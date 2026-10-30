@@ -431,7 +431,9 @@ pub(crate) fn pick(
     y: f64,
 ) -> Result<Option<(String, String)>, SurfaceError> {
     let previews = studio.previews.clone();
-    let mut previews = preview::lock(&previews);
+    // Before anything else: the line the preview answers is looked up in
+    // the session's text, and a newly failed reload is caught below.
+    let mut previews = preview::caught_up(&previews);
     let not_shown = || {
         SurfaceError::new(
             ErrorCode::NotActionable,

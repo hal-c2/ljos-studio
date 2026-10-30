@@ -851,6 +851,32 @@ fn a_point_selects_the_object_declared_where_the_preview_says() {
 }
 
 #[test]
+fn a_point_after_a_burst_is_read_from_the_last_edit() {
+    let f = Fixture::new();
+    f.call("preview_open", json!({ "doc": "Shell.qml" }))
+        .unwrap();
+    let mut last_write = std::time::Instant::now();
+    for i in 0..20 {
+        last_write = std::time::Instant::now();
+        set_text(&f, i);
+    }
+    f.seen.lock().unwrap().declared = declared("Shell.qml", 6, 5);
+    let out = f
+        .call(
+            "node_select",
+            json!({ "doc": "Shell.qml", "at": { "x": 1, "y": 1 } }),
+        )
+        .unwrap();
+    // The line the preview names is of the text the session holds: the
+    // reload of the last write came before the question.
+    let calls = f.calls();
+    assert_eq!(calls.last().unwrap(), "pick 1,1");
+    assert!(*f.seen.lock().unwrap().reloads.last().unwrap() >= last_write);
+    assert_eq!(out["selection"][0]["path"], "root/1");
+    assert_within_the_budget(&f);
+}
+
+#[test]
 fn a_point_with_nothing_there_clears_the_selection() {
     let f = Fixture::new();
     f.call("preview_open", json!({ "doc": "Shell.qml" }))
