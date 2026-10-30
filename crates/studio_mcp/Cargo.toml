@@ -12,6 +12,8 @@ publish.workspace = true
 studio_core = { path = "../studio_core" }
 ljos_mcp_core.workspace = true
 ljos_blocks.workspace = true
+# Paths a window reads layers by.
+qml_edit.workspace = true
 schemars.workspace = true
 serde.workspace = true
 serde_json.workspace = true

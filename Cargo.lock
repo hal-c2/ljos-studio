@@ -1937,6 +1937,7 @@ dependencies = [
  "insta",
  "ljos_blocks",
  "ljos_mcp_core",
+ "qml_edit",
  "schemars",
  "serde",
  "serde_json",

@@ -6,6 +6,7 @@
 //! is no second way into the session; it saves a window from asking five
 //! tools, and holding the lock five times, for one picture of it.
 
+use qml_edit::Step;
 use serde::Serialize;
 use studio_core::{
     Address,
@@ -24,6 +25,12 @@ pub struct Layer {
     pub depth: usize,
     /// Its type and its `id`, as the layers panel names it: `Item root`.
     pub label: String,
+    /// The handle of the object it is written in; empty for the root.
+    pub parent: String,
+    /// Its place among the objects written in `parent`, as `node_move`
+    /// counts; `None` for one a property holds (`contentItem: Item {}`),
+    /// which has no place among them.
+    pub index: Option<usize>,
 }
 
 /// A binding of the selected object, as written.
@@ -119,10 +126,26 @@ impl Studio {
         view.generation = generation;
         match self.session.tree(doc) {
             Ok((tree, _)) => {
+                let handle_of = |path: &[Step]| {
+                    tree.iter()
+                        .find(|(_, n)| n.path.0 == path)
+                        .map(|(h, _)| h.clone())
+                };
                 view.layers = tree
                     .iter()
                     .map(|(node, n)| {
                         let id = n.id.clone().unwrap_or_default();
+                        let steps = &n.path.0;
+                        let (parent, index) = match steps.split_last() {
+                            Some((last, up)) => (
+                                handle_of(up).unwrap_or_default(),
+                                match last {
+                                    Step::Child(i) => Some(*i),
+                                    _ => None,
+                                },
+                            ),
+                            None => (String::new(), None),
+                        };
                         Layer {
                             node: node.clone(),
                             ty: n.ty.clone(),
@@ -133,6 +156,8 @@ impl Studio {
                             },
                             id,
                             depth: n.depth,
+                            parent,
+                            index,
                         }
                     })
                     .collect();
