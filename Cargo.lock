@@ -1032,6 +1032,7 @@ dependencies = [
 [[package]]
 name = "ljos_child"
 version = "0.0.0"
+source = "git+https://github.com/hal-c2/ljos-ui?rev=63ec3fa4ad17dbc7ed126be86796703201e30403#63ec3fa4ad17dbc7ed126be86796703201e30403"
 
 [[package]]
 name = "ljos_ir"
