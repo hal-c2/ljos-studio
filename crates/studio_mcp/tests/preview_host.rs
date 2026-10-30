@@ -371,10 +371,11 @@ fn assert_within_the_budget(f: &Fixture) {
     }
 }
 
+/// The `i`th write after the preview opened, so of generation `i + 1`.
 fn set_text(f: &Fixture, i: usize) {
     f.call(
         "binding_set",
-        json!({ "doc": "Shell.qml", "node": { "path": "root/1" }, "name": "text", "value": format!("\"{i}\"") }),
+        json!({ "doc": "Shell.qml", "generation": i + 1, "node": { "path": "root/1" }, "name": "text", "value": format!("\"{i}\"") }),
     )
     .unwrap();
 }
@@ -420,7 +421,7 @@ fn a_burst_shows_once_the_budget_allows_with_nobody_looking() {
     for i in 0..20 {
         f.call(
             "binding_set",
-            json!({ "doc": "Shell.qml", "node": { "path": "root/1" }, "name": "text", "value": format!("\"{i}\"") }),
+            json!({ "doc": "Shell.qml", "generation": i + 1, "node": { "path": "root/1" }, "name": "text", "value": format!("\"{i}\"") }),
         )
         .unwrap();
     }
