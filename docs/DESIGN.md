@@ -705,6 +705,51 @@ states make the trigger visible. DECISION: the flow is the root's; an
 interaction that sets another object's state is that object's and is not
 drawn. DECISION: play mode does not select; leaving it, a click selects
 again.
+#### As built: export bundles and review comments
+
+Two of S6's items are tools with their scenarios
+(`features/project/export.feature`, `features/edit/review.feature`), and
+review is in the window too (`features/ui/review.feature`). MCP.md lists
+their arguments, answers and refusals.
+
+- **An export is what `ljos run` starts.** `export` copies the project
+  into `build/native`: its QML, its theme, its assets and its own blocks,
+  never the mocks or `.studio/`, with a manifest (`ljos-bundle.json`) that
+  says what it holds, what was left out and why, and how to start it. The
+  scenario copies the bundle out of the project and runs it headless: its
+  outline is the live preview's.
+- **What cannot be exported is refused, saying why.** A web site (ljos-web
+  builds none on its own), types written in Rust (only the app's program
+  registers them), a document that does not parse, and a module that only
+  a mock provides each have their own refusal; nothing is written.
+- **Comments sit on objects, in the sidecar.** `review` adds, answers,
+  resolves and reopens comments, and lists them by document or object. A
+  comment follows its object through anybody's edits as a handle does,
+  and is written down with the object's key, so the next session finds it.
+  Deleting `.studio/` loses the comments and nothing else.
+- **A removed object orphans its comments.** They are kept with the
+  place the object last had and can still be answered; undoing the
+  removal gives them their object back.
+- **The window.** A layer with open comments says how many ("1 comment on
+  Text title"). The inspector's *Comments* section lists the selected
+  object's comments and the document's orphaned ones ("Open comment: Too
+  small", "Resolved comment: …", "Orphaned comment: …"), each with a
+  "Resolve …" or "Reopen …" button, and "New comment" with "Add comment"
+  adds one. Every gesture is the `review` call an agent makes.
+
+DECISION: the bundle is a directory, not Ljós's production bundle
+(ARCHITECTURE.md 12.2) nor an AOT binary: both need a build Studio does
+not make. Its manifest has no hashes or signature until Ljós defines them.
+DECISION: a bundle is written below the project's `build/`, which the
+store does not list, so it is never a document nor part of the next one.
+DECISION: comments are not edits: they are not in the undo history, and
+they change no document's generation.
+
+Measured in a release build on the reference desktop:
+
+| Path | p50 | p95 |
+|---|---|---|
+| `export` of a project whose bundle holds 200 files (415 677 bytes), 20 exports (`studio_mcp` example `export_perf`, release) | 9.41 ms | 9.95 ms |
 
 ## 8. Risks
 

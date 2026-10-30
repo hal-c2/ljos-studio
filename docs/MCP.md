@@ -20,8 +20,7 @@ Studio composes three servers rather than duplicating them:
 
 Budgets follow ARCHITECTURE.md section 19.6: tools listed in a fixed order,
 descriptions ≤ 300 characters, responses ≤ 40 KB with cursors, ≤ 25 tools
-on one server. Studio offers 22 tools today; with `export` and `review`,
-still to come in S6, it offers 24. Capabilities as in section 19.7:
+on one server. Studio offers 24 tools. Capabilities as in section 19.7:
 `inspect` (read), `mutate` (edit documents), `fs` (write files outside
 documents: export), `run` (start previews). They are granted at launch with
 `--caps`: by default `inspect` on a running window's endpoint and
@@ -53,19 +52,14 @@ documents: export), `run` (start previews). They are granted at launch with
 | 20 | `preview_state` | Read an object's state and a block's published state in the preview; set it when the block is mocked; click first | run |
 | 21 | `preview_screenshot` | A PNG of the preview (≤ 1280 px), or its outline as text | inspect |
 | 22 | `preview_events` | Since a cursor: opened, reloaded (with ms), reload failed, logs, ended | inspect |
+| 23 | `export` | Write a bundle that `ljos run` starts: the project's QML, theme, assets and own blocks with a manifest, never mocks or `.studio/` | fs |
+| 24 | `review` | Add, reply to, resolve, reopen or list design review comments on objects, kept in `.studio/` | inspect (writing: mutate) |
 
 A document is a `.qml` file or a `theme.json` of the project outside the
 directories a walk leaves out, judged where its links lead; anything else is
 `path_denied`. A file reached by two names is one document: answers name it
 by where it really is, and it has one generation and one history whichever
 name an edit uses.
-
-Still to come:
-
-| # | Tool | Does | Needs |
-|---|---|---|---|
-| 23 | `export` | Write a build bundle or a site for a target | fs |
-| 24 | `review` | Comments on nodes: add, list, resolve | mutate |
 
 - DECISION: `theme_tokens` folds into `theme_set`, which reads the tokens
   when it is given no value, as `history` lists when given no action.
@@ -164,7 +158,7 @@ shows it; the watcher's quiet time is not on that path.
   app's own.
 - DECISION: `preview_screenshot {format: "outline"}` gives the preview's
   items as text (the inspector's outline) instead of a separate tool:
-  Studio's list stays within 25 tools with the ones still to come.
+  Studio's list of 24 stays within 25 tools.
 - DECISION: starting a preview needs `run` (it runs the project's code);
   looking at one that runs (`preview_screenshot`, `preview_events`) needs
   only `inspect`.
@@ -346,6 +340,73 @@ replaces the app's (`App/Data`) and the list's text is unchanged.
 - DECISION: data is QML, not a JSON-backed model. Ljós has no model that
   reads JSON, and a `ListModel` document is edited, diffed, undone and
   previewed like the rest; JSON is imported once.
+## Export and review (S6)
+
+`export {entry, target?, out?, dry_run?}` (`fs`) writes a bundle of the
+project below its `build/` (`build/native` by default) and answers `out`,
+`files` and `bytes` (totals that stay true when a long manifest is cut
+short in the answer), the `manifest` and `ms`. The bundle holds every file
+of the project except `.studio/`, the top-level `mocks/`, hidden files,
+`build/`, `target/`, `node_modules/` and unfinished writes, and beside them
+`ljos-bundle.json`:
+
+| Field | Holds |
+|---|---|
+| `format`, `version` | `ljos-bundle`, 1 |
+| `target`, `entry` | `native`; the document the app starts with |
+| `run` | `["ljos", "run", <entry>, "--project", "."]`, run in the bundle |
+| `theme` | `theme.json` beside the entry, when there is one |
+| `blocks` | The project's own blocks (`App.Media.Player`) and their files |
+| `files` | Every file, `path` and `bytes`, sorted |
+| `left_out` | What of the project is not in it, `path` and `why` |
+
+A bundle is written beside its place and swapped in, so it is never half
+of two exports. Refusals: `capability_denied` without `fs`; `not_found`
+for an entry that is not a document; `unsupported` for `target: "web"`
+(`no_web_build`) and for types written in Rust (`native_types`, with
+`details.files`); `syntax` for a document that does not parse (`broken`,
+`details.doc`); `not_actionable` for a module only a mock provides
+(`mocked_only`, `details.modules`) and for a project not in a directory
+(`no_directory`); `path_denied` for an `out` not below `build/`;
+`invalid_argument` (`exists`) for an `out` that holds something other
+than a bundle.
+
+- DECISION: the native bundle is the project directory as `ljos run`
+  starts it. Ljós's production bundles (ARCHITECTURE.md 12.2: hashed,
+  signed, A/B) and AOT binaries need a build Studio does not make, so the
+  manifest has no hashes or signature yet.
+- DECISION: a web site is refused rather than half made: ljos-web compiles
+  QML to modules that need its runtime package and a bundler, and builds
+  no site on its own.
+- DECISION: `export` writes no history entry; it changes no document.
+
+`review {action, doc?, node?, comment?, text?, author?}` keeps design
+review comments in `.studio/review.json`, never in the QML:
+
+| `action` | Takes | Does |
+|---|---|---|
+| `add` | `doc`, `node`, `text`, `author?` | Comment on an object (`c1`, `c2`, …) |
+| `reply` | `comment`, `text`, `author?` | Answer it |
+| `resolve`, `reopen` | `comment` | Mark it resolved, or open again |
+| `list` | `doc?`, `node?` (with `doc`) | The comments, in the order they were made |
+
+A comment answers `id`, `doc`, `node` (the object's handle, absent once
+orphaned), `anchor` (`path`, `line`, `type`, `id?`: where the object is or
+last was), `orphaned`, `resolved` and `thread` (`author?`, `text`, `at`,
+milliseconds since the epoch). Listing needs `inspect`; the rest `mutate`.
+Refusals: `not_found` (`no_comment`), `invalid_argument` for a comment
+with no text, `not_actionable` (`review_unreadable`) for writing over a
+sidecar this version cannot read.
+
+- DECISION: a comment follows its object as a handle does, through
+  anybody's edits; on disk it carries the object's key, so the next
+  session finds it again.
+- DECISION: a comment whose object is removed is kept, orphaned, at the
+  place it last had, and can still be answered and resolved. Undo gives it
+  its object back in the session; a new session does not match an
+  orphaned comment to an object again.
+- DECISION: comments are not in the undo history. `reopen` takes back
+  `resolve`; a comment is not deleted, it is resolved.
 
 ## Prompts
 
@@ -359,3 +420,9 @@ replaces the app's (`App/Data`) and the list's text is unchanged.
 - **prototype:** `state_edit` (`add`, a state per screen) → `state_edit`
   (`interaction`, a trigger per step) → `preview_open` → `preview_state`
   (`click`) per step, checking `variant` → `preview_screenshot`.
+- **review:** `review` (`list`, by doc) → `document_tree` →
+  `node_inspect` of each object commented on → `preview_screenshot` →
+  `review` (`add` or `reply`, one per finding, on the object it is about)
+  → `review` (`resolve`) once an edit answers one.
+- **ship:** `export` with `dry_run` → mend what it refuses → `export` →
+  start the bundle with its manifest's `run`.
