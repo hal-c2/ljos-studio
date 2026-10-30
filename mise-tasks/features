@@ -2,6 +2,14 @@
 #MISE description="Studio's Gherkin scenarios, or only the given feature files or directories"
 set -euo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd)"
+# Previews run `ljos`; unless LJOS names one, build it from the Ljós
+# checkout beside this one, the same one the path dependencies use.
+if [ -z "${LJOS:-}" ]; then
+  ljos_ui="$root/../ljos-ui"
+  cargo build --manifest-path "$ljos_ui/Cargo.toml" -p ljos_cli --bin ljos
+  LJOS="${CARGO_TARGET_DIR:-$ljos_ui/target}/debug/ljos"
+fi
+export LJOS
 if [ $# -eq 0 ]; then
   STUDIO_FEATURES="$root/features" cargo test -p studio_mcp --test features
 else
