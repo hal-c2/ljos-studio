@@ -5,7 +5,6 @@
 use std::{
     collections::VecDeque,
     sync::{Arc, Mutex},
-    time::Instant,
 };
 
 use ljos_mcp_core::{
@@ -195,7 +194,8 @@ fn open(studio: &Mutex<Studio>, a: OpenArgs) -> Result<OpenOut, SurfaceError> {
     if !studio.session.store().exists(&a.doc) {
         return Err(SurfaceError::not_found(format!("no document `{}`", a.doc)));
     }
-    let (Some(hosts), Some(dir)) = (studio.hosts.clone(), studio.dir()) else {
+    let dir = studio.dir();
+    let Some(hosts) = studio.hosts.clone().filter(|h| h.runs(dir.as_deref())) else {
         return Err(SurfaceError::new(
             ErrorCode::NotActionable,
             "this server has no preview host",
@@ -236,7 +236,9 @@ fn open(studio: &Mutex<Studio>, a: OpenArgs) -> Result<OpenOut, SurfaceError> {
         }
         State::Mocked => mocks,
     };
-    let started_at = Instant::now();
+    let timer = previews.timer.clone();
+    let started_at = timer.now();
+    let elapsed = || ms(timer.now().saturating_sub(started_at));
     // A process that ended while nothing read it would otherwise be reused
     // as it is when no change needs a host call: ask, and start another.
     if let Some(open) = previews.open.as_mut().filter(|o| o.doc == a.doc)
@@ -261,7 +263,7 @@ fn open(studio: &Mutex<Studio>, a: OpenArgs) -> Result<OpenOut, SurfaceError> {
         if let Some(mut last) = previews.open.take() {
             last.host.close();
         }
-        let mut host = hosts(&dir);
+        let mut host = hosts.make(dir.as_deref()).expect("checked: it runs here");
         host.open(&preview::spec(&a.doc, size, &aliases))
             .map_err(preview_error)?;
         previews.log_mark = 0;
@@ -269,7 +271,7 @@ fn open(studio: &Mutex<Studio>, a: OpenArgs) -> Result<OpenOut, SurfaceError> {
             entry: a.doc.clone(),
             size,
             mocked: aliases.iter().map(|m| m.module.clone()).collect(),
-            ms: ms(started_at.elapsed()),
+            ms: elapsed(),
         });
         previews.open = Some(Open {
             host,
@@ -289,7 +291,7 @@ fn open(studio: &Mutex<Studio>, a: OpenArgs) -> Result<OpenOut, SurfaceError> {
         state,
         mocked: aliases.into_iter().map(|m| m.module).collect(),
         started: !reuse,
-        ms: ms(started_at.elapsed()),
+        ms: elapsed(),
     })
 }
 

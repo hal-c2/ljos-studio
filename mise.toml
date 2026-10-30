@@ -5,3 +5,5 @@
 # rust-toolchain.toml.
 [tools]
 rust = "1.98.1"
+# Runs the wasm build's scenarios and numbers (web/).
+node = "24.21.0"

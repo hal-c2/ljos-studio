@@ -2,3 +2,5 @@
 [toolchain]
 channel = "1.98.1"
 components = ["rustfmt", "clippy"]
+# Studio's core and tools also build for a browser (`mise run check:wasm`).
+targets = ["wasm32-unknown-unknown"]

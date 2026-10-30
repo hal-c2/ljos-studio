@@ -128,7 +128,10 @@ impl Studio {
     pub fn view(&mut self, doc: &str) -> View {
         let mut view = View {
             documents: self.session.documents(),
-            previews: self.hosts.is_some() && self.dir().is_some(),
+            previews: self
+                .hosts
+                .as_ref()
+                .is_some_and(|h| h.runs(self.dir().as_deref())),
             ..View::default()
         };
         let (done, undone) = self.session.history();
