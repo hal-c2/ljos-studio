@@ -1,0 +1,85 @@
+---
+source: crates/studio_mcp/tests/golden_tools.rs
+expression: value
+---
+{
+  "annotations": {
+    "destructive": false,
+    "idempotent": true,
+    "open_world": false,
+    "read_only": true
+  },
+  "description": "A document's text or a byte range of it, with its generation and whether it parses.",
+  "inputSchema": {
+    "additionalProperties": false,
+    "properties": {
+      "doc": {
+        "type": "string"
+      },
+      "end": {
+        "format": "uint",
+        "minimum": 0,
+        "type": [
+          "integer",
+          "null"
+        ]
+      },
+      "start": {
+        "description": "Byte offsets; the whole text when left out.",
+        "format": "uint",
+        "minimum": 0,
+        "type": [
+          "integer",
+          "null"
+        ]
+      }
+    },
+    "required": [
+      "doc"
+    ],
+    "title": "TextArgs",
+    "type": "object"
+  },
+  "max_result_bytes": 40960,
+  "name": "document_text",
+  "outputSchema": {
+    "properties": {
+      "doc": {
+        "type": "string"
+      },
+      "end": {
+        "format": "uint",
+        "minimum": 0,
+        "type": "integer"
+      },
+      "generation": {
+        "format": "uint64",
+        "minimum": 0,
+        "type": "integer"
+      },
+      "parses": {
+        "description": "Whether the whole document parses; structural edits wait until it does.",
+        "type": "boolean"
+      },
+      "start": {
+        "format": "uint",
+        "minimum": 0,
+        "type": "integer"
+      },
+      "text": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "doc",
+      "generation",
+      "start",
+      "end",
+      "text",
+      "parses"
+    ],
+    "title": "Text",
+    "type": "object"
+  },
+  "required_cap": "inspect"
+}

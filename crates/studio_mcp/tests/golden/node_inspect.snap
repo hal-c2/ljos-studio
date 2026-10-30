@@ -1,0 +1,216 @@
+---
+source: crates/studio_mcp/tests/golden_tools.rs
+expression: value
+---
+{
+  "annotations": {
+    "destructive": false,
+    "idempotent": true,
+    "open_world": false,
+    "read_only": true
+  },
+  "description": "An object's bindings with their byte ranges, its parent and its children.",
+  "inputSchema": {
+    "$defs": {
+      "Address": {
+        "description": "How a caller names an object.",
+        "oneOf": [
+          {
+            "additionalProperties": false,
+            "description": "A handle the session gave out (`n7`); stable for the session.",
+            "properties": {
+              "node": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "node"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "description": "The object's `id` in the document.",
+            "properties": {
+              "id": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "description": "A path as `document_tree` prints it (`root/0/contentItem:`), true of\nthe current text only.",
+            "properties": {
+              "path": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "path"
+            ],
+            "type": "object"
+          }
+        ]
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "doc": {
+        "type": "string"
+      },
+      "node": {
+        "$ref": "#/$defs/Address"
+      }
+    },
+    "required": [
+      "doc",
+      "node"
+    ],
+    "title": "NodeArgs",
+    "type": "object"
+  },
+  "max_result_bytes": 40960,
+  "name": "node_inspect",
+  "outputSchema": {
+    "$defs": {
+      "BindingOut": {
+        "properties": {
+          "declared": {
+            "description": "A `property` this object declares, not a setting of an inherited one.",
+            "type": "boolean"
+          },
+          "end": {
+            "format": "uint",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "name": {
+            "type": "string"
+          },
+          "start": {
+            "format": "uint",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "value": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "value",
+          "start",
+          "end",
+          "declared"
+        ],
+        "type": "object"
+      },
+      "Found": {
+        "properties": {
+          "doc": {
+            "type": "string"
+          },
+          "id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "node": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "doc",
+          "node",
+          "path",
+          "type"
+        ],
+        "type": "object"
+      }
+    },
+    "properties": {
+      "bindings": {
+        "items": {
+          "$ref": "#/$defs/BindingOut"
+        },
+        "type": "array"
+      },
+      "children": {
+        "items": {
+          "$ref": "#/$defs/Found"
+        },
+        "type": "array"
+      },
+      "doc": {
+        "type": "string"
+      },
+      "end": {
+        "format": "uint",
+        "minimum": 0,
+        "type": "integer"
+      },
+      "generation": {
+        "format": "uint64",
+        "minimum": 0,
+        "type": "integer"
+      },
+      "id": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "line": {
+        "format": "uint",
+        "minimum": 0,
+        "type": "integer"
+      },
+      "node": {
+        "type": "string"
+      },
+      "parent": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "path": {
+        "type": "string"
+      },
+      "start": {
+        "format": "uint",
+        "minimum": 0,
+        "type": "integer"
+      },
+      "type": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "doc",
+      "generation",
+      "node",
+      "path",
+      "type",
+      "start",
+      "end",
+      "line",
+      "bindings",
+      "children"
+    ],
+    "title": "Inspected",
+    "type": "object"
+  },
+  "required_cap": "inspect"
+}

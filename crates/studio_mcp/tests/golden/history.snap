@@ -1,0 +1,118 @@
+---
+source: crates/studio_mcp/tests/golden_tools.rs
+expression: value
+---
+{
+  "annotations": {
+    "destructive": true,
+    "idempotent": false,
+    "open_world": false,
+    "read_only": false
+  },
+  "description": "List edits, or undo or redo the last one. Undo gives back the document's bytes.",
+  "inputSchema": {
+    "$defs": {
+      "HistoryAction": {
+        "enum": [
+          "list",
+          "undo",
+          "redo"
+        ],
+        "type": "string"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "action": {
+        "$ref": "#/$defs/HistoryAction"
+      }
+    },
+    "required": [
+      "action"
+    ],
+    "title": "HistoryArgs",
+    "type": "object"
+  },
+  "max_result_bytes": 40960,
+  "name": "history",
+  "outputSchema": {
+    "$defs": {
+      "EntryOut": {
+        "properties": {
+          "added": {
+            "format": "uint",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "doc": {
+            "type": "string"
+          },
+          "id": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "label": {
+            "type": "string"
+          },
+          "removed": {
+            "format": "uint",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "doc",
+          "label",
+          "removed",
+          "added"
+        ],
+        "type": "object"
+      }
+    },
+    "properties": {
+      "done": {
+        "description": "Oldest first.",
+        "items": {
+          "$ref": "#/$defs/EntryOut"
+        },
+        "type": "array"
+      },
+      "entry": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/EntryOut"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "description": "The entry undone or redone."
+      },
+      "generation": {
+        "description": "Its document's generation after it, when the document still exists.",
+        "format": "uint64",
+        "minimum": 0,
+        "type": [
+          "integer",
+          "null"
+        ]
+      },
+      "undone": {
+        "description": "Next to redo first.",
+        "items": {
+          "$ref": "#/$defs/EntryOut"
+        },
+        "type": "array"
+      }
+    },
+    "required": [
+      "done",
+      "undone"
+    ],
+    "title": "HistoryOut",
+    "type": "object"
+  },
+  "required_cap": "mutate"
+}

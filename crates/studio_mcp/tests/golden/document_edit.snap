@@ -1,0 +1,136 @@
+---
+source: crates/studio_mcp/tests/golden_tools.rs
+expression: value
+---
+{
+  "annotations": {
+    "destructive": true,
+    "idempotent": false,
+    "open_world": false,
+    "read_only": false
+  },
+  "description": "Replace a byte range of a document's text, as the code view does. The result may not parse; structural edits then wait and handles hold. Needs the generation read.",
+  "inputSchema": {
+    "additionalProperties": false,
+    "properties": {
+      "doc": {
+        "type": "string"
+      },
+      "dry_run": {
+        "default": false,
+        "type": "boolean"
+      },
+      "end": {
+        "format": "uint",
+        "minimum": 0,
+        "type": [
+          "integer",
+          "null"
+        ]
+      },
+      "generation": {
+        "description": "The generation the offsets were read at.",
+        "format": "uint64",
+        "minimum": 0,
+        "type": "integer"
+      },
+      "start": {
+        "description": "Byte range to replace; the whole text when both are left out.",
+        "format": "uint",
+        "minimum": 0,
+        "type": [
+          "integer",
+          "null"
+        ]
+      },
+      "text": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "doc",
+      "generation",
+      "text"
+    ],
+    "title": "EditTextArgs",
+    "type": "object"
+  },
+  "max_result_bytes": 40960,
+  "name": "document_edit",
+  "outputSchema": {
+    "$defs": {
+      "ChangeOut": {
+        "properties": {
+          "end": {
+            "format": "uint",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "start": {
+            "description": "Byte range of the text before the edit.",
+            "format": "uint",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "text": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "start",
+          "end",
+          "text"
+        ],
+        "type": "object"
+      }
+    },
+    "properties": {
+      "changes": {
+        "items": {
+          "$ref": "#/$defs/ChangeOut"
+        },
+        "type": "array"
+      },
+      "doc": {
+        "type": "string"
+      },
+      "generation": {
+        "description": "The document's generation now; pass it with the next edit.",
+        "format": "uint64",
+        "minimum": 0,
+        "type": "integer"
+      },
+      "history": {
+        "description": "The history entry; absent for a dry run.",
+        "format": "uint64",
+        "minimum": 0,
+        "type": [
+          "integer",
+          "null"
+        ]
+      },
+      "node": {
+        "description": "The handle of the object put or moved.",
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "text": {
+        "description": "The text the edit would give, for a dry run.",
+        "type": [
+          "string",
+          "null"
+        ]
+      }
+    },
+    "required": [
+      "doc",
+      "generation",
+      "changes"
+    ],
+    "title": "EditOut",
+    "type": "object"
+  },
+  "required_cap": "mutate"
+}
