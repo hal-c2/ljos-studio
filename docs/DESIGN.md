@@ -384,6 +384,106 @@ to the preview would need the preview to be given the new text by its
 inspector as well as reading it from the file; Ljós's watcher can take a
 save as text already, but no inspector tool hands it one.
 
+#### As built: tokens, shells and the self-reskin
+
+This half of S4 lets a person restyle any project, Studio included, from
+inside Studio, and lets them replace Studio's whole shell with one of
+their own.
+
+- **Tokens.** `theme_set` (MCP.md, "Tokens") reads and sets the roles of
+  `Ljos.Design` in a project's `theme.json`. The `Workspace` block
+  publishes `theme` (the file of the document shown) and `tokens` (one
+  row per role: `token`, `kind`, the module's value and the file's, and
+  for a colour `light` and `dark`). The *Tokens* panel
+  (`shell/Builtin/TokensPanel.qml`) lists them under a filter, a colour
+  with a swatch and a field for light and for dark ("Colors.canvas
+  light"), any other role with one field. Enter in a field is
+  `dispatch("theme_set", …)`; an empty field gives the role back to the
+  module. A refusal shows in the panel, with Ljós's own message (a
+  contrast that fails names the pair and the ratio).
+- **The window is a `ShellLoader`.** `shell/Window.qml` loads the
+  person's `Shell.qml` (`userShell`, set by the host), with
+  `shell/Builtin/Shell.qml`, the shell Studio ships, as its fallback. A
+  banner above it (an accessible alert named "Shell error") shows the
+  loader's `error` (`file:line: message`) when the person's shell
+  failed and the built-in one is shown, or else why their last edit did
+  not apply.
+- **Where the person's shell is.** `studio --shell DIR`, else
+  `ljos-studio/shell` in the configuration directory (`XDG_CONFIG_HOME`,
+  else `~/.config`) when it holds a `Shell.qml`. A directory without one
+  is given a copy of Studio's (`studio_blocks::shell::seed`), the place a
+  person's shell starts. With no shell of the person's, the window is
+  the built-in shell compiled ahead of time, as before.
+- **Studio's own theme.** `--theme FILE`, else `ljos-studio/theme.json`
+  in the configuration directory: the same kind of file `theme_set`
+  writes, so a person restyles Studio by opening its configuration
+  directory as a project.
+- **The self-reskin.** With a shell of the person's, the window is a
+  watched session, as any app under `ljos run --watch`: its roots are
+  the person's directory and Studio's own shell, written to the state
+  directory (`studio_blocks::shell::write`); its entry is `Window`; its
+  theme file is Studio's. A save of the theme puts the new theme on the
+  running window; a save of the shell reloads it in place, keeping what
+  it can. The reload hook tells the window how the save went
+  (`studio_blocks::reloaded`, which `Studio.ShellStatus` publishes as
+  `reloadError`).
+
+DECISION: Studio's window is the shell's `ShellLoader`, not a Rust
+fallback: the rule for when a shell gives way is Ljós's (ADR 0003), and
+the banner is a part of the window anyone may restyle.
+DECISION: the watched session is used only for a person's shell. Studio's
+own shell stays compiled ahead of time when there is none, so the
+default start pays no compile; with one, both are compiled from the disk
+so a reload sees them together.
+DECISION: a shell made from a copy of Studio's, not an empty directory:
+a person changes a shell that works, and a panel they do not touch is
+Studio's as it was copied.
+DECISION: why a save did not apply comes to QML from the host
+(`Studio.ShellStatus`). A shell that is still running cannot know its
+own reload failed, and Ljós does not yet tell QML (asked of Ljós below).
+DECISION: Studio's own theme is put on once at start when there is no
+person's shell (`ljos_design_qml::theme::apply`); it is live only in
+the watched window, where Ljós already watches a theme file.
+DECISION: an edit of a running shell keeps what it made: a reload that
+does not compile keeps the shell and says why on the banner, and one
+that compiles is applied in place, so a `Component.onCompleted` it adds
+does not run on objects already made. The built-in shell takes over when
+the person's shell fails while it is made, as when the window opens on
+it; mending the file brings theirs back.
+
+The scenarios (`features/ui/reskin.feature`) run the watched window
+in-process over the test window: a token edit in the panel repaints the
+canvas, a QML edit renames a pane, a shell that throws when the window
+opens falls back with the banner and comes back when mended, an edit that
+does not compile keeps the shell with the banner, and a watched window
+nobody touches runs no frames.
+
+Measured in a release build, off-screen (`studio` example `budgets`,
+20 rounds, one edit per 250 ms; the preview is a release `ljos`):
+
+| Path | p50 | p95 |
+|---|---|---|
+| `theme_set` in the tokens panel → the preview's new picture drawn | 14.2 ms | 17.0 ms |
+| Studio's theme file saved → the window repainted in it | 15.6 ms | 15.8 ms |
+| The window opened on a shell that throws → the built-in shell shown | 47.4 ms | 50.8 ms |
+| For comparison, cold start on the built-in shell (5 rounds) | 44.7 ms | 52.0 ms |
+
+The watched window left alone for 5 s used 0 ms of CPU, its watcher woke
+nothing, and it drew no frames. The theme save's time is almost all the
+watcher's quiet period (15 ms), which lets a save that is still being
+written finish. A first run on a machine under heavy load (load average
+about 35) measured `theme_set` → picture at 157 ms p50 and 422 ms p95;
+the quiet run above is the one the budget is held to.
+
+Asked of Ljós, each general: a reload's outcome readable from QML (a
+`ShellLoader`'s `reloadError`, say), so no app needs its own
+`ShellStatus`; an app's theme file on `ljos::App` outside watch mode,
+so no app calls `ljos_design_qml` itself; `DevSession` on the facade, for
+in-process tests of a watched window; a driver whose `aim_at_node` aims
+at the part of a node its clips leave showing; and a watched window that
+runs the shell compiled ahead of time until the first save, so a person's
+shell does not cost a compile at every start.
+
 ### S5: web
 
 - Studio on ljos-web; the web `PreviewHost`; `Store` on browser storage.

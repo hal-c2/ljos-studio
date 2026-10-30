@@ -20,8 +20,8 @@ Studio composes three servers rather than duplicating them:
 
 Budgets follow ARCHITECTURE.md section 19.6: tools listed in a fixed order,
 descriptions ≤ 300 characters, responses ≤ 40 KB with cursors, ≤ 25 tools
-on one server. Studio offers 21 tools today; with `theme_set` and `export`,
-still to come, it offers 23. Capabilities as in section 19.7:
+on one server. Studio offers 22 tools today; with `export`, still to
+come, it offers 23. Capabilities as in section 19.7:
 `inspect` (read), `mutate` (edit documents), `fs` (write files outside
 documents: export), `run` (start previews). They are granted at launch with
 `--caps`: by default `inspect` on a running window's endpoint and
@@ -52,18 +52,18 @@ documents: export), `run` (start previews). They are granted at launch with
 | 19 | `preview_state` | Read a block's published state in the preview; set it when the block is mocked | run |
 | 20 | `preview_screenshot` | A PNG of the preview (≤ 1280 px), or its outline as text | inspect |
 | 21 | `preview_events` | Since a cursor: opened, reloaded (with ms), reload failed, logs, ended | inspect |
+| 22 | `theme_set` | Read the tokens (`Ljos.Design` roles and the theme file, light and dark), or set one; the preview reloads live | mutate |
 
-A document is a `.qml` file of the project outside the directories a walk
-leaves out, judged where its links lead; anything else is `path_denied`.
-A file reached by two names is one document: answers name it by where it
-really is, and it has one generation and one history whichever name an
-edit uses.
+A document is a `.qml` file or a `theme.json` of the project outside the
+directories a walk leaves out, judged where its links lead; anything else is
+`path_denied`. A file reached by two names is one document: answers name it
+by where it really is, and it has one generation and one history whichever
+name an edit uses.
 
-Still to come, in the order they will be listed after `history`:
+Still to come:
 
 | # | Tool | Does | Needs |
 |---|---|---|---|
-| 22 | `theme_set` | Read the tokens (`Ljos.Design` roles and the theme file, light and dark), or set one; the preview reloads live | mutate |
 | 23 | `export` | Write a build bundle or a site for a target | fs |
 
 - DECISION: `theme_tokens` folds into `theme_set`, which reads the tokens
@@ -247,10 +247,54 @@ object that parses, and (`not_a_contribution`) for removing anything else.
 - DECISION: both tools are annotated destructive, since they can take
   things out.
 
+## Tokens (S4)
+
+`theme_set {doc?, token?, value?, variant?, generation?, dry_run?}` works
+on the theme file of `doc`: the `theme.json` beside it, the document
+itself when it is a `theme.json`, the open preview's when `doc` is left
+out, else the project's own. It is listed after `preview_events`, so the
+first 21 keep their places.
+
+- **Reading** (no `value`): `file`, its `generation` (0 while it does
+  not exist), `exists`, `problem` (why Ljós would not load the file, with
+  its values then left out), and `tokens`: one row per role of
+  `Ljos.Design` (or the one `token` names, or a singleton's roles) with
+  its `kind` (`color`, `int`, `real`, `curve`), the module's value and
+  the theme file's. A colour's values are `light`, `dark`, `lightHigh`
+  and `darkHigh`.
+- **Setting** (`token` and `value`): `value` is a colour string, a
+  number or a curve's JSON; `null` gives the role back to the module. A
+  colour string sets every variant; `variant` sets one. The answer is
+  an edit's (`doc`, `changes`, `generation`, `history`), the rest of the
+  file is kept byte for byte, and `history` undoes it.
+- **Refusals**: `invalid_argument` with `details.kind` `theme` and Ljós's
+  own `errors` (`file`, `line`, `column`, `message`) for a theme Ljós
+  would not load, a colour pair below its contrast among them, so a theme
+  Studio writes always loads; `not_found` (`no_token`) for a role the
+  module does not have; `invalid_argument` (`invalid`) for a value or
+  variant that does not fit the role; `not_actionable` (`nothing_to_do`)
+  for `null` on a role the file does not set; `stale_ref` for a stale
+  `generation`.
+
+- DECISION: Studio checks a theme with Ljós's reader (`ljos_design`)
+  before it writes, rather than writing and letting the preview say why
+  it did not load: an agent learns at once, and the file on disk always
+  loads.
+- DECISION: a write is renamed over the file, as document writes are, so
+  a watcher (the preview's, or Studio's own window's) never reads half
+  of one.
+
+Studio's window shows the same tokens in its *Tokens* panel (DESIGN.md,
+S4 "As built: tokens, shells and the self-reskin"): its `Workspace`
+publishes `theme` (the file) and `tokens` (the rows `theme_set` reads),
+and an edit there is `dispatch("theme_set", …)`.
+
 ## Prompts
 
 - **compose-shell:** `blocks_list` → `node_insert` per block →
   `binding_set` for skins → `preview_open` → `preview_screenshot`.
-- **restyle:** `theme_set` (read) → `theme_set` → `preview_screenshot`.
+- **restyle:** `theme_set` (read: the tokens and the file's `problem`) →
+  `theme_set` per role, a refusal's `errors` saying which pair fails its
+  contrast → `preview_events` (the reload) → `preview_screenshot`.
 - **fix-preview:** `preview_events` → `document_text` → `binding_set` /
   `property_set` → `preview_events`.
