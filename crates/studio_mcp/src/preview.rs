@@ -9,8 +9,9 @@
 //! ARCHITECTURE.md 19.7), and one that asks too often waits a second for its
 //! answer. So a burst of writes (typing in the code view) reloads at most
 //! [`RELOADS_PER_SECOND`] times a second; the writes in between are shown by
-//! the preview's own file watcher a moment later, and whatever reads the
-//! preview first asks for the reload they missed ([`Previews::catch_up`]).
+//! the preview's own file watcher a moment later, and the reload they missed
+//! is asked for once the budget allows ([`Previews::catch_up`]) or before
+//! anything reads the preview, whichever comes first.
 
 use std::{
     collections::VecDeque,
@@ -73,11 +74,11 @@ pub(crate) fn lock(p: &Mutex<Previews>) -> MutexGuard<'_, Previews> {
 
 impl Previews {
     /// After a file was written: the open preview shows it now, or, in a
-    /// burst, once its watcher sees the file or somebody reads it.
-    pub fn wrote(&mut self) {
-        let Some(open) = &mut self.open else {
-            return;
-        };
+    /// burst, once its watcher sees the file or somebody reads it. In a
+    /// burst, the first write past the budget answers when the budget next
+    /// allows a reload, for the caller to catch up then.
+    pub fn wrote(&mut self) -> Option<Instant> {
+        let open = self.open.as_mut()?;
         let now = Instant::now();
         while open
             .reloads
@@ -87,14 +88,18 @@ impl Previews {
             open.reloads.pop_front();
         }
         if open.reloads.len() >= RELOADS_PER_SECOND {
-            open.behind = true;
-            return;
+            let first = !std::mem::replace(&mut open.behind, true);
+            return first
+                .then(|| open.reloads.front().map(|at| *at + Duration::from_secs(1)))
+                .flatten();
         }
         open.reloads.push_back(now);
         self.reload();
+        None
     }
 
-    /// Before the preview is read: the reload a burst of writes left out.
+    /// Before the preview is read, or once the budget allows: the reload a
+    /// burst of writes left out.
     pub fn catch_up(&mut self) {
         if self
             .open

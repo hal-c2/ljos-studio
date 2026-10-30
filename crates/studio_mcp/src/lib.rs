@@ -96,13 +96,24 @@ impl Studio {
     }
 
     /// The open preview follows every write of the session, and then the
-    /// watchers hear of it.
+    /// watchers hear of it. A write past the reload budget is caught up
+    /// when the budget allows, so a window shows the last state of a burst
+    /// without anybody having to look first.
     fn follow(&mut self) {
         let previews = self.previews.clone();
         let watchers = self.watchers.clone();
         self.session.on_write(move |_| {
-            preview::lock(&previews).wrote();
+            let catch_up = preview::lock(&previews).wrote();
             watchers.tell();
+            if let Some(at) = catch_up {
+                let (previews, watchers) = (previews.clone(), watchers.clone());
+                // One sleeper per burst, which ends: a timer, not a poll.
+                std::thread::spawn(move || {
+                    std::thread::sleep(at.saturating_duration_since(std::time::Instant::now()));
+                    preview::lock(&previews).catch_up();
+                    watchers.tell();
+                });
+            }
         });
     }
 

@@ -154,6 +154,8 @@ struct Fixture {
     server: StudioServer,
     seen: Arc<Mutex<Seen>>,
     opened: Arc<Mutex<usize>>,
+    /// Hears whenever a window would be told that what it shows changed.
+    told: std::sync::mpsc::Receiver<()>,
 }
 
 impl Fixture {
@@ -186,7 +188,7 @@ impl Fixture {
         }
         let seen = Arc::new(Mutex::new(Seen::default()));
         let opened = Arc::new(Mutex::new(0));
-        let studio = Studio::open(dir.path()).unwrap().with_previews(Arc::new({
+        let mut studio = Studio::open(dir.path()).unwrap().with_previews(Arc::new({
             let seen = seen.clone();
             let opened = opened.clone();
             move |_| {
@@ -194,11 +196,16 @@ impl Fixture {
                 Box::new(Recorder(seen.clone()))
             }
         }));
+        let (tell, told) = std::sync::mpsc::channel();
+        studio.watch(Arc::new(move || {
+            let _ = tell.send(());
+        }));
         Fixture {
             _dir: dir,
             server: StudioServer::new(studio),
             seen,
             opened,
+            told,
         }
     }
 
@@ -347,6 +354,34 @@ fn a_burst_of_writes_reloads_within_the_budget_and_a_reading_catches_up() {
     assert_eq!(f.calls(), ["reload", "screenshot 800"]);
     f.call("preview_screenshot", json!({})).unwrap();
     assert_eq!(f.calls(), ["screenshot 800"]);
+}
+
+#[test]
+fn a_burst_shows_once_the_budget_allows_with_nobody_looking() {
+    let f = Fixture::new();
+    f.call("preview_open", json!({ "doc": "Shell.qml" }))
+        .unwrap();
+    for i in 0..20 {
+        f.call(
+            "binding_set",
+            json!({ "doc": "Shell.qml", "node": { "path": "root/1" }, "name": "text", "value": format!("\"{i}\"") }),
+        )
+        .unwrap();
+    }
+    f.calls();
+    while f.told.try_recv().is_ok() {}
+    let began = std::time::Instant::now();
+    // A window hears of the catch-up as of any change, and the preview was
+    // asked for the burst's last state though nothing read it.
+    f.told
+        .recv_timeout(std::time::Duration::from_secs(5))
+        .expect("the window was told of the catch-up");
+    assert_eq!(f.calls(), ["reload"]);
+    assert!(
+        began.elapsed() <= std::time::Duration::from_millis(1100),
+        "caught up after {:?}",
+        began.elapsed()
+    );
 }
 
 #[test]

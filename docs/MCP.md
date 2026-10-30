@@ -123,11 +123,12 @@ shows it; the watcher's quiet time is not on that path.
 
 - DECISION: Studio asks for at most 8 reloads a second (the inspector
   answers at most 20 calls a second, and a refused call waits a second to
-  retry). A write past the budget is left to the child's watcher, and the
-  next look at the preview (`preview_state`, `preview_screenshot`,
-  `preview_events`) asks for the reload first, so what an agent reads is
-  never older than what it wrote. A burst of edits costs no stalls; its
-  last state is what shows.
+  retry). A write past the budget is left to the child's watcher; the
+  reload it missed is asked for when the budget next allows (one timer per
+  burst, which tells a window as any change does) or before the next look
+  at the preview (`preview_state`, `preview_screenshot`, `preview_events`),
+  whichever comes first. What an agent reads is never older than what it
+  wrote, and a burst's last state is what shows.
 
 - DECISION: targets are a parameter of `preview_open`, not a tool:
   `desktop` 1280×800, `tablet` 820×1180, `phone` 390×844, or any `size`
