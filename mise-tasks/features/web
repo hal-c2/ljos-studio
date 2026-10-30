@@ -2,4 +2,8 @@
 #MISE description="Studio's scenarios that need no preview, against the wasm build in node"
 #MISE depends=["web:build"]
 set -euo pipefail
+# What the scenarios cannot set up by hand: two Studios in one wasm
+# instance, and a preview's late answer racing the next request.
+node web/cores.mjs
+node web/bridge.mjs
 node web/features.mjs "$@"

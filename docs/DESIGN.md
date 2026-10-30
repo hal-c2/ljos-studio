@@ -515,7 +515,8 @@ the ljos-web requests below.
   storage after `write` returns, so a page closed in between loses it, and
   a write storage refuses refuses its call after the edit is in the
   session (`details.kind = "not_stored"`, which files, and the files are
-  queued again).
+  queued again as the session holds them then: two calls store alongside,
+  so the refused text may be older than one already stored).
 - **Preview protocol**: `{"ljos-preview": 1, id, request | answer}` with
   `open`, `reload` (carrying the files), `alias`, `resize`, `screenshot`,
   `outline`, `read`, `write`, `logs`, `pick`, `close`: the `PreviewHost`
@@ -523,9 +524,13 @@ the ljos-web requests below.
   `web/worker.js` runs the session in a worker and blocks on
   `Atomics.wait` over a `SharedArrayBuffer` while the page answers
   (`web/preview.js`, `web/page.js`). That needs cross-origin isolation
-  (COOP/COEP). Tested against a fake page natively (`host.rs`) and in
-  Chromium (`web/browser.mjs`).
-- **JS face** (`web/studio.js`): `openStudio({backend, caps, ask})` gives
+  (COOP/COEP). The worker waits for the id of its own request in the
+  buffer, so a late answer to one that timed out is never the next one's
+  (`web/bridge.mjs` sets that race up in node). Tested against a fake page
+  natively (`host.rs`) and in Chromium (`web/browser.mjs`).
+- **JS face** (`web/studio.js`): every Studio a page opens shares one
+  wasm instance; each keeps its own `ask` and watchers (`web/cores.mjs`).
+  `openStudio({backend, caps, ask})` gives
   `call(tool, args)`, answered as an MCP client's call is, plus `tools()`,
   `view(doc)`, `watch(stale)`, `text(doc)` and `replaceText` (offsets in
   UTF-16 units, as JavaScript counts). `web/features.mjs` runs the
