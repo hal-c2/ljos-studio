@@ -12,11 +12,11 @@ Feature: Studio's tools and who may use them
 
   Scenario: Every tool, in order
     Given the studio tools are connected
-    Then the agent is offered the tools "project_open, document_tree, document_text, document_new, document_edit, node_find, node_select, node_inspect, blocks_list, node_insert, node_move, node_remove, property_set, binding_set, history, preview_screenshot, preview_events"
+    Then the agent is offered the tools "project_open, document_tree, document_text, document_new, document_edit, node_find, node_select, node_inspect, blocks_list, node_insert, node_move, node_remove, property_set, binding_set, state_edit, slot_contribute, history, preview_screenshot, preview_events"
 
   Scenario: Previews are offered to whoever may run the project
     Given the studio tools are connected with the capabilities "inspect, mutate, run"
-    Then the agent is offered the tools "project_open, document_tree, document_text, document_new, document_edit, node_find, node_select, node_inspect, blocks_list, node_insert, node_move, node_remove, property_set, binding_set, history, preview_open, preview_state, preview_screenshot, preview_events"
+    Then the agent is offered the tools "project_open, document_tree, document_text, document_new, document_edit, node_find, node_select, node_inspect, blocks_list, node_insert, node_move, node_remove, property_set, binding_set, state_edit, slot_contribute, history, preview_open, preview_state, preview_screenshot, preview_events"
 
   Scenario: A reader is offered only the reading tools
     Given the studio tools are connected with the capabilities "inspect"
