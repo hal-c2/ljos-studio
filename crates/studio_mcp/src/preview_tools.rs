@@ -235,7 +235,7 @@ fn open(studio: &Mutex<Studio>, a: OpenArgs) -> Result<OpenOut, SurfaceError> {
         for reload in reloads {
             previews.record(reload, started_at);
         }
-        changed.map_err(preview_error)?;
+        changed.map_err(|e| preview_error(previews.failed(e)))?;
     } else {
         // One preview at a time: the last one ends before the next starts.
         if let Some(mut last) = previews.open.take() {
@@ -322,10 +322,15 @@ fn state(studio: &Mutex<Studio>, a: StateArgs) -> Result<StateOut, SurfaceError>
             )));
         }
         for (name, value) in set {
-            open.host.write(&id, &name, value).map_err(preview_error)?;
+            if let Err(e) = open.host.write(&id, &name, value) {
+                return Err(preview_error(previews.failed(e)));
+            }
         }
     }
-    let state = open.host.read(&id, &names).map_err(preview_error)?;
+    let state = match open.host.read(&id, &names) {
+        Ok(state) => state,
+        Err(e) => return Err(preview_error(previews.failed(e))),
+    };
     Ok(StateOut {
         block,
         id,
@@ -351,7 +356,10 @@ pub(crate) fn screenshot(studio: &Mutex<Studio>, args: Value) -> Result<ToolRepl
         .ok_or_else(|| preview_error(PreviewError::NotOpen))?;
     let internal = |e: serde_json::Error| SurfaceError::new(ErrorCode::Internal, e.to_string());
     if let Format::Outline = a.format {
-        let outline = open.host.outline().map_err(preview_error)?;
+        let outline = match open.host.outline() {
+            Ok(outline) => outline,
+            Err(e) => return Err(preview_error(previews.failed(e))),
+        };
         let out = ScreenshotOut {
             outline: Some(outline),
             ..ScreenshotOut::default()
@@ -360,7 +368,10 @@ pub(crate) fn screenshot(studio: &Mutex<Studio>, args: Value) -> Result<ToolRepl
             serde_json::to_value(out).map_err(internal)?,
         ));
     }
-    let picture = open.host.screenshot(side).map_err(preview_error)?;
+    let picture = match open.host.screenshot(side) {
+        Ok(picture) => picture,
+        Err(e) => return Err(preview_error(previews.failed(e))),
+    };
     let out = ScreenshotOut {
         width: Some(picture.width),
         height: Some(picture.height),

@@ -465,6 +465,72 @@ fn refused() -> PreviewError {
     }
 }
 
+/// Review 4427296674: every host call that says the preview is over must end
+/// it here, or the next `preview_open` reuses a process that is gone.
+#[test]
+fn a_call_that_finds_the_preview_ended_ends_it_and_the_next_open_starts_one() {
+    for (call, args) in [
+        ("screenshot", json!({})),
+        ("outline", json!({ "format": "outline" })),
+    ] {
+        let f = Fixture::new();
+        f.call("preview_open", json!({ "doc": "Shell.qml" }))
+            .unwrap();
+        f.fail(call, ended());
+        assert_eq!(
+            f.call("preview_screenshot", args).unwrap_err()["details"]["kind"],
+            "ended"
+        );
+        f.calls();
+        let out = f
+            .call("preview_open", json!({ "doc": "Shell.qml" }))
+            .unwrap();
+        assert_eq!(out["started"], true, "{call}");
+        assert_eq!(f.calls()[0], "open Shell.qml 1280x800 []", "{call}");
+        assert_eq!(*f.opened.lock().unwrap(), 2, "{call}");
+    }
+}
+
+#[test]
+fn a_block_read_or_a_resize_that_finds_the_preview_ended_ends_it() {
+    let f = Fixture::new();
+    f.call("preview_open", json!({ "doc": "Shell.qml" }))
+        .unwrap();
+    f.fail("read", ended());
+    f.call("preview_state", json!({ "node": { "id": "player1" } }))
+        .unwrap_err();
+    assert!(event_kinds(&f.events()).contains(&"ended".to_owned()));
+    f.call("preview_open", json!({ "doc": "Shell.qml" }))
+        .unwrap();
+    assert_eq!(*f.opened.lock().unwrap(), 2);
+
+    f.fail("resize", ended());
+    f.call(
+        "preview_open",
+        json!({ "doc": "Shell.qml", "target": "phone" }),
+    )
+    .unwrap_err();
+    let out = f
+        .call("preview_open", json!({ "doc": "Shell.qml" }))
+        .unwrap();
+    assert_eq!(out["started"], true);
+    assert_eq!(*f.opened.lock().unwrap(), 3);
+}
+
+#[test]
+fn a_refused_screenshot_leaves_the_preview_open() {
+    let f = Fixture::new();
+    f.call("preview_open", json!({ "doc": "Shell.qml" }))
+        .unwrap();
+    f.fail("screenshot", refused());
+    f.call("preview_screenshot", json!({})).unwrap_err();
+    let out = f
+        .call("preview_open", json!({ "doc": "Shell.qml" }))
+        .unwrap();
+    assert_eq!(out["started"], false);
+    assert_eq!(*f.opened.lock().unwrap(), 1);
+}
+
 /// A project with three mock modules, for failures part way through them.
 fn three_mocks(f: &Fixture) {
     for module in ["A", "B", "C"] {

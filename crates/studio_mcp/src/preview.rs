@@ -20,7 +20,9 @@ use std::{
 
 use studio_core::{
     Store,
-    preview::{Alias, PreviewEvent, PreviewHost, PreviewSpec, Reload, Size, Target, ms},
+    preview::{
+        Alias, PreviewError, PreviewEvent, PreviewHost, PreviewSpec, Reload, Size, Target, ms,
+    },
 };
 
 /// Reloads asked for after writes in any second: well within the 20 calls
@@ -117,10 +119,8 @@ impl Previews {
             Ok(Reload::Failed { message }) => PreviewEvent::ReloadFailed { message },
             Ok(Reload::Unchanged) => return,
             Err(e) => {
-                self.open = None;
-                PreviewEvent::Ended {
-                    message: e.to_string(),
-                }
+                self.failed(e);
+                return;
             }
         };
         self.events.push(event);
@@ -150,12 +150,22 @@ impl Previews {
                 self.events.extend(lines.into_iter().map(PreviewEvent::Log));
             }
             Err(e) => {
-                self.open = None;
-                self.events.push(PreviewEvent::Ended {
-                    message: e.to_string(),
-                });
+                self.failed(e);
             }
         }
+    }
+
+    /// What every host call's error goes through: one that says the preview
+    /// is over ends it here too, or the next `preview_open` would reuse a
+    /// process that is gone. Any other leaves it open.
+    pub fn failed(&mut self, e: PreviewError) -> PreviewError {
+        if matches!(e, PreviewError::Ended(_) | PreviewError::NotOpen) {
+            self.open = None;
+            self.events.push(PreviewEvent::Ended {
+                message: e.to_string(),
+            });
+        }
+        e
     }
 }
 
