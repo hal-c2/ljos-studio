@@ -33,6 +33,23 @@ pub struct Layer {
     /// counts; `None` for one a property holds (`contentItem: Item {}`),
     /// which has no place among them.
     pub index: Option<usize>,
+    /// How many open review comments are on it.
+    pub comments: usize,
+}
+
+/// A review comment of the open document, as a window lists it.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct Commented {
+    pub id: String,
+    /// Its object's handle; empty once the object was taken out.
+    pub node: String,
+    /// What the comment says; its replies are `replies` more.
+    pub text: String,
+    pub replies: usize,
+    pub resolved: bool,
+    pub orphaned: bool,
+    /// Its object as the layers panel names it, or named it last.
+    pub label: String,
 }
 
 /// A binding of the selected object, as written.
@@ -144,6 +161,8 @@ pub struct View {
     pub palette: Vec<Offered>,
     pub done: Vec<String>,
     pub undone: Vec<String>,
+    /// The document's review comments, in the order they were made.
+    pub comments: Vec<Commented>,
     pub preview: Option<Previewed>,
     /// The server can start previews.
     pub previews: bool,
@@ -231,6 +250,7 @@ impl Studio {
                             depth: n.depth,
                             parent,
                             index,
+                            comments: 0,
                         }
                     })
                     .collect();
@@ -238,6 +258,35 @@ impl Studio {
             Err(e) => view.problem = e.to_string(),
         }
         view.flow = self.flow(doc).unwrap_or_default();
+        view.comments = self
+            .session
+            .comments(Some(doc))
+            .into_iter()
+            .map(|v| {
+                let c = v.comment;
+                let anchor = c.anchor;
+                Commented {
+                    id: c.id,
+                    node: v.node.unwrap_or_default(),
+                    text: c.thread.first().map(|n| n.text.clone()).unwrap_or_default(),
+                    replies: c.thread.len().saturating_sub(1),
+                    resolved: c.resolved,
+                    orphaned: c.orphaned,
+                    label: anchor
+                        .id
+                        .map_or_else(|| anchor.ty.clone(), |id| format!("{} {id}", anchor.ty)),
+                }
+            })
+            .collect();
+        for c in view
+            .comments
+            .iter()
+            .filter(|c| !c.resolved && !c.node.is_empty())
+        {
+            if let Some(layer) = view.layers.iter_mut().find(|l| l.node == c.node) {
+                layer.comments += 1;
+            }
+        }
         let selected = self
             .session
             .selection()

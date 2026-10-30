@@ -103,7 +103,8 @@ pub struct Workspace {
     #[qml(readonly, notify)]
     pub text: String,
     /// One row per object, in order: `node`, `type`, `id`, `depth`,
-    /// `label`, and `parent` and `index`, its place as `node_move` counts.
+    /// `label`, `parent` and `index`, its place as `node_move` counts, and
+    /// `comments`, how many open review comments are on it.
     #[qml(readonly, notify)]
     pub layers: Json,
     /// The handle of the selected object of `doc`; empty when none is.
@@ -139,6 +140,12 @@ pub struct Workspace {
     pub done: Json,
     #[qml(readonly, notify)]
     pub undone: Json,
+    /// `doc`'s review comments: `id`, `node` (empty once orphaned),
+    /// `text`, `replies`, `resolved`, `orphaned` and `label`, its object
+    /// as the layers panel names it. Each layer counts its open ones in
+    /// `comments`.
+    #[qml(readonly, notify)]
+    pub comments: Json,
     /// The preview of `doc`, or `null`: `target`, `width`, `height`,
     /// `state`, `variant` (the root's state its breakpoint turns on, or
     /// empty), `generation` (what it shows: 1, and one more each reload
@@ -196,6 +203,7 @@ impl Default for Workspace {
             previews: false,
             theme: String::new(),
             tokens: none(),
+            comments: none(),
             queue: Rc::default(),
         }
     }
@@ -594,6 +602,7 @@ fn publish(engine: &Engine, ws: ObjectId, view: View, seen: u64) {
     let _ = cx.set(Workspace::PALETTE, to_json(&view.palette));
     let _ = cx.set(Workspace::DONE, to_json(&view.done));
     let _ = cx.set(Workspace::UNDONE, to_json(&view.undone));
+    let _ = cx.set(Workspace::COMMENTS, to_json(&view.comments));
     let _ = cx.set(Workspace::PREVIEW, preview);
     let _ = cx.set(Workspace::PROBLEM, view.problem);
     let _ = cx.set(Workspace::PREVIEWS, view.previews);

@@ -1,5 +1,6 @@
 // The open document's objects in order, indented by depth. Selecting one
-// is `node_select`, as an agent selects.
+// is `node_select`, as an agent selects. A layer with open review comments
+// says how many.
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
@@ -55,6 +56,7 @@ Panel {
             Accessible.name: "Layers"
 
             delegate: ItemDelegate {
+                id: row
                 required property var modelData
                 width: ListView.view.width
                 leftPadding: Spacing.xs + modelData.depth * Spacing.md
@@ -65,6 +67,19 @@ Panel {
                     doc: panel.workspace.doc,
                     nodes: [{node: modelData.node}]
                 })
+
+                Label {
+                    anchors.right: parent.right
+                    anchors.rightMargin: Spacing.xs
+                    anchors.verticalCenter: parent.verticalCenter
+                    visible: row.modelData.comments > 0
+                    text: String(row.modelData.comments)
+                    color: Colors.text
+                    Accessible.role: Accessible.StaticText
+                    Accessible.name: row.modelData.comments
+                                     + (row.modelData.comments === 1 ? " comment on " : " comments on ")
+                                     + row.modelData.label
+                }
             }
         }
 

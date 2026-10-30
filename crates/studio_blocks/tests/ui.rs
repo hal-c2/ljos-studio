@@ -770,6 +770,14 @@ fn adds_state(w: &mut UiWorld, name: String) -> StepResult {
     })
 }
 
+#[when(regex = r#"^the person adds the comment "(.*)" in the inspector$"#)]
+fn adds_comment(w: &mut UiWorld, text: String) -> StepResult {
+    let text = unescape(&text);
+    let window = w.window()?;
+    let field = window.node("Inspector", Some("textinput"), "New comment")?;
+    window.enter(&field, &text)
+}
+
 #[given(regex = r#"^the person has picked the state "([^"]+)" in the inspector$"#)]
 #[when(regex = r#"^the person picks the state "([^"]+)" in the inspector$"#)]
 fn picks_state(w: &mut UiWorld, name: String) -> StepResult {
@@ -1198,6 +1206,52 @@ fn inspector_shows(w: &mut UiWorld, name: String, value: String) -> StepResult {
     (field.value == value)
         .then_some(())
         .ok_or_else(|| format!("the inspector shows {name} as {:?}", field.value))
+}
+
+#[then(regex = r#"^the inspector shows the (open|resolved|orphaned) comment "(.*)"$"#)]
+fn inspector_shows_comment(w: &mut UiWorld, kind: String, text: String) -> StepResult {
+    let window = w.window()?;
+    let mut kind = kind;
+    kind[..1].make_ascii_uppercase();
+    window
+        .node(
+            "Inspector",
+            None,
+            &format!("{kind} comment: {}", unescape(&text)),
+        )
+        .map(|_| ())
+}
+
+/// The layers' comment counts: what the panel shows beside the rows.
+fn comment_counts(window: &Window) -> Result<Vec<String>, String> {
+    let tree = window.tree();
+    let list = find(&tree, &|n| n.name == "Layers" && n.role == "list")
+        .ok_or("no layers list in the window")?;
+    let mut counts = Vec::new();
+    collect(list, &mut |n| {
+        // Static text reads as a label.
+        if n.key.is_some() && n.role == "label" && n.name.contains(" comment") {
+            counts.push(n.name.clone());
+        }
+    });
+    Ok(counts)
+}
+
+#[then(regex = r#"^the layers panel shows "([^"]+)"$"#)]
+fn layers_show(w: &mut UiWorld, want: String) -> StepResult {
+    let counts = comment_counts(w.window()?)?;
+    (counts == [want])
+        .then_some(())
+        .ok_or_else(|| format!("the layers panel shows {counts:?}"))
+}
+
+#[then("the layers panel shows no comments")]
+fn layers_show_no_comments(w: &mut UiWorld) -> StepResult {
+    let counts = comment_counts(w.window()?)?;
+    counts
+        .is_empty()
+        .then_some(())
+        .ok_or_else(|| format!("the layers panel shows {counts:?}"))
 }
 
 #[then(regex = r#"^the file "([^"]+)" is:$"#)]

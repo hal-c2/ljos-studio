@@ -6,8 +6,12 @@
 // it changes and the condition that turns it on, or to give it a
 // breakpoint, a width bound of the window.
 //
-// Last, the roles of the data it sees, in a list's delegate: one is bound
+// Then the roles of the data it sees, in a list's delegate: one is bound
 // to a property as `model.<role>`, the form a delegate reads it in.
+//
+// Last, its review comments (`review`), and those of the document whose
+// objects were taken out: a person adds one, resolves it or reopens it.
+// They are kept in Studio's sidecar; the file does not change.
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
@@ -71,6 +75,22 @@ Panel {
         if (text !== "")
             args.binding = text
         editState(args)
+    }
+
+    // The selected object's comments, then those whose objects are gone.
+    readonly property var comments: {
+        const all = workspace.comments
+        const out = []
+        for (let i = 0; i < all.length; i++) {
+            if (all[i].orphaned || all[i].node === workspace.selected)
+                out.push(all[i])
+        }
+        return out
+    }
+
+    function review(args) {
+        refusal.text = ""
+        workspace.dispatch("review", args)
     }
 
     function bind(name, text) {
@@ -356,6 +376,73 @@ Panel {
                         panel.bind(text, "model." + roleRow.modelData)
                         text = ""
                     }
+                }
+            }
+        }
+
+        Label {
+            text: "Comments"
+            color: Colors.text
+            font.weight: Typography.bodyStrongWeight
+            Accessible.role: Accessible.Heading
+            Accessible.name: text
+        }
+
+        Repeater {
+            model: panel.comments
+            delegate: RowLayout {
+                id: commentRow
+                required property var modelData
+                readonly property string kind: modelData.orphaned ? "Orphaned"
+                                               : modelData.resolved ? "Resolved" : "Open"
+                Layout.fillWidth: true
+                spacing: Spacing.xxs
+
+                Label {
+                    text: commentRow.modelData.orphaned
+                          ? commentRow.modelData.text + " (" + commentRow.modelData.label + ", removed)"
+                          : commentRow.modelData.text
+                    color: commentRow.modelData.resolved ? Colors.textMuted : Colors.text
+                    wrapMode: Text.Wrap
+                    Layout.fillWidth: true
+                    Accessible.role: Accessible.StaticText
+                    Accessible.name: commentRow.kind + " comment: " + commentRow.modelData.text
+                }
+                Button {
+                    text: commentRow.modelData.resolved ? "Reopen" : "Resolve"
+                    Accessible.name: text + " " + commentRow.modelData.text
+                    onClicked: panel.review({
+                        action: commentRow.modelData.resolved ? "reopen" : "resolve",
+                        comment: commentRow.modelData.id
+                    })
+                }
+            }
+        }
+
+        RowLayout {
+            Layout.fillWidth: true
+            spacing: Spacing.xxs
+
+            TextField {
+                id: newComment
+                placeholderText: "comment"
+                Accessible.name: "New comment"
+                Layout.fillWidth: true
+                onAccepted: addComment.clicked()
+            }
+            Button {
+                id: addComment
+                text: "Comment"
+                Accessible.name: "Add comment"
+                enabled: newComment.text.trim() !== ""
+                onClicked: {
+                    panel.review({
+                        action: "add",
+                        doc: panel.workspace.doc,
+                        node: {node: panel.workspace.selected},
+                        text: newComment.text
+                    })
+                    newComment.text = ""
                 }
             }
         }

@@ -187,6 +187,18 @@
               "notify": "undoneChanged"
             },
             {
+              "name": "comments",
+              "type": "var",
+              "kind": "value",
+              "list": false,
+              "readonly": true,
+              "final": true,
+              "required": false,
+              "constant": false,
+              "group": false,
+              "notify": "commentsChanged"
+            },
+            {
               "name": "preview",
               "type": "var",
               "kind": "value",
