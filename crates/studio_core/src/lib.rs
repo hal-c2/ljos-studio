@@ -1601,13 +1601,16 @@ impl Session {
             .collect()
     }
 
-    /// A new comment on the object `address` names.
+    /// A new comment on the object `address` names, written at `at`
+    /// (milliseconds since the Unix epoch). The caller reads the clock: a
+    /// session has none of its own, as a browser gives none to `std`.
     pub fn comment_add(
         &mut self,
         doc: &str,
         address: &Address,
         text: &str,
         author: Option<&str>,
+        at: u64,
     ) -> Result<CommentView, Error> {
         let text = note_text(text)?;
         self.sync(doc)?;
@@ -1626,7 +1629,7 @@ impl Session {
             thread: vec![Note {
                 author: author.map(str::to_owned),
                 text,
-                at: review::now_ms(),
+                at,
             }],
         };
         let n = handle[1..].parse().expect("handles are n and a number");
@@ -1636,19 +1639,21 @@ impl Session {
         Ok(self.view(&comment))
     }
 
-    /// Answers the comment `id`; an orphaned one too.
+    /// Answers the comment `id`, an orphaned one too, at `at` (as
+    /// [`Session::comment_add`]).
     pub fn comment_reply(
         &mut self,
         id: &str,
         text: &str,
         author: Option<&str>,
+        at: u64,
     ) -> Result<CommentView, Error> {
         let text = note_text(text)?;
         self.change_comment(id, |c| {
             c.thread.push(Note {
                 author: author.map(str::to_owned),
                 text,
-                at: review::now_ms(),
+                at,
             });
         })
     }

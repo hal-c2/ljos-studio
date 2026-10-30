@@ -205,6 +205,9 @@ mod tests {
         fn now(&self) -> Duration {
             Duration::ZERO
         }
+        fn wall(&self) -> Duration {
+            Duration::ZERO
+        }
         fn after(&self, _: Duration, _: Box<dyn FnOnce() + Send>) {}
     }
 

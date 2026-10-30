@@ -124,6 +124,7 @@ fn review(studio: &Mutex<Studio>, ctx: &CallCtx, a: ReviewArgs) -> Result<Review
         return Err(denied(NAME, Cap::Mutate, ctx));
     }
     let mut studio = lock(studio);
+    let at = u64::try_from(studio.timer.wall().as_millis()).unwrap_or(u64::MAX);
     let session = &mut studio.session;
     let author = a.author.as_deref();
     let changed = match a.action {
@@ -152,12 +153,12 @@ fn review(studio: &Mutex<Studio>, ctx: &CallCtx, a: ReviewArgs) -> Result<Review
             let doc = needs(a.doc, "doc", "add")?;
             let node = needs(a.node, "node", "add")?;
             let text = needs(a.text, "text", "add")?;
-            session.comment_add(&doc, &node, &text, author)
+            session.comment_add(&doc, &node, &text, author, at)
         }
         Action::Reply => {
             let id = needs(a.comment, "comment", "reply")?;
             let text = needs(a.text, "text", "reply")?;
-            session.comment_reply(&id, &text, author)
+            session.comment_reply(&id, &text, author, at)
         }
         Action::Resolve => session.comment_resolve(&needs(a.comment, "comment", "resolve")?, true),
         Action::Reopen => session.comment_resolve(&needs(a.comment, "comment", "reopen")?, false),

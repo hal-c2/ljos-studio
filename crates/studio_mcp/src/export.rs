@@ -13,7 +13,6 @@ use std::{
     fs,
     path::{Component, Path, PathBuf},
     sync::{Arc, Mutex},
-    time::Instant,
 };
 
 use ljos_blocks::read_qmldir;
@@ -380,8 +379,8 @@ fn write(root: &Path, out: &Path, manifest: &Manifest) -> Result<(), SurfaceErro
 }
 
 fn export(studio: &Mutex<Studio>, a: ExportArgs) -> Result<ExportOut, SurfaceError> {
-    let started = Instant::now();
     let studio = lock(studio);
+    let started = studio.timer.now();
     let Some(root) = studio.dir() else {
         return Err(refused(
             ErrorCode::NotActionable,
@@ -400,7 +399,7 @@ fn export(studio: &Mutex<Studio>, a: ExportArgs) -> Result<ExportOut, SurfaceErr
         bytes: manifest.files.iter().map(|f| f.bytes).sum(),
         manifest,
         written: !a.dry_run,
-        ms: studio_core::preview::ms(started.elapsed()),
+        ms: studio_core::preview::ms(studio.timer.now().saturating_sub(started)),
     })
 }
 
