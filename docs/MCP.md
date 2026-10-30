@@ -20,8 +20,8 @@ Studio composes three servers rather than duplicating them:
 
 Budgets follow ARCHITECTURE.md section 19.6: tools listed in a fixed order,
 descriptions ≤ 300 characters, responses ≤ 40 KB with cursors, ≤ 25 tools
-on one server. Studio offers 22 tools today; with `export`, still to
-come, it offers 23. Capabilities as in section 19.7:
+on one server. Studio offers 22 tools today; with `export` and `review`,
+still to come in S6, it offers 24. Capabilities as in section 19.7:
 `inspect` (read), `mutate` (edit documents), `fs` (write files outside
 documents: export), `run` (start previews). They are granted at launch with
 `--caps`: by default `inspect` on a running window's endpoint and
@@ -65,6 +65,7 @@ Still to come:
 | # | Tool | Does | Needs |
 |---|---|---|---|
 | 23 | `export` | Write a build bundle or a site for a target | fs |
+| 24 | `review` | Comments on nodes: add, list, resolve | mutate |
 
 - DECISION: `theme_tokens` folds into `theme_set`, which reads the tokens
   when it is given no value, as `history` lists when given no action.
