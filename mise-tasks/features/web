@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+#MISE description="Studio's scenarios that need no preview, against the wasm build in node"
+#MISE depends=["web:build"]
+set -euo pipefail
+node web/features.mjs "$@"

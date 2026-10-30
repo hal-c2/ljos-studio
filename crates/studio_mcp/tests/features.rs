@@ -659,9 +659,14 @@ async fn main() {
         // A preview is a whole application in a process of its own.
         .max_concurrent_scenarios(8)
         .fail_on_skipped()
-        // A window's scenarios run in studio_blocks, which drives the shell.
+        // A window's scenarios run in studio_blocks, which drives the shell;
+        // the browser's storage only in a browser's build (`web/features.mjs`).
         .filter_run_and_exit(input, |feature, _, scenario| {
-            !feature.tags.iter().chain(&scenario.tags).any(|t| t == "ui")
+            !feature
+                .tags
+                .iter()
+                .chain(&scenario.tags)
+                .any(|t| t == "ui" || t == "web")
         })
         .await;
 }
