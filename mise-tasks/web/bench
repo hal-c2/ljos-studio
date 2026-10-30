@@ -4,4 +4,5 @@
 set -euo pipefail
 node web/bench.mjs
 wasm=web/pkg/studio_web_bg.wasm
-echo "wasm: $(wc -c < "$wasm") bytes, $(gzip -9 -c "$wasm" | wc -c) gzipped"
+# BSD `wc` pads its number; arithmetic drops the padding.
+echo "wasm: $(($(wc -c <"$wasm"))) bytes, $(($(gzip -9 -c "$wasm" | wc -c))) gzipped"
