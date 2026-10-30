@@ -136,7 +136,11 @@ fn left_out_why(name: &str, is_dir: bool, top: bool) -> Option<&'static str> {
     match name {
         ".studio" if top => Some("Studio's sidecar"),
         MOCKS if top && is_dir => Some("mock modules stand in for blocks in previews only"),
+        // The directories `ljos run` does not read a project's files from.
         BUILD | "target" | "node_modules" if is_dir => Some("build output and tooling"),
+        _ if is_dir && (name.starts_with("build-") || name.starts_with("cmake-build")) => {
+            Some("build output and tooling")
+        }
         _ if name.starts_with('.') => Some("hidden: not part of the app"),
         // Half a file Studio was writing when it stopped.
         _ if name.ends_with(".studio-tmp") => Some("an unfinished write"),
