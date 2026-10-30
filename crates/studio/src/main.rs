@@ -5,13 +5,13 @@
 //! loopback endpoint while it is open. `studio --mcp [DIR]` serves them on
 //! stdio instead, with no window.
 
-use std::{path::PathBuf, sync::Arc};
+use std::{ffi::OsString, path::PathBuf, sync::Arc};
 
 use anyhow::Context;
 use clap::Parser;
 use ljos_mcp_core::{Cap, CapSet};
 use studio_mcp::{Studio, StudioServer};
-use studio_preview::NativeHost;
+use studio_preview::{NativeHost, private_dir};
 
 #[derive(Parser, Debug)]
 #[command(name = "studio", version, about)]
@@ -48,7 +48,7 @@ fn main() -> anyhow::Result<()> {
         None => std::env::current_dir().context("the current directory")?,
     };
     let ljos = args.ljos.unwrap_or_else(NativeHost::default_program);
-    let state = state_dir();
+    let state = state_dir()?;
     let previews = state.clone();
     let studio = Studio::open(&dir)
         .with_context(|| format!("opening {}", dir.display()))?
@@ -121,13 +121,32 @@ fn window(server: Arc<StudioServer>, shell: Option<PathBuf>) -> anyhow::Result<(
 }
 
 /// Where previews keep their inspector token files and logs, and where the
-/// window's own token file is: a directory only this user can read (a token
-/// grants control), and outside the project, which the preview watches. One
-/// level, by process: a shared parent in a shared temporary directory would
-/// let one other user stop every Studio's previews.
-fn state_dir() -> PathBuf {
-    let base = std::env::var_os("XDG_RUNTIME_DIR").map_or_else(std::env::temp_dir, PathBuf::from);
-    base.join(format!("ljos-studio-{}", std::process::id()))
+/// window's own token file is: outside the project, which the preview
+/// watches, and only this user's, as a token grants control: made so before
+/// the window's token is written, and refused if found otherwise. Never below
+/// the shared temporary directory, where another user could have made it
+/// first; one level, by process, so no shared parent of ours is there to take.
+fn state_dir() -> anyhow::Result<PathBuf> {
+    let base = state_base(
+        std::env::var_os("XDG_RUNTIME_DIR"),
+        std::env::var_os("XDG_STATE_HOME"),
+        std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE")),
+    )
+    .context("no place for Studio's state: set XDG_RUNTIME_DIR, XDG_STATE_HOME or HOME")?;
+    let dir = base.join(format!("ljos-studio-{}", std::process::id()));
+    private_dir(&dir)?;
+    Ok(dir)
+}
+
+fn state_base(
+    runtime: Option<OsString>,
+    state: Option<OsString>,
+    home: Option<OsString>,
+) -> Option<PathBuf> {
+    let set = |dir: Option<OsString>| dir.filter(|d| !d.is_empty()).map(PathBuf::from);
+    set(runtime)
+        .or_else(|| set(state))
+        .or_else(|| set(home).map(|h| h.join(".local").join("state")))
 }
 
 #[cfg(test)]
@@ -153,5 +172,23 @@ mod tests {
             granted_by(&["--mcp"]),
             CapSet::of([Cap::Inspect, Cap::Mutate])
         );
+    }
+
+    #[test]
+    fn the_state_is_never_in_the_shared_temporary_directory() {
+        let os = |s: &str| Some(OsString::from(s));
+        assert_eq!(
+            state_base(os("/run/user/1"), os("/s"), os("/h")),
+            Some(PathBuf::from("/run/user/1"))
+        );
+        assert_eq!(
+            state_base(os(""), os("/s"), os("/h")),
+            Some(PathBuf::from("/s"))
+        );
+        assert_eq!(
+            state_base(None, None, os("/h")),
+            Some(PathBuf::from("/h/.local/state"))
+        );
+        assert_eq!(state_base(None, None, None), None);
     }
 }
