@@ -159,6 +159,20 @@ Feature: A person wires and plays a prototype's flow in Studio's window
     When the person clicks the frame "Desktop" at 50, 150
     Then the flow panel says the app is in the state "details"
 
+  # The badge has no `id` and is drawn over the card's right end, reaching
+  # past it: the click is at its point, not at the middle of the badge.
+  @preview
+  Scenario: In play mode a click plays the flow at the very point clicked
+    Given the person has selected "Rectangle card" in the layers panel
+    And the person has clicked the button "Tap selection to go to details"
+    And an agent has called the tool "node_insert" with:
+      """json
+      {"doc": "Main.qml", "parent": {"id": "card"}, "id": false, "text": "Rectangle { x: 150; width: 250; height: 20 }"}
+      """
+    And the person has clicked the button "Play"
+    When the person clicks the frame "Desktop" at 160, 110
+    Then the flow panel says the app is in the state "details"
+
   @preview
   Scenario: In play mode a click plays a document whose root has no id
     Given the person has opened "Pages.qml" in the documents list
