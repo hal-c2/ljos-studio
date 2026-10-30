@@ -60,11 +60,11 @@ Feature: An agent opens a project and reads and makes its documents
     And the answer's "/next" is "1"
 
   Scenario: A new document, and undo removes it
-    Given the agent has called the tool "document_new" with:
+    When the agent calls the tool "document_new" with:
       """json
       {"doc": "Shell.qml"}
       """
-    And the file "Shell.qml" is:
+    Then the file "Shell.qml" is:
       """qml
       import QtQuick
 
@@ -90,7 +90,7 @@ Feature: An agent opens a project and reads and makes its documents
       """json
       {"doc": "Broken.qml", "text": "Item {"}
       """
-    Then the agent is refused with "not_actionable"
+    Then the agent is refused with "syntax"
     And the refusal's "/details/kind" is "broken"
     And the file "Broken.qml" does not exist
 

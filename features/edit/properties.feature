@@ -119,5 +119,4 @@ Feature: An agent sets properties and bindings
       """json
       {"doc": "Main.qml", "node": {"id": "label"}, "name": "width", "value": "parent.width /"}
       """
-    Then the agent is refused with "invalid_argument"
-    And the refusal's "/details/kind" is "would_break"
+    Then the agent is refused with "would_break"

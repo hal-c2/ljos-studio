@@ -194,18 +194,16 @@ pub(crate) fn error(e: Error) -> SurfaceError {
             "current": current,
         })),
         Error::Gone { .. } => kind(ErrorCode::StaleRef, "gone"),
-        Error::Broken { problem, .. } => SurfaceError::new(ErrorCode::NotActionable, message)
+        Error::Broken { problem, .. } => SurfaceError::new(ErrorCode::Syntax, message)
             .with_details(json!({ "kind": "broken", "problem": problem })),
         Error::NotFound { .. } => kind(ErrorCode::NotFound, "no_object"),
         Error::Exists(_) => kind(ErrorCode::InvalidArgument, "exists"),
         Error::Invalid(_) => kind(ErrorCode::InvalidArgument, "invalid"),
         Error::NothingTo(_) => kind(ErrorCode::NotActionable, "nothing_to_do"),
         Error::Edit(e) => match e {
-            studio_core::EditError::WouldBreak(_) => {
-                kind(ErrorCode::InvalidArgument, "would_break")
-            }
-            studio_core::EditError::Unsupported(_) => kind(ErrorCode::NotActionable, "unsupported"),
-            studio_core::EditError::Syntax(_) => kind(ErrorCode::NotActionable, "broken"),
+            studio_core::EditError::WouldBreak(_) => kind(ErrorCode::WouldBreak, "would_break"),
+            studio_core::EditError::Unsupported(_) => kind(ErrorCode::Unsupported, "unsupported"),
+            studio_core::EditError::Syntax(_) => kind(ErrorCode::Syntax, "broken"),
             studio_core::EditError::NotFound(_) => kind(ErrorCode::NotFound, "no_object"),
             studio_core::EditError::NoBinding { .. } => kind(ErrorCode::NotFound, "no_binding"),
             studio_core::EditError::NotAChild(_) => kind(ErrorCode::InvalidArgument, "not_a_child"),

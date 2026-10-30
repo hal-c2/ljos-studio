@@ -72,7 +72,7 @@ Feature: An object keeps its handle across everyone's edits
       """json
       {"doc": "Main.qml", "parent": {"id": "root"}, "text": "Item {}"}
       """
-    Then the agent is refused with "not_actionable"
+    Then the agent is refused with "syntax"
     And the refusal's "/details/kind" is "broken"
     When a person types in the code view of "Main.qml", replacing "    Rectangle { Text {" with "    Text {"
     And the agent calls the tool "node_inspect" with:
