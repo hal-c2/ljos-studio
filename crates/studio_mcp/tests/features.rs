@@ -76,6 +76,13 @@ impl StudioWorld {
         }
     }
 
+    /// Where the endpoint keeps its token: a directory for the server to
+    /// make, as Studio's state directory is the user's alone and a temporary
+    /// directory is as open as the umask leaves it.
+    fn endpoint_state(&self) -> std::path::PathBuf {
+        self.state.path().join("endpoint")
+    }
+
     fn server(&mut self) -> Result<&StudioServer, String> {
         if self.server.is_none() {
             // Previews run the `ljos` that `LJOS` names (`mise run features`
@@ -643,7 +650,8 @@ fn serves_agents(w: &mut StudioWorld, caps: String) -> StepResult {
     let caps = CapSet::parse_list(&caps).map_err(|e| e.to_string())?;
     let studio = Studio::open(w.dir.path()).map_err(|e| e.to_string())?;
     let server = Arc::new(StudioServer::new(studio));
-    let http = endpoint::serve_agents(&server, caps, w.state.path()).map_err(|e| e.to_string())?;
+    let http =
+        endpoint::serve_agents(&server, caps, &w.endpoint_state()).map_err(|e| e.to_string())?;
     w.endpoint = Some(http);
     Ok(())
 }
@@ -760,7 +768,7 @@ fn on_loopback(w: &mut StudioWorld) -> StepResult {
 fn token_file_private(w: &mut StudioWorld) -> StepResult {
     use std::os::unix::fs::PermissionsExt as _;
     let http = w.endpoint.as_ref().ok_or("nothing serves agents")?;
-    let path = w.state.path().join(endpoint::TOKEN_FILE);
+    let path = w.endpoint_state().join(endpoint::TOKEN_FILE);
     let meta = std::fs::metadata(&path).map_err(|e| format!("{}: {e}", path.display()))?;
     let text = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
     let mode = meta.permissions().mode() & 0o777;
