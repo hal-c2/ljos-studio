@@ -5471,6 +5471,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "studio_web"
+version = "0.0.0"
+dependencies = [
+ "base64",
+ "js-sys",
+ "ljos_mcp_core",
+ "serde",
+ "serde_json",
+ "studio_core",
+ "studio_mcp",
+ "thiserror 2.0.21",
+ "wasm-bindgen",
+]
+
+[[package]]
 name = "subtle"
 version = "2.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"

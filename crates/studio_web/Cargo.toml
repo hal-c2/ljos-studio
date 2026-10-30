@@ -1,0 +1,29 @@
+[package]
+name = "studio_web"
+description = "Ljós Studio in a browser: projects in the browser's storage, previews in a sandboxed page, the MCP tools called from JavaScript."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lib]
+# `cdylib` is what wasm-bindgen reads; `rlib` keeps the native tests.
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+studio_core = { path = "../studio_core", default-features = false }
+studio_mcp = { path = "../studio_mcp", default-features = false }
+ljos_mcp_core.workspace = true
+base64.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen.workspace = true
+js-sys.workspace = true
+
+[lints]
+workspace = true

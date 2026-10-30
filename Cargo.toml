@@ -42,6 +42,7 @@ ljos_a11y = { git = "https://github.com/hal-c2/ljos-ui", rev = "63ec3fa4ad17dbc7
 
 # Pins match ljos-ui's, so the two lock files agree.
 anyhow = "1.0"
+base64 = "0.23"
 clap = { version = "4.6", features = ["derive"] }
 cucumber = "0.23.0"
 insta = { version = "1.49", features = ["json"] }
@@ -54,6 +55,10 @@ serde_json = "1.0"
 tempfile = "3"
 thiserror = "2.0"
 uuid = "1.28"
+# The page glue of studio_web. The CLI that writes the JavaScript side must
+# be this exact version (`mise run web:build` installs it).
+wasm-bindgen = "=0.2.129"
+js-sys = "0.3.106"
 tokio = { version = "1.53", features = ["rt-multi-thread", "macros", "sync", "time", "io-util", "io-std"] }
 
 [workspace.lints.rust]
@@ -61,3 +66,12 @@ unsafe_code = "forbid"
 
 [workspace.lints.clippy]
 all = { level = "warn", priority = -1 }
+
+# What a page downloads: as small as the compiler makes it (`mise run
+# web:build`).
+[profile.web]
+inherits = "release"
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
