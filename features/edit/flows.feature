@@ -5,6 +5,8 @@
 #   https://doc.qt.io/qt-6/qml-qtquick-taphandler.html
 #   https://doc.qt.io/qt-6/qml-qtquick-loader.html (source)
 #   https://doc.qt.io/qt-6/qml-qtquick-controls-stackview.html (push)
+#   https://doc.qt.io/qt-6/qtqml-syntax-objectattributes.html (signal
+#   attributes, signal handlers, property change signals)
 
 Feature: An agent wires a prototype's flow
   A flow is what a tap does: it goes to one of a component's states or
@@ -13,9 +15,12 @@ Feature: An agent wires a prototype's flow
   the signal (`onClicked` of a button), else a `TapHandler`, which any
   item can hold. `state_edit` writes one (`interaction`) and takes one out
   (`remove_interaction`), checking what it names: the state, the
-  document, the object that opens it. `node_inspect` lists the flows of an
-  object and everything in it, so the root's lists the document's whole
-  flow beside its states and transitions.
+  document, the object that opens it, the signal. `node_inspect` lists the
+  flows of an object and everything in it, so the root's lists the
+  document's whole flow beside its states and transitions, and the signals
+  the object has with their arguments: what it declares, then what its type
+  declares and inherits, as Ljós's table of types, the project's QML files
+  and its type dumps (ljostypes.json, a type written in Rust) describe it.
 
   Background:
     Given the file "Main.qml":
@@ -137,6 +142,164 @@ Feature: An agent wires a prototype's flow
         {"doc": "Main.qml", "action": "interaction", "trigger": {"id": "back"}, "signal": "clicked()", "state": "details"}
         """
       Then the agent is refused with "invalid_argument"
+
+  Rule: A flow handles a signal the object has
+
+    Scenario: An object's signals are listed with their arguments
+      Given the agent has called the tool "node_insert" with:
+        """json
+        {"doc": "Main.qml", "parent": {"id": "root"}, "text": "MouseArea { id: area }", "id": false}
+        """
+      When the agent calls the tool "node_inspect" with:
+        """json
+        {"doc": "Main.qml", "node": {"id": "area"}}
+        """
+      Then the answer's "/signals" has the entry:
+        """json
+        {"name": "clicked", "arguments": [{"name": "mouse", "type": "QtObject"}]}
+        """
+      And the answer's "/signals" has the entry:
+        """json
+        {"name": "widthChanged", "arguments": [], "change": true}
+        """
+
+    Scenario: A signal the trigger does not have is refused, naming those it has
+      When the agent calls the tool "state_edit" with:
+        """json
+        {"doc": "Main.qml", "action": "interaction", "trigger": {"id": "back"}, "signal": "tapped", "state": "details"}
+        """
+      Then the agent is refused with "not_found"
+      And the refusal's "/details/kind" is "no_signal"
+      And the refusal's message matches "has no signal `tapped`; it has .*\bclicked\b"
+
+    Scenario: A property's change signal is one a flow may handle
+      When the agent calls the tool "state_edit" with:
+        """json
+        {"doc": "Main.qml", "action": "interaction", "trigger": {"id": "card"}, "signal": "colorChanged", "state": "details"}
+        """
+      Then the answer's "/generation" is 2
+
+    Scenario: A component of the project has what its file declares
+      Given the file "Card.qml":
+        """qml
+        import QtQuick
+
+        Rectangle {
+            property string title
+            signal chosen(int index)
+        }
+        """
+      And the agent has called the tool "node_insert" with:
+        """json
+        {"doc": "Main.qml", "parent": {"id": "root"}, "text": "Card { id: picked }", "id": false}
+        """
+      When the agent calls the tool "node_inspect" with:
+        """json
+        {"doc": "Main.qml", "node": {"id": "picked"}}
+        """
+      Then the answer's "/signals/0" is {"name": "chosen", "arguments": [{"name": "index", "type": "int"}]}
+      And the answer's "/signals/1" is {"name": "titleChanged", "arguments": [], "change": true}
+      And the answer's "/signals" has the entry:
+        """json
+        {"name": "colorChanged", "arguments": [], "change": true}
+        """
+
+    Scenario: A type written in Rust has the signals its dump lists
+      Given the file "native/ljostypes.json":
+        """json
+        {"format": 2, "modules": [{"uri": "App.Media", "versions": ["1.0"], "types": [
+          {"name": "Player", "since": "1.0", "base": "Item", "baseModule": "QtQuick",
+           "creatable": true, "defaultProperty": null, "attached": null,
+           "properties": [{"name": "source", "type": "url", "readonly": false, "final": true,
+             "required": false, "constant": false, "group": false, "notify": "sourceChanged"}],
+           "signals": [{"name": "finished", "parameters": [{"name": "reason", "type": "string"}]}],
+           "methods": []}]}]}
+        """
+      And the file "Player.qml":
+        """qml
+        import QtQuick
+        import App.Media
+
+        Item {
+            id: root
+            states: [
+                State {
+                    name: "done"
+                }
+            ]
+
+            Player {
+                id: player
+            }
+        }
+        """
+      When the agent calls the tool "node_inspect" with:
+        """json
+        {"doc": "Player.qml", "node": {"id": "player"}}
+        """
+      Then the answer's "/signals/0" is {"name": "finished", "arguments": [{"name": "reason", "type": "string"}]}
+      And the answer's "/signals/1" is {"name": "sourceChanged", "arguments": [], "change": true}
+      And the answer's "/signals" has the entry:
+        """json
+        {"name": "visibleChanged", "arguments": [], "change": true}
+        """
+      When the agent calls the tool "state_edit" with:
+        """json
+        {"doc": "Player.qml", "action": "interaction", "trigger": {"id": "player"}, "signal": "finished", "state": "done"}
+        """
+      Then the file "Player.qml" is:
+        """qml
+        import QtQuick
+        import App.Media
+
+        Item {
+            id: root
+            states: [
+                State {
+                    name: "done"
+                }
+            ]
+
+            Player {
+                id: player
+                onFinished: root.state = "done"
+            }
+        }
+        """
+
+    # A type no import, project file, dump or table of Ljós's describes may
+    # be one Studio does not see (a module of the app's, built elsewhere):
+    # its signals are not listed, and a handler of one is written as asked
+    # for Ljós to check when it compiles.
+    Scenario: A type described nowhere lists no signals and refuses none
+      Given the file "Other.qml":
+        """qml
+        import QtQuick
+        import Somewhere.Else
+
+        Item {
+            id: root
+            states: [
+                State {
+                    name: "on"
+                }
+            ]
+
+            Gadget {
+                id: gadget
+            }
+        }
+        """
+      When the agent calls the tool "node_inspect" with:
+        """json
+        {"doc": "Other.qml", "node": {"id": "gadget"}}
+        """
+      Then the answer's "/signals" is absent
+      When the agent calls the tool "state_edit" with:
+        """json
+        {"doc": "Other.qml", "action": "interaction", "trigger": {"id": "gadget"}, "signal": "fired", "state": "on"}
+        """
+      Then the answer's "/generation" is 2
 
   Rule: A tap opens a document
 

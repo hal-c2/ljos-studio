@@ -13,7 +13,10 @@ Feature: A person wires and plays a prototype's flow in Studio's window
   call an agent makes. In play mode a click in a frame is a click on the
   running app (`preview_state` with `click_at`), and the panel says which
   state the app is in. The inspector lists the roles of the data the
-  selected object sees, and binds one to a property as `model.<role>`.
+  selected object sees (a JSON file's keys, when a `JsonListModel` reads
+  it), and binds one to a property as `model.<role>`,
+  and the signals it has; the flow panel wires one of them, or a tap, as
+  `node_inspect` lists them for an agent.
 
   Background:
     Given the file "Contacts.qml":
@@ -143,6 +146,18 @@ Feature: A person wires and plays a prototype's flow in Studio's window
           }
       }
       """
+
+  Scenario: The selection's own signal is wired to go to a state
+    Given an agent has called the tool "node_insert" with:
+      """json
+      {"doc": "Main.qml", "parent": {"id": "card"}, "text": "MouseArea { id: area }", "id": false}
+      """
+    And the person has selected "MouseArea area" in the layers panel
+    Then the inspector lists the signals "pressAndHold, pressed, released, clicked, doubleClicked, positionChanged, entered, exited, canceled, wheel"
+    When the person picks the signal "clicked" to wire in the flow panel
+    And the person clicks the button "On clicked of selection go to details"
+    Then the flow panel lists the flows "clicked area to details"
+    And the history lists "clicked area to details"
 
   Scenario: A wire is taken out
     Given the person has selected "Rectangle card" in the layers panel
