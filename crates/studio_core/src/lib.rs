@@ -525,6 +525,13 @@ impl Session {
                 let count = child_count(&tree, &parent_node.path);
                 let index = index.unwrap_or(count);
                 let mut text = text.trim().to_owned();
+                let imported = match import {
+                    Some(module) => imported(before, module),
+                    None => Imported::Bare,
+                };
+                if let Imported::As(qualifier) = &imported {
+                    text = qualified(&text, qualifier)?;
+                }
                 if *add_id {
                     let ids: Vec<String> = tree.iter().filter_map(|(_, n)| n.id.clone()).collect();
                     text = with_id(&text, &ids)?;
@@ -538,7 +545,7 @@ impl Session {
                     },
                 )?
                 .text;
-                if let Some(module) = import {
+                if let (Some(module), Imported::No) = (import, &imported) {
                     out = with_import(&out, module)?;
                 }
                 Ok((
@@ -1115,19 +1122,59 @@ fn with_id(text: &str, taken: &[String]) -> Result<String, Error> {
     Ok(out)
 }
 
-/// `text` importing `module`: a line after the last import, unless one
-/// already imports it.
+/// How a document imports a module.
+enum Imported {
+    /// Its types are written bare.
+    Bare,
+    /// Only under a name: its types are written `Name.Type`.
+    As(String),
+    No,
+}
+
+fn imported(text: &str, module: &str) -> Imported {
+    let allocator = qml_syntax::Allocator::default();
+    let parsed = qml_syntax::parse(&allocator, text);
+    let mut out = Imported::No;
+    for i in &parsed.document.imports {
+        let named = match &i.source {
+            qml_syntax::ast::QmlImportSource::Module(name) => name.to_string() == module,
+            qml_syntax::ast::QmlImportSource::Path(path) => path.trim_matches('"') == module,
+        };
+        match (&i.alias, named) {
+            (_, false) => {}
+            (None, true) => return Imported::Bare,
+            (Some(alias), true) => {
+                if matches!(out, Imported::No) {
+                    out = Imported::As(alias.name.to_string());
+                }
+            }
+        }
+    }
+    out
+}
+
+/// `text` (an object) with its type written `qualifier.Type`, unless it is
+/// written qualified already.
+fn qualified(text: &str, qualifier: &str) -> Result<String, Error> {
+    let nodes = outline::outline(text)
+        .ok_or_else(|| Error::Invalid("the text to insert is not one QML object".to_owned()))?;
+    let root = &nodes[0];
+    if root.ty.contains('.') {
+        return Ok(text.to_owned());
+    }
+    Ok(format!(
+        "{}{qualifier}.{}",
+        &text[..root.start],
+        &text[root.start..]
+    ))
+}
+
+/// `text` importing `module`, which it does not yet: a line after the last
+/// import.
 fn with_import(text: &str, module: &str) -> Result<String, Error> {
     let allocator = qml_syntax::Allocator::default();
     let parsed = qml_syntax::parse(&allocator, text);
     let imports = &parsed.document.imports;
-    let has = imports.iter().any(|i| match &i.source {
-        qml_syntax::ast::QmlImportSource::Module(name) => name.to_string() == module,
-        qml_syntax::ast::QmlImportSource::Path(path) => path.trim_matches('"') == module,
-    });
-    if has {
-        return Ok(text.to_owned());
-    }
     let line = if module.contains('/') || module.ends_with(".js") {
         format!("import \"{module}\"")
     } else {

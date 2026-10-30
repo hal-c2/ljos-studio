@@ -50,6 +50,25 @@ Feature: An agent composes a shell from the app's blocks
     And the answer's "/blocks/1/actions/0/name" is "play"
     And the answer's "/errors" has 0 entries
 
+  Scenario: A block whose module the shell imports under a name is written with that name
+    Given the agent has called the tool "document_new" with:
+      """json
+      {"doc": "Shell.qml", "text": "import QtQuick\nimport App.Media as M\n\nColumn {\n}\n"}
+      """
+    When the agent calls the tool "node_insert" with:
+      """json
+      {"doc": "Shell.qml", "generation": 1, "parent": {"path": "root"}, "block": "App.Media.Player"}
+      """
+    Then the file "Shell.qml" is:
+      """qml
+      import QtQuick
+      import App.Media as M
+
+      Column {
+          M.Player { id: player1 }
+      }
+      """
+
   Scenario: A two-block shell, made and undone over MCP alone
     Given the agent has called the tool "document_new" with:
       """json
