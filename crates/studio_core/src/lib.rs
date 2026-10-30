@@ -993,58 +993,99 @@ impl Session {
 
 /// Points every handle of `doc` at its object in the new text.
 fn remap(doc: &mut Document, change: Option<&PathChange>) {
-    let Some(nodes) = &doc.nodes else {
-        // Waits for a text that parses; the last paths stay as they were.
-        return;
-    };
-    for t in &mut doc.tracked {
-        let found = |t: &Tracked| {
-            // The object whose bytes the text's changes carried here, if
-            // they did not touch it; else the one its key names.
-            t.span
-                .and_then(|(start, end)| {
-                    nodes
-                        .iter()
-                        .find(|n| n.start == start && n.end == end && n.ty == t.ty)
-                })
-                .or_else(|| find_by_key(nodes, &t.key))
-                .map(|n| n.path.clone())
-        };
-        // A path worked out from the edit is trusted only when the object
-        // there is still of its type.
-        t.path = match (change, &t.path) {
-            (Some(change), Some(path)) => match change.apply(path) {
-                Some(p) if nodes.iter().any(|n| n.path == p && n.ty == t.ty) => Some(p),
-                // The edit took the object out.
-                None => None,
-                Some(_) => found(t),
-            },
-            _ => found(t),
-        };
-        refresh(t, nodes);
-    }
+    let leads = doc
+        .tracked
+        .iter()
+        .map(|t| match (change, &t.path) {
+            // A path worked out from the edit is trusted only when the
+            // object there is still of its type.
+            (Some(change), Some(path)) => Lead::Known(change.apply(path)),
+            _ => Lead::Search,
+        })
+        .collect();
+    place(doc, leads);
 }
 
 /// Handles from [`Session::replay`] whose path no longer names an object of
 /// their type are found again by key.
 fn remap_unknown(doc: &mut Document) {
-    let Some(nodes) = &doc.nodes else { return };
-    for t in &mut doc.tracked {
-        let fits = t
-            .path
-            .as_ref()
-            .is_some_and(|p| nodes.iter().any(|n| n.path == *p && n.ty == t.ty));
-        if !fits {
-            t.path = t
-                .span
-                .and_then(|(start, end)| {
-                    nodes
-                        .iter()
-                        .find(|n| n.start == start && n.end == end && n.ty == t.ty)
-                })
-                .or_else(|| find_by_key(nodes, &t.key))
-                .map(|n| n.path.clone());
+    let leads = doc
+        .tracked
+        .iter()
+        .map(|t| match &t.path {
+            Some(path) => Lead::Known(Some(path.clone())),
+            None => Lead::Search,
+        })
+        .collect();
+    place(doc, leads);
+}
+
+/// What is known of where a handle's object is in the new text.
+enum Lead {
+    /// Here, or gone (`None`), unless no object of its type is there.
+    Known(Option<NodePath>),
+    /// Unknown: found by its bytes, then by its key.
+    Search,
+}
+
+/// Points each handle at an object, one handle to an object: a handle whose
+/// object went must not be found again in a sibling that has a handle of
+/// its own. Known places go first, then bytes the changes carried, and a
+/// key only names an object no other handle took.
+fn place(doc: &mut Document, mut leads: Vec<Lead>) {
+    let Some(nodes) = &doc.nodes else {
+        // Waits for a text that parses; the last paths stay as they were.
+        return;
+    };
+    let mut taken = vec![false; nodes.len()];
+    let mut placed: Vec<Option<Option<NodePath>>> = vec![None; doc.tracked.len()];
+    for (i, t) in doc.tracked.iter().enumerate() {
+        match &leads[i] {
+            Lead::Known(None) => placed[i] = Some(None),
+            Lead::Known(Some(path)) => {
+                match nodes
+                    .iter()
+                    .position(|n| n.path == *path && n.ty == t.ty)
+                    .filter(|&at| !taken[at])
+                {
+                    Some(at) => {
+                        taken[at] = true;
+                        placed[i] = Some(Some(path.clone()));
+                    }
+                    None => leads[i] = Lead::Search,
+                }
+            }
+            Lead::Search => {}
         }
+    }
+    for (i, t) in doc.tracked.iter().enumerate() {
+        if placed[i].is_some() {
+            continue;
+        }
+        let Some((start, end)) = t.span else { continue };
+        if let Some(at) = nodes
+            .iter()
+            .position(|n| n.start == start && n.end == end && n.ty == t.ty)
+            .filter(|&at| !taken[at])
+        {
+            taken[at] = true;
+            placed[i] = Some(Some(nodes[at].path.clone()));
+        }
+    }
+    for (i, t) in doc.tracked.iter().enumerate() {
+        if placed[i].is_some() {
+            continue;
+        }
+        let found = find_by_key(nodes, &t.key)
+            .and_then(|n| nodes.iter().position(|m| m.path == n.path))
+            .filter(|&at| !taken[at]);
+        placed[i] = Some(found.map(|at| {
+            taken[at] = true;
+            nodes[at].path.clone()
+        }));
+    }
+    for (t, path) in doc.tracked.iter_mut().zip(placed) {
+        t.path = path.flatten();
         refresh(t, nodes);
     }
 }

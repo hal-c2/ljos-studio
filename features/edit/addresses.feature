@@ -178,3 +178,31 @@ Feature: An object keeps its handle across everyone's edits
           }
       }
       """
+
+  Scenario: An object the code view deletes is gone, not its sibling of the same type
+    Given the file "Column.qml":
+      """qml
+      Column {
+          Rectangle { width: 1 }
+          Rectangle { width: 2 }
+      }
+      """
+    And the agent has called the tool "node_find" with:
+      """json
+      {"doc": "Column.qml", "type": "Rectangle"}
+      """
+    And the agent keeps the answer's "/nodes/0/node" as "first"
+    And the agent keeps the answer's "/nodes/1/node" as "second"
+    When a person types in the code view of "Column.qml", replacing "    Rectangle { width: 1 }\n" with ""
+    And the agent calls the tool "node_inspect" with:
+      """json
+      {"doc": "Column.qml", "node": {"node": "$first"}}
+      """
+    Then the agent is refused with "stale_ref"
+    And the refusal's "/details/kind" is "gone"
+    When the agent calls the tool "node_inspect" with:
+      """json
+      {"doc": "Column.qml", "node": {"node": "$second"}}
+      """
+    Then the answer's "/path" is "root/0"
+    And the answer's "/bindings/0/value" is "2"
