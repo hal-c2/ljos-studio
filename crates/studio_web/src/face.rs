@@ -288,6 +288,46 @@ mod tests {
         );
     }
 
+    /// A burst of writes within one second reloads a page once a display
+    /// frame at 60 Hz (`host::CALLS_PER_SECOND`); the rest wait for a
+    /// reading or the next second.
+    #[test]
+    fn a_burst_reloads_a_page_at_most_once_a_frame() {
+        use crate::host::{WebPreviewHost, tests::FakePage};
+        use crate::protocol::Request;
+
+        let store = WebStore::new(
+            "memory",
+            [(
+                "Main.qml".to_owned(),
+                "import QtQuick\n\nItem {\n    id: card\n    width: 10\n}\n".to_owned(),
+            )],
+        );
+        let page = FakePage::default();
+        let hosts: StoreHostFactory = {
+            let (page, store) = (page.clone(), store.clone());
+            Arc::new(move || Box::new(WebPreviewHost::new(page.clone(), store.clone())))
+        };
+        let face = Face::new(store, "inspect,mutate,run", Arc::new(NoTime), Some(hosts)).unwrap();
+        let open = face.call("preview_open", json!({"doc": "Main.qml"}));
+        assert!(open.get("ok").is_some(), "{open}");
+        for width in 0..100 {
+            let set = face.call(
+                "property_set",
+                json!({"doc": "Main.qml", "node": {"id": "card"}, "name": "width", "value": width}),
+            );
+            assert!(set.get("ok").is_some(), "{set}");
+        }
+        let reloads = page
+            .heard
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|r| matches!(r, Request::Reload { .. }))
+            .count();
+        assert_eq!(reloads, 60);
+    }
+
     /// The preview tools against a page that keeps what it is sent: the
     /// Studio side of the web preview, end to end but for the browser.
     #[test]

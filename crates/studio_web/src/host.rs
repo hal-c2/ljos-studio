@@ -19,6 +19,18 @@ use crate::{
     protocol::{Answer, Request},
 };
 
+/// The calls a second a preview page is said to answer.
+///
+/// DECISION: 150. The bridge has no limiter and no `Retry-After` to stay
+/// under (each call blocks the worker until the page answers), so this is
+/// only Studio's own pace: two fifths of it are reloads in a burst, 60 a
+/// second, one a display frame at 60 Hz. More than Ljós's inspector default
+/// (20), which would show a person's typing 8 times a second; less than
+/// the native preview's 200, because a page's preview draws on the thread
+/// the shell draws on, so a reload no frame can show costs the shell a
+/// frame, where natively it costs another process.
+pub const CALLS_PER_SECOND: u32 = 150;
+
 /// Why a page gave no answer.
 #[derive(Debug, thiserror::Error)]
 pub enum PortError {
@@ -113,6 +125,10 @@ fn unexpected(call: &str, answer: &Answer) -> PreviewError {
 }
 
 impl<P: Port> PreviewHost for WebPreviewHost<P> {
+    fn calls_per_second(&self) -> u32 {
+        CALLS_PER_SECOND
+    }
+
     fn open(&mut self, spec: &PreviewSpec) -> Result<(), PreviewError> {
         let files = self.store.files();
         if !files.contains_key(&spec.entry) {
