@@ -232,6 +232,7 @@ fn json(text: &str) -> Result<Value, String> {
 fn empty_project(_: &mut StudioWorld) {}
 
 #[given(regex = r#"^the file "([^"]+)":$"#)]
+#[when(regex = r#"^somebody writes the file "([^"]+)":$"#)]
 fn the_file(w: &mut StudioWorld, name: String, step: &Step) -> StepResult {
     let path = w.dir.path().join(&name);
     if let Some(parent) = path.parent() {
@@ -296,6 +297,35 @@ fn nothing_outside(w: &mut StudioWorld) -> StepResult {
             if std::fs::read_to_string(one).is_ok_and(|text| text == "Item {}\n"));
         if !untouched {
             return Err(format!("{entries:?}"));
+        }
+    }
+    Ok(())
+}
+
+#[given(
+    regex = r#"^"([^"]+)" links to a directory outside the project that holds the file "([^"]+)"$"#
+)]
+fn links_out(w: &mut StudioWorld, link: String, file: String) -> StepResult {
+    link_outside(w, link, file)
+}
+
+#[then(regex = r#"^the directory outside the project holds only "([^"]*)"$"#)]
+fn outside_holds(w: &mut StudioWorld, names: String) -> StepResult {
+    let outside = w.outside.last().ok_or("no directory outside the project")?;
+    let mut held: Vec<String> = std::fs::read_dir(outside.path())
+        .map_err(|e| e.to_string())?
+        .map(|e| e.map(|e| e.file_name().to_string_lossy().into_owned()))
+        .collect::<Result<_, _>>()
+        .map_err(|e| e.to_string())?;
+    held.sort();
+    let want: Vec<&str> = names.split(", ").filter(|n| !n.is_empty()).collect();
+    if held != want {
+        return Err(format!("it holds {held:?}, not {want:?}"));
+    }
+    for name in &held {
+        let text = std::fs::read_to_string(outside.path().join(name)).map_err(|e| e.to_string())?;
+        if text != "Item {}\n" {
+            return Err(format!("`{name}` was written: {text:?}"));
         }
     }
     Ok(())

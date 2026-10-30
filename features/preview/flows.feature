@@ -91,3 +91,19 @@ Feature: The preview plays a prototype's flow
       """
     Then the agent is refused with "invalid_argument"
     And the refusal's "/details/kind" is "not_a_block"
+
+  Scenario: A click alone plays the flow and reads nothing
+    When the agent calls the tool "preview_state" with:
+      """json
+      {"click_at": {"x": 50, "y": 150}}
+      """
+    Then the answer's "/variant" is absent
+    And the answer's "/id" is absent
+    And the preview shows "Details"
+
+  Scenario: Setting state needs the object it is set on
+    When the agent calls the tool "preview_state" with:
+      """json
+      {"set": {"playing": true}, "click_at": {"x": 50, "y": 150}}
+      """
+    Then the agent is refused with "invalid_argument"

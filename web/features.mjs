@@ -323,13 +323,15 @@ const keeps = (w, s, pointer, name) => void w.kept.set(name, must(w.ok(), pointe
 
 const STEPS = [
   step("given", /^an empty project$/, () => {}),
-  step("given", /^the file "([^"]+)":$/, (w, s, name) => {
-    // The native store reads the directory as it is; this one holds what
-    // it loaded when the tools connected, so a file given later is in
-    // storage and told to the tools, as another tab's would be.
-    w.backend.files.set(name, fileText(s));
-    w.studio?.stored(name, fileText(s));
-  }),
+  ...[["given", /^the file "([^"]+)":$/], ["when", /^somebody writes the file "([^"]+)":$/]].map(([kind, pattern]) =>
+    step(kind, pattern, (w, s, name) => {
+      // The native store reads the directory as it is; this one holds what
+      // it loaded when the tools connected, so a file given later is in
+      // storage and told to the tools, as another tab's would be.
+      w.backend.files.set(name, fileText(s));
+      w.studio?.stored(name, fileText(s));
+    }),
+  ),
   step("given", /^the studio tools are connected$/, async (w) => void (await w.server())),
   step("given", /^the studio tools are connected with the capabilities "([^"]*)"$/, async (w, s, caps) => {
     // The native runner gives the capabilities with each call; a studio
@@ -408,7 +410,11 @@ const STEPS = [
     const below = `${name.replace(/\/$/, "")}/`;
     const gone = [...w.backend.files.keys()].filter((f) => f.startsWith(below));
     if (gone.length === 0) throw new Error(`\`${name}\`: there is no such directory`);
-    for (const f of gone) w.backend.files.delete(f);
+    // Told to the tools, as another tab's removal would be (see "the file").
+    for (const f of gone) {
+      w.backend.files.delete(f);
+      w.studio?.stored(f, null);
+    }
   }),
   // A new studio over the same storage: what a session kept in memory is
   // gone, what it wrote is read again.
@@ -466,6 +472,9 @@ const NATIVE_ONLY = new Map([
   ['then ^the endpoint\'s tool refuses it with "([a-z_]+)"$', "the endpoint is a native window's (endpoint.feature)"],
   ["then ^the endpoint listens on loopback only$", "the endpoint is a native window's (endpoint.feature)"],
   ["then ^the token file can be read by its owner alone$", "the endpoint is a native window's (endpoint.feature)"],
+  ['given ^"([^"]+)" links to a directory outside the project that holds the file "([^"]+)"$', "storage holds no links (@disk)"],
+  ['then ^the bundle "([^"]+)", copied out of the project, runs headless and shows what the preview shows$', "a bundle runs as a native process (@preview)"],
+  ['then ^the directory outside the project holds only "([^"]*)"$', "storage holds no links (@disk)"],
 ]);
 const WEB_ONLY = new Set(['given ^storage refuses to keep "([^"]+)"$', "when ^storage keeps files again$"]);
 

@@ -770,6 +770,16 @@ fn adds_state(w: &mut UiWorld, name: String) -> StepResult {
     })
 }
 
+#[given(regex = r#"^the person has typed the comment "(.*)" in the inspector$"#)]
+fn types_comment(w: &mut UiWorld, text: String) -> StepResult {
+    let text = unescape(&text);
+    let window = w.window()?;
+    let field = window.node("Inspector", Some("textinput"), "New comment")?;
+    window.click_node(&field)?;
+    window.stage.drive().commit(&text).map_err(drive_error)?;
+    window.rest()
+}
+
 #[when(regex = r#"^the person adds the comment "(.*)" in the inspector$"#)]
 fn adds_comment(w: &mut UiWorld, text: String) -> StepResult {
     let text = unescape(&text);
@@ -896,6 +906,45 @@ fn flow_plays(w: &mut UiWorld, state: String) -> StepResult {
             window.read("error").to_js_string()
         )
     })
+}
+
+#[then(regex = r#"^the window shows a refusal that says "(.+)"$"#)]
+fn refusal_says(w: &mut UiWorld, want: String) -> StepResult {
+    let error = w.window()?.read("error").to_js_string();
+    error
+        .contains(&want)
+        .then_some(())
+        .ok_or_else(|| format!("the window shows the refusal {error:?}"))
+}
+
+#[then(regex = r#"^the inspector's button "([^"]+)" is disabled$"#)]
+fn inspector_button_disabled(w: &mut UiWorld, name: String) -> StepResult {
+    let button = w.window()?.node("Inspector", Some("button"), &name)?;
+    button
+        .states
+        .iter()
+        .any(|s| s == "disabled")
+        .then_some(())
+        .ok_or_else(|| format!("{name:?} is {:?}", button.states))
+}
+
+#[then(regex = r#"^the inspector's comment box holds "(.*)"$"#)]
+fn comment_box_holds(w: &mut UiWorld, want: String) -> StepResult {
+    let field = w
+        .window()?
+        .node("Inspector", Some("textinput"), "New comment")?;
+    (field.value == unescape(&want))
+        .then_some(())
+        .ok_or_else(|| format!("the comment box holds {:?}", field.value))
+}
+
+#[then("the window shows no refusal")]
+fn no_refusal(w: &mut UiWorld) -> StepResult {
+    let error = w.window()?.read("error").to_js_string();
+    error
+        .is_empty()
+        .then_some(())
+        .ok_or_else(|| format!("the window shows the refusal {error:?}"))
 }
 
 #[then(regex = r#"^the inspector lists the roles "([^"]*)"$"#)]

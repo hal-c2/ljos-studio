@@ -40,6 +40,26 @@ Feature: A person reviews a design in Studio's window
       }
       """
 
+  Scenario: A comment is not sent once its object is gone
+    Given the person has selected "Text title" in the layers panel
+    And the person has typed the comment "Too small" in the inspector
+    When an agent calls the tool "node_remove" with:
+      """json
+      {"doc": "Main.qml", "node": {"id": "title"}}
+      """
+    Then the inspector's button "Add comment" is disabled
+    And the file ".studio/review.json" does not exist
+
+  Scenario: A comment the sidecar did not take stays in the box
+    Given the file ".studio/review.json":
+      """
+      {"version": 1, "comments": [
+      """
+    And the person has selected "Text title" in the layers panel
+    When the person adds the comment "Too small" in the inspector
+    Then the window shows a refusal that says "does not read"
+    And the inspector's comment box holds "Too small"
+
   Scenario: An agent's comment is resolved and reopened by a person
     Given an agent has called the tool "review" with:
       """json

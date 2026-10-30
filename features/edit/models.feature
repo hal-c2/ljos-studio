@@ -133,6 +133,33 @@ Feature: An agent binds a list to its data
       And the answer's "/model/rows" is 1
       And the answer's "/model/doc" is "Main.qml"
 
+    Scenario: Only a list's delegate sees its roles, not its header
+      Given the file "List.qml":
+        """qml
+        import QtQuick
+
+        ListView {
+            id: list
+            model: Contacts {}
+            header: Text {
+                id: heading
+            }
+            delegate: Text {
+                id: line
+            }
+        }
+        """
+      When the agent calls the tool "node_inspect" with:
+        """json
+        {"doc": "List.qml", "node": {"id": "heading"}}
+        """
+      Then the answer's "/model" is absent
+      When the agent calls the tool "node_inspect" with:
+        """json
+        {"doc": "List.qml", "node": {"id": "line"}}
+        """
+      Then the answer's "/model/roles" lists "name, email, team"
+
     Scenario: An object outside any list sees no data
       When the agent calls the tool "node_inspect" with:
         """json
@@ -178,6 +205,32 @@ Feature: An agent binds a list to its data
         """
       Then the agent is refused with "invalid_argument"
       And the refusal's "/details/kind" is "not_flat"
+      And the file "People.qml" does not exist
+
+    Scenario: A key QML reads as the object's id is not a role
+      Given the file "data/people.json":
+        """json
+        [{"id": "p1", "name": "Ada"}]
+        """
+      When the agent calls the tool "document_new" with:
+        """json
+        {"doc": "People.qml", "data": "data/people.json"}
+        """
+      Then the agent is refused with "invalid_argument"
+      And the refusal's "/details/kind" is "not_a_role"
+      And the file "People.qml" does not exist
+
+    Scenario: A record that has a key twice is refused
+      Given the file "data/people.json":
+        """json
+        [{"name": "Ada", "name": "Grace"}]
+        """
+      When the agent calls the tool "document_new" with:
+        """json
+        {"doc": "People.qml", "data": "data/people.json"}
+        """
+      Then the agent is refused with "invalid_argument"
+      And the refusal's "/details/kind" is "repeated_role"
       And the file "People.qml" does not exist
 
     Scenario: Text and data together are refused

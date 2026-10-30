@@ -167,6 +167,30 @@ Feature: Design review comments sit on objects, in the sidecar
         """
       Then the answer's "/comments/0/orphaned" is false
 
+    Scenario: Redoing a new document gives its comments their object back
+      Given the agent has called the tool "document_new" with:
+        """json
+        {"doc": "Other.qml"}
+        """
+      And the agent has called the tool "review" with:
+        """json
+        {"action": "add", "doc": "Other.qml", "node": {"path": "root"}, "text": "Needs a layout"}
+        """
+      And the agent has called the tool "history" with:
+        """json
+        {"action": "undo"}
+        """
+      And the agent has called the tool "history" with:
+        """json
+        {"action": "redo"}
+        """
+      When the agent calls the tool "review" with:
+        """json
+        {"action": "list", "doc": "Other.qml"}
+        """
+      Then the answer's "/comments/0/orphaned" is false
+      And the answer's "/comments/0/anchor" is {"path": "root", "line": 3, "type": "Item"}
+
     Scenario: A reviewer cannot comment on an orphaned comment's object, only answer it
       Given the agent has called the tool "review" with:
         """json
@@ -227,6 +251,110 @@ Feature: Design review comments sit on objects, in the sidecar
             Rectangle { color: "red" }
         }
         """
+
+  Rule: A sidecar Studio cannot read, or one changed on disk, is never overwritten
+
+    Scenario: A sidecar that does not read is left alone and says so
+      Given the file ".studio/review.json":
+        """
+        {"version": 1, "comments": [
+        """
+      When the agent calls the tool "review" with:
+        """json
+        {"action": "add", "doc": "Main.qml", "node": {"id": "title"}, "text": "Too small"}
+        """
+      Then the agent is refused with "not_actionable"
+      And the refusal's "/details/kind" is "review_unreadable"
+      When the agent calls the tool "review" with:
+        """json
+        {"action": "list", "doc": "Main.qml"}
+        """
+      Then the agent is refused with "not_actionable"
+      And the refusal's "/details/kind" is "review_unreadable"
+      And the file ".studio/review.json" is:
+        """
+        {"version": 1, "comments": [
+        """
+
+    Scenario: A sidecar a later Studio wrote is left alone
+      Given the file ".studio/review.json":
+        """json
+        {"version": 2, "comments": []}
+        """
+      When the agent calls the tool "review" with:
+        """json
+        {"action": "add", "doc": "Main.qml", "node": {"id": "title"}, "text": "Too small"}
+        """
+      Then the agent is refused with "not_actionable"
+      And the refusal's "/details/kind" is "review_unreadable"
+      And the file ".studio/review.json" is:
+        """json
+        {"version": 2, "comments": []}
+        """
+
+    Scenario: A mended sidecar is read again without reopening the project
+      Given the file ".studio/review.json":
+        """
+        {"version": 1, "comments": [
+        """
+      When the agent calls the tool "review" with:
+        """json
+        {"action": "list", "doc": "Main.qml"}
+        """
+      Then the agent is refused with "not_actionable"
+      When somebody writes the file ".studio/review.json":
+        """json
+        {"version": 1, "comments": [{"id": "c1", "doc": "Main.qml", "anchor": {"key": [{"Id": "title"}], "path": "root/0", "line": 5, "type": "Text", "id": "title"}, "thread": [{"text": "Too small", "at": 1}]}]}
+        """
+      When the agent calls the tool "review" with:
+        """json
+        {"action": "add", "doc": "Main.qml", "node": {"id": "title"}, "text": "And too pale"}
+        """
+      Then the answer's "/comment/id" is "c2"
+      When the agent calls the tool "review" with:
+        """json
+        {"action": "list", "doc": "Main.qml", "node": {"id": "title"}}
+        """
+      Then the answer's "/comments" has 2 entries
+
+    Scenario: Comments written to the sidecar by somebody else are kept
+      Given the agent has called the tool "review" with:
+        """json
+        {"action": "add", "doc": "Main.qml", "node": {"id": "title"}, "text": "Too small"}
+        """
+      When somebody writes the file ".studio/review.json":
+        """json
+        {"version": 1, "comments": [{"id": "c7", "doc": "Main.qml", "anchor": {"key": [{"Id": "title"}], "path": "root/0", "line": 5, "type": "Text", "id": "title"}, "thread": [{"text": "Pulled in", "at": 1}]}]}
+        """
+      When the agent calls the tool "review" with:
+        """json
+        {"action": "add", "doc": "Main.qml", "node": {"id": "title"}, "text": "Mine"}
+        """
+      Then the answer's "/comment/id" is "c8"
+      When the agent calls the tool "review" with:
+        """json
+        {"action": "list", "doc": "Main.qml"}
+        """
+      Then the answer's "/comments" has 2 entries
+      And the answer's "/comments/0/thread/0/text" is "Pulled in"
+      And the answer's "/comments/1/thread/0/text" is "Mine"
+
+    Scenario: A sidecar somebody deleted does not come back with the next comment
+      Given the agent has called the tool "review" with:
+        """json
+        {"action": "add", "doc": "Main.qml", "node": {"id": "title"}, "text": "Too small"}
+        """
+      And the directory ".studio" is deleted
+      When the agent calls the tool "review" with:
+        """json
+        {"action": "add", "doc": "Main.qml", "node": {"id": "title"}, "text": "Starting again"}
+        """
+      Then the answer's "/comment/id" is "c1"
+      When the agent calls the tool "review" with:
+        """json
+        {"action": "list", "doc": "Main.qml"}
+        """
+      Then the answer's "/comments" has 1 entries
 
   Rule: Reading comments needs inspect, writing them mutate
 

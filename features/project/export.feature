@@ -121,6 +121,21 @@ Feature: A project is exported as a bundle that runs without Studio
         ]
         """
 
+    Scenario: A link out of the project is left out of the bundle
+      Given "vendor" links to a directory outside the project that holds the file "Secret.qml"
+      When the agent calls the tool "export" with:
+        """json
+        {"entry": "Shell.qml", "dry_run": true}
+        """
+      Then the answer's "/manifest/left_out" is:
+        """json
+        [
+          {"path": ".studio", "why": "Studio's sidecar"},
+          {"path": "mocks", "why": "mock modules stand in for blocks in previews only"},
+          {"path": "vendor", "why": "a link out of the project"}
+        ]
+        """
+
     Scenario: A dry run says what the bundle would hold and writes nothing
       When the agent calls the tool "export" with:
         """json
@@ -200,6 +215,22 @@ Feature: A project is exported as a bundle that runs without Studio
         """
       Then the agent is refused with "not_found"
 
+    Scenario: The entry must be in the bundle
+      Given the file "mocks/Preview.qml":
+        """qml
+        import QtQuick
+
+        Item {}
+        """
+      When the agent calls the tool "export" with:
+        """json
+        {"entry": "mocks/Preview.qml"}
+        """
+      Then the agent is refused with "not_actionable"
+      And the refusal's "/details/kind" is "entry_left_out"
+      And the refusal's "/details/why" is "mock modules stand in for blocks in previews only"
+      And the file "build/native/ljos-bundle.json" does not exist
+
     Scenario: A site for the web is not built yet
       When the agent calls the tool "export" with:
         """json
@@ -253,6 +284,15 @@ Feature: A project is exported as a bundle that runs without Studio
         {"entry": "Shell.qml", "out": "../elsewhere"}
         """
       Then the agent is refused with "path_denied"
+
+    Scenario: A build directory that leads out of the project is refused
+      Given "build" links to a directory outside the project that holds the file "ljos-bundle.json"
+      When the agent calls the tool "export" with:
+        """json
+        {"entry": "Shell.qml"}
+        """
+      Then the agent is refused with "path_denied"
+      And the directory outside the project holds only "ljos-bundle.json"
 
     Scenario: A directory that holds something else is not overwritten
       Given the file "build/notes/todo.txt":

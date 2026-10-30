@@ -64,6 +64,25 @@ Feature: A person wires and plays a prototype's flow in Studio's window
           }
       }
       """
+    And the file "Pages.qml":
+      """qml
+      import QtQuick
+
+      Rectangle {
+          width: 400
+          height: 800
+
+          Text {
+              id: label
+              text: "One"
+          }
+
+          MouseArea {
+              anchors.fill: parent
+              onClicked: label.text = "Two"
+          }
+      }
+      """
     And Studio's window shows the project
     And the person has opened "Main.qml" in the documents list
 
@@ -139,6 +158,13 @@ Feature: A person wires and plays a prototype's flow in Studio's window
     And the person has clicked the button "Play"
     When the person clicks the frame "Desktop" at 50, 150
     Then the flow panel says the app is in the state "details"
+
+  @preview
+  Scenario: In play mode a click plays a document whose root has no id
+    Given the person has opened "Pages.qml" in the documents list
+    And the person has clicked the button "Play"
+    When the person clicks the frame "Desktop" at 50, 150
+    Then the window shows no refusal
 
   Scenario: The inspector lists the roles a delegate sees
     When the person selects "Text row" in the layers panel
