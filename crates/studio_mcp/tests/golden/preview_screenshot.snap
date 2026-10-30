@@ -1,0 +1,81 @@
+---
+source: crates/studio_mcp/tests/golden_tools.rs
+expression: value
+---
+{
+  "annotations": {
+    "destructive": false,
+    "idempotent": true,
+    "open_world": false,
+    "read_only": true
+  },
+  "description": "What the preview shows: a PNG at most `max_size` pixels on its longest side (default 800), or with `format: \"outline\"` its items as text, one per line.",
+  "inputSchema": {
+    "$defs": {
+      "Format": {
+        "enum": [
+          "png",
+          "outline"
+        ],
+        "type": "string"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "format": {
+        "$ref": "#/$defs/Format",
+        "description": "`png` (default) or `outline`: what the preview shows as text, one\nline per item, for reading rather than looking."
+      },
+      "max_size": {
+        "description": "Longest side of a PNG in pixels (default 800, at most 1280).",
+        "format": "uint32",
+        "minimum": 0,
+        "type": [
+          "integer",
+          "null"
+        ]
+      }
+    },
+    "title": "ScreenshotArgs",
+    "type": "object"
+  },
+  "max_result_bytes": 40960,
+  "name": "preview_screenshot",
+  "outputSchema": {
+    "properties": {
+      "bytes": {
+        "format": "uint",
+        "minimum": 0,
+        "type": [
+          "integer",
+          "null"
+        ]
+      },
+      "height": {
+        "format": "uint32",
+        "minimum": 0,
+        "type": [
+          "integer",
+          "null"
+        ]
+      },
+      "outline": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "width": {
+        "format": "uint32",
+        "minimum": 0,
+        "type": [
+          "integer",
+          "null"
+        ]
+      }
+    },
+    "title": "ScreenshotOut",
+    "type": "object"
+  },
+  "required_cap": "inspect"
+}

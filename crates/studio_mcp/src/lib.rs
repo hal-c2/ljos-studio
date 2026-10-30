@@ -7,6 +7,8 @@
 //! changes between versions without a golden-file diff (DESIGN.md, MCP.md).
 
 mod blocks;
+pub mod preview;
+mod preview_tools;
 mod tools;
 
 use std::{
@@ -15,7 +17,8 @@ use std::{
 };
 
 use ljos_mcp_core::{
-    CapSet, ErrorCode, McpSurface, ServerMeta, SurfaceError, ToolRegistry,
+    CallCtx, CapSet, ErrorCode, McpSurface, ServerMeta, SurfaceError, ToolFuture, ToolRegistry,
+    ToolReply,
     glue::{RmcpServer, ServeError},
 };
 use serde_json::json;
@@ -28,6 +31,8 @@ pub struct Studio {
     /// The open project, relative to the workspace (`.` for itself).
     project: String,
     pub session: Session,
+    previews: preview::Shared,
+    hosts: Option<preview::HostFactory>,
 }
 
 impl std::fmt::Debug for Studio {
@@ -44,21 +49,44 @@ impl Studio {
     pub fn open(workspace: impl Into<PathBuf>) -> Result<Self, StoreError> {
         let store = FsStore::new(workspace.into())?;
         let workspace = store.root().to_owned();
-        Ok(Self {
+        Ok(Self::new(workspace, Box::new(store)))
+    }
+
+    fn new(workspace: PathBuf, store: Box<dyn Store>) -> Self {
+        let mut studio = Self {
             workspace,
             project: ".".to_owned(),
-            session: Session::open(Box::new(store)),
-        })
+            session: Session::open(store),
+            previews: preview::Shared::default(),
+            hosts: None,
+        };
+        studio.follow();
+        studio
+    }
+
+    /// Previews of this project run on hosts `hosts` makes; without, the
+    /// preview tools say there is none.
+    pub fn with_previews(mut self, hosts: preview::HostFactory) -> Self {
+        self.hosts = Some(hosts);
+        self
+    }
+
+    /// The open preview follows every write of the session.
+    fn follow(&mut self) {
+        let previews = self.previews.clone();
+        self.session
+            .on_write(move |_| preview::lock(&previews).wrote());
+    }
+
+    /// The project's directory, when it has one on disk.
+    pub fn dir(&self) -> Option<PathBuf> {
+        (!self.workspace.as_os_str().is_empty()).then(|| self.workspace.join(&self.project))
     }
 
     /// A project held by any store (memory in tests, browser storage on the
     /// web); `project_open` then cannot switch projects.
     pub fn with_store(store: Box<dyn Store>) -> Self {
-        Self {
-            workspace: PathBuf::new(),
-            project: ".".to_owned(),
-            session: Session::open(store),
-        }
+        Self::new(PathBuf::new(), store)
     }
 
     pub fn workspace(&self) -> &Path {
@@ -100,6 +128,9 @@ impl Studio {
         }
         self.project = relative.to_owned();
         self.session = Session::open(Box::new(store));
+        // A preview shows a project; another one needs its own.
+        preview::lock(&self.previews).open = None;
+        self.follow();
         Ok(())
     }
 }
@@ -128,6 +159,23 @@ impl StudioServer {
     /// The session, shared with whatever else shows it (Studio's canvas).
     pub fn studio(&self) -> Arc<Mutex<Studio>> {
         self.studio.clone()
+    }
+
+    /// Runs a tool as a client's call does, pictures included: the
+    /// registry's handlers answer JSON only, so the one tool that answers
+    /// with a picture is run here.
+    pub fn call(
+        &self,
+        name: &str,
+        ctx: &CallCtx,
+        args: serde_json::Value,
+    ) -> Result<ToolReply, SurfaceError> {
+        if name == "preview_screenshot" {
+            let def = self.tools.check(name, ctx)?;
+            let per_copy = def.per_copy_bytes();
+            return preview_tools::screenshot(&self.studio, args).map(|r| r.capped(per_copy));
+        }
+        self.tools.call(name, ctx, args).0.map(ToolReply::from)
     }
 }
 
@@ -158,6 +206,15 @@ impl McpSurface for StudioServer {
 
     fn tools(&self) -> &ToolRegistry {
         &self.tools
+    }
+
+    fn call_tool<'a>(
+        &'a self,
+        name: &'a str,
+        ctx: &'a CallCtx,
+        args: serde_json::Value,
+    ) -> ToolFuture<'a> {
+        Box::pin(std::future::ready(self.call(name, ctx, args)))
     }
 }
 

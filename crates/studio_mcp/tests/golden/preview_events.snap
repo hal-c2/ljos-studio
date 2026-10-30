@@ -1,0 +1,215 @@
+---
+source: crates/studio_mcp/tests/golden_tools.rs
+expression: value
+---
+{
+  "annotations": {
+    "destructive": false,
+    "idempotent": true,
+    "open_world": false,
+    "read_only": true
+  },
+  "description": "What happened to the preview since a cursor: opened, reloaded (with ms), reload_failed (the last good one stays), log lines, ended.",
+  "inputSchema": {
+    "additionalProperties": false,
+    "properties": {
+      "since": {
+        "description": "The `next` of an earlier answer; 0 or left out: from the start.",
+        "format": "uint",
+        "minimum": 0,
+        "type": [
+          "integer",
+          "null"
+        ]
+      }
+    },
+    "title": "EventsArgs",
+    "type": "object"
+  },
+  "max_result_bytes": 40960,
+  "name": "preview_events",
+  "outputSchema": {
+    "$defs": {
+      "LogLine": {
+        "description": "A line the previewed app logged.",
+        "properties": {
+          "file": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "level": {
+            "type": "string"
+          },
+          "line": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "level",
+          "message"
+        ],
+        "type": "object"
+      },
+      "PreviewEvent": {
+        "description": "Something that happened to a preview, in the order it happened.",
+        "oneOf": [
+          {
+            "properties": {
+              "entry": {
+                "type": "string"
+              },
+              "kind": {
+                "const": "opened",
+                "type": "string"
+              },
+              "mocked": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "ms": {
+                "format": "double",
+                "type": "number"
+              },
+              "size": {
+                "$ref": "#/$defs/Size"
+              }
+            },
+            "required": [
+              "kind",
+              "entry",
+              "size",
+              "mocked",
+              "ms"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "generation": {
+                "format": "uint64",
+                "minimum": 0,
+                "type": "integer"
+              },
+              "kind": {
+                "const": "reloaded",
+                "type": "string"
+              },
+              "ms": {
+                "format": "double",
+                "type": "number"
+              }
+            },
+            "required": [
+              "kind",
+              "generation",
+              "ms"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "kind": {
+                "const": "reload_failed",
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind",
+              "message"
+            ],
+            "type": "object"
+          },
+          {
+            "$ref": "#/$defs/LogLine",
+            "properties": {
+              "kind": {
+                "const": "log",
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "kind": {
+                "const": "ended",
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind",
+              "message"
+            ],
+            "type": "object"
+          }
+        ]
+      },
+      "Size": {
+        "properties": {
+          "height": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "width": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "width",
+          "height"
+        ],
+        "type": "object"
+      }
+    },
+    "properties": {
+      "events": {
+        "items": {
+          "$ref": "#/$defs/PreviewEvent"
+        },
+        "type": "array"
+      },
+      "next": {
+        "description": "Pass as `since` for what comes after.",
+        "format": "uint",
+        "minimum": 0,
+        "type": "integer"
+      },
+      "open": {
+        "description": "A preview is running now.",
+        "type": "boolean"
+      }
+    },
+    "required": [
+      "events",
+      "next",
+      "open"
+    ],
+    "title": "EventsOut",
+    "type": "object"
+  },
+  "required_cap": "inspect"
+}
