@@ -42,10 +42,26 @@ impl Target {
     }
 }
 
+/// Logical pixels, 1 to 8192 on each side.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct Size {
+    #[schemars(range(min = 1, max = Size::MAX_SIDE))]
     pub width: u32,
+    #[schemars(range(min = 1, max = Size::MAX_SIDE))]
     pub height: u32,
+}
+
+impl Size {
+    /// The longest side a preview is laid out for: past every screen the
+    /// targets stand for, and short of a headless surface large enough to
+    /// matter for memory.
+    pub const MAX_SIDE: u32 = 8192;
+
+    /// Whether a preview can be laid out at this size.
+    pub fn fits(self) -> bool {
+        let side = 1..=Self::MAX_SIDE;
+        side.contains(&self.width) && side.contains(&self.height)
+    }
 }
 
 /// One module standing in for another: `module` is imported from `dir`

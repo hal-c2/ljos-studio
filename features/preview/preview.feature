@@ -75,6 +75,20 @@ Feature: A shell under edit runs in a preview
         """
       Then the agent is refused with "not_found"
 
+    Scenario Outline: A size is 1 to 8192 pixels on each side
+      When the agent calls the tool "preview_open" with:
+        """json
+        {"doc": "Shell.qml", "size": {"width": <width>, "height": <height>}}
+        """
+      Then the agent is refused with "invalid_argument"
+
+      Examples:
+        | width | height |
+        | 0     | 600    |
+        | 800   | 0      |
+        | 8193  | 600    |
+        | 800   | 100000 |
+
     Scenario: Previews need the capability to run the project
       Given the studio tools are connected with the capabilities "inspect, mutate"
       When the agent calls the tool "preview_open" with:

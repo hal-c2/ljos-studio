@@ -686,3 +686,32 @@ fn a_preview_opens_only_on_a_document() {
     assert_eq!(e["code"], "path_denied");
     assert_eq!(*f.opened.lock().unwrap(), 0);
 }
+
+/// Review 4429187157: a size past 1..=8192 on a side never reaches the host,
+/// neither to start a preview nor to resize the open one.
+#[test]
+fn a_size_out_of_bounds_is_refused_before_start_or_resize() {
+    let f = Fixture::new();
+    let open = |width: u32, height: u32| {
+        f.call(
+            "preview_open",
+            json!({ "doc": "Shell.qml", "size": { "width": width, "height": height } }),
+        )
+    };
+    for (width, height) in [(0, 600), (800, 0), (8193, 600), (800, 100_000)] {
+        assert_eq!(
+            open(width, height).unwrap_err()["code"],
+            "invalid_argument",
+            "{width}x{height}"
+        );
+    }
+    assert!(f.calls().is_empty());
+    assert_eq!(*f.opened.lock().unwrap(), 0);
+
+    assert_eq!(open(1, 1).unwrap()["started"], true);
+    f.calls();
+    open(8193, 600).unwrap_err();
+    assert!(f.calls().is_empty());
+    open(8192, 8192).unwrap();
+    assert_eq!(f.calls(), ["resize 8192x8192"]);
+}

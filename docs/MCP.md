@@ -130,7 +130,8 @@ shows it; the watcher's quiet time is not on that path.
   last state is what shows.
 
 - DECISION: targets are a parameter of `preview_open`, not a tool:
-  `desktop` 1280×800, `tablet` 820×1180, `phone` 390×844, or any `size`.
+  `desktop` 1280×800, `tablet` 820×1180, `phone` 390×844, or any `size`
+  of 1 to 8192 pixels on each side (others are `invalid_argument`).
 - DECISION: re-opening the open document changes its size and its aliases
   in place (`started: false`) and keeps the app's state; another document
   starts another process. A re-open first asks the host whether the

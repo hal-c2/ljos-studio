@@ -13,15 +13,18 @@ expression: value
   "inputSchema": {
     "$defs": {
       "Size": {
+        "description": "Logical pixels, 1 to 8192 on each side.",
         "properties": {
           "height": {
             "format": "uint32",
-            "minimum": 0,
+            "maximum": 8192,
+            "minimum": 1,
             "type": "integer"
           },
           "width": {
             "format": "uint32",
-            "minimum": 0,
+            "maximum": 8192,
+            "minimum": 1,
             "type": "integer"
           }
         },
@@ -100,15 +103,18 @@ expression: value
   "outputSchema": {
     "$defs": {
       "Size": {
+        "description": "Logical pixels, 1 to 8192 on each side.",
         "properties": {
           "height": {
             "format": "uint32",
-            "minimum": 0,
+            "maximum": 8192,
+            "minimum": 1,
             "type": "integer"
           },
           "width": {
             "format": "uint32",
-            "minimum": 0,
+            "maximum": 8192,
+            "minimum": 1,
             "type": "integer"
           }
         },

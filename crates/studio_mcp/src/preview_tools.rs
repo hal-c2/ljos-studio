@@ -180,6 +180,16 @@ fn change(
 }
 
 fn open(studio: &Mutex<Studio>, a: OpenArgs) -> Result<OpenOut, SurfaceError> {
+    // Refused before anything starts or resizes: past the bound is a start
+    // failure or an outsized surface in the child, not a clear answer.
+    if let Some(size) = a.size.filter(|s| !s.fits()) {
+        return Err(SurfaceError::invalid_argument(format!(
+            "a size is 1 to {} pixels on each side, not {}x{}",
+            Size::MAX_SIDE,
+            size.width,
+            size.height
+        )));
+    }
     let studio = lock(studio);
     studio.session.check_document(&a.doc).map_err(error)?;
     if !studio.session.store().exists(&a.doc) {
