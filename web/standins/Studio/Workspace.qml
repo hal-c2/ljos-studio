@@ -13,6 +13,7 @@ QtObject {
     readonly property string selected
     readonly property var selection
     readonly property var inspector
+    readonly property var states
     readonly property var palette
     readonly property var done
     readonly property var undone

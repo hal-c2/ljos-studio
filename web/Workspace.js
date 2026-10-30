@@ -29,7 +29,7 @@ export function serve(studio) {
 }
 
 // The view's parts, as the workspace's properties.
-const PARTS = ["documents", "generation", "text", "layers", "selected", "selection", "inspector", "palette", "done", "undone", "problem", "previews"];
+const PARTS = ["documents", "generation", "text", "layers", "selected", "selection", "inspector", "states", "palette", "done", "undone", "problem", "previews"];
 
 export const Workspace = defineType("Workspace", QtObject, {
   properties: {
@@ -41,6 +41,7 @@ export const Workspace = defineType("Workspace", QtObject, {
     selected: typed(kinds.string, ""),
     selection: null,
     inspector: null,
+    states: null,
     palette: null,
     done: null,
     undone: null,
