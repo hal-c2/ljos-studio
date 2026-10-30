@@ -165,7 +165,12 @@ impl Store for FsStore {
             std::fs::create_dir_all(parent).map_err(io)?;
         }
         // Written beside and renamed over, so a watcher (the preview's hot
-        // reload) never reads half a file.
+        // reload) never reads half a file and a crash leaves the old text
+        // or the new, never a mix. The price is the rename: ext4 has the
+        // new file's data on its way to the disk before it replaces the
+        // old one, and behind other writing to the same drive that takes
+        // up to a second, which is the whole tail of an edit's way to the
+        // preview (DESIGN.md section 6).
         let tmp = full.with_extension("qml.studio-tmp");
         // A link left at that name would take the text wherever it leads.
         match std::fs::remove_file(&tmp) {

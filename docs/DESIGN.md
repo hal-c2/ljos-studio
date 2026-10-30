@@ -342,13 +342,47 @@ Measured in a release build on the reference desktop:
 | A state's value edited in the inspector → new picture, one edit per 250 ms (`studio` example `budgets`) | 38 ms | 376 ms |
 | For comparison, the same run's plain value edit → new picture, one per 250 ms | 22 ms | 627 ms |
 
-Both picture paths miss section 6's 50 ms p95 in their tail, and the
-edit is not the cause (the first row). Each gesture makes several calls to
-the preview's inspector (reload, picture), which answers at most 20 a
-second and has a refused call wait out a one-second `Retry-After`; that
-wait was measured as the whole of such a tail before, and a launcher-set
-rate is the fix in hand (`ljos run --mcp-rate`). This lane did not measure
-the split of its own tail.
+Both picture paths missed section 6's 50 ms p95 in their tail, and the
+edit is not the cause (the first row). The inspector's call rate was the
+first cause: it answered 20 calls a second and had a refused call wait out
+a one-second `Retry-After`, so the preview now grants Studio 200
+(`ljos run --mcp-rate`).
+
+The tail that is left is the file system's. `budgets` prints where the time
+of each round's slowest edits went: the text written beside the document,
+the rename into place (both read off the file's own times), the reload
+asked and how it answered, the picture asked and fetched, the window at
+rest and the frame, with the preview's own account of each reload from its
+log. Under other lanes' builds on the same drive, one run of 150 edits of
+each kind (p50 / p95 / max):
+
+| Path | p50 | p95 | max |
+|---|---|---|---|
+| Inspector edit → new picture, back to back | 17.8 ms | 20.5 ms | 115 ms |
+| The same, one per 250 ms | 19.6 ms | 71.8 ms | 524 ms |
+| A state's value, one per 250 ms | 15.2 ms | 18.9 ms | 85 ms |
+
+In every slow edit the time is in the rename: 506 ms of the 524 ms edit,
+292 of 311, 252 of 282, 94 of 115, while the preview's reload took 1–2 ms
+from asked to answered (its compile and apply about 1 ms) and the
+picture's fetch 3–5 ms. Timed alone on that drive, each call of the same
+save separately, `rename` over the document took up to 1 040 ms while the
+`open` that creates the file beside it, the `write` and the `close` stayed
+under 0.2 ms. The create needs the file system's journal as the rename
+does, so it is not waiting on the journal: ext4 (mounted without
+`noauto_da_alloc`) sends a replacing file's data towards the disk before
+the rename replaces the old one, and that write waits behind the other
+writing to the drive. On an idle drive the save is under 2 ms and no
+edit of 600 went past 24 ms.
+
+DECISION: Studio keeps its save written beside and renamed over. Writing
+the document in place would skip ext4's flush, but a crash in the middle
+would leave neither the old text nor the new, and the preview's watcher
+would see the file half written. The tail is the price of a save that
+survives a crash, paid on a busy drive only. Taking it off the edit's way
+to the preview would need the preview to be given the new text by its
+inspector as well as reading it from the file; Ljós's watcher can take a
+save as text already, but no inspector tool hands it one.
 
 ### S5: web
 
