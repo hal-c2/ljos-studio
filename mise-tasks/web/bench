@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+#MISE description="A tool call's latency in node on a 200-object document, and the wasm's size"
+#MISE depends=["web:build"]
+set -euo pipefail
+node web/bench.mjs
+wasm=web/pkg/studio_web_bg.wasm
+echo "wasm: $(wc -c < "$wasm") bytes, $(gzip -9 -c "$wasm" | wc -c) gzipped"
