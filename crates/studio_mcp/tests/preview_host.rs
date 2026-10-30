@@ -590,6 +590,70 @@ fn a_failure_on_the_second_of_three_aliases_keeps_the_record_true() {
     assert_eq!(f.calls(), ["alias B -", "alias C -"]);
 }
 
+/// Review 4427296687.
+#[test]
+fn a_refused_reload_is_a_failed_reload_and_the_next_reading_asks_again() {
+    let f = Fixture::new();
+    f.call("preview_open", json!({ "doc": "Shell.qml" }))
+        .unwrap();
+    f.fail("reload", refused());
+    f.calls();
+    f.call(
+        "document_edit",
+        json!({ "doc": "Shell.qml", "generation": 1, "text": "import QtQuick\n\nItem {}\n" }),
+    )
+    .unwrap();
+    assert_eq!(f.calls(), ["reload"]);
+
+    let out = f
+        .call("preview_open", json!({ "doc": "Shell.qml" }))
+        .unwrap();
+    assert_eq!(out["started"], false, "still open");
+    f.call("preview_screenshot", json!({})).unwrap();
+    assert_eq!(f.calls(), ["reload", "screenshot 800"]);
+    let kinds = event_kinds(&f.events());
+    assert!(kinds.contains(&"reload_failed".to_owned()), "{kinds:?}");
+    assert!(!kinds.contains(&"ended".to_owned()), "{kinds:?}");
+}
+
+#[test]
+fn a_reload_that_finds_the_preview_ended_ends_it() {
+    let f = Fixture::new();
+    f.call("preview_open", json!({ "doc": "Shell.qml" }))
+        .unwrap();
+    f.fail("reload", ended());
+    f.call(
+        "document_edit",
+        json!({ "doc": "Shell.qml", "generation": 1, "text": "import QtQuick\n\nItem {}\n" }),
+    )
+    .unwrap();
+    assert!(event_kinds(&f.events()).contains(&"ended".to_owned()));
+    let out = f
+        .call("preview_open", json!({ "doc": "Shell.qml" }))
+        .unwrap();
+    assert_eq!(out["started"], true);
+}
+
+#[test]
+fn logs_that_cannot_be_read_end_the_preview_only_when_it_is_over() {
+    let f = Fixture::new();
+    f.call("preview_open", json!({ "doc": "Shell.qml" }))
+        .unwrap();
+    f.fail("logs", refused());
+    let out = f.call("preview_events", json!({})).unwrap();
+    assert_eq!(out["open"], true);
+    assert!(event_kinds(out["events"].as_array().unwrap()).contains(&"reload_failed".to_owned()));
+    f.calls();
+    // The one reading after it asks for the reload it may have missed.
+    f.call("preview_screenshot", json!({})).unwrap();
+    assert_eq!(f.calls(), ["reload", "screenshot 800"]);
+
+    f.fail("logs", ended());
+    let out = f.call("preview_events", json!({})).unwrap();
+    assert_eq!(out["open"], false);
+    assert!(event_kinds(out["events"].as_array().unwrap()).contains(&"ended".to_owned()));
+}
+
 #[test]
 fn a_preview_opens_only_on_a_document() {
     let f = Fixture::new();

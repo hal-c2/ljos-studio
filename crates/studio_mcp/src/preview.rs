@@ -118,9 +118,19 @@ impl Previews {
             },
             Ok(Reload::Failed { message }) => PreviewEvent::ReloadFailed { message },
             Ok(Reload::Unchanged) => return,
-            Err(e) => {
+            Err(e @ (PreviewError::Ended(_) | PreviewError::NotOpen)) => {
                 self.failed(e);
                 return;
+            }
+            // The process is still there and may still be showing the last
+            // good text: a refusal (too many calls a second) or a broken
+            // connection is one reload missed, and the next reading asks
+            // again.
+            Err(e) => {
+                open.behind = true;
+                PreviewEvent::ReloadFailed {
+                    message: e.to_string(),
+                }
             }
         };
         self.events.push(event);
@@ -149,8 +159,14 @@ impl Previews {
                 self.log_mark = next;
                 self.events.extend(lines.into_iter().map(PreviewEvent::Log));
             }
-            Err(e) => {
+            Err(e @ (PreviewError::Ended(_) | PreviewError::NotOpen)) => {
                 self.failed(e);
+            }
+            Err(e) => {
+                open.behind = true;
+                self.events.push(PreviewEvent::ReloadFailed {
+                    message: e.to_string(),
+                });
             }
         }
     }
