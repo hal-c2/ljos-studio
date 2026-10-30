@@ -249,6 +249,6 @@ object that parses, and (`not_a_contribution`) for removing anything else.
 
 - **compose-shell:** `blocks_list` → `node_insert` per block →
   `binding_set` for skins → `preview_open` → `preview_screenshot`.
-- **restyle:** `theme_tokens` → `theme_set` → `preview_screenshot`.
+- **restyle:** `theme_set` (read) → `theme_set` → `preview_screenshot`.
 - **fix-preview:** `preview_events` → `document_text` → `binding_set` /
   `property_set` → `preview_events`.
