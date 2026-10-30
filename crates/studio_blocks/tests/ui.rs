@@ -12,7 +12,7 @@ use ljos::item::{DrawOp, MouseButtons, kurbo::Point};
 use ljos::prelude::*;
 use ljos::testing::AccessibleNode;
 use ljos_dev::{DevSession, Host, Report};
-use ljos_drive::{Chord, DriveError, Stage};
+use ljos_drive::{Chord, DriveError, Stage, Wheel};
 use ljos_mcp_core::{CallCtx, Cap, CapSet};
 use ljos_runtime::SystemClock;
 use serde_json::Value as Json;
@@ -370,24 +370,46 @@ impl Window {
     /// Clicks `row` of the list named `list` where it shows: a list
     /// clips the rows past its ends, and the driver aims at a node's
     /// middle whatever clips it, so a row half past the end would give
-    /// the click to what lies below the list.
+    /// the click to what lies below the list. A row past an end is
+    /// scrolled to first, a wheel notch at a time over the list, as a
+    /// person does.
     fn click_row(&mut self, list: &str, row: &AccessibleNode) -> StepResult {
         let key = row.key.ok_or("the row has no key")?;
         let shown = self
             .bounds(&|role, name| role == "list" && name == list)
             .ok_or_else(|| format!("no list {list:?} in the window"))?;
-        let mut at = None;
-        self.stage.scene.accessibility_tree().walk(|k, _, d| {
-            if k == key {
-                let b = d.bounds;
-                at = Some(ljos::item::kurbo::Rect::new(b.x0, b.y0, b.x1, b.y1));
+        let at = |w: &Self| {
+            let mut at = None;
+            w.stage.scene.accessibility_tree().walk(|k, _, d| {
+                if k == key {
+                    let b = d.bounds;
+                    at = Some(ljos::item::kurbo::Rect::new(b.x0, b.y0, b.x1, b.y1));
+                }
+            });
+            at.ok_or_else(|| format!("{:?} is not in {list:?}", row.name))
+        };
+        let mut now = at(self)?;
+        while now.y0 < shown.y0 || now.y1 > shown.y1 {
+            // A positive notch turns the wheel away, which shows what is
+            // above.
+            let notch = if now.y1 > shown.y1 { -1.0 } else { 1.0 };
+            self.stage
+                .drive()
+                .wheel(shown.center(), Wheel::Notches(0.0, notch))
+                .map_err(drive_error)?;
+            // A wheel notch eases the list over time; the person waits for
+            // it to stop, on the test clock.
+            self.stage.drive().advance(1000).map_err(drive_error)?;
+            let then = at(self)?;
+            if then.y0 == now.y0 {
+                break;
             }
-        });
-        let at = at.ok_or_else(|| format!("{:?} is not in {list:?}", row.name))?;
-        let seen = at.intersect(shown);
+            now = then;
+        }
+        let seen = now.intersect(shown);
         if seen.area() <= 0.0 {
             return Err(format!(
-                "{:?} at {at:?} is out of the view of {list:?}, {shown:?}",
+                "{:?} at {now:?} is out of the view of {list:?}, {shown:?}, and the wheel does not bring it in",
                 row.name
             ));
         }
