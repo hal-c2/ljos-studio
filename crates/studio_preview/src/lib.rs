@@ -306,11 +306,10 @@ impl PreviewHost for NativeHost {
             Click::Id(id) => self
                 .call("app_click", json!({ "target": locator(id) }))
                 .map_err(|e| no_object(e, id))?,
-            // `at=` names every item drawn there, topmost first.
-            Click::Point { x, y } => self.call(
-                "app_click",
-                json!({ "target": format!("at={x},{y} >> nth=0") }),
-            )?,
+            // At the point itself, through the hit test: whatever is on top
+            // there gets it, as under a person's pointer, not the middle of
+            // the topmost item drawn there.
+            Click::Point { x, y } => self.call("app_click", json!({ "at": [x, y] }))?,
         };
         Ok(())
     }

@@ -98,7 +98,7 @@ expression: value
             "type": "null"
           }
         ],
-        "description": "A point to click instead: the topmost item drawn there."
+        "description": "A point to click instead, exactly there: whatever is on top gets it."
       },
       "doc": {
         "type": [

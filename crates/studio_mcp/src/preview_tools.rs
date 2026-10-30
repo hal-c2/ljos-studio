@@ -73,7 +73,7 @@ struct StateArgs {
     /// An object (with an `id`) to click first, after `set`, as a person
     /// does: the app's own handlers answer, so a flow plays.
     click: Option<Address>,
-    /// A point to click instead: the topmost item drawn there.
+    /// A point to click instead, exactly there: whatever is on top gets it.
     click_at: Option<ClickAt>,
 }
 
