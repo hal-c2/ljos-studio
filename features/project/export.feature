@@ -1,6 +1,7 @@
 # Sources:
 #   docs/DESIGN.md (goal 1: the QML is the document; the sidecar is deletable; S6)
 #   docs/MCP.md (export)
+#   features/project/export-web.feature (the same export, for a site)
 #   ljos-ui docs/ARCHITECTURE.md section 12.2 (production bundles) and
 #   `ljos run` (a project directory and its entry document)
 
@@ -344,14 +345,6 @@ Feature: A project is exported as a bundle that runs without Studio
       And the refusal's "/details/kind" is "entry_left_out"
       And the refusal's "/details/why" is "mock modules stand in for blocks in previews only"
       And the file "build/native/ljos-bundle.json" does not exist
-
-    Scenario: A site for the web is not built yet
-      When the agent calls the tool "export" with:
-        """json
-        {"entry": "Shell.qml", "target": "web"}
-        """
-      Then the agent is refused with "unsupported"
-      And the refusal's "/details/kind" is "no_web_build"
 
     Scenario: A document that does not parse is not shipped
       Given the file "Broken.qml":
