@@ -9,14 +9,14 @@ repository.workspace = true
 publish.workspace = true
 
 [dependencies]
-studio_mcp = { path = "../studio_mcp" }
+studio_mcp = { path = "../studio_mcp", features = ["http"] }
 studio_preview = { path = "../studio_preview" }
 studio_blocks = { path = "../studio_blocks" }
 # The window, and `dev-qml` so that `--shell DIR` compiles a shell of the
 # person's own at start: Studio ships the compiler anyway, and a shell is a
 # directory of QML anyone may replace.
 ljos = { workspace = true, features = ["shell", "dev-qml"] }
-ljos_mcp_core = { workspace = true, features = ["http"] }
+ljos_mcp_core.workspace = true
 anyhow.workspace = true
 clap.workspace = true
 tokio.workspace = true

@@ -5306,6 +5306,7 @@ dependencies = [
  "serde",
  "serde_json",
  "studio_core",
+ "studio_mcp",
  "studio_preview",
  "tempfile",
  "thiserror 2.0.21",

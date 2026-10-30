@@ -7,6 +7,8 @@
 //! changes between versions without a golden-file diff (DESIGN.md, MCP.md).
 
 mod blocks;
+#[cfg(feature = "http")]
+pub mod endpoint;
 pub mod preview;
 mod preview_tools;
 mod tools;

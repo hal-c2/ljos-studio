@@ -19,7 +19,13 @@ serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 
+[features]
+# The loopback endpoint a running Studio serves agents on: a native window's.
+http = ["ljos_mcp_core/http"]
+
 [dev-dependencies]
+# The scenarios drive the endpoint as a client does.
+studio_mcp = { path = ".", features = ["http"] }
 studio_preview = { path = "../studio_preview" }
 cucumber.workspace = true
 insta.workspace = true

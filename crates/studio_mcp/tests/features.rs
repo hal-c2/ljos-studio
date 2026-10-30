@@ -17,9 +17,11 @@ use cucumber::{
     gherkin::{Step, StepType},
     given, then, when,
 };
-use ljos_mcp_core::{CallCtx, Cap, CapSet, McpSurface, SurfaceError, ToolImage};
+use ljos_mcp_core::{
+    CallCtx, Cap, CapSet, McpSurface, SurfaceError, ToolImage, glue::http::HttpServer,
+};
 use serde_json::{Value, json};
-use studio_mcp::{Studio, StudioServer};
+use studio_mcp::{Studio, StudioServer, endpoint};
 use studio_preview::NativeHost;
 
 #[path = "support/schema.rs"]
@@ -41,6 +43,10 @@ struct StudioWorld {
     images: Vec<ToolImage>,
     /// Values kept from answers, written `$name` in later arguments.
     kept: HashMap<String, Value>,
+    /// The endpoint a running Studio serves agents on.
+    endpoint: Option<HttpServer>,
+    /// What it answered last: status and body.
+    reply: Option<(u16, String)>,
 }
 
 impl std::fmt::Debug for StudioWorld {
@@ -65,6 +71,8 @@ impl StudioWorld {
             answer: None,
             images: Vec::new(),
             kept: HashMap::new(),
+            endpoint: None,
+            reply: None,
         }
     }
 
@@ -463,6 +471,137 @@ fn png_size(data: &[u8]) -> Option<(u32, u32)> {
     }
     let word = |at: usize| Some(u32::from_be_bytes(data.get(at..at + 4)?.try_into().ok()?));
     Some((word(16)?, word(20)?))
+}
+
+#[given(regex = r#"^Studio serves agents with the capabilities "([^"]*)"$"#)]
+fn serves_agents(w: &mut StudioWorld, caps: String) -> StepResult {
+    let caps = CapSet::parse_list(&caps).map_err(|e| e.to_string())?;
+    let studio = Studio::open(w.dir.path()).map_err(|e| e.to_string())?;
+    let server = Arc::new(StudioServer::new(studio));
+    let http = endpoint::serve_agents(&server, caps, w.state.path()).map_err(|e| e.to_string())?;
+    w.endpoint = Some(http);
+    Ok(())
+}
+
+#[when(
+    regex = r#"^a client calls the tool "([^"]+)" on the endpoint( with the token| with another token)?(?: and the (Origin|Host) "([^"]+)")?$"#
+)]
+fn client_calls(
+    w: &mut StudioWorld,
+    tool: String,
+    token: String,
+    header: String,
+    value: String,
+) -> StepResult {
+    use std::io::{Read as _, Write as _};
+    let http = w.endpoint.as_ref().ok_or("nothing serves agents")?;
+    let addr = http.addr().ok_or("the endpoint has no address")?;
+    let mut head = vec![
+        "POST /mcp HTTP/1.1".to_owned(),
+        "Connection: close".to_owned(),
+        "Accept: application/json, text/event-stream".to_owned(),
+        "Content-Type: application/json".to_owned(),
+    ];
+    head.push(if header == "Host" {
+        format!("Host: {value}")
+    } else {
+        format!("Host: {addr}")
+    });
+    if header == "Origin" {
+        head.push(format!("Origin: {value}"));
+    }
+    match token.trim() {
+        "with the token" => head.push(format!("Authorization: Bearer {}", http.token().as_str())),
+        "with another token" => head.push(format!("Authorization: Bearer {}", "0".repeat(64))),
+        _ => {}
+    }
+    let body = json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "tools/call",
+        "params": { "name": tool, "arguments": {} },
+    })
+    .to_string();
+    head.push(format!("Content-Length: {}", body.len()));
+    let request = format!("{}\r\n\r\n{body}", head.join("\r\n"));
+    let mut stream = std::net::TcpStream::connect(addr).map_err(|e| e.to_string())?;
+    stream
+        .write_all(request.as_bytes())
+        .map_err(|e| e.to_string())?;
+    let mut answer = String::new();
+    stream
+        .read_to_string(&mut answer)
+        .map_err(|e| e.to_string())?;
+    let (head, body) = answer
+        .split_once("\r\n\r\n")
+        .ok_or_else(|| format!("no HTTP answer: {answer}"))?;
+    let status = head
+        .split_whitespace()
+        .nth(1)
+        .and_then(|s| s.parse().ok())
+        .ok_or_else(|| format!("no status in {head}"))?;
+    w.reply = Some((status, body.to_owned()));
+    Ok(())
+}
+
+/// The JSON in the endpoint's last answer, which may come chunked.
+fn reply_json(w: &StudioWorld) -> Result<(u16, Value), String> {
+    let (status, body) = w.reply.as_ref().ok_or("the endpoint was not called")?;
+    let start = body.find('{').ok_or_else(|| format!("no JSON in {body}"))?;
+    let end = body
+        .rfind('}')
+        .ok_or_else(|| format!("no JSON in {body}"))?;
+    let value = serde_json::from_str(&body[start..=end]).map_err(|e| format!("{e}: {body}"))?;
+    Ok((*status, value))
+}
+
+#[then("the endpoint answers it")]
+fn endpoint_answers(w: &mut StudioWorld) -> StepResult {
+    let (status, value) = reply_json(w)?;
+    (status == 200 && value["result"]["isError"] != true)
+        .then_some(())
+        .ok_or_else(|| format!("{status}: {value}"))
+}
+
+#[then(regex = r#"^the endpoint refuses it with (\d+) "([a-z_]+)"$"#)]
+fn endpoint_refuses(w: &mut StudioWorld, want: u16, code: String) -> StepResult {
+    let (status, value) = reply_json(w)?;
+    (status == want && value["error"]["code"] == code.as_str())
+        .then_some(())
+        .ok_or_else(|| format!("{status}: {value}"))
+}
+
+#[then(regex = r#"^the endpoint's tool refuses it with "([a-z_]+)"$"#)]
+fn endpoint_tool_refuses(w: &mut StudioWorld, code: String) -> StepResult {
+    let (status, value) = reply_json(w)?;
+    (status == 200
+        && value["result"]["isError"] == true
+        && value["result"].to_string().contains(&code))
+    .then_some(())
+    .ok_or_else(|| format!("{status}: {value}"))
+}
+
+#[then("the endpoint listens on loopback only")]
+fn on_loopback(w: &mut StudioWorld) -> StepResult {
+    let http = w.endpoint.as_ref().ok_or("nothing serves agents")?;
+    let addr = http.addr().ok_or("the endpoint has no address")?;
+    addr.ip()
+        .is_loopback()
+        .then_some(())
+        .ok_or_else(|| format!("it listens on {addr}"))
+}
+
+#[then("the token file can be read by its owner alone")]
+fn token_file_private(w: &mut StudioWorld) -> StepResult {
+    use std::os::unix::fs::PermissionsExt as _;
+    let http = w.endpoint.as_ref().ok_or("nothing serves agents")?;
+    let path = w.state.path().join(endpoint::TOKEN_FILE);
+    let meta = std::fs::metadata(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+    let text = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
+    let mode = meta.permissions().mode() & 0o777;
+    (mode == 0o600 && text.contains(http.token().as_str()))
+        .then_some(())
+        .ok_or_else(|| format!("mode {mode:o}, or another token in it"))
 }
 
 #[tokio::main]

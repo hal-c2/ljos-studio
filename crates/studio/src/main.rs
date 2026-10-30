@@ -9,10 +9,7 @@ use std::{path::PathBuf, sync::Arc};
 
 use anyhow::Context;
 use clap::Parser;
-use ljos_mcp_core::{
-    Cap, CapSet,
-    glue::http::{HttpConfig, HttpServer},
-};
+use ljos_mcp_core::{Cap, CapSet};
 use studio_mcp::{Studio, StudioServer};
 use studio_preview::NativeHost;
 
@@ -73,7 +70,14 @@ fn main() -> anyhow::Result<()> {
     let _agents = if args.no_agents {
         None
     } else {
-        Some(serve_agents(&server, caps, &state)?)
+        let http = studio_mcp::endpoint::serve_agents(&server, caps, &state)
+            .context("serving Studio's tools on loopback")?;
+        eprintln!(
+            "studio: agents connect at {} with the token in {}",
+            http.url(),
+            state.join(studio_mcp::endpoint::TOKEN_FILE).display()
+        );
+        Some(http)
     };
     window(server, args.shell)
 }
@@ -101,27 +105,6 @@ fn window(server: Arc<StudioServer>, shell: Option<PathBuf>) -> anyhow::Result<(
             .map_err(|e| -> ljos::SetupError { e.to_string().into() })
     })?;
     Ok(())
-}
-
-/// The window's tools on a loopback endpoint behind a bearer token, as a
-/// Ljós inspector serves its own: an agent works with the person on the
-/// session the window shows, and each sees the other's changes.
-fn serve_agents(
-    server: &Arc<StudioServer>,
-    caps: CapSet,
-    state: &std::path::Path,
-) -> anyhow::Result<HttpServer> {
-    let token_file = state.join("mcp.json");
-    let mut config = HttpConfig::loopback(caps).token_file(&token_file);
-    config.clean_up_on_signals = true;
-    let http = HttpServer::start(Arc::clone(server), config)
-        .context("serving Studio's tools on loopback")?;
-    eprintln!(
-        "studio: agents connect at {} with the token in {}",
-        http.url(),
-        token_file.display()
-    );
-    Ok(http)
 }
 
 /// Where previews keep their inspector token files and logs, and where the
