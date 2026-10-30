@@ -373,6 +373,15 @@ const STEPS = [
     if (!Array.isArray(got)) throw new Error(`\`${pointer}\` is not a list: ${JSON.stringify(got)}`);
     if (got.length !== Number(count)) throw new Error(`\`${pointer}\` has ${got.length} entries: ${JSON.stringify(got)}`);
   }),
+  // One entry of a list, wherever it is in the list: what a scenario says
+  // of one member, not of the order of the rest.
+  step("then", /^the answer's "(\/[^"]*)" has the entry:$/, (w, s, pointer) => {
+    const got = must(w.ok(), pointer);
+    if (!Array.isArray(got)) throw new Error(`\`${pointer}\` is not a list: ${JSON.stringify(got)}`);
+    const want = json(docstring(s));
+    if (!got.some((entry) => equal(entry, want)))
+      throw new Error(`\`${pointer}\` has no entry ${JSON.stringify(want)}: ${JSON.stringify(got)}`);
+  }),
   step("then", /^the answer's "(\/[^"]*)" is absent$/, (w, s, pointer) => {
     const got = at(w.ok(), pointer);
     if (got !== undefined) throw new Error(`\`${pointer}\` is ${JSON.stringify(got)}`);

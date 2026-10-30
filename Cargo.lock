@@ -5447,6 +5447,7 @@ dependencies = [
  "ljos_blocks",
  "ljos_mcp_core",
  "qml_edit",
+ "qt_types",
  "regex",
  "schemars",
  "serde",

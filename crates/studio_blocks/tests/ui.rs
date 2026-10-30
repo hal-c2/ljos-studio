@@ -955,6 +955,23 @@ fn lists_roles(w: &mut UiWorld, names: String) -> StepResult {
         .ok_or_else(|| format!("the inspector lists the roles {shown:?}"))
 }
 
+#[then(regex = r#"^the inspector lists the signals "([^"]*)"$"#)]
+fn lists_signals(w: &mut UiWorld, names: String) -> StepResult {
+    let shown = shown_with(w.window()?, "Inspector", "Signal ")?;
+    (shown == listed(&names))
+        .then_some(())
+        .ok_or_else(|| format!("the inspector lists the signals {shown:?}"))
+}
+
+/// Picks `signal` from the flow panel's list of what a wire handles,
+/// scrolling the list to it as a person does.
+#[when(regex = r#"^the person picks the signal "([^"]+)" to wire in the flow panel$"#)]
+fn picks_signal(w: &mut UiWorld, signal: String) -> StepResult {
+    let window = w.window()?;
+    let row = window.node("Wire", None, &signal)?;
+    window.click_row("Wire", &row)
+}
+
 #[when(regex = r#"^the person binds the role "([^"]+)" to "([^"]+)" in the inspector$"#)]
 fn binds_role(w: &mut UiWorld, role: String, name: String) -> StepResult {
     let window = w.window()?;

@@ -276,6 +276,12 @@ struct Inspected {
     /// in a list's delegate the list's, whose roles bind as `model.role`.
     #[serde(skip_serializing_if = "Option::is_none")]
     model: Option<Model>,
+    /// Every signal it has, which a flow's `signal` may name: what it
+    /// declares, then its type's own and inherited, each with its
+    /// arguments. Absent for a type described nowhere Studio looks (no
+    /// import, project file, type dump or Ljós type has it).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    signals: Option<Vec<crate::signals::Signal>>,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -928,6 +934,54 @@ fn list_model(path: &str, json: &str) -> Result<String, SurfaceError> {
     Ok(out)
 }
 
+/// Refuses a handler of a signal the trigger's type does not have, naming
+/// those it has. One whose type is described nowhere is written as asked:
+/// what it has is not known here, and Ljós says so when it compiles.
+fn has_signal(
+    studio: &Mutex<Studio>,
+    doc: &str,
+    trigger: &Address,
+    signal: &str,
+) -> Result<(), SurfaceError> {
+    // What is not a name is no signal of any type: the edit refuses it as
+    // such.
+    if !studio_core::flows::is_identifier(signal) {
+        return Ok(());
+    }
+    let mut studio = lock(studio);
+    let (handle, node) = studio.session.resolve(doc, trigger).map_err(error)?;
+    let source = studio.session.text(doc).map_err(error)?.0.to_owned();
+    let Some(signals) = crate::signals::of(studio.session.store(), doc, &source, &node) else {
+        return Ok(());
+    };
+    if signals.iter().any(|s| s.name == signal) {
+        return Ok(());
+    }
+    let offered: Vec<&str> = signals
+        .iter()
+        .filter(|s| !s.change)
+        .map(|s| s.name.as_str())
+        .collect();
+    let has = if offered.is_empty() {
+        "none but its properties' change signals".to_owned()
+    } else {
+        format!("{} and its properties' change signals", offered.join(", "))
+    };
+    Err(SurfaceError::new(
+        ErrorCode::NotFound,
+        format!(
+            "{handle} (`{}`) has no signal `{signal}`; it has {has}",
+            node.ty
+        ),
+    )
+    .with_details(json!({
+        "kind": "no_signal",
+        "signal": signal,
+        "type": node.ty,
+        "signals": offered,
+    })))
+}
+
 fn needs(field: &str, action: &str) -> SurfaceError {
     SurfaceError::invalid_argument(format!("`{action}` needs `{field}`"))
 }
@@ -956,6 +1010,9 @@ fn state_op(studio: &Mutex<Studio>, a: StateEditArgs) -> Result<Op, SurfaceError
                 },
                 (None, None) => return Err(needs("state` or `open", "interaction")),
             };
+            if let Some(signal) = &a.signal {
+                has_signal(studio, &a.doc, &trigger, signal)?;
+            }
             return Ok(Op::Interaction {
                 trigger,
                 signal: a.signal,
@@ -1404,8 +1461,9 @@ fn edits(studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
             ToolDef::new::<NodeArgs>(
                 "node_inspect",
                 "An object's bindings with their byte ranges, its parent, its children, its \
-                 states and transitions, the flows in it, and the roles and rows of the data it \
-                 sees (a ListModel, a list's model, in a delegate its list's).",
+                 states and transitions, the flows in it, the signals it has with their \
+                 arguments, and the roles and rows of the data it sees (a ListModel's, a JsonListModel's file's, \
+                 a list's model's, in a delegate its list's).",
             )
             .output::<Inspected>()
             .requires(Cap::Inspect),
@@ -1418,6 +1476,8 @@ fn edits(studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
                     let variants = studio.session.variants(&doc, &a.node).map_err(error)?;
                     let interactions = studio.session.interactions(&doc, &a.node).map_err(error)?;
                     let model = studio.session.model(&doc, &a.node).map_err(error)?;
+                    let source = studio.session.text(&doc).map_err(error)?.0.to_owned();
+                    let signals = crate::signals::of(studio.session.store(), &doc, &source, &node);
                     let (tree, generation) = studio.session.tree(&doc).map_err(error)?;
                     let parent_path = (!node.path.0.is_empty())
                         .then(|| studio_core::NodePath(node.path.0[..node.path.0.len() - 1].to_vec()));
@@ -1458,6 +1518,7 @@ fn edits(studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
                         transitions: variants.transitions,
                         interactions,
                         model,
+                        signals,
                     })
                 }
             }),

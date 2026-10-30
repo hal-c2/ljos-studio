@@ -6,8 +6,9 @@
 // it changes and the condition that turns it on, or to give it a
 // breakpoint, a width bound of the window.
 //
-// Then the roles of the data it sees, in a list's delegate: one is bound
-// to a property as `model.<role>`, the form a delegate reads it in.
+// Then the signals it has, with their arguments, which the flow panel
+// wires; and the roles of the data it sees, in a list's delegate: one is
+// bound to a property as `model.<role>`, the form a delegate reads it in.
 //
 // Last, its review comments (`review`), and those of the document whose
 // objects were taken out: a person adds one, resolves it or reopens it.
@@ -355,6 +356,33 @@ Panel {
                     enabled: changeTarget.text !== "" && changeName.text !== ""
                     onClicked: panel.change(changeTarget.text, changeName.text, changeValue.text)
                 }
+            }
+        }
+
+        Label {
+            visible: signalList.count > 0
+            text: "Signals"
+            color: Colors.text
+            font.weight: Typography.bodyStrongWeight
+            Accessible.role: Accessible.Heading
+            Accessible.name: text
+        }
+
+        // What a flow may handle on it, with the arguments a handler is
+        // given; a property's change signal, which every property has, is
+        // left out.
+        Repeater {
+            id: signalList
+            model: panel.workspace.signals.filter(s => !s.change)
+            delegate: Label {
+                required property var modelData
+                text: modelData.name + "(" + modelData.arguments
+                    .map(a => a.type === "" ? a.name : a.name + ": " + a.type).join(", ") + ")"
+                color: Colors.text
+                elide: Text.ElideRight
+                Layout.fillWidth: true
+                Accessible.role: Accessible.StaticText
+                Accessible.name: "Signal " + modelData.name
             }
         }
 

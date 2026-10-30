@@ -542,6 +542,21 @@ fn answer_has(w: &mut StudioWorld, pointer: String, count: usize) -> StepResult 
         .ok_or_else(|| format!("`{pointer}` has {len} entries: {got}"))
 }
 
+/// One entry of a list is the docstring's JSON, wherever it is in the list:
+/// what a scenario says of one member, not of the order of the rest.
+#[then(regex = r#"^the answer's "(/[^"]*)" has the entry:$"#)]
+fn answer_has_entry(w: &mut StudioWorld, pointer: String, step: &Step) -> StepResult {
+    let want: Value = serde_json::from_str(&file_text(step)?)
+        .map_err(|e| format!("the docstring is no JSON: {e}"))?;
+    let got = at(w.answer()?, &pointer)?;
+    let list = got
+        .as_array()
+        .ok_or_else(|| format!("`{pointer}` is not a list: {got}"))?;
+    list.contains(&want)
+        .then_some(())
+        .ok_or_else(|| format!("`{pointer}` has no entry {want}: {got}"))
+}
+
 #[then(regex = r#"^the answer's "(/[^"]*)" is absent$"#)]
 fn answer_absent(w: &mut StudioWorld, pointer: String) -> StepResult {
     match w.answer()?.pointer(&pointer) {

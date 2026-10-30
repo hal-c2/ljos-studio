@@ -18,6 +18,7 @@ publish = false
 [workspace.dependencies]
 qml_syntax = { git = "https://github.com/hal-c2/ljos-ui", rev = "f5005294c5d6e66e0015349133e8aeca037b1454" }
 qml_edit = { git = "https://github.com/hal-c2/ljos-ui", rev = "f5005294c5d6e66e0015349133e8aeca037b1454" }
+qt_types = { git = "https://github.com/hal-c2/ljos-ui", rev = "f5005294c5d6e66e0015349133e8aeca037b1454" }
 ljos_ir = { git = "https://github.com/hal-c2/ljos-ui", rev = "f5005294c5d6e66e0015349133e8aeca037b1454" }
 # What a theme may say and when Ljós refuses one, judged by Ljós itself.
 ljos_design = { git = "https://github.com/hal-c2/ljos-ui", rev = "f5005294c5d6e66e0015349133e8aeca037b1454" }

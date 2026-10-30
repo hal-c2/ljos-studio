@@ -139,6 +139,18 @@
               "notify": "rolesChanged"
             },
             {
+              "name": "signals",
+              "type": "var",
+              "kind": "value",
+              "list": false,
+              "readonly": true,
+              "final": true,
+              "required": false,
+              "constant": false,
+              "group": false,
+              "notify": "signalsChanged"
+            },
+            {
               "name": "flow",
               "type": "var",
               "kind": "value",
