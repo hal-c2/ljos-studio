@@ -16,6 +16,14 @@ target directory, so your edits leave the sample alone. It builds release:
 opening a shell and following a selection are several times faster than in a
 debug build, and the first build is the only cost.
 
+While the window is open, agents reach Studio's tools on a loopback endpoint;
+it prints the URL and the file that holds the token. That endpoint only reads
+(`inspect`) unless you grant more at launch: `--caps` takes a comma-separated
+list of `inspect`, `mutate`, `fs` and `run`, so
+`mise run studio DIR --caps inspect,mutate` lets an agent edit. `--no-agents`
+serves no endpoint. `studio --mcp` serves the tools on stdin and stdout
+instead, with no window, and there the default is `inspect,mutate`.
+
 `mise run web:serve` serves on `localhost` only (`PORT`, default 5199).
 Projects live in your browser's storage; *New* starts one and *Import* reads a
 folder of text files. Your edits compile on that local server, which draws the
