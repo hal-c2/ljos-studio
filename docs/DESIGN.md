@@ -262,9 +262,11 @@ headless). Its shell is QML under `shell/`, and it binds one block,
   `text`, `layers` (one row per object: `node`, `type`, `id`, `depth`,
   `label`), `selected`, `selection` (`start`, `end` in characters of
   `text`), `inspector` (the selected object's bindings: `name`, `value`),
+  `states` (the selected object's states: `name`, `when`, `changes`),
   `palette` (the project's blocks: `module`, `name`, `summary`,
-  `category`), `done` and `undone` (history labels), `preview` (`target`,
-  `picture`, `width`, `height`, `generation`), `error`.
+  `category`, `slots`), `done` and `undone` (history labels), `preview`
+  (`target`, `picture`, `width`, `height`, `generation`, `variant`: the
+  root's state the preview's width turns on), `error`.
 - **Its one action**, `dispatch(tool, args)`, takes a Studio tool's name
   and its arguments. A gesture *is* a tool call: the shell has no path to
   the session that an agent lacks, which is how the UI scenarios
@@ -289,6 +291,64 @@ window nobody touches does no work (rule 6).
 - States/transitions as variants; breakpoints as width bindings.
 - **Exit:** Studio reskins itself (its own shell edited in Studio) and a
   user shell with an error falls back with the error shown.
+
+#### As built: variants, breakpoints and slots
+
+This half of S4 makes a component's variants and a block's slots edits of
+the file, made the same way by an agent (`state_edit`, `slot_contribute`,
+MCP.md) and by a person in the window. The tokens editor, `ShellLoader`
+and the self-reskin are the other half.
+
+- **States are the variants.** A variant is a `State` in the object's
+  `states`, with `PropertyChanges` for the values it changes and a `when`
+  that turns it on; a `Transition` animates between them. There is no
+  variant model beside the file: `studio_core::states` reads the lists
+  from the parse and edits them in place, keeping every byte it does not
+  change, and every edit is one undo step.
+- **A breakpoint is a state's `when`.** `breakpoint: "phone"` writes
+  `root.width < 600`; tablets are 600 up to 1024, desktops from 1024, so
+  each preview target turns on its own state. A person sees the condition
+  in the code view and may change it.
+- **A slot contribution is a `Contribution` in the shell.** It names its
+  slot, joins the slot by `mode` and `order`, and holds its delegate in a
+  `Component`; the block is not changed (ADR 0003, section 4). Slots are
+  checked against the block registry.
+- **The window.** The inspector's *States* section lists the selected
+  object's states as toggle buttons ("State compact"), with a field to
+  rename each ("Name of compact") and a button to remove it; "New state"
+  and "Add state" add one. Picking a state shows its "When" field, the
+  buttons "Breakpoint phone", "Breakpoint tablet" and "Breakpoint
+  desktop", a field for each value it changes (named `label.text`, empty
+  to remove), and "Change target", "Change property", "Change value" and
+  "Set change" for a new one. The canvas's frame says which state its
+  width shows ("State compact" or "No state"). The palette lists each
+  block's slots ("Slot controls of Player"), and when an instance of that
+  block is selected, a field and a "Contribute to controls" button for
+  each. Every control has an accessible role and name, and the scenarios
+  (`features/ui/variants.feature`) find them by those.
+
+DECISION: the frame names the root's state whose `when` is exactly a
+breakpoint's condition for the frame's width. Studio does not evaluate
+other conditions; the preview does, and shows what they turn on.
+DECISION: a value typed in the inspector for a state goes in as written
+(as `binding_set` takes it), so `"narrow"` with its quotes is a string and
+`parent.width / 2` an expression.
+
+Measured in a release build on the reference desktop:
+
+| Path | p50 | p95 |
+|---|---|---|
+| `state_edit` on a 200-object document, 50 edits of each kind in turn (`studio_mcp` example `state_perf`) | 1.8 ms | 2.0 ms |
+| A state's value edited in the inspector → new picture, one edit per 250 ms (`studio` example `budgets`) | 38 ms | 376 ms |
+| For comparison, the same run's plain value edit → new picture, one per 250 ms | 22 ms | 627 ms |
+
+Both picture paths miss section 6's 50 ms p95 in their tail, and the
+edit is not the cause (the first row). Each gesture makes several calls to
+the preview's inspector (reload, picture), which answers at most 20 a
+second and has a refused call wait out a one-second `Retry-After`; that
+wait was measured as the whole of such a tail before, and a launcher-set
+rate is the fix in hand (`ljos run --mcp-rate`). This lane did not measure
+the split of its own tail.
 
 ### S5: web
 
