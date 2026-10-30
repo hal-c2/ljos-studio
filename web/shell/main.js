@@ -7,12 +7,9 @@ import { memoryBackend } from "./store.js";
 import { openStudio } from "./studio.js";
 import { serve } from "./Workspace.js";
 import Window from "./qml/Window.qml";
+import sample from "./sample.txt?raw";
 
-const SAMPLE = {
-  "Main.qml": "import QtQuick\n\nItem {\n    id: root\n    width: 400\n    height: 300\n\n    Rectangle {\n        id: card\n        width: 120\n        height: 80\n        color: \"steelblue\"\n    }\n}\n",
-};
-
-const backend = memoryBackend(window.studioFiles ?? SAMPLE);
+const backend = memoryBackend(window.studioFiles ?? { "Main.qml": sample });
 const studio = await openStudio({ backend, caps: "inspect,mutate,run" });
 serve(studio);
 const { object } = mount(Window, document.getElementById("app"));
