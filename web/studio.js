@@ -103,8 +103,8 @@ export class Studio {
         }
       }
       if (failed.length === 0) return;
-      // Done again with the next call's, unless a newer text came since.
-      this.#core.unstored(JSON.stringify(failed.map(({ path, text }) => ({ path, text }))));
+      // Done again with the next call's, as the session holds the file then.
+      this.#core.unstored(JSON.stringify(failed.map(({ path }) => ({ path, text: null }))));
       const error = new Error(`storage did not keep ${failed.map((f) => f.path).join(", ")}`);
       error.refusal = {
         code: "internal",
