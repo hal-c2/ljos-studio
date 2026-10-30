@@ -1,6 +1,6 @@
 [package]
 name = "studio"
-description = "Ljós Studio: design QML apps by editing their files losslessly. `studio --mcp` serves its tools on stdio."
+description = "Ljós Studio: design QML apps by editing their files losslessly. `studio [DIR]` opens its window; `studio --mcp` serves its tools on stdio."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -11,14 +11,21 @@ publish.workspace = true
 [dependencies]
 studio_mcp = { path = "../studio_mcp" }
 studio_preview = { path = "../studio_preview" }
-ljos_mcp_core.workspace = true
+studio_blocks = { path = "../studio_blocks" }
+# The window, and `dev-qml` so that `--shell DIR` compiles a shell of the
+# person's own at start: Studio ships the compiler anyway, and a shell is a
+# directory of QML anyone may replace.
+ljos = { workspace = true, features = ["shell", "dev-qml"] }
+ljos_mcp_core = { workspace = true, features = ["http"] }
 anyhow.workspace = true
 clap.workspace = true
 tokio.workspace = true
 
-[dev-dependencies]
-serde_json.workspace = true
-tempfile.workspace = true
+# The shell Studio ships, compiled ahead of time against
+# crates/studio_blocks/ljostypes.json: the build script runs none of
+# Studio's code.
+[build-dependencies]
+ljos = { workspace = true, features = ["build"] }
 
 [lints]
 workspace = true

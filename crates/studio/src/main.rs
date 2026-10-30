@@ -1,24 +1,28 @@
 //! `studio`: Ljós Studio.
 //!
-//! `studio --mcp [DIR]` serves Studio's tools on stdio for an agent, on the
-//! project in DIR (the current directory when left out). The canvas comes
-//! with milestone S3; until then the tools are the whole of Studio.
+//! `studio [DIR]` opens Studio's window on the project in DIR (the current
+//! directory when left out), and serves the same tools to agents on a
+//! loopback endpoint while it is open. `studio --mcp [DIR]` serves them on
+//! stdio instead, with no window.
 
 use std::{path::PathBuf, sync::Arc};
 
-use anyhow::{Context, bail};
+use anyhow::Context;
 use clap::Parser;
-use ljos_mcp_core::{Cap, CapSet};
+use ljos_mcp_core::{
+    Cap, CapSet,
+    glue::http::{HttpConfig, HttpServer},
+};
 use studio_mcp::{Studio, StudioServer};
 use studio_preview::NativeHost;
 
 #[derive(Parser, Debug)]
 #[command(name = "studio", version, about)]
 struct Args {
-    /// Serve Studio's MCP tools on stdin and stdout.
+    /// Serve Studio's MCP tools on stdin and stdout, with no window.
     #[arg(long)]
     mcp: bool,
-    /// What the agent may do: a comma-separated list of `inspect`,
+    /// What an agent may do: a comma-separated list of `inspect`,
     /// `mutate`, `fs` and `run`.
     #[arg(long, default_value = "inspect,mutate")]
     caps: String,
@@ -26,6 +30,13 @@ struct Args {
     /// the `PATH`).
     #[arg(long)]
     ljos: Option<PathBuf>,
+    /// A shell of your own: a directory of QML whose `Main.qml` is the
+    /// window, compiled at start in place of the one Studio ships.
+    #[arg(long, value_name = "DIR", conflicts_with = "mcp")]
+    shell: Option<PathBuf>,
+    /// Serve no tools to agents while the window is open.
+    #[arg(long, conflicts_with = "mcp")]
+    no_agents: bool,
     /// The workspace: the project opened first, and the directory
     /// `project_open` may open others below.
     dir: Option<PathBuf>,
@@ -33,9 +44,6 @@ struct Args {
 
 fn main() -> anyhow::Result<()> {
     let args = Args::parse();
-    if !args.mcp {
-        bail!("the canvas is not built yet: run `studio --mcp [DIR]` to serve the tools");
-    }
     let caps = CapSet::parse_list(&args.caps)?;
     // Reading is what every other tool builds on.
     let caps = caps.with(Cap::Inspect);
@@ -44,26 +52,84 @@ fn main() -> anyhow::Result<()> {
         None => std::env::current_dir().context("the current directory")?,
     };
     let ljos = args.ljos.unwrap_or_else(NativeHost::default_program);
-    let state = preview_state_dir();
+    let state = state_dir();
+    let previews = state.clone();
     let studio = Studio::open(&dir)
         .with_context(|| format!("opening {}", dir.display()))?
         .with_previews(Arc::new(move |project| {
-            Box::new(NativeHost::new(project, &ljos, &state))
+            Box::new(NativeHost::new(project, &ljos, &previews))
         }));
-    let server = StudioServer::new(studio);
-    tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()?
-        .block_on(studio_mcp::serve_stdio(server, caps))?;
+    let server = Arc::new(StudioServer::new(studio));
+    if args.mcp {
+        let server = Arc::into_inner(server).expect("nothing else holds the server yet");
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()?
+            .block_on(studio_mcp::serve_stdio(server, caps))?;
+        return Ok(());
+    }
+    // Held until the window closes; dropping it stops the endpoint and
+    // removes its token file.
+    let _agents = if args.no_agents {
+        None
+    } else {
+        Some(serve_agents(&server, caps, &state)?)
+    };
+    window(server, args.shell)
+}
+
+/// Opens the window and runs until it is closed.
+fn window(server: Arc<StudioServer>, shell: Option<PathBuf>) -> anyhow::Result<()> {
+    let app = ljos::App::new("Ljós Studio")
+        .size(1440.0, 900.0)
+        .register(studio_blocks::register);
+    let app = match shell {
+        Some(dir) => app
+            .qml_dir(&dir, "Main")
+            .with_context(|| format!("compiling the shell in {}", dir.display()))?,
+        None => app
+            .source(ljos::include_qml!("shell.pack"))
+            .compiled(ljos::include_compiled!("shell.rs"))
+            .root("Main"),
+    };
+    app.run_with(move |setup| {
+        // Before the root is made, so its workspace starts with the session.
+        studio_blocks::serve(setup.engine(), server);
+        setup
+            .engine()
+            .create_from_url("Main", None, Vec::new())
+            .map_err(|e| -> ljos::SetupError { e.to_string().into() })
+    })?;
     Ok(())
 }
 
-/// Where previews keep their inspector token files and logs: a directory
-/// only this user can read (`NativeHost` makes it, or refuses what it finds;
-/// the token grants control of the preview), and outside the project, which
-/// the preview watches. One level, by process: a shared parent in a shared
-/// temporary directory would let one other user stop every Studio's previews.
-fn preview_state_dir() -> PathBuf {
+/// The window's tools on a loopback endpoint behind a bearer token, as a
+/// Ljós inspector serves its own: an agent works with the person on the
+/// session the window shows, and each sees the other's changes.
+fn serve_agents(
+    server: &Arc<StudioServer>,
+    caps: CapSet,
+    state: &std::path::Path,
+) -> anyhow::Result<HttpServer> {
+    let token_file = state.join("mcp.json");
+    let mut config = HttpConfig::loopback(caps).token_file(&token_file);
+    config.clean_up_on_signals = true;
+    let http = HttpServer::start(Arc::clone(server), config)
+        .context("serving Studio's tools on loopback")?;
+    eprintln!(
+        "studio: agents connect at {} with the token in {}",
+        http.url(),
+        token_file.display()
+    );
+    Ok(http)
+}
+
+/// Where previews keep their inspector token files and logs, and where the
+/// window's own token file is: a directory only this user can read (a token
+/// grants control), and outside the project, which the preview watches. One
+/// level, by process: a shared parent in a shared temporary directory would
+/// let one other user stop every Studio's previews.
+fn state_dir() -> PathBuf {
     let base = std::env::var_os("XDG_RUNTIME_DIR").map_or_else(std::env::temp_dir, PathBuf::from);
     base.join(format!("ljos-studio-{}", std::process::id()))
 }
