@@ -22,7 +22,7 @@ import { memoryBackend } from "./store.js";
 const here = dirname(fileURLToPath(import.meta.url));
 const root = join(here, "..");
 const SKIPPED_TAGS = ["preview", "ui", "disk"];
-const DEFAULT = ["features/tools.feature", "features/edit", "features/project", "features/web"];
+const DEFAULT = ["features/tools.feature", "features/theme.feature", "features/edit", "features/project", "features/web"];
 
 // --- Gherkin --------------------------------------------------------------
 
@@ -382,6 +382,12 @@ const STEPS = [
     const wanted = json(want);
     const got = must(w.refusal(), pointer);
     if (!equal(got, wanted)) throw new Error(`\`${pointer}\` is ${JSON.stringify(got)}, not ${JSON.stringify(wanted)}`);
+  }),
+  // The pattern is a Rust `regex` one; the ones the scenarios use mean the
+  // same to JavaScript's.
+  step("then", /^the refusal's message matches "(.+)"$/, (w, s, pattern) => {
+    const message = w.refusal().message ?? "";
+    if (!new RegExp(pattern).test(message)) throw new Error(`the message is ${JSON.stringify(message)}`);
   }),
   // What storage holds: a call resolves only once it has the files.
   step("then", /^the file "([^"]+)" is:$/, (w, s, name) => {

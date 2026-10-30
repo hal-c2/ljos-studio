@@ -17,8 +17,10 @@ ui="${LJOS_UI:-$root/../ljos-ui}"
 
 rm -rf "$app"
 mkdir -p "$app/qml" "$app/node_modules/@solidjs"
-cp "$root"/web/shell/* "$app/"
-cp "$root"/shell/*.qml "$app/qml/"
+cp "$root"/web/shell/{index.html,main.js,vite.config.js} "$app/"
+# The built-in shell, in a window of the page's own: the native window
+# loads a person's shell through `Ljos.Blocks`, which ljos-web lacks.
+cp "$root"/shell/Builtin/*.qml "$root"/web/shell/Window.qml "$app/qml/"
 cp -r "$root/web/standins" "$root/web/pkg" "$app/"
 cp "$root"/web/{store,studio,Workspace}.js "$app/"
 # What compiled QML and the page import, from the checkout: its runtime,

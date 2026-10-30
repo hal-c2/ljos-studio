@@ -557,10 +557,18 @@ the ljos-web requests below.
   through `Face::view`, so the two cannot say different things. The
   compiler sees QML stand-ins (`web/standins/Studio/`), checked against
   `crates/studio_blocks/ljostypes.json` by `studio_web`'s `standins` test.
-  `mise run web:shell` compiles `shell/*.qml` with ljos-web's `qmlc`,
-  bundles it with ljos-web's vite plugin and drives it in headless
-  Chromium (`web/shell.mjs`, `features/web/shell.feature`).
+  `mise run web:shell` compiles the built-in shell (`shell/Builtin/*.qml`)
+  in a window of the page's own (`web/shell/Window.qml`) with ljos-web's
+  `qmlc`, bundles it with ljos-web's vite plugin and drives it in headless
+  Chromium (`web/shell.mjs`, `features/web/shell.feature`): the S3
+  gestures, and a token set from the Tokens panel (9 of 9 checks).
+  `features:web` runs `features/theme.feature` too: `theme_set` reads and
+  writes the theme file in wasm with Ljós's reader and checker (83
+  scenarios, 5 not run here).
 
+DECISION: a page shows the built-in shell. The native window loads a
+person's shell through `Ljos.Blocks`' `ShellLoader` (S4), which ljos-web
+does not have; a request to ljos-web, not a second loader in JavaScript.
 DECISION: QML stand-ins plus a hand-written face, the interim of
 ljos-web's LJOS_WEB.md §3, until its generated `web` backend exists.
 DECISION: the face reads `studio_mcp::view` through wasm rather than
@@ -636,6 +644,8 @@ What it showed that the desktop does not:
     'query'`).
 14. ARIA roles for controls (`button`, `textbox`).
 15. Perhaps a Controls style with Ljós metrics on the web.
+16. `Ljos.Blocks` (`Contribution`, `Slot`, `ShellLoader`), so a page can
+    show a person's own shell as the native window does.
 
 **Request to ljos-ui:** gate rmcp and tokio in `ljos_mcp_core` behind a
 feature, so a wasm build needs no `tokio_unstable`.

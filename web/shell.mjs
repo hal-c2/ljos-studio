@@ -17,7 +17,7 @@ const ORIGIN = "https://shell.test";
 const TYPES = { ".js": "text/javascript", ".css": "text/css", ".html": "text/html", ".wasm": "application/wasm" };
 
 const browser = await chromium.launch({ headless: true });
-// The size `shell/Main.qml` gives its window: on the web the window fills
+// The size `shell/Window.qml` gives its window: on the web the window fills
 // the page.
 const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
 const failures = [];
@@ -68,6 +68,19 @@ check("the window's status shows no refusal", (await labelled("Status").innerTex
 await labelled("Undo").click();
 await page.waitForFunction(() => window.studio.text("Main.qml").text.includes("width: 120"), null, { timeout: 5000 }).catch(() => {});
 check("undo takes it back", (await code()).includes("width: 120") && !(await code()).includes("width: 150"), await code());
+
+// The tokens panel: a role filtered into view, set from its field, is the
+// `theme_set` call, written into the theme file beside the document.
+await labelled("Filter tokens").locator("input").fill("Spacing.md");
+const md = labelled("Spacing.md").locator("input");
+await md.waitFor({ timeout: 5000 }).catch(() => {});
+await md.fill("20");
+await md.press("Enter");
+const theme = () => page.evaluate(() => window.files.get("theme.json") ?? "");
+await page.waitForFunction(() => (window.files.get("theme.json") ?? "").includes('"md": 20'), null, { timeout: 5000 }).catch(() => {});
+check("setting a token in the tokens panel writes the theme file", (await theme()).includes('"md": 20'), await theme());
+await page.waitForFunction(() => document.querySelector('[aria-label="Spacing.md"] input')?.value === "20", null, { timeout: 5000 }).catch(() => {});
+check("the tokens panel shows the token's new value", (await md.inputValue()) === "20", await md.inputValue());
 
 if (shot) await page.screenshot({ path: shot });
 check("the page logged no errors", said.length === 0, said);

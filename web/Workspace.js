@@ -29,7 +29,7 @@ export function serve(studio) {
 }
 
 // The view's parts, as the workspace's properties.
-const PARTS = ["documents", "generation", "text", "layers", "selected", "selection", "inspector", "states", "palette", "done", "undone", "problem", "previews"];
+const PARTS = ["documents", "generation", "text", "layers", "selected", "selection", "inspector", "states", "palette", "done", "undone", "problem", "previews", "theme", "tokens"];
 
 export const Workspace = defineType("Workspace", QtObject, {
   properties: {
@@ -49,6 +49,10 @@ export const Workspace = defineType("Workspace", QtObject, {
     error: typed(kinds.string, ""),
     problem: typed(kinds.string, ""),
     previews: typed(kinds.bool, false),
+    theme: typed(kinds.string, ""),
+    // Empty, as the native block's, so a panel filters it before the
+    // first view is in.
+    tokens: [],
   },
   signals: ["answered", "refused"],
   methods: {

@@ -21,6 +21,8 @@ QtObject {
     readonly property string error
     readonly property string problem
     readonly property bool previews
+    readonly property string theme
+    readonly property var tokens
 
     signal answered(string tool, var answer)
     signal refused(string tool, var error)
