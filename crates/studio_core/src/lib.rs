@@ -95,6 +95,11 @@ pub enum Error {
     /// Writing would lose the comments the sidecar holds.
     #[error("`.studio/review.json` does not read ({0}): mend it or delete it")]
     ReviewUnreadable(String),
+    #[error(
+        "`.studio/review.json` was changed by somebody else while it was open; it is read again: \
+         look at the comments and try again"
+    )]
+    ReviewChanged,
 }
 
 /// A literal a property can be set to.
@@ -333,6 +338,10 @@ pub struct Session {
     on_write: Vec<OnWrite>,
     /// The review comments, read from the sidecar when first needed.
     review: Option<review::Review>,
+    /// Documents an undo of their making took away, with the comments that
+    /// were on their objects then: a redo makes the document again, and
+    /// they go back on their objects.
+    unmade: BTreeMap<String, Vec<String>>,
 }
 
 /// A comment with the handle of its object, when it has one.
@@ -377,6 +386,7 @@ impl Session {
             retired: BTreeMap::new(),
             on_write: Vec::new(),
             review: None,
+            unmade: BTreeMap::new(),
         }
     }
 
@@ -1367,6 +1377,14 @@ impl Session {
         if entry.created && !forward {
             self.store.remove(&path)?;
             self.retire(&path);
+            let on_it: Vec<String> = self.review.as_ref().map_or_else(Vec::new, |r| {
+                r.comments
+                    .iter()
+                    .filter(|c| c.doc == path && !c.orphaned)
+                    .map(|c| c.id.clone())
+                    .collect()
+            });
+            self.unmade.insert(path.clone(), on_it);
             self.reanchor(&path);
             return Ok(());
         }
@@ -1376,7 +1394,8 @@ impl Session {
             let mut doc = Document::new(text.clone(), past);
             doc.tracked = entry.handles_after.clone();
             self.store.write(&path, &text)?;
-            self.docs.insert(path, doc);
+            self.docs.insert(path.clone(), doc);
+            self.remade(&path);
             return Ok(());
         }
         let doc = self.doc(&path)?;
@@ -1435,12 +1454,56 @@ impl Session {
         Ok(())
     }
 
+    /// The comments an undo orphaned with `doc`, back on their objects
+    /// now that a redo made it again: found by key, as in a new session,
+    /// since the document's handles are new.
+    fn remade(&mut self, doc: &str) {
+        let Some(ids) = self.unmade.remove(doc) else {
+            return;
+        };
+        let Some(review) = &mut self.review else {
+            return;
+        };
+        for c in review.comments.iter_mut().filter(|c| ids.contains(&c.id)) {
+            c.orphaned = false;
+            review.bound.remove(&c.id);
+        }
+        review.looked_up.retain(|d| d != doc);
+        self.look_up(doc);
+        let _ = self.save_review();
+    }
+
     fn review(&mut self) -> &mut review::Review {
         if self.review.is_none() {
-            let text = self.store.read(review::FILE).ok();
-            self.review = Some(review::Review::read(text.as_deref()));
+            self.review = Some(self.read_review());
         }
         self.review.as_mut().expect("just read")
+    }
+
+    /// The sidecar as it is now. Only a sidecar that is not there means no
+    /// comments: one that would not read (not text, not to be opened) is
+    /// unreadable, and never written over.
+    fn read_review(&self) -> review::Review {
+        match self.store.read(review::FILE) {
+            Ok(text) => review::Review::read(Some(&text)),
+            Err(StoreError::Missing(_)) => review::Review::read(None),
+            Err(e) => review::Review::unreadable(e.to_string()),
+        }
+    }
+
+    /// Reads the sidecar again where somebody else changed it since this
+    /// session last read or wrote it, or where it did not read then (it
+    /// may be mended now). What the session knew of the old one (which
+    /// object each comment follows) goes: the comments are found by key
+    /// again, as in a new session.
+    fn refresh_review(&mut self) {
+        let Some(held) = &self.review else {
+            return;
+        };
+        let now = self.read_review();
+        if held.unreadable.is_some() || now.unreadable.is_some() || now.seen != held.seen {
+            self.review = Some(now);
+        }
     }
 
     /// Finds the objects of `doc`'s comments by their keys, once a session:
@@ -1551,13 +1614,22 @@ impl Session {
 
     /// Writes the comments down. The sidecar is not the design: nothing
     /// that shows the design is told.
+    ///
+    /// A sidecar somebody else changed since it was read is never written
+    /// over: it is read again instead, and the caller told.
     fn save_review(&mut self) -> Result<(), Error> {
+        let now = self.read_review();
         let review = self.review();
         if let Some(why) = &review.unreadable {
             return Err(Error::ReviewUnreadable(why.clone()));
         }
+        if now.seen != review.seen {
+            self.review = Some(now);
+            return Err(Error::ReviewChanged);
+        }
         let text = review.to_text();
         self.store.write(review::FILE, &text)?;
+        self.review().seen = Some(text);
         Ok(())
     }
 
@@ -1576,7 +1648,14 @@ impl Session {
 
     /// The comments on `doc`'s objects, or on every document's, in the
     /// order they were made.
-    pub fn comments(&mut self, doc: Option<&str>) -> Vec<CommentView> {
+    ///
+    /// A sidecar that does not read is refused rather than answered as no
+    /// comments: they are there, only not to be read.
+    pub fn comments(&mut self, doc: Option<&str>) -> Result<Vec<CommentView>, Error> {
+        self.refresh_review();
+        if let Some(why) = &self.review().unreadable {
+            return Err(Error::ReviewUnreadable(why.clone()));
+        }
         let docs: Vec<String> = {
             let review = self.review();
             let mut docs: Vec<String> = review
@@ -1593,12 +1672,12 @@ impl Session {
             self.look_up_now(d);
         }
         let review = self.review.as_ref().expect("read above");
-        review
+        Ok(review
             .comments
             .iter()
             .filter(|c| doc.is_none_or(|d| c.doc == d))
             .map(|c| self.view(c))
-            .collect()
+            .collect())
     }
 
     /// A new comment on the object `address` names, written at `at`
@@ -1613,6 +1692,7 @@ impl Session {
         at: u64,
     ) -> Result<CommentView, Error> {
         let text = note_text(text)?;
+        self.refresh_review();
         self.sync(doc)?;
         self.look_up(doc);
         let (handle, node) = self.resolve_now(doc, address)?;
@@ -1635,7 +1715,16 @@ impl Session {
         let n = handle[1..].parse().expect("handles are n and a number");
         review.bound.insert(comment.id.clone(), n);
         review.comments.push(comment.clone());
-        self.save_review()?;
+        // A comment the sidecar did not take is not made: kept, it would
+        // be written with the next, and a caller trying again after the
+        // refusal would have made it twice.
+        if let Err(e) = self.save_review() {
+            if let Some(review) = &mut self.review {
+                review.comments.retain(|c| c.id != comment.id);
+                review.bound.remove(&comment.id);
+            }
+            return Err(e);
+        }
         Ok(self.view(&comment))
     }
 
@@ -1668,6 +1757,10 @@ impl Session {
         id: &str,
         f: impl FnOnce(&mut Comment),
     ) -> Result<CommentView, Error> {
+        self.refresh_review();
+        if let Some(why) = &self.review().unreadable {
+            return Err(Error::ReviewUnreadable(why.clone()));
+        }
         let doc = self
             .review()
             .comments
@@ -1677,9 +1770,17 @@ impl Session {
             .ok_or_else(|| Error::NoComment(id.to_owned()))?;
         self.look_up_now(&doc);
         let comment = self.review().get_mut(id).expect("found above");
+        let before = comment.clone();
         f(comment);
         let comment = comment.clone();
-        self.save_review()?;
+        // As with a new comment: a change the sidecar did not take is not
+        // made.
+        if let Err(e) = self.save_review() {
+            if let Some(c) = self.review.as_mut().and_then(|r| r.get_mut(id)) {
+                *c = before;
+            }
+            return Err(e);
+        }
         Ok(self.view(&comment))
     }
 

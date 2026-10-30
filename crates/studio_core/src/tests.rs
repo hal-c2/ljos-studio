@@ -861,3 +861,84 @@ fn a_theme_file_reached_through_a_link_is_one_document() {
             .contains("20")
     );
 }
+
+/// A store that refuses to write the sidecar while `refuse` is set.
+struct Refusing {
+    inner: MemStore,
+    refuse: Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl Store for Refusing {
+    fn list(&self, extension: &str) -> Vec<String> {
+        self.inner.list(extension)
+    }
+    fn read(&self, path: &str) -> Result<String, StoreError> {
+        self.inner.read(path)
+    }
+    fn write(&self, path: &str, text: &str) -> Result<(), StoreError> {
+        if path == review::FILE && self.refuse.load(std::sync::atomic::Ordering::SeqCst) {
+            return Err(StoreError::Io {
+                path: path.to_owned(),
+                message: "no space left on device".to_owned(),
+            });
+        }
+        self.inner.write(path, text)
+    }
+    fn remove(&self, path: &str) -> Result<(), StoreError> {
+        self.inner.remove(path)
+    }
+    fn exists(&self, path: &str) -> bool {
+        self.inner.exists(path)
+    }
+    fn describe(&self) -> String {
+        self.inner.describe()
+    }
+}
+
+#[test]
+fn a_comment_the_sidecar_did_not_take_is_not_made() {
+    let refuse = Arc::new(std::sync::atomic::AtomicBool::new(true));
+    let mut session = Session::open(Box::new(Refusing {
+        inner: MemStore::new([("Main.qml".to_owned(), MAIN.to_owned())]),
+        refuse: refuse.clone(),
+    }));
+    let root = Address::Id("root".into());
+    assert!(matches!(
+        session.comment_add("Main.qml", &root, "Too wide", None, 1),
+        Err(Error::Store(_))
+    ));
+    assert!(session.comments(None).unwrap().is_empty());
+    refuse.store(false, std::sync::atomic::Ordering::SeqCst);
+    let made = session
+        .comment_add("Main.qml", &root, "Too wide", None, 2)
+        .unwrap();
+    assert_eq!(made.comment.id, "c1");
+    refuse.store(true, std::sync::atomic::Ordering::SeqCst);
+    assert!(session.comment_resolve("c1", true).is_err());
+    assert!(session.comment_reply("c1", "Narrowed it", None, 3).is_err());
+    let after = session.comments(None).unwrap();
+    assert_eq!(after.len(), 1);
+    assert!(!after[0].comment.resolved);
+    assert_eq!(after[0].comment.thread.len(), 1);
+}
+
+#[cfg(feature = "fs")]
+#[test]
+fn a_sidecar_that_is_not_text_is_never_written_over() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("Main.qml"), MAIN).unwrap();
+    std::fs::create_dir(dir.path().join(".studio")).unwrap();
+    let bytes = b"{\"version\": 1, \"comments\": [\xff\xfe]}";
+    std::fs::write(dir.path().join(review::FILE), bytes).unwrap();
+    let mut session = Session::open(Box::new(FsStore::new(dir.path()).unwrap()));
+    let root = Address::Id("root".into());
+    assert!(matches!(
+        session.comment_add("Main.qml", &root, "Too wide", None, 1),
+        Err(Error::ReviewUnreadable(_))
+    ));
+    assert!(matches!(
+        session.comments(None),
+        Err(Error::ReviewUnreadable(_))
+    ));
+    assert_eq!(std::fs::read(dir.path().join(review::FILE)).unwrap(), bytes);
+}

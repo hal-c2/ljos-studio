@@ -258,9 +258,12 @@ impl Studio {
             Err(e) => view.problem = e.to_string(),
         }
         view.flow = self.flow(doc).unwrap_or_default();
+        // A sidecar that does not read shows no comments here; `review`
+        // says why when asked.
         view.comments = self
             .session
             .comments(Some(doc))
+            .unwrap_or_default()
             .into_iter()
             .map(|v| {
                 let c = v.comment;

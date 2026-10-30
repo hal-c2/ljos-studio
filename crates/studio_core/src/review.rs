@@ -75,20 +75,44 @@ pub(crate) struct Review {
     /// Why the sidecar's comments could not be read: writing then would
     /// lose them, so it waits until somebody mends or deletes the file.
     pub unreadable: Option<String>,
+    /// The sidecar as it was last read or written, `None` for none: a
+    /// sidecar that is not this any more was changed by somebody else (a
+    /// pull, a second Studio, a person deleting it), and is read again
+    /// rather than written over.
+    pub seen: Option<String>,
 }
 
 impl Review {
     /// The sidecar's comments; none when there is no sidecar, or one this
     /// version cannot read, which is then left alone.
     pub fn read(text: Option<&str>) -> Self {
-        let mut review = Self::default();
+        let mut review = Self {
+            seen: text.map(str::to_owned),
+            ..Self::default()
+        };
         if let Some(text) = text {
             match serde_json::from_str::<OnDisk>(text) {
+                // Its fields may mean more than this version knows, and
+                // writing it as this version would drop them.
+                Ok(disk) if disk.version > VERSION => {
+                    review.unreadable = Some(format!(
+                        "a later Studio wrote it (version {}; this one reads {VERSION})",
+                        disk.version
+                    ));
+                }
                 Ok(disk) => review.comments = disk.comments,
                 Err(e) => review.unreadable = Some(e.to_string()),
             }
         }
         review
+    }
+
+    /// A sidecar that is there but could not be read at all.
+    pub fn unreadable(why: String) -> Self {
+        Self {
+            unreadable: Some(why),
+            ..Self::default()
+        }
     }
 
     pub fn to_text(&self) -> String {
@@ -152,5 +176,15 @@ mod tests {
         assert!(review.comments.is_empty());
         assert!(review.unreadable.is_some());
         assert!(Review::read(None).comments.is_empty());
+    }
+
+    #[test]
+    fn a_sidecar_a_later_version_wrote_is_left_alone() {
+        let review = Review::read(Some(r#"{"version": 2, "comments": []}"#));
+        assert!(
+            review
+                .unreadable
+                .is_some_and(|why| why.contains("version 2"))
+        );
     }
 }

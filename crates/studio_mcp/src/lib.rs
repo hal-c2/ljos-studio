@@ -402,6 +402,7 @@ pub(crate) fn error(e: Error) -> SurfaceError {
         Error::NoId(_) => kind(ErrorCode::InvalidArgument, "no_id"),
         Error::NoComment(_) => kind(ErrorCode::NotFound, "no_comment"),
         Error::ReviewUnreadable(_) => kind(ErrorCode::NotActionable, "review_unreadable"),
+        Error::ReviewChanged => kind(ErrorCode::StaleRef, "review_changed"),
         Error::NotAContribution(_) => kind(ErrorCode::InvalidArgument, "not_a_contribution"),
         Error::NoToken(_) => kind(ErrorCode::NotFound, "no_token"),
         Error::Theme(errors) => SurfaceError::new(ErrorCode::InvalidArgument, message)

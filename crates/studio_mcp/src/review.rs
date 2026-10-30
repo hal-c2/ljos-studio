@@ -140,6 +140,7 @@ fn review(studio: &Mutex<Studio>, ctx: &CallCtx, a: ReviewArgs) -> Result<Review
             };
             let comments = session
                 .comments(a.doc.as_deref())
+                .map_err(error)?
                 .into_iter()
                 .filter(|c| node.is_none() || c.node == node)
                 .map(CommentOut::from)
