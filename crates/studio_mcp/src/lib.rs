@@ -229,9 +229,7 @@ impl StudioServer {
         args: serde_json::Value,
     ) -> Result<ToolReply, SurfaceError> {
         if name == "preview_screenshot" {
-            let def = self.tools.check(name, ctx)?;
-            let per_copy = def.per_copy_bytes();
-            return preview_tools::screenshot(&self.studio, args).map(|r| r.capped(per_copy));
+            return self.picture(ctx, args, preview_tools::Picturing::Latest);
         }
         let out = self.tools.call(name, ctx, args).0.map(ToolReply::from);
         // Writes tell the watchers as they happen (`follow`); these change
@@ -240,6 +238,30 @@ impl StudioServer {
             lock(&self.studio).watchers.tell();
         }
         out
+    }
+}
+
+impl StudioServer {
+    /// `preview_screenshot` for a window: what the preview shows now, even
+    /// if a burst's last writes are still to come. Unlike an agent, a window
+    /// never waits for the reload budget: it fetches again after the catch-up.
+    pub fn shown_picture(
+        &self,
+        ctx: &CallCtx,
+        args: serde_json::Value,
+    ) -> Result<ToolReply, SurfaceError> {
+        self.picture(ctx, args, preview_tools::Picturing::AsShown)
+    }
+
+    fn picture(
+        &self,
+        ctx: &CallCtx,
+        args: serde_json::Value,
+        picturing: preview_tools::Picturing,
+    ) -> Result<ToolReply, SurfaceError> {
+        let def = self.tools.check("preview_screenshot", ctx)?;
+        let per_copy = def.per_copy_bytes();
+        preview_tools::screenshot(&self.studio, args, picturing).map(|r| r.capped(per_copy))
     }
 }
 

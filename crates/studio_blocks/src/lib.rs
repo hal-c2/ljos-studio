@@ -332,7 +332,7 @@ fn run(server: &StudioServer, writes: &AtomicU64, doc: &str, job: Job) -> Done {
         Job::Picture { generation } => {
             let args = json!({"format": "png", "max_size": 1280});
             let picture = server
-                .call("preview_screenshot", &CallCtx::new(caps()), args)
+                .shown_picture(&CallCtx::new(caps()), args)
                 .map_err(|e| e.to_string())
                 .and_then(|reply| {
                     let image = reply

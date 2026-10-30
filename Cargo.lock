@@ -2737,6 +2737,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "ljos_3d"
+version = "0.0.0"
+dependencies = [
+ "slotmap",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "ljos_a11y"
 version = "0.0.0"
 dependencies = [
@@ -2815,6 +2823,7 @@ name = "ljos_design_qml"
 version = "0.0.0"
 dependencies = [
  "ljos_compiler",
+ "ljos_design",
  "ljos_engine",
  "ljos_ir",
  "qt_types",
@@ -3042,6 +3051,7 @@ version = "0.0.0"
 dependencies = [
  "bitflags 2.13.2",
  "egui",
+ "ljos_3d",
  "ljos_runtime",
  "ljos_shader",
  "lyon_tessellation",

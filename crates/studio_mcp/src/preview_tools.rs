@@ -296,8 +296,7 @@ fn open(studio: &Mutex<Studio>, a: OpenArgs) -> Result<OpenOut, SurfaceError> {
 fn state(studio: &Mutex<Studio>, a: StateArgs) -> Result<StateOut, SurfaceError> {
     let mut studio = lock(studio);
     let previews = studio.previews.clone();
-    let mut previews = preview::lock(&previews);
-    previews.catch_up();
+    let mut previews = preview::caught_up(&previews);
     let open = previews
         .open
         .as_mut()
@@ -359,8 +358,23 @@ fn state(studio: &Mutex<Studio>, a: StateArgs) -> Result<StateOut, SurfaceError>
     })
 }
 
+/// How a picture treats writes a burst has not shown yet.
+#[derive(Clone, Copy)]
+pub(crate) enum Picturing {
+    /// An agent's look: it sees every write, waiting for the budget if a
+    /// burst spent it.
+    Latest,
+    /// A window's: it must not hold up the person typing, and fetches again
+    /// when the catch-up gives a new generation.
+    AsShown,
+}
+
 /// The picture as an MCP image, with its size as the structured answer.
-pub(crate) fn screenshot(studio: &Mutex<Studio>, args: Value) -> Result<ToolReply, SurfaceError> {
+pub(crate) fn screenshot(
+    studio: &Mutex<Studio>,
+    args: Value,
+    picturing: Picturing,
+) -> Result<ToolReply, SurfaceError> {
     let a: ScreenshotArgs = serde_json::from_value(if args.is_null() { json!({}) } else { args })
         .map_err(|e| SurfaceError::invalid_argument(e.to_string()))?;
     let side = a
@@ -368,8 +382,14 @@ pub(crate) fn screenshot(studio: &Mutex<Studio>, args: Value) -> Result<ToolRepl
         .unwrap_or(PICTURE_SIDE)
         .clamp(16, MAX_PICTURE_SIDE);
     let studio = lock(studio);
-    let mut previews = preview::lock(&studio.previews);
-    previews.catch_up();
+    let mut previews = match picturing {
+        Picturing::Latest => preview::caught_up(&studio.previews),
+        Picturing::AsShown => {
+            let mut previews = preview::lock(&studio.previews);
+            previews.catch_up();
+            previews
+        }
+    };
     let open = previews
         .open
         .as_mut()
@@ -461,10 +481,9 @@ pub(crate) fn pick(
 
 fn events(studio: &Mutex<Studio>, a: EventsArgs) -> EventsOut {
     let studio = lock(studio);
-    let mut previews = preview::lock(&studio.previews);
     // What a burst of writes left out is reloaded first, so its outcome
     // is among the events.
-    previews.catch_up();
+    let mut previews = preview::caught_up(&studio.previews);
     previews.pull_logs();
     let since = a.since.unwrap_or(0).min(previews.events.len());
     let end = (since + EVENTS_PAGE).min(previews.events.len());
@@ -518,7 +537,7 @@ pub(crate) fn add(registry: ToolRegistry, studio: &Arc<Mutex<Studio>>) -> ToolRe
             .annotated(ToolAnnotations::READ_ONLY),
             typed({
                 let studio = s();
-                move |_, a: Value| screenshot(&studio, a).map(|r| r.structured)
+                move |_, a: Value| screenshot(&studio, a, Picturing::Latest).map(|r| r.structured)
             }),
         )
         .with(

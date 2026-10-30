@@ -14,6 +14,8 @@ use studio_mcp::{Studio, StudioServer};
 #[derive(Default)]
 struct Seen {
     calls: Vec<String>,
+    /// When each reload arrived, as the inspector would count it.
+    reloads: Vec<std::time::Instant>,
     generation: u64,
     fail_next: bool,
     /// Calls that answer with an error, by how the call's note starts; each
@@ -66,6 +68,7 @@ impl PreviewHost for Recorder {
     fn reload(&mut self) -> Result<Reload, PreviewError> {
         self.note("reload".to_owned())?;
         let mut seen = self.0.lock().unwrap();
+        seen.reloads.push(std::time::Instant::now());
         if std::mem::take(&mut seen.fail_next) {
             return Ok(Reload::Failed {
                 message: "Shell.qml:4: expected a property".to_owned(),
@@ -354,6 +357,59 @@ fn a_burst_of_writes_reloads_within_the_budget_and_a_reading_catches_up() {
     assert_eq!(f.calls(), ["reload", "screenshot 800"]);
     f.call("preview_screenshot", json!({})).unwrap();
     assert_eq!(f.calls(), ["screenshot 800"]);
+}
+
+/// No second holds more reloads than the budget allows: 8 (preview.rs).
+fn assert_within_the_budget(f: &Fixture) {
+    let seen = f.seen.lock().unwrap();
+    for (first, last) in seen.reloads.iter().zip(seen.reloads.iter().skip(8)) {
+        assert!(
+            last.duration_since(*first) >= std::time::Duration::from_secs(1),
+            "nine reloads in {:?}",
+            last.duration_since(*first)
+        );
+    }
+}
+
+fn set_text(f: &Fixture, i: usize) {
+    f.call(
+        "binding_set",
+        json!({ "doc": "Shell.qml", "node": { "path": "root/1" }, "name": "text", "value": format!("\"{i}\"") }),
+    )
+    .unwrap();
+}
+
+#[test]
+fn a_burst_with_a_picture_after_every_write_stays_within_the_budget() {
+    let f = Fixture::new();
+    f.call("preview_open", json!({ "doc": "Shell.qml" }))
+        .unwrap();
+    for i in 0..20 {
+        set_text(&f, i);
+        f.call("preview_screenshot", json!({})).unwrap();
+    }
+    assert_within_the_budget(&f);
+    // Each look saw the write before it, budget or no budget.
+    assert_eq!(f.seen.lock().unwrap().reloads.len(), 20);
+}
+
+#[test]
+fn a_window_fetching_pictures_in_a_burst_stays_within_the_budget_and_ends_up_shown() {
+    let f = Fixture::new();
+    f.call("preview_open", json!({ "doc": "Shell.qml" }))
+        .unwrap();
+    let ctx = CallCtx::new(CapSet::of([Cap::Inspect, Cap::Mutate, Cap::Run]));
+    let mut last_write = std::time::Instant::now();
+    for i in 0..20 {
+        last_write = std::time::Instant::now();
+        set_text(&f, i);
+        f.server.shown_picture(&ctx, json!({})).unwrap();
+    }
+    assert_within_the_budget(&f);
+    // Whatever the timer has done by now, a reading shows the last write.
+    f.call("preview_events", json!({})).unwrap();
+    assert_within_the_budget(&f);
+    assert!(*f.seen.lock().unwrap().reloads.last().unwrap() >= last_write);
 }
 
 #[test]
