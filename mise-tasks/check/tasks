@@ -163,11 +163,16 @@ stub cargo 'echo "cargo $*"; if [ "$1" = install ]; then shift; while [ "$1" != 
 ENVS="LJOS=/some/ljos" call 'find_ljos; echo "L=$LJOS"'
 says "LJOS is taken as it is" "L=/some/ljos"
 call 'find_ljos; echo "L=$LJOS"'
-says "with no ljos-ui beside it, it says what it installs" "cargo install --git https://github.com/hal-c2/ljos-ui --rev abc123 --locked --force ljos_cli --root $co/target/tools"
-says "and uses that" "L=$co/target/tools/bin/ljos"
-stub cargo 'echo "cargo should not run"; exit 1'
+refuses "with no ljos-ui beside it, it installs nothing and names setup" "run mise run setup"
+says "and the command setup runs" "cargo install --git https://github.com/hal-c2/ljos-ui --rev abc123 --locked --force ljos_cli --root $co/target/tools"
+if [ -e "$co/target/tools/bin/ljos" ]; then bad "find_ljos installed nothing"; else ok "find_ljos installed nothing"; fi
+call 'install_ljos'
+says "setup prints what it installs" "cargo install --git https://github.com/hal-c2/ljos-ui --rev abc123 --locked --force ljos_cli --root $co/target/tools"
 call 'find_ljos; echo "L=$LJOS"'
-says "the same pin is not installed twice" "L=$co/target/tools/bin/ljos"
+says "and then it is used" "L=$co/target/tools/bin/ljos"
+stub cargo 'echo "cargo should not run"; exit 1'
+call 'install_ljos'
+says "setup does not install the same pin twice" "already in $co/target/tools"
 mkdir -p "$scratch/layout/ljos-ui"
 touch "$scratch/layout/ljos-ui/Cargo.toml"
 stub cargo 'echo "cargo $*"'
@@ -175,6 +180,26 @@ call 'find_ljos; echo "L=$LJOS"'
 says "a ljos-ui beside this one is built instead" "-p ljos_cli --bin ljos"
 says "and its program used" "ljos-ui/target/debug/ljos"
 rm -rf "$scratch/layout/ljos-ui"
+
+# --- wasm-bindgen ------------------------------------------------------------
+echo 'wasm-bindgen = "=9.9.9"' >>"$co/Cargo.toml"
+stub wasm-bindgen 'echo "wasm-bindgen 0.0.1"'
+call 'find_bindgen'
+refuses "another wasm-bindgen is not taken, and nothing installs it" "no wasm-bindgen 9.9.9: run mise run setup"
+says "and the command setup runs" "cargo install wasm-bindgen-cli --version =9.9.9 --locked --root $co/target/tools"
+stub wasm-bindgen 'echo "wasm-bindgen 9.9.9"'
+call 'find_bindgen; echo "B=$WASM_BINDGEN"'
+says "the pinned one on PATH is taken" "B=wasm-bindgen"
+ENVS="WASM_BINDGEN=$stubs/wasm-bindgen" call 'find_bindgen; echo "B=$WASM_BINDGEN"'
+says "WASM_BINDGEN names it" "B=$stubs/wasm-bindgen"
+stub other-bindgen 'echo "wasm-bindgen 0.0.1"'
+ENVS="WASM_BINDGEN=$stubs/other-bindgen" call 'find_bindgen'
+refuses "a named one of another version is refused, not passed over" "is not wasm-bindgen 9.9.9"
+unstub wasm-bindgen
+unstub other-bindgen
+stub cargo 'echo "cargo $*"'
+call 'install_bindgen'
+says "setup prints and runs the install" "cargo install wasm-bindgen-cli --version =9.9.9 --locked --root $co/target/tools"
 
 # --- Paths from where the person asked ---------------------------------------
 mkdir -p "$scratch/asked/project"

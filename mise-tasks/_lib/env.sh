@@ -226,16 +226,21 @@ find_design_qml() {
   export LJOS_DESIGN
 }
 
+# The `cargo install` that puts the ljos program of the pinned commit in our
+# target's tools, and the file that says which commit is there.
+ljos_install_command() {
+  printf 'cargo install --git https://github.com/hal-c2/ljos-ui --rev %s --locked --force ljos_cli --root %s\n' "$(ljos_ui_rev)" "$(own_target)/tools"
+}
+
 # Sets LJOS, the `ljos` previews run: as named; else built from a ljos-ui
-# checkout beside this one; else installed from the commit Cargo.toml pins,
-# into our own target and saying so first, as `web:build` does its bindgen.
+# checkout beside this one; else the one `mise run setup` installed from the
+# commit Cargo.toml pins. Nothing is downloaded here: a missing program is an
+# error that names `mise run setup` and the command it runs.
 find_ljos() {
   if [ -n "${LJOS:-}" ]; then
     export LJOS
     return 0
   fi
-  local target
-  target="$(own_target)"
   local sibling="${LJOS_UI:-$studio_root/../ljos-ui}"
   if [ -f "$sibling/Cargo.toml" ]; then
     cargo build --manifest-path "$sibling/Cargo.toml" -p ljos_cli --bin ljos
@@ -246,17 +251,72 @@ find_ljos() {
   local rev tools
   rev="$(ljos_ui_rev)"
   [ -n "$rev" ] || die "Cargo.toml names no ljos-ui rev, and no ljos-ui checkout is beside this one; name a program with LJOS=/path/to/ljos"
-  tools="$target/tools"
-  # Stamped with the commit, so a moved pin installs again, and an unmoved one
-  # asks nothing of the network.
+  tools="$(own_target)/tools"
+  # Stamped with the commit, so a moved pin asks for setup again.
   if [ ! -x "$tools/bin/ljos" ] || [ "$(cat "$tools/ljos.rev" 2>/dev/null || true)" != "$rev" ]; then
-    echo "No LJOS and no ../ljos-ui: building the ljos program from the commit Cargo.toml pins, into $tools:" >&2
-    echo "  cargo install --git https://github.com/hal-c2/ljos-ui --rev $rev --locked --force ljos_cli --root $tools" >&2
-    cargo install --git https://github.com/hal-c2/ljos-ui --rev "$rev" --locked --force ljos_cli --root "$tools"
-    printf '%s\n' "$rev" >"$tools/ljos.rev"
+    die "no ljos program for ljos-ui $rev (no LJOS, no ../ljos-ui): run mise run setup, which runs
+  $(ljos_install_command)
+or name one with LJOS=/path/to/ljos."
   fi
   LJOS="$tools/bin/ljos"
   export LJOS
+}
+
+# What `mise run setup` does for ljos: install it unless the pin's is there.
+install_ljos() {
+  local rev tools
+  rev="$(ljos_ui_rev)"
+  [ -n "$rev" ] || die "Cargo.toml names no ljos-ui rev"
+  tools="$(own_target)/tools"
+  if [ -x "$tools/bin/ljos" ] && [ "$(cat "$tools/ljos.rev" 2>/dev/null || true)" = "$rev" ]; then
+    echo "ljos for ljos-ui $rev is already in $tools"
+    return 0
+  fi
+  echo "$(ljos_install_command)"
+  cargo install --git https://github.com/hal-c2/ljos-ui --rev "$rev" --locked --force ljos_cli --root "$tools"
+  printf '%s\n' "$rev" >"$tools/ljos.rev"
+}
+
+# The wasm-bindgen version Cargo.toml pins; the CLI must be the same one.
+bindgen_version() {
+  sed -n 's/^wasm-bindgen = "=\(.*\)"$/\1/p' "$studio_root/Cargo.toml"
+}
+
+bindgen_install_command() {
+  printf 'cargo install wasm-bindgen-cli --version =%s --locked --root %s\n' "$(bindgen_version)" "$(own_target)/tools"
+}
+
+# Sets WASM_BINDGEN: as named, else on PATH, else in our tools, if it is the
+# pinned version; otherwise an error naming `mise run setup`.
+find_bindgen() {
+  local want candidate
+  want="$(bindgen_version)"
+  for candidate in "${WASM_BINDGEN:-}" wasm-bindgen "$(own_target)/tools/bin/wasm-bindgen"; do
+    [ -n "$candidate" ] || continue
+    if [ "$("$candidate" --version 2>/dev/null || true)" = "wasm-bindgen $want" ]; then
+      WASM_BINDGEN="$candidate"
+      export WASM_BINDGEN
+      return 0
+    fi
+    # A named one that is not the pinned version is not passed over.
+    if [ "$candidate" = "${WASM_BINDGEN:-}" ]; then
+      die "WASM_BINDGEN=$candidate is not wasm-bindgen $want"
+    fi
+  done
+  die "no wasm-bindgen $want: run mise run setup, which runs
+  $(bindgen_install_command)
+or name one with WASM_BINDGEN=/path/to/wasm-bindgen."
+}
+
+install_bindgen() {
+  local want
+  want="$(bindgen_version)"
+  if [ "$("$(own_target)/tools/bin/wasm-bindgen" --version 2>/dev/null || true)" = "wasm-bindgen $want" ]; then
+    echo "wasm-bindgen $want is already in $(own_target)/tools"
+    return 0
+  fi
+  echo "$(bindgen_install_command)"
+  cargo install wasm-bindgen-cli --version "=$want" --locked --root "$(own_target)/tools"
 }
 
 # The shell as an ljos-web page, assembled in the target (nothing is written

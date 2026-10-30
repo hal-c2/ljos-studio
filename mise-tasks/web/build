@@ -1,22 +1,15 @@
 #!/usr/bin/env bash
 #MISE description="Build Studio for the web: studio_web as wasm and its JavaScript glue, into web/pkg"
 set -euo pipefail
-root=$PWD
-target=${CARGO_TARGET_DIR:-$root/target}
+. "$(dirname "$0")/../_lib/env.sh"
 if ! [ -d "$(rustc --print sysroot)/lib/rustlib/wasm32-unknown-unknown" ]; then
-  echo "This Rust has no wasm32 target: run rustup target add wasm32-unknown-unknown" >&2
-  exit 1
+  die "This Rust has no wasm32 target: run rustup target add wasm32-unknown-unknown"
 fi
+# The glue must come from the CLI of the version the crate links; found
+# before the build, so a missing one costs no compile.
+find_bindgen
 cargo build --target wasm32-unknown-unknown -p studio_web --profile web
-# The glue must come from the CLI of the version the crate links.
-want=$(sed -n 's/^wasm-bindgen = "=\(.*\)"$/\1/p' Cargo.toml)
-bindgen=${WASM_BINDGEN:-wasm-bindgen}
-if [[ "$("$bindgen" --version 2>/dev/null || true)" != "wasm-bindgen $want" ]]; then
-  echo "Building the wasm-bindgen it needs into $target/tools: cargo install wasm-bindgen-cli --version =$want --locked --root $target/tools" >&2
-  cargo install wasm-bindgen-cli --version "=$want" --locked --root "$target/tools"
-  bindgen=$target/tools/bin/wasm-bindgen
-fi
 # `--target web` is an ES module a page imports and node can start from
 # the bytes (`initSync`), so one build serves the browser and the runner.
-"$bindgen" --target web --out-dir web/pkg \
-  "$target/wasm32-unknown-unknown/web/studio_web.wasm"
+"$WASM_BINDGEN" --target web --out-dir "$studio_root/web/pkg" \
+  "$(own_target)/wasm32-unknown-unknown/web/studio_web.wasm"

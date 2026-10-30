@@ -46,11 +46,15 @@ Everything found has an override: `LJOS_WEB`, `PLAYWRIGHT`, `QMLC`,
 `QT_INSTALL_QML`, `LJOS_UI`, `LJOS`, `WASM_BINDGEN`. None is needed in this
 layout.
 
-`mise run features` needs the `ljos` program: `LJOS`, else one built in a
-`../ljos-ui` beside this checkout, else it prints and runs
-`cargo install --git https://github.com/hal-c2/ljos-ui --rev <rev> ljos_cli`
-into `target/tools`. `mise run web:browser`, `web:shell` and `web:serve:check`
-drive headless Chromium, which also needs
+Nothing downloads on its own except `mise run setup`, which installs the
+two programs cargo does not build here, into `target/tools`, printing each
+command: the `ljos` program at the ljos-ui commit Cargo.toml pins (`mise run
+features` and `mise run studio` run previews with it; skipped when `LJOS` is
+set or a `../ljos-ui` checkout is beside this one, which they build from), and
+the `wasm-bindgen` CLI at the version Cargo.toml pins (`mise run web:build`
+and every web task after it). A task that needs one and lacks it says to run
+`mise run setup` and the command it would run. `mise run web:browser`,
+`web:shell` and `web:serve:check` drive headless Chromium, which also needs
 `(cd ../ljos-web && pnpm --filter ljos-web-example-web exec playwright install chromium)`.
 
 ## Status

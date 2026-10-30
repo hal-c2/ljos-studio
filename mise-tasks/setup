@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+#MISE description="Install the two programs the tasks use that cargo does not build here: ljos at the pinned ljos-ui (when no ../ljos-ui is beside this checkout) and the pinned wasm-bindgen CLI, into the target's tools"
+set -euo pipefail
+. "$(dirname "$0")/_lib/env.sh"
+# The only task that downloads; every other one says to run this instead.
+# Each step prints the command it runs, and skips what is already there.
+if [ -n "${LJOS:-}" ]; then
+  echo "LJOS is set ($LJOS): no ljos to install"
+elif [ -f "${LJOS_UI:-$studio_root/../ljos-ui}/Cargo.toml" ]; then
+  echo "a ljos-ui checkout is beside this one: the tasks build ljos from it"
+else
+  install_ljos
+fi
+install_bindgen

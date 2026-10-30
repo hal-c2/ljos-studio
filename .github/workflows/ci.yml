@@ -34,7 +34,9 @@ jobs:
       - run: mise run check:tasks
       - run: mise run check:wasm
       - run: mise run test
-      # Builds ljos from the rev Cargo.toml pins, unless the cache above has it.
+      # ljos at the rev Cargo.toml pins and the pinned wasm-bindgen, unless the
+      # cache above has them: the only step that installs anything.
+      - run: mise run setup
       - run: mise run features
       - run: mise run features:web
 
@@ -88,6 +90,7 @@ jobs:
         working-directory: ljos-web
       - run: pnpm --filter ljos-web-example-web exec playwright install --with-deps chromium
         working-directory: ljos-web
+      - run: mise run setup
       - run: mise run web:browser
       - run: mise run web:shell
       - run: mise run web:serve:check
