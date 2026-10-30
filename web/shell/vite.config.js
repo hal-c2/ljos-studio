@@ -26,6 +26,13 @@ export default defineConfig({
     faces,
     qml({
       qmlc: process.env.QMLC ?? "qmlc",
+      // A project `serve.mjs` compiles is its own root: qmlc finds modules
+      // by every qmldir under its root, and the others there are not this
+      // project's.
+      args: (file) => {
+        const project = /^(.*\/projects\/\d+)\//.exec(file.replaceAll("\\", "/"));
+        return project ? ["--root", project[1]] : [];
+      },
       standins: [path("./standins"), ...(process.env.LJOS_DESIGN ? [process.env.LJOS_DESIGN] : [])],
     }),
   ],

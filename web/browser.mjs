@@ -7,9 +7,10 @@
 //
 // Nothing is served from a network: Playwright answers the page's requests
 // from this directory, with the headers that make the page cross-origin
-// isolated (a shared buffer needs them). The frame mounts with a stand-in
-// for a QML compiler, which shows the entry's text as it is: ljos-web has
-// none that runs in a page, and the point here is that the files arrive.
+// isolated (a shared buffer needs them). The frame mounts with the fake
+// Compiler (`compiler.js`), which shows the entry's text as it is: the
+// point here is that the files arrive. `web/features.browser.mjs` runs
+// previews that ljos-web compiles.
 
 import { readFileSync } from "node:fs";
 import { dirname, extname, join } from "node:path";
@@ -65,13 +66,14 @@ const PAGES = {
   "/frame.html": `<!doctype html><meta charset="utf-8"><div id="preview"></div>
 <script type="module">
   import { servePreview } from "./page.js";
+  import { fakeCompiler } from "./compiler.js";
   const compiler = new URLSearchParams(location.search).has("compiler");
   servePreview({
     element: document.getElementById("preview"),
     // Stand-ins: "compiles" by showing the entry's text; logs a line.
-    compile: compiler ? async (files, entry) => ({ text: files[entry] }) : undefined,
+    compile: compiler ? fakeCompiler() : undefined,
     mount: (component, element) => {
-      element.textContent = component.text;
+      element.textContent = component;
       console.log("mounted");
       return { dispose() {} };
     },
@@ -189,7 +191,11 @@ check(
   c.events.ok?.events?.some((e) => e.kind === "reloaded") && c.events.ok.events.some((e) => e.kind === "log" && e.message === "mounted"),
   c.events,
 );
-check("what ljos-web cannot answer is refused as unsupported", c.outline.error?.details?.code === "unsupported" || /unsupported/.test(c.outline.error?.message ?? ""), c.outline);
+check(
+  "what ljos-web cannot answer is refused as not supported, naming the request it waits on",
+  c.outline.error?.details?.kind === "not_supported" && c.outline.error.details.ljos_web_request === 3,
+  c.outline,
+);
 check("a removed frame ends the preview", c.gone.error?.details?.kind === "ended" || c.gone.error?.details?.kind === "no_preview", c.gone);
 const p = bridge.plain;
 check("without a compiler the preview does not start, and says why", p.open.error?.details?.kind === "start" && /no QML compiler/.test(p.open.error.message), p.open);

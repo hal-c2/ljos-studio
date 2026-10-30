@@ -39,6 +39,36 @@ const body = (req) =>
     req.on("error", reject);
   });
 
+// The files qmlc is shown for a project previewed with `aliases`
+// (`[{module, dir}]`): an aliased module's own files are the alias
+// directory's, as `ljos run --alias` imports them. qmlc finds a module by
+// every `qmldir` under its root, and of two declaring one module it takes
+// either (ljos-web request 17); Qt takes the one at the module's import
+// path, so a `qmldir` elsewhere declaring a module that one at its path
+// declares too is not shown (a project's `mocks/`).
+export function forQmlc(files, aliases = []) {
+  const shown = { ...files };
+  const direct = (path, dir) => path.startsWith(`${dir}/`) && !path.slice(dir.length + 1).includes("/");
+  for (const { module, dir } of aliases) {
+    const at = module.replaceAll(".", "/");
+    for (const path of Object.keys(shown)) if (direct(path, at)) delete shown[path];
+    for (const [path, text] of Object.entries(files)) if (direct(path, dir)) shown[`${at}/${path.slice(dir.length + 1)}`] = text;
+  }
+  const declared = (path) => /^\s*module\s+([\w.]+)/m.exec(shown[path])?.[1];
+  const qmldirs = Object.keys(shown).filter((p) => p === "qmldir" || p.endsWith("/qmldir"));
+  const atPath = new Set(qmldirs.filter((p) => declared(p) && p === `${declared(p).replaceAll(".", "/")}/qmldir`).map(declared));
+  for (const p of qmldirs) if (atPath.has(declared(p)) && p !== `${declared(p).replaceAll(".", "/")}/qmldir`) delete shown[p];
+  // A Ljós block's `# block Name Version File …` line declares its type
+  // to Ljós; qmlc reads only Qt's type lines, so it is shown one as well
+  // (ljos-web request 19).
+  for (const p of Object.keys(shown).filter((p) => p === "qmldir" || p.endsWith("/qmldir"))) {
+    const typed = new Set([...shown[p].matchAll(/^\s*(?:singleton\s+)?([A-Z]\w*)\s+\d/gm)].map((m) => m[1]));
+    const blocks = [...shown[p].matchAll(/^#\s*block\s+([A-Z]\w*)\s+(\d+(?:\.\d+)?)\s+(\S+\.qml)\b/gm)].filter((m) => !typed.has(m[1]));
+    if (blocks.length > 0) shown[p] = `${shown[p].replace(/\n?$/, "\n")}${blocks.map((m) => `${m[1]} ${m[2]} ${m[3]}`).join("\n")}\n`;
+  }
+  return shown;
+}
+
 export async function start({ app, port = 0 }) {
   process.env.VITE_CONFIG_NATIVE_IGNORE_WARNING = "true";
   // Vite and the plugin, from the checkout the app's `node_modules` links to.
@@ -60,10 +90,14 @@ export async function start({ app, port = 0 }) {
   });
 
   let compiles = 0;
-  const compile = async ({ files, entry }) => {
+  const compile = async ({ files, entry, aliases = [] }) => {
     if (typeof files !== "object" || !Object.keys(files).every(inside) || !inside(entry)) {
       return { status: 400, answer: { error: "a file's path must be relative, and inside the project" } };
     }
+    if (!Array.isArray(aliases) || !aliases.every((a) => /^\w+(\.\w+)*$/.test(a?.module) && inside(a?.dir))) {
+      return { status: 400, answer: { error: "an alias is a module name and a directory inside the project" } };
+    }
+    files = forQmlc(files, aliases);
     const n = ++compiles;
     const dir = join(projects, String(n));
     for (const [path, text] of Object.entries(files)) {

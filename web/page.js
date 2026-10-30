@@ -1,17 +1,17 @@
 // A preview page: the frame Studio's previews run in, answering
 // `crates/studio_web/src/protocol.rs` over `postMessage`.
 //
-// It does what ljos-web lets a page do today. ljos-web compiles QML ahead of
-// time, natively (`qmlc`), so a page given QML text can run it only if it
-// is given a compiler (`compile`); without one `open` answers that it could
-// not start. The calls ljos-web has no way to answer yet are refused with
-// `unsupported` and the reason (DESIGN.md section 7, S5, requests).
+// It does what ljos-web lets a page do today. A page given QML text runs it
+// through a Compiler (`compiler.js`); without one `open` answers that it
+// could not start. A call ljos-web has no way to answer yet is answered
+// `not_supported` with the numbered ljos-web request it waits on (DESIGN.md,
+// S5), never with a made-up answer.
 
 import { TAG, VERSION } from "./preview.js";
 
 // `element` is where the preview is mounted; `mount(Component, element)`
-// is ljos-web's (`ljos-web/object`); `compile(files, entry, aliases)`
-// gives a component of the entry, when this page has a QML compiler.
+// is ljos-web's (`ljos-web/object`); `compile` is a Compiler
+// (`compiler.js`), when this page has one.
 export function servePreview({ element, mount, compile, window: w = globalThis, parent = w.parent }) {
   let files = null;
   let entry = null;
@@ -35,10 +35,18 @@ export function servePreview({ element, mount, compile, window: w = globalThis, 
     };
   }
 
-  const unsupported = (call, why) => ({ answer: "refused", code: "unsupported", message: `${call}: ${why}` });
+  const waiting = (call, why, request) => ({ answer: "not_supported", message: `${call}: ${why}`, ljos_web_request: request });
 
+  // What the compiler said, as one message a person reads.
+  const said = (diagnostics) =>
+    diagnostics.map((d) => (d.file ? `${d.file}${d.line ? `:${d.line}:${d.column ?? 1}` : ""}: ${d.message}` : d.message)).join("\n");
+
+  // A remount: the app's state starts over (ljos-web has no reload that
+  // keeps a mounted root's state, request 18).
   const start = async () => {
-    const Component = await compile(files, entry, aliases);
+    const compiled = await compile({ files, entry, aliases });
+    if (compiled.diagnostics) throw new Error(said(compiled.diagnostics));
+    const Component = compiled.component;
     running?.dispose?.();
     element.replaceChildren();
     running = mount(Component, element);
@@ -94,15 +102,16 @@ export function servePreview({ element, mount, compile, window: w = globalThis, 
       element.style.height = `${r.size.height}px`;
       return { answer: "done" };
     },
-    screenshot: () => unsupported("screenshot", "a page cannot draw its DOM into a picture; ljos-web has no capture of a mounted root"),
-    outline: () => unsupported("outline", "ljos-web exposes no tree of a mounted root's objects"),
-    read: () => unsupported("read", "ljos-web keeps a component's ids private to its context"),
-    write: () => unsupported("write", "ljos-web keeps a component's ids private to its context"),
+    screenshot: () => waiting("screenshot", "a page cannot draw its DOM into a picture; ljos-web has no capture of a mounted root", 2),
+    // The DOM's tree is not the QML object tree, so it is not given as one.
+    outline: () => waiting("outline", "ljos-web exposes no tree of a mounted root's objects", 3),
+    read: () => waiting("read", "ljos-web keeps a component's ids private to its context", 4),
+    write: () => waiting("write", "ljos-web keeps a component's ids private to its context", 4),
     logs(r) {
       const first = Math.max(r.since - dropped, 0);
       return { answer: "logs", lines: logs.slice(first), next: dropped + logs.length };
     },
-    pick: () => unsupported("pick", "ljos-web's objects and elements carry no place in the QML they were declared in"),
+    pick: () => waiting("pick", "ljos-web's objects and elements carry no place in the QML they were declared in", 5),
     close() {
       running?.dispose?.();
       element.replaceChildren();
@@ -117,7 +126,7 @@ export function servePreview({ element, mount, compile, window: w = globalThis, 
     const { call } = message.request;
     let answer;
     try {
-      answer = answers[call] ? await answers[call](message.request) : unsupported(call, "not a call of this protocol");
+      answer = answers[call] ? await answers[call](message.request) : { answer: "refused", code: "unsupported", message: `${call}: not a call of this protocol` };
     } catch (e) {
       answer = { answer: "refused", code: "app_faulted", message: String(e?.message ?? e) };
     }

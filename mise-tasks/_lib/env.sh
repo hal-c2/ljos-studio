@@ -379,7 +379,7 @@ assemble_page() {
   # loads a person's shell through `Ljos.Blocks`, which ljos-web lacks.
   cp "$studio_root"/shell/Builtin/*.qml "$studio_root"/web/shell/Window.qml "$app/qml/"
   cp -r "$studio_root/web/standins" "$studio_root/web/pkg" "$app/"
-  cp "$studio_root"/web/{store,studio,Workspace,page,preview}.js "$app/"
+  cp "$studio_root"/web/{store,studio,Workspace,page,preview,compiler}.js "$app/"
   cp "$studio_root/samples/hello/Main.qml" "$app/sample.txt"
   # What compiled QML and the page import, from the checkout: its runtime,
   # and the Solid and Vite the runtime is built with.
