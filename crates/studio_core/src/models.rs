@@ -75,8 +75,9 @@ impl Session {
         if VIEWS.contains(&short(&node.ty)) {
             return self.model_of(path, &tree, &node);
         }
-        // The nearest list the object is in, unless it is in the list's
-        // model rather than its delegate.
+        // The nearest list whose delegate the object is in. Its model, its
+        // `header`, `footer` or `highlight` are made once, not for each row,
+        // and see no row's roles: those see an outer list's, if any.
         for depth in (0..node.path.0.len()).rev() {
             let Some((handle, view)) = tree
                 .iter()
@@ -84,8 +85,15 @@ impl Session {
             else {
                 continue;
             };
-            if node.path.0[depth] == Step::Value("model".to_owned()) {
-                return Ok(None);
+            let delegate = match &node.path.0[depth] {
+                Step::Value(name) => name == "delegate",
+                // A Repeater's default property is its delegate; the other
+                // views' children are their content, not rows.
+                Step::Child(_) => short(&view.ty) == "Repeater",
+                _ => false,
+            };
+            if !delegate {
+                continue;
             }
             let handle = handle.clone();
             let view = view.clone();

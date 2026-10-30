@@ -885,12 +885,28 @@ fn list_model(path: &str, json: &str) -> Result<String, SurfaceError> {
     let mut out = String::from("import QtQuick\n\nListModel {\n");
     for record in &records {
         out.push_str("    ListElement {\n");
-        for (role, value) in &record.0 {
+        for (n, (role, value)) in record.0.iter().enumerate() {
             let first_lower = role.chars().next().is_some_and(|c| c.is_ascii_lowercase());
             if !first_lower || !role.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
                 return Err(refuse(
                     "not_a_role",
                     format!("has the key `{role}`; a role is a name starting lowercase"),
+                ));
+            }
+            // Written `id: …`, QML reads it as the element's id, not a role.
+            if role == "id" {
+                return Err(refuse(
+                    "not_a_role",
+                    "has the key `id`, which QML reads as an object's id; name the role \
+                     otherwise (`key`, `uid`)"
+                        .to_owned(),
+                ));
+            }
+            // QML refuses a property set twice in one object.
+            if record.0[..n].iter().any(|(r, _)| r == role) {
+                return Err(refuse(
+                    "repeated_role",
+                    format!("has the key `{role}` twice in one record"),
                 ));
             }
             let literal = match value {
