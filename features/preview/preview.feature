@@ -108,7 +108,7 @@ Feature: A shell under edit runs in a preview
     Scenario: An agent's edit shows in the preview
       When the agent calls the tool "binding_set" with:
         """json
-        {"doc": "Shell.qml", "node": {"path": "root/1"}, "name": "text", "value": "\"Ready\""}
+        {"doc": "Shell.qml", "generation": 1, "node": {"path": "root/1"}, "name": "text", "value": "\"Ready\""}
         """
       Then the preview shows "Ready"
       When the agent calls the tool "preview_events" with:
@@ -121,7 +121,7 @@ Feature: A shell under edit runs in a preview
     Scenario: Undo shows in the preview
       Given the agent has called the tool "binding_set" with:
         """json
-        {"doc": "Shell.qml", "node": {"path": "root/1"}, "name": "text", "value": "\"Ready\""}
+        {"doc": "Shell.qml", "generation": 1, "node": {"path": "root/1"}, "name": "text", "value": "\"Ready\""}
         """
       When the agent calls the tool "history" with:
         """json

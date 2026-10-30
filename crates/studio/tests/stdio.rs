@@ -143,7 +143,7 @@ fn a_preview_opens_and_answers_through_the_stdio_server() {
     // A write reloads through the same client before the tool answers.
     server.tool(
         "binding_set",
-        json!({ "doc": "Main.qml", "node": { "path": "root" }, "name": "color", "value": "\"blue\"" }),
+        json!({ "doc": "Main.qml", "generation": 1, "node": { "path": "root" }, "name": "color", "value": "\"blue\"" }),
     );
     let events = server.tool("preview_events", json!({}));
     let kinds: Vec<&str> = events["structuredContent"]["events"]

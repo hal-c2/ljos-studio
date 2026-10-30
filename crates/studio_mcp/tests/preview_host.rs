@@ -294,7 +294,7 @@ fn every_write_reloads_the_preview_before_the_tool_answers() {
     f.calls();
     f.call(
         "binding_set",
-        json!({ "doc": "Shell.qml", "node": { "path": "root/1" }, "name": "text", "value": "\"Ready\"" }),
+        json!({ "doc": "Shell.qml", "generation": 1, "node": { "path": "root/1" }, "name": "text", "value": "\"Ready\"" }),
     )
     .unwrap();
     assert_eq!(f.calls(), ["reload"]);
@@ -327,7 +327,7 @@ fn a_burst_of_writes_reloads_within_the_budget_and_a_reading_catches_up() {
     for i in 0..20 {
         f.call(
             "binding_set",
-            json!({ "doc": "Shell.qml", "node": { "path": "root/1" }, "name": "text", "value": format!("\"{i}\"") }),
+            json!({ "doc": "Shell.qml", "generation": i + 1, "node": { "path": "root/1" }, "name": "text", "value": format!("\"{i}\"") }),
         )
         .unwrap();
     }
