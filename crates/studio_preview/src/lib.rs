@@ -51,6 +51,8 @@ struct Running {
     child: Reaped,
     inspector: Inspector,
     log: PathBuf,
+    /// The last generation a reload was reported applied at.
+    reported: u64,
 }
 
 impl std::fmt::Debug for NativeHost {
@@ -90,6 +92,11 @@ impl NativeHost {
     /// The `ljos` program: `LJOS` when set, else `ljos` on the `PATH`.
     pub fn default_program() -> PathBuf {
         std::env::var_os("LJOS").map_or_else(|| PathBuf::from("ljos"), PathBuf::from)
+    }
+
+    fn reported(&mut self, answer: &Value) -> Result<Reload, PreviewError> {
+        let running = self.running()?;
+        since(answer, &mut running.reported)
     }
 
     fn running(&mut self) -> Result<&mut Running, PreviewError> {
@@ -165,6 +172,7 @@ impl NativeHost {
             child,
             inspector,
             log,
+            reported: 0,
         })
     }
 }
@@ -193,13 +201,13 @@ impl PreviewHost for NativeHost {
 
     fn reload(&mut self) -> Result<Reload, PreviewError> {
         let answer = self.call("app_reload", json!({}))?;
-        reload(&answer.structured)
+        self.reported(&answer.structured)
     }
 
     fn alias(&mut self, module: &str, dir: Option<&str>) -> Result<Reload, PreviewError> {
         let dir = dir.map(|d| self.root.join(d).display().to_string());
         let answer = self.call("app_alias", json!({ "module": module, "dir": dir }))?;
-        reload(&answer.structured)
+        self.reported(&answer.structured)
     }
 
     fn resize(&mut self, size: Size) -> Result<(), PreviewError> {
@@ -392,6 +400,23 @@ fn value_of(row: &Value) -> Value {
     }
 }
 
+/// What a reload's answer says the preview did since the one `reported`
+/// last told of. The preview watches the files too, and its watcher may
+/// apply a save before the reload asked for it arrives; that reload then
+/// answers `unchanged` at a generation nobody was told of, which was
+/// applied all the same.
+fn since(answer: &Value, reported: &mut u64) -> Result<Reload, PreviewError> {
+    let generation = answer["generation"].as_u64().unwrap_or(0);
+    let outcome = match reload(answer)? {
+        Reload::Unchanged if generation > *reported => Reload::Applied { generation },
+        outcome => outcome,
+    };
+    if let Reload::Applied { generation } = outcome {
+        *reported = generation;
+    }
+    Ok(outcome)
+}
+
 fn reload(answer: &Value) -> Result<Reload, PreviewError> {
     let generation = answer["generation"].as_u64().unwrap_or(0);
     match answer["outcome"].as_str() {
@@ -414,4 +439,34 @@ fn tail(log: &Path) -> String {
         return "it wrote nothing".to_owned();
     }
     lines.into_iter().rev().collect::<Vec<_>>().join("\n")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_save_the_watcher_applied_first_is_reported_applied() {
+        let mut reported = 3;
+        let answer = json!({ "outcome": "unchanged", "generation": 4 });
+        assert_eq!(
+            since(&answer, &mut reported).unwrap(),
+            Reload::Applied { generation: 4 }
+        );
+        assert_eq!(reported, 4);
+        // Told of once: asked again, nothing changed.
+        assert_eq!(since(&answer, &mut reported).unwrap(), Reload::Unchanged);
+    }
+
+    #[test]
+    fn an_applied_reload_is_what_is_reported_next() {
+        let mut reported = 0;
+        let applied = json!({ "outcome": "applied", "generation": 1 });
+        assert_eq!(
+            since(&applied, &mut reported).unwrap(),
+            Reload::Applied { generation: 1 }
+        );
+        let unchanged = json!({ "outcome": "unchanged", "generation": 1 });
+        assert_eq!(since(&unchanged, &mut reported).unwrap(), Reload::Unchanged);
+    }
 }
