@@ -4,16 +4,28 @@
 //! view), and it asks its host to reload at once; what came of each reload
 //! goes into an event list that `preview_events` reads with a cursor, so a
 //! client learns of failures without anything polling.
+//!
+//! A preview's inspector answers a bounded number of calls a second (Ljós
+//! ARCHITECTURE.md 19.7), and one that asks too often waits a second for its
+//! answer. So a burst of writes (typing in the code view) reloads at most
+//! [`RELOADS_PER_SECOND`] times a second; the writes in between are shown by
+//! the preview's own file watcher a moment later, and whatever reads the
+//! preview first asks for the reload they missed ([`Previews::catch_up`]).
 
 use std::{
+    collections::VecDeque,
     sync::{Arc, Mutex, MutexGuard},
-    time::Instant,
+    time::{Duration, Instant},
 };
 
 use studio_core::{
     Store,
     preview::{Alias, PreviewEvent, PreviewHost, PreviewSpec, Reload, Size, Target, ms},
 };
+
+/// Reloads asked for after writes in any second: well within the 20 calls
+/// a second an inspector answers, leaving the rest to pictures and reads.
+pub(crate) const RELOADS_PER_SECOND: usize = 8;
 
 /// Makes a host for the project in a directory.
 pub type HostFactory = Arc<dyn Fn(&std::path::Path) -> Box<dyn PreviewHost> + Send + Sync>;
@@ -36,6 +48,11 @@ pub(crate) struct Open {
     pub state: State,
     /// The aliases in force: empty when live.
     pub mocked: Vec<Alias>,
+    /// When the last reloads after writes were asked for, oldest first,
+    /// within the last second.
+    pub reloads: VecDeque<Instant>,
+    /// A write was not reloaded: the next reading asks for it.
+    pub behind: bool,
 }
 
 #[derive(Default)]
@@ -53,11 +70,44 @@ pub(crate) fn lock(p: &Mutex<Previews>) -> MutexGuard<'_, Previews> {
 }
 
 impl Previews {
-    /// After a file was written: the open preview shows it now.
+    /// After a file was written: the open preview shows it now, or, in a
+    /// burst, once its watcher sees the file or somebody reads it.
     pub fn wrote(&mut self) {
         let Some(open) = &mut self.open else {
             return;
         };
+        let now = Instant::now();
+        while open
+            .reloads
+            .front()
+            .is_some_and(|at| now.duration_since(*at) >= Duration::from_secs(1))
+        {
+            open.reloads.pop_front();
+        }
+        if open.reloads.len() >= RELOADS_PER_SECOND {
+            open.behind = true;
+            return;
+        }
+        open.reloads.push_back(now);
+        self.reload();
+    }
+
+    /// Before the preview is read: the reload a burst of writes left out.
+    pub fn catch_up(&mut self) {
+        if self
+            .open
+            .as_mut()
+            .is_some_and(|o| std::mem::take(&mut o.behind))
+        {
+            self.reload();
+        }
+    }
+
+    fn reload(&mut self) {
+        let Some(open) = &mut self.open else {
+            return;
+        };
+        open.behind = false;
         let started = Instant::now();
         let event = match open.host.reload() {
             Ok(Reload::Applied { generation }) => PreviewEvent::Reloaded {

@@ -3,6 +3,7 @@
 //! wire order.
 
 use std::{
+    collections::VecDeque,
     sync::{Arc, Mutex},
     time::Instant,
 };
@@ -242,6 +243,8 @@ fn open(studio: &Mutex<Studio>, a: OpenArgs) -> Result<OpenOut, SurfaceError> {
             size,
             state,
             mocked: aliases.clone(),
+            reloads: VecDeque::new(),
+            behind: false,
         });
     }
     Ok(OpenOut {
@@ -259,6 +262,7 @@ fn state(studio: &Mutex<Studio>, a: StateArgs) -> Result<StateOut, SurfaceError>
     let mut studio = lock(studio);
     let previews = studio.previews.clone();
     let mut previews = preview::lock(&previews);
+    previews.catch_up();
     let open = previews
         .open
         .as_mut()
@@ -325,6 +329,7 @@ pub(crate) fn screenshot(studio: &Mutex<Studio>, args: Value) -> Result<ToolRepl
         .clamp(16, MAX_PICTURE_SIDE);
     let studio = lock(studio);
     let mut previews = preview::lock(&studio.previews);
+    previews.catch_up();
     let open = previews
         .open
         .as_mut()
@@ -354,6 +359,9 @@ pub(crate) fn screenshot(studio: &Mutex<Studio>, args: Value) -> Result<ToolRepl
 fn events(studio: &Mutex<Studio>, a: EventsArgs) -> EventsOut {
     let studio = lock(studio);
     let mut previews = preview::lock(&studio.previews);
+    // What a burst of writes left out is reloaded first, so its outcome
+    // is among the events.
+    previews.catch_up();
     previews.pull_logs();
     let since = a.since.unwrap_or(0).min(previews.events.len());
     let end = (since + EVENTS_PAGE).min(previews.events.len());

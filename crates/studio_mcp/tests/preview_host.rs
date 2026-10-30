@@ -277,6 +277,34 @@ fn every_write_reloads_the_preview_before_the_tool_answers() {
     assert_eq!(rest["events"], json!([]));
 }
 
+/// A preview's inspector answers a bounded number of calls a second; a
+/// burst of writes (typing in the code view) must not wait out its limit.
+/// What a burst leaves unreloaded the preview's own watcher shows, and any
+/// reading of the preview catches up first.
+#[test]
+fn a_burst_of_writes_reloads_within_the_budget_and_a_reading_catches_up() {
+    let f = Fixture::new();
+    f.call("preview_open", json!({ "doc": "Shell.qml" }))
+        .unwrap();
+    f.calls();
+    for i in 0..20 {
+        f.call(
+            "binding_set",
+            json!({ "doc": "Shell.qml", "node": { "path": "root/1" }, "name": "text", "value": format!("\"{i}\"") }),
+        )
+        .unwrap();
+    }
+    let reloads = f.calls().len();
+    assert!(
+        (1..20).contains(&reloads),
+        "{reloads} reloads for 20 writes in a burst"
+    );
+    f.call("preview_screenshot", json!({})).unwrap();
+    assert_eq!(f.calls(), ["reload", "screenshot 800"]);
+    f.call("preview_screenshot", json!({})).unwrap();
+    assert_eq!(f.calls(), ["screenshot 800"]);
+}
+
 #[test]
 fn a_live_block_is_read_but_not_set() {
     let f = Fixture::new();
