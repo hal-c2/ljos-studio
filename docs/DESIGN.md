@@ -509,8 +509,9 @@ the ljos-web requests below.
   a page and on threads natively. Previews are made by a
   `StoreHostFactory` (`Studio::with_preview_hosts`), not by spawning.
   `mise run check:wasm` is clippy `-D warnings` for `wasm32-unknown-unknown`.
-  `ljos_mcp_core` still pulls tokio with its unstable cfg; `.cargo/config.toml`
-  sets `tokio_unstable` until ljos-ui gates it (request below).
+  `ljos_mcp_core` is linked without its `server` feature there (`native`
+  turns it on), so the wasm has neither rmcp nor tokio and needs no
+  `tokio_unstable`; `check:wasm` fails if either is linked.
 - **`studio_web`** (crate): `WebStore`, the preview protocol, the
   `WebPreviewHost`, and `Face`, the JSON surface a page calls; `wasm.rs` is
   the only `wasm-bindgen` code, so everything else is tested natively.
@@ -664,8 +665,8 @@ What it showed that the desktop does not:
 16. `Ljos.Blocks` (`Contribution`, `Slot`, `ShellLoader`), so a page can
     show a person's own shell as the native window does.
 
-**Request to ljos-ui:** gate rmcp and tokio in `ljos_mcp_core` behind a
-feature, so a wasm build needs no `tokio_unstable`.
+**Request to ljos-ui (done in 2582cba2):** gate rmcp and tokio in
+`ljos_mcp_core` behind a feature, so a wasm build needs no `tokio_unstable`.
 
 Left for the second half: requests 1–7 and 11–12, then previews drawn by
 ljos-web behind the protocol, `PreviewPicture`, Playwright in CI, and the
