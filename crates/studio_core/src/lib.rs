@@ -559,8 +559,11 @@ impl Session {
                 let (_, parent_node) = self.resolve_now(path, parent)?;
                 let (tree, _) = self.tree_now(path)?;
                 let mut count = child_count(&tree, &parent_node.path);
+                // Only a child is one of the children counted; a value
+                // object under the same parent is not.
                 let same_parent = moved.path.0.len() == parent_node.path.0.len() + 1
-                    && moved.path.0.starts_with(&parent_node.path.0);
+                    && moved.path.0.starts_with(&parent_node.path.0)
+                    && matches!(moved.path.0.last(), Some(qml_edit::Step::Child(_)));
                 if same_parent {
                     count -= 1;
                 }

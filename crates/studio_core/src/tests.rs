@@ -463,3 +463,35 @@ fn only_an_object_studio_inserts_is_given_an_id() {
     s.edit("Main.qml", None, &plain, false).unwrap();
     assert_eq!(ids(&mut s), 2, "asked not to");
 }
+
+fn one_file(text: &str) -> Session {
+    Session::open(Box::new(MemStore::new([(
+        "Main.qml".to_owned(),
+        text.to_owned(),
+    )])))
+}
+
+#[test]
+fn a_value_object_is_not_counted_as_a_child_of_its_parent() {
+    // Counting it, the end of a parent with no other child came to -1 and
+    // the call panicked before the move could be refused.
+    let mut s = one_file("Item {\n    contentItem: Rectangle {}\n}\n");
+    let (tree, g) = s.tree("Main.qml").unwrap();
+    let content = tree
+        .iter()
+        .find(|(_, n)| n.ty == "Rectangle")
+        .unwrap()
+        .0
+        .clone();
+    let moved = Op::Move {
+        node: Address::Node(content),
+        parent: Address::Path("root".into()),
+        index: None,
+    };
+    let err = s.edit("Main.qml", Some(g), &moved, false).unwrap_err();
+    assert!(
+        matches!(err, Error::Edit(EditError::NotAChild(_))),
+        "{err:?}"
+    );
+    assert_eq!(s.history().0.len(), 0);
+}
