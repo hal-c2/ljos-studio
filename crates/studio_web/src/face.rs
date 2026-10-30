@@ -8,7 +8,7 @@
 use std::sync::Arc;
 
 use base64::Engine as _;
-use ljos_mcp_core::{CallCtx, CapSet, McpSurface, SurfaceError};
+use ljos_mcp_core::{CallCtx, Cap, CapSet, ErrorCode, McpSurface, SurfaceError};
 use serde_json::{Value, json};
 use studio_mcp::{Studio, StudioServer, preview::StoreHostFactory, timer::Timer};
 
@@ -23,6 +23,9 @@ pub enum FaceError {
     Session(#[from] studio_core::Error),
     #[error("{0} is not a place in the text: it is past its end or inside a character")]
     Offset(usize),
+    /// What a tool needing the capability answers: `capability_denied`.
+    #[error("{0}")]
+    Denied(SurfaceError),
 }
 
 pub struct Face {
@@ -141,6 +144,16 @@ impl Face {
         end: usize,
         text: &str,
     ) -> Result<(), FaceError> {
+        // It edits as `document_edit` does, so it is granted as that is.
+        if !self.caps.contains(Cap::Mutate) {
+            return Err(FaceError::Denied(
+                SurfaceError::new(
+                    ErrorCode::CapabilityDenied,
+                    "typing in a code view needs the `mutate` capability",
+                )
+                .with_details(json!({ "required": Cap::Mutate, "granted": self.caps })),
+            ));
+        }
         let studio = self.server.studio();
         let mut studio = studio_lock(&studio);
         let (current, _) = studio.session.text(doc)?;
@@ -255,6 +268,24 @@ mod tests {
             face.replace_text("Emoji.qml", generation + 1, 15, 15, ""),
             Err(FaceError::Offset(15))
         ));
+    }
+
+    /// Typing edits the document as `document_edit` does, so a page whose
+    /// Studio may not edit is refused it as that tool is.
+    #[test]
+    fn typing_needs_mutate_as_the_tools_that_edit_do() {
+        let face = face("inspect");
+        let (before, generation) = face.text("Main.qml").unwrap();
+        let refused = face.replace_text("Main.qml", generation, 0, 0, "// typed\n");
+        match refused {
+            Err(FaceError::Denied(e)) => {
+                assert_eq!(e.code, ljos_mcp_core::ErrorCode::CapabilityDenied);
+                assert!(e.message.contains("`mutate`"), "{e}");
+            }
+            other => panic!("{other:?}"),
+        }
+        assert_eq!(face.text("Main.qml").unwrap().0, before);
+        assert!(face.take().is_empty());
     }
 
     /// What `Workspace.js` publishes: the native block's view, and a
