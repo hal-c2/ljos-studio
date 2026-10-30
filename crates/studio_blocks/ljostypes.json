@@ -209,6 +209,30 @@
               "constant": false,
               "group": false,
               "notify": "previewsChanged"
+            },
+            {
+              "name": "theme",
+              "type": "string",
+              "kind": "value",
+              "list": false,
+              "readonly": true,
+              "final": true,
+              "required": false,
+              "constant": false,
+              "group": false,
+              "notify": "themeChanged"
+            },
+            {
+              "name": "tokens",
+              "type": "var",
+              "kind": "value",
+              "list": false,
+              "readonly": true,
+              "final": true,
+              "required": false,
+              "constant": false,
+              "group": false,
+              "notify": "tokensChanged"
             }
           ],
           "signals": [
@@ -257,7 +281,7 @@
           ],
           "block": {
             "category": "Studio",
-            "summary": "A Studio session: documents, layers, inspector, palette, history and preview"
+            "summary": "A Studio session: documents, layers, inspector, palette, tokens, history and preview"
           }
         },
         {
@@ -282,6 +306,33 @@
               "constant": false,
               "group": false,
               "notify": "workspaceChanged"
+            }
+          ],
+          "signals": [],
+          "methods": []
+        },
+        {
+          "name": "ShellStatus",
+          "since": "1.0",
+          "base": "QtObject",
+          "baseModule": "QtQml",
+          "singleton": false,
+          "enums": [],
+          "creatable": true,
+          "defaultProperty": null,
+          "attached": null,
+          "properties": [
+            {
+              "name": "reloadError",
+              "type": "string",
+              "kind": "value",
+              "list": false,
+              "readonly": true,
+              "final": true,
+              "required": false,
+              "constant": false,
+              "group": false,
+              "notify": "reloadErrorChanged"
             }
           ],
           "signals": [],

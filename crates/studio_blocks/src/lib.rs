@@ -9,9 +9,15 @@
 //! `Studio.PreviewPicture` draws the latest picture of the preview a
 //! workspace shows.
 //!
+//! `Studio.ShellStatus` tells the window why the last reload of its shell
+//! failed, which a shell that is still running cannot know itself:
+//! [`reloaded`] is the host's word for it (DESIGN.md, S4 "As built").
+//!
 //! [`register`] declares the types, on any Engine (a compile's throwaway
 //! one too). [`serve`] hands the real Engine the session; a workspace made
 //! without it refuses every gesture.
+
+pub mod shell;
 
 use std::cell::RefCell;
 use std::collections::VecDeque;
@@ -27,9 +33,12 @@ use serde_json::{Value as Json, json};
 use studio_mcp::StudioServer;
 use studio_mcp::view::View;
 
-/// Declares `Studio.Workspace` and `Studio.PreviewPicture`.
+/// Declares `Studio.Workspace`, `Studio.PreviewPicture` and
+/// `Studio.ShellStatus`.
 pub fn register(engine: &Engine) {
-    engine.register_module(ljos::module!("Studio" 1.0 => [Workspace, PreviewPicture]));
+    engine.register_module(ljos::module!(
+        "Studio" 1.0 => [Workspace, PreviewPicture, ShellStatus]
+    ));
     item::register_paint_item::<PreviewPicture>(engine, read_picture);
 }
 
@@ -65,17 +74,20 @@ struct Context {
     /// How many times the session told of a change. A view read after the
     /// count was `n` shows every change up to `n`.
     writes: Arc<AtomicU64>,
+    statuses: RefCell<Vec<ObjectId>>,
+    /// What the last reload said, for a status made after it.
+    reload_error: RefCell<String>,
 }
 
 /// The session a shell binds: its state as plain JS values, and one
 /// action.
-#[derive(Default, QmlObject)]
+#[derive(QmlObject)]
 #[qml(
     module = "Studio",
     name = "Workspace",
     block,
     category = "Studio",
-    summary = "A Studio session: documents, layers, inspector, palette, history and preview"
+    summary = "A Studio session: documents, layers, inspector, palette, tokens, history and preview"
 )]
 pub struct Workspace {
     /// The project's documents, as paths from its root.
@@ -133,8 +145,48 @@ pub struct Workspace {
     /// Whether the session can run previews.
     #[qml(readonly, notify)]
     pub previews: bool,
+    /// The theme file `Ljos.Design` reads for `doc`, from the project's
+    /// root.
+    #[qml(readonly, notify)]
+    pub theme: String,
+    /// Every role of `Ljos.Design`: `token`, `kind`, `set` (the theme
+    /// file sets it), a colour's `light` and `dark`, any other role's
+    /// `value` as JSON writes it. Read again after every write, so a
+    /// `theme_set` shows at once.
+    #[qml(readonly, notify)]
+    pub tokens: Json,
     #[qml(skip)]
     queue: Rc<RefCell<Queue>>,
+}
+
+/// Each list starts empty, not null, so a shell's bindings read it before
+/// the first view arrives as they read it after: a shell that throws while
+/// it is made is not shown (`ShellLoader`).
+impl Default for Workspace {
+    fn default() -> Self {
+        let none = || Json::Array(Vec::new());
+        Self {
+            documents: none(),
+            doc: String::new(),
+            generation: 0.0,
+            text: String::new(),
+            layers: none(),
+            selected: String::new(),
+            selection: json!({"start": 0, "end": 0}),
+            inspector: none(),
+            states: none(),
+            palette: none(),
+            done: none(),
+            undone: none(),
+            preview: Json::Null,
+            error: String::new(),
+            problem: String::new(),
+            previews: false,
+            theme: String::new(),
+            tokens: none(),
+            queue: Rc::default(),
+        }
+    }
 }
 
 #[qml_impl]
@@ -321,7 +373,7 @@ fn run(server: &StudioServer, writes: &AtomicU64, doc: &str, job: Job) -> Done {
             let answer = server
                 .call(&tool, &CallCtx::new(caps()), args.clone())
                 .map(|reply| reply.structured)
-                .map_err(|e| e.to_value());
+                .map_err(|e| refusal(e.to_value()));
             let (view, seen) = read();
             Done::Call {
                 tool,
@@ -353,6 +405,15 @@ fn run(server: &StudioServer, writes: &AtomicU64, doc: &str, job: Job) -> Done {
                 picture,
             }
         }
+    }
+}
+
+/// A refusal as the shell is given it: `code`, `message`, `details`. An
+/// MCP error wraps them in `error`.
+fn refusal(mut error: Json) -> Json {
+    match error.get_mut("error") {
+        Some(inner) => inner.take(),
+        None => error,
     }
 }
 
@@ -522,6 +583,8 @@ fn publish(engine: &Engine, ws: ObjectId, view: View, seen: u64) {
     let _ = cx.set(Workspace::PREVIEW, preview);
     let _ = cx.set(Workspace::PROBLEM, view.problem);
     let _ = cx.set(Workspace::PREVIEWS, view.previews);
+    let _ = cx.set(Workspace::THEME, view.theme);
+    let _ = cx.set(Workspace::TOKENS, to_json(&view.tokens));
     // A picture is fetched once for each generation the preview applies.
     if let Some(generation) = wanted {
         let queued = queue
@@ -565,6 +628,49 @@ fn lock(
 /// A view's part as the JSON a script reads.
 fn to_json(v: &impl serde::Serialize) -> Json {
     serde_json::to_value(v).unwrap_or_default()
+}
+
+/// Why the last reload of the window's shell failed; empty once one was
+/// applied or the error went away.
+///
+/// A reload that does not compile leaves the running shell as it was, so
+/// only the host that watches the files knows: it calls [`reloaded`].
+#[derive(Default, QmlObject)]
+#[qml(module = "Studio", name = "ShellStatus")]
+pub struct ShellStatus {
+    /// `file:line:column: message`, as Ljós reports it.
+    #[qml(readonly, notify)]
+    pub reload_error: String,
+}
+
+#[qml_impl]
+impl ShellStatus {
+    #[qml(on_complete)]
+    fn completed(cx: &Cx) -> Result<(), EngineError> {
+        let context = cx.engine.extension::<Context>();
+        context.statuses.borrow_mut().push(cx.this);
+        let error = context.reload_error.borrow().clone();
+        let _ = cx.set(ShellStatus::RELOAD_ERROR, error);
+        Ok(())
+    }
+}
+
+/// Tells every `Studio.ShellStatus` of `engine` how the last reload of
+/// the shell went: `Some` with Ljós's message when it failed, `None` when
+/// it was applied or its error went away. Call it on the Engine's thread.
+pub fn reloaded(engine: &Engine, error: Option<String>) {
+    let context = engine.extension::<Context>();
+    let error = error.unwrap_or_default();
+    *context.reload_error.borrow_mut() = error.clone();
+    let live: Vec<ObjectId> = {
+        let mut all = context.statuses.borrow_mut();
+        all.retain(|&s| engine.is_alive(s));
+        all.clone()
+    };
+    for status in live {
+        // Read-only to QML: only the host says how a reload went.
+        let _ = Cx::new(engine, status).set(ShellStatus::RELOAD_ERROR, error.clone());
+    }
 }
 
 /// The latest picture of the preview a workspace shows, scaled to the
