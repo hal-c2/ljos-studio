@@ -251,6 +251,37 @@ Each milestone ends with its exit criteria met and its scenarios green.
 - **Exit:** the S1 scenarios pass driven through the UI off-screen; idle
   CPU 0 %; budgets measured in CI.
 
+#### As built: Studio's blocks and its shell
+
+Studio's window is a Ljós app (`studio [project]`; `studio --mcp` stays
+headless). Its shell is QML under `shell/`, and it binds one block,
+`Studio.Workspace` (`studio_blocks`), as any shell binds an app's blocks:
+
+- **State it publishes** (read-only properties, each a plain JS value so a
+  shell needs no Rust model types): `documents`, `doc`, `generation`,
+  `text`, `layers` (one row per object: `node`, `type`, `id`, `depth`,
+  `label`), `selected`, `selection` (`start`, `end` in characters of
+  `text`), `inspector` (the selected object's bindings: `name`, `value`),
+  `palette` (the project's blocks: `module`, `name`, `summary`,
+  `category`), `done` and `undone` (history labels), `preview` (`target`,
+  `picture`, `width`, `height`, `generation`), `error`.
+- **Its one action**, `dispatch(tool, args)`, takes a Studio tool's name
+  and its arguments. A gesture *is* a tool call: the shell has no path to
+  the session that an agent lacks, which is how the UI scenarios
+  (`features/ui/`) prove the same flows as the MCP ones with the same
+  oracle, the file text.
+- **Its events**: `answered(tool, answer)` and `refused(tool, error)`.
+
+DECISION: one block with a `dispatch` action, not one native type per
+panel. Panels are skins; splitting the state per panel would put layout
+into Rust. DECISION: Studio's shell uses `node_select` like an agent, so a
+selection made by either shows in the other.
+
+The block republishes after every write, whoever made it: the session's
+write callback posts to the UI thread through `UiHandle` (rule 7), so an
+agent attached over MCP while a person works moves the panels too, and a
+window nobody touches does no work (rule 6).
+
 ### S4: shells, skins and tokens
 
 - Theme tokens editor over `Ljos.Design` + theme files; `ShellLoader` and
