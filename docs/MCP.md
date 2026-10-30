@@ -48,11 +48,11 @@ documents: export), `run` (start previews). They are granted at launch with
 | 15 | `state_edit` | Add, rename or remove a `State`; set its changes, its `when` or a breakpoint; add or remove a `Transition` | mutate |
 | 16 | `slot_contribute` | Write a `Contribution` to a block's slot, or take one out | mutate |
 | 17 | `history` | List, undo or redo edits (each with its inverse changes) | inspect to list; mutate to undo or redo |
-| 18 | `preview_open` | Start a preview of a shell on a target (desktop, tablet, phone) or size with live or mocked state; on the open one, change size or state in place | run |
-| 19 | `preview_state` | Read a block's published state in the preview; set it when the block is mocked | run |
-| 20 | `preview_screenshot` | A PNG of the preview (≤ 1280 px), or its outline as text | inspect |
-| 21 | `preview_events` | Since a cursor: opened, reloaded (with ms), reload failed, logs, ended | inspect |
-| 22 | `theme_set` | Read the tokens (`Ljos.Design` roles and the theme file, light and dark), or set one; the preview reloads live | mutate |
+| 18 | `theme_set` | Read the tokens (`Ljos.Design` roles and the theme file, light and dark), or set one; the preview reloads live | mutate |
+| 19 | `preview_open` | Start a preview of a shell on a target (desktop, tablet, phone) or size with live or mocked state; on the open one, change size or state in place | run |
+| 20 | `preview_state` | Read a block's published state in the preview; set it when the block is mocked | run |
+| 21 | `preview_screenshot` | A PNG of the preview (≤ 1280 px), or its outline as text | inspect |
+| 22 | `preview_events` | Since a cursor: opened, reloaded (with ms), reload failed, logs, ended | inspect |
 
 A document is a `.qml` file or a `theme.json` of the project outside the
 directories a walk leaves out, judged where its links lead; anything else is
@@ -253,8 +253,9 @@ object that parses, and (`not_a_contribution`) for removing anything else.
 `theme_set {doc?, token?, value?, variant?, generation?, dry_run?}` works
 on the theme file of `doc`: the `theme.json` beside it, the document
 itself when it is a `theme.json`, the open preview's when `doc` is left
-out, else the project's own. It is listed after `preview_events`, so the
-first 21 keep their places.
+out, else the project's own. It is listed with the edit tools, after
+`history`, so the tools a reader or an editor is offered come before the
+preview tools, as they did.
 
 - **Reading** (no `value`): `file`, its `generation` (0 while it does
   not exist), `exists`, `problem` (why Ljós would not load the file, with
