@@ -158,7 +158,7 @@ Feature: A person composes a shell in Studio's window
     Given the person has opened "Main.qml" in the documents list
     When an agent calls the tool "property_set" with:
       """json
-      {"doc": "Main.qml", "node": {"path": "root/0"}, "name": "color", "value": "blue"}
+      {"doc": "Main.qml", "generation": 1, "node": {"path": "root/0"}, "name": "color", "value": "blue"}
       """
     And the person selects "Rectangle" in the layers panel
     Then the inspector shows "color" as "\"blue\""
