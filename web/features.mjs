@@ -6,8 +6,8 @@
 //
 // With no arguments it runs every scenario that needs no preview: a
 // preview is a page of its own (`@preview`), a window is native (`@ui`),
-// and a link or a file that is not text is the file system's, which
-// storage has not (`@disk`).
+// and a link, a bundle or a file that is not text is the file system's,
+// which storage is not (`@disk`).
 //
 // DECISION: node, not Playwright. These scenarios touch no DOM and no
 // browser storage, and node runs the very module a page loads; the OPFS
@@ -332,6 +332,10 @@ const STEPS = [
   }),
   step("given", /^the studio tools are connected$/, async (w) => void (await w.server())),
   step("given", /^the studio tools are connected with the capabilities "([^"]*)"$/, async (w, s, caps) => {
+    // The native runner gives the capabilities with each call; a studio
+    // here is opened with them, so one with others is opened again over
+    // the same storage.
+    if (w.caps !== caps) w.studio = undefined;
     w.caps = caps;
     await w.server();
   }),
@@ -396,6 +400,21 @@ const STEPS = [
     const got = w.backend.files.get(name);
     if (got === undefined) throw new Error(`\`${name}\` does not exist`);
     if (got !== want) throw new Error(`\`${name}\` is:\n${got}\nnot:\n${want}`);
+  }),
+  step("then", /^the file "([^"]+)" exists$/, (w, s, name) => {
+    if (!w.backend.files.has(name)) throw new Error(`\`${name}\` does not exist`);
+  }),
+  step("given", /^the directory "([^"]+)" is deleted$/, (w, s, name) => {
+    const below = `${name.replace(/\/$/, "")}/`;
+    const gone = [...w.backend.files.keys()].filter((f) => f.startsWith(below));
+    if (gone.length === 0) throw new Error(`\`${name}\`: there is no such directory`);
+    for (const f of gone) w.backend.files.delete(f);
+  }),
+  // A new studio over the same storage: what a session kept in memory is
+  // gone, what it wrote is read again.
+  step("given", /^the studio tools are reconnected$/, async (w) => {
+    w.studio = undefined;
+    await w.server();
   }),
   step("then", /^the file "([^"]+)" does not exist$/, (w, s, name) => {
     if (w.backend.files.has(name)) throw new Error(`\`${name}\` exists`);

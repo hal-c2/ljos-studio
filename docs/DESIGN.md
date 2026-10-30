@@ -539,7 +539,9 @@ the ljos-web requests below.
   UTF-16 units, as JavaScript counts). `web/features.mjs` runs the
   `features/` scenarios that need no preview and no window against it in
   node (`mise run features:web`); `@web` scenarios
-  (`features/web/storage.feature`) run only there. It reads Scenario
+  (`features/web/storage.feature`) run only there, and `@disk` ones
+  (`features/project/export.feature`: a bundle is written to a directory,
+  and the browser's storage is not one) only natively. It reads Scenario
   Outlines and data tables as cucumber does (one scenario per Examples
   row, `<name>`s written into step text, doc strings and tables) and
   refuses any Gherkin it does not read. Its steps match by kind (`Given`,
