@@ -167,6 +167,12 @@ shows it; the watcher's quiet time is not on that path.
   A dump is read when the preview starts: an edit of it shows when the
   preview is opened again. Export still refuses a project whose types
   are written in Rust.
+- DECISION: a preview in a browser (ljos-web, DESIGN.md S5) answers what
+  ljos-web can: open, reload, aliases, resize, logs (without file and
+  line). The rest (`preview_screenshot`, `preview_state` reads, writes and
+  clicks, `node_select {at}`) is refused `not_actionable` with
+  `details.kind: "not_supported"` and `details.ljos_web_request`, the
+  numbered ljos-web request it waits on, never with a made-up answer.
 - DECISION: starting a preview needs `run` (it runs the project's code);
   looking at one that runs (`preview_screenshot`, `preview_events`) needs
   only `inspect`.

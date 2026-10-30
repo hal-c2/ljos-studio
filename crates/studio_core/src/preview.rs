@@ -215,6 +215,16 @@ pub enum PreviewError {
     /// `app_faulted`…) and message.
     #[error("the preview refused ({code}): {message}")]
     Refused { code: String, message: String },
+    /// The preview's runtime cannot answer this call yet (a browser preview
+    /// on ljos-web), and which numbered ljos-web request it waits on
+    /// (DESIGN.md, S5). Never a made-up answer in its place.
+    #[error(
+        "the preview cannot do this yet: {message} (waits on ljos-web request {ljos_web_request})"
+    )]
+    NotSupported {
+        message: String,
+        ljos_web_request: u32,
+    },
     #[error("the preview did not answer: {0}")]
     Transport(String),
 }
