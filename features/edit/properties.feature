@@ -53,11 +53,12 @@ Feature: An agent sets properties and bindings
       """json
       {"doc": "Main.qml", "node": {"id": "root"}, "name": "font.bold", "value": false}
       """
-    And the agent has called the tool "property_set" with:
+    When the agent calls the tool "property_set" with:
       """json
       {"doc": "Main.qml", "node": {"id": "label"}, "name": "font", "value": null}
       """
-    Then the file "Main.qml" is:
+    Then the agent is refused with "not_found"
+    And the file "Main.qml" is:
       """qml
       import QtQuick
 

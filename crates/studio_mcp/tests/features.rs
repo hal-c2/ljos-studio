@@ -12,7 +12,11 @@
 
 use std::{collections::HashMap, sync::Arc};
 
-use cucumber::{World, gherkin::Step, given, then, when};
+use cucumber::{
+    World,
+    gherkin::{Step, StepType},
+    given, then, when,
+};
 use ljos_mcp_core::{CallCtx, Cap, CapSet, McpSurface, SurfaceError, ToolImage};
 use serde_json::{Value, json};
 use studio_mcp::{Studio, StudioServer};
@@ -283,8 +287,9 @@ fn calls(w: &mut StudioWorld, tool: String) -> StepResult {
 fn calls_with(w: &mut StudioWorld, tool: String, step: &Step) -> StepResult {
     let args = w.arguments(&docstring(step)?)?;
     w.call(&tool, args)?;
-    // A `Given` sets the scene: a refusal there is the scenario's mistake.
-    if step.keyword.trim() == "Given" {
+    // A `Given` sets the scene (an `And` under one too): a refusal there is
+    // the scenario's mistake.
+    if step.ty == StepType::Given {
         w.answer()?;
     }
     Ok(())
@@ -468,6 +473,9 @@ async fn main() {
         // A preview is a whole application in a process of its own.
         .max_concurrent_scenarios(8)
         .fail_on_skipped()
-        .run_and_exit(input)
+        // A window's scenarios run in studio_blocks, which drives the shell.
+        .filter_run_and_exit(input, |feature, _, scenario| {
+            !feature.tags.iter().chain(&scenario.tags).any(|t| t == "ui")
+        })
         .await;
 }
