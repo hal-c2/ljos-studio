@@ -11,7 +11,9 @@ use anyhow::Context;
 use clap::Parser;
 use ljos_mcp_core::{Cap, CapSet};
 use studio_mcp::{Studio, StudioServer};
-use studio_preview::{NativeHost, private_dir};
+use studio_preview::NativeHost;
+
+mod state;
 
 #[derive(Parser, Debug)]
 #[command(name = "studio", version, about)]
@@ -48,7 +50,10 @@ fn main() -> anyhow::Result<()> {
         None => std::env::current_dir().context("the current directory")?,
     };
     let ljos = args.ljos.unwrap_or_else(NativeHost::default_program);
-    let state = state_dir()?;
+    // Dropped last, on every way out but a kill: the next start removes
+    // what a killed run left (`state.rs`).
+    let state_dir = state_dir()?;
+    let state = state_dir.path().to_owned();
     let previews = state.clone();
     let studio = Studio::open(&dir)
         .with_context(|| format!("opening {}", dir.display()))?
@@ -126,16 +131,15 @@ fn window(server: Arc<StudioServer>, shell: Option<PathBuf>) -> anyhow::Result<(
 /// the window's token is written, and refused if found otherwise. Never below
 /// the shared temporary directory, where another user could have made it
 /// first; one level, by process, so no shared parent of ours is there to take.
-fn state_dir() -> anyhow::Result<PathBuf> {
+/// Removed when the run ends, as below `XDG_STATE_HOME` nothing else would.
+fn state_dir() -> anyhow::Result<state::StateDir> {
     let base = state_base(
         std::env::var_os("XDG_RUNTIME_DIR"),
         std::env::var_os("XDG_STATE_HOME"),
         std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE")),
     )
     .context("no place for Studio's state: set XDG_RUNTIME_DIR, XDG_STATE_HOME or HOME")?;
-    let dir = base.join(format!("ljos-studio-{}", std::process::id()));
-    private_dir(&dir)?;
-    Ok(dir)
+    state::StateDir::new(&base)
 }
 
 fn state_base(
