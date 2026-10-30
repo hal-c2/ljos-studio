@@ -199,6 +199,23 @@ Feature: A person wires and plays a prototype's flow in Studio's window
     When the person selects "Text row" in the layers panel
     Then the inspector lists the roles "name, email"
 
+  Scenario: The inspector lists the keys of a JSON list's records as roles
+    Given the file "data/staff.json":
+      """json
+      [{"name": "Ada", "room": "4"}, {"name": "Grace", "phone": "12"}]
+      """
+    And an agent has called the tool "document_new" with:
+      """json
+      {"doc": "Staff.qml", "data": "data/staff.json"}
+      """
+    And an agent has called the tool "document_new" with:
+      """json
+      {"doc": "Directory.qml", "text": "import QtQuick\n\nColumn {\n    Repeater {\n        model: Staff {}\n        Text {\n            id: member\n        }\n    }\n}\n"}
+      """
+    And the person has opened "Directory.qml" in the documents list
+    When the person selects "Text member" in the layers panel
+    Then the inspector lists the roles "name, room, phone"
+
   Scenario: A role is bound to a property
     Given the person has selected "Text row" in the layers panel
     When the person binds the role "name" to "text" in the inspector

@@ -767,6 +767,26 @@ fn reloaded_since_read(w: &mut StudioWorld) -> StepResult {
     }
 }
 
+/// A file written outside Studio reaches the preview through the preview's
+/// own watch, which runs after the write returns, so the outline is read
+/// again until the deadline.
+#[then(regex = r#"^the preview shows "([^"]*)" within (\d+) seconds$"#)]
+fn preview_shows_within(w: &mut StudioWorld, text: String, seconds: u64) -> StepResult {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(seconds);
+    loop {
+        let outline = w.preview_outline()?;
+        if outline.contains(&format!("\"{text}\"")) {
+            return Ok(());
+        }
+        if std::time::Instant::now() >= deadline {
+            return Err(format!(
+                "after {seconds} seconds the preview shows:\n{outline}"
+            ));
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+}
+
 #[then(regex = r#"^the answer has a PNG picture at most (\d+) pixels on its longest side$"#)]
 fn png_picture(w: &mut StudioWorld, side: u32) -> StepResult {
     w.answer()?;
