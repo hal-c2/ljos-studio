@@ -147,6 +147,7 @@ fn preview_error(e: PreviewError) -> SurfaceError {
 
 fn open(studio: &Mutex<Studio>, a: OpenArgs) -> Result<OpenOut, SurfaceError> {
     let studio = lock(studio);
+    studio.session.check_document(&a.doc).map_err(error)?;
     if !studio.session.store().exists(&a.doc) {
         return Err(SurfaceError::not_found(format!("no document `{}`", a.doc)));
     }

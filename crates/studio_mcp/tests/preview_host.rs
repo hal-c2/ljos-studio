@@ -16,13 +16,31 @@ struct Seen {
     calls: Vec<String>,
     generation: u64,
     fail_next: bool,
+    /// Calls that answer with an error, by how the call's note starts; each
+    /// answers once.
+    errors: Vec<(String, PreviewError)>,
 }
 
 struct Recorder(Arc<Mutex<Seen>>);
 
 impl Recorder {
-    fn note(&self, call: String) {
+    fn note(&self, call: String) -> Result<(), PreviewError> {
+        let answer = self.answer(&call);
         self.0.lock().unwrap().calls.push(call);
+        answer
+    }
+
+    /// The error a call was set up to answer with, if one was.
+    fn answer(&self, call: &str) -> Result<(), PreviewError> {
+        let mut seen = self.0.lock().unwrap();
+        match seen
+            .errors
+            .iter()
+            .position(|(start, _)| call.starts_with(start))
+        {
+            Some(at) => Err(seen.errors.remove(at).1),
+            None => Ok(()),
+        }
     }
 }
 
@@ -39,12 +57,12 @@ impl PreviewHost for Recorder {
             spec.size.width,
             spec.size.height,
             aliases.join(",")
-        ));
+        ))?;
         Ok(())
     }
 
     fn reload(&mut self) -> Result<Reload, PreviewError> {
-        self.note("reload".to_owned());
+        self.note("reload".to_owned())?;
         let mut seen = self.0.lock().unwrap();
         if std::mem::take(&mut seen.fail_next) {
             return Ok(Reload::Failed {
@@ -58,7 +76,7 @@ impl PreviewHost for Recorder {
     }
 
     fn alias(&mut self, module: &str, dir: Option<&str>) -> Result<Reload, PreviewError> {
-        self.note(format!("alias {module} {}", dir.unwrap_or("-")));
+        self.note(format!("alias {module} {}", dir.unwrap_or("-")))?;
         let mut seen = self.0.lock().unwrap();
         seen.generation += 1;
         Ok(Reload::Applied {
@@ -67,12 +85,12 @@ impl PreviewHost for Recorder {
     }
 
     fn resize(&mut self, size: Size) -> Result<(), PreviewError> {
-        self.note(format!("resize {}x{}", size.width, size.height));
+        self.note(format!("resize {}x{}", size.width, size.height))?;
         Ok(())
     }
 
     fn screenshot(&mut self, max_side: u32) -> Result<Picture, PreviewError> {
-        self.note(format!("screenshot {max_side}"));
+        self.note(format!("screenshot {max_side}"))?;
         Ok(Picture {
             png: b"\x89PNG".to_vec(),
             width: max_side,
@@ -81,11 +99,12 @@ impl PreviewHost for Recorder {
     }
 
     fn outline(&mut self) -> Result<String, PreviewError> {
+        self.answer("outline")?;
         Ok("text \"Stopped\"".to_owned())
     }
 
     fn read(&mut self, id: &str, names: &[String]) -> Result<Map<String, Value>, PreviewError> {
-        self.note(format!("read {id} {}", names.join(",")));
+        self.note(format!("read {id} {}", names.join(",")))?;
         Ok(names
             .iter()
             .map(|n| (n.clone(), Value::Bool(false)))
@@ -93,11 +112,12 @@ impl PreviewHost for Recorder {
     }
 
     fn write(&mut self, id: &str, name: &str, value: Value) -> Result<(), PreviewError> {
-        self.note(format!("write {id}.{name}={value}"));
+        self.note(format!("write {id}.{name}={value}"))?;
         Ok(())
     }
 
     fn logs(&mut self, since: u64) -> Result<(Vec<LogLine>, u64), PreviewError> {
+        self.answer("logs")?;
         let lines = if since == 0 {
             vec![LogLine {
                 level: "warning".to_owned(),
@@ -112,7 +132,7 @@ impl PreviewHost for Recorder {
     }
 
     fn close(&mut self) {
-        self.note("close".to_owned());
+        let _ = self.note("close".to_owned());
     }
 }
 
@@ -177,6 +197,19 @@ impl Fixture {
             .call(tool, &ctx, args)
             .map(|r| r.structured)
             .map_err(|e| e.to_value()["error"].clone())
+    }
+
+    fn fail(&self, call: &str, error: PreviewError) {
+        self.seen
+            .lock()
+            .unwrap()
+            .errors
+            .push((call.to_owned(), error));
+    }
+
+    fn events(&self) -> Vec<Value> {
+        let out = self.call("preview_events", json!({})).unwrap();
+        out["events"].as_array().unwrap().clone()
     }
 
     fn calls(&self) -> Vec<String> {
@@ -412,4 +445,42 @@ fn a_project_without_mocks_cannot_preview_mocked() {
         )
         .unwrap_err();
     assert_eq!(refused["details"]["kind"], "no_mocks");
+}
+
+fn event_kinds(events: &[Value]) -> Vec<String> {
+    events
+        .iter()
+        .map(|e| e["kind"].as_str().unwrap_or_default().to_owned())
+        .collect()
+}
+
+fn ended() -> PreviewError {
+    PreviewError::Ended("the process exited".to_owned())
+}
+
+fn refused() -> PreviewError {
+    PreviewError::Refused {
+        code: "rate_limited".to_owned(),
+        message: "too many calls".to_owned(),
+    }
+}
+
+/// A project with three mock modules, for failures part way through them.
+fn three_mocks(f: &Fixture) {
+    for module in ["A", "B", "C"] {
+        let path = f._dir.path().join("mocks").join(module);
+        std::fs::create_dir_all(&path).unwrap();
+        std::fs::write(path.join("qmldir"), format!("module {module}\n")).unwrap();
+    }
+    std::fs::remove_dir_all(f._dir.path().join("mocks/App")).unwrap();
+}
+
+#[test]
+fn a_preview_opens_only_on_a_document() {
+    let f = Fixture::new();
+    let e = f
+        .call("preview_open", json!({ "doc": "mocks/App/Media/qmldir" }))
+        .unwrap_err();
+    assert_eq!(e["code"], "path_denied");
+    assert_eq!(*f.opened.lock().unwrap(), 0);
 }
