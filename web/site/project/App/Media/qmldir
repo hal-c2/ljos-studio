@@ -1,0 +1,3 @@
+module App.Media
+# block Player 1.0 Player.qml Media "Plays one source"
+Player 1.0 Player.qml
