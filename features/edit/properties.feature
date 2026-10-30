@@ -120,3 +120,29 @@ Feature: An agent sets properties and bindings
       {"doc": "Main.qml", "node": {"id": "label"}, "name": "width", "value": "parent.width /"}
       """
     Then the agent is refused with "would_break"
+
+  Scenario: Leaving the value out removes nothing
+    When the agent calls the tool "property_set" with:
+      """json
+      {"doc": "Main.qml", "node": {"id": "label"}, "name": "font.pixelSize"}
+      """
+    Then the agent is refused with "invalid_argument"
+    When the agent calls the tool "binding_set" with:
+      """json
+      {"doc": "Main.qml", "node": {"id": "label"}, "name": "font.pixelSize"}
+      """
+    Then the agent is refused with "invalid_argument"
+    And the file "Main.qml" is:
+      """qml
+      import QtQuick
+
+      Item {
+          id: root
+          font { bold: true }
+
+          Text {
+              id: label
+              font.pixelSize: 12
+          }
+      }
+      """

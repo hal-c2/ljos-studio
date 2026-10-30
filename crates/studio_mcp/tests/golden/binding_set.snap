@@ -82,7 +82,7 @@ expression: value
         "$ref": "#/$defs/Address"
       },
       "value": {
-        "description": "QML after the `:` (`parent.width / 2`, `{ count++ }`); `null` removes it.",
+        "description": "QML after the `:` (`parent.width / 2`, `{ count++ }`); `null` removes it.\nRequired: left out, nothing is removed.",
         "type": [
           "string",
           "null"
@@ -92,7 +92,8 @@ expression: value
     "required": [
       "doc",
       "node",
-      "name"
+      "name",
+      "value"
     ],
     "title": "BindingArgs",
     "type": "object"

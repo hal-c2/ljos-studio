@@ -295,6 +295,37 @@ enum LiteralArg {
     String(String),
 }
 
+/// A value that must be given, `null` included. Serde reads a missing
+/// `Option` field as `None`, so a `value` left out by mistake would remove
+/// a binding; this type is not an `Option`, so a missing one is refused,
+/// and its schema is `Option<T>`'s: required, and `null` allowed.
+struct Present<T>(Option<T>);
+
+impl<'de, T: serde::de::DeserializeOwned> Deserialize<'de> for Present<T> {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        // Serde fills a missing field by asking for an `Option`, which says
+        // `None`; asked for any value, it says the field is missing.
+        let value = serde_json::Value::deserialize(d)?;
+        serde_json::from_value(value)
+            .map(Present)
+            .map_err(serde::de::Error::custom)
+    }
+}
+
+impl<T: JsonSchema> JsonSchema for Present<T> {
+    fn inline_schema() -> bool {
+        true
+    }
+
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        <Option<T>>::schema_name()
+    }
+
+    fn json_schema(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        <Option<T>>::json_schema(generator)
+    }
+}
+
 #[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct PropertyArgs {
@@ -303,8 +334,8 @@ struct PropertyArgs {
     node: Address,
     /// `width`, `font.bold`; written grouped or dotted as the file already does.
     name: String,
-    /// `null` removes the binding.
-    value: Option<LiteralArg>,
+    /// `null` removes the binding. Required: left out, nothing is removed.
+    value: Present<LiteralArg>,
     #[serde(default)]
     dry_run: bool,
 }
@@ -318,7 +349,8 @@ struct BindingArgs {
     /// A property (`width`) or a handler (`onClicked`).
     name: String,
     /// QML after the `:` (`parent.width / 2`, `{ count++ }`); `null` removes it.
-    value: Option<String>,
+    /// Required: left out, nothing is removed.
+    value: Present<String>,
     #[serde(default)]
     dry_run: bool,
 }
@@ -846,7 +878,7 @@ pub(crate) fn registry(studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
             typed({
                 let studio = s();
                 move |_, a: PropertyArgs| {
-                    let op = match a.value {
+                    let op = match a.value.0 {
                         None => Op::RemoveBinding {
                             node: a.node,
                             name: a.name,
@@ -880,7 +912,7 @@ pub(crate) fn registry(studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
             typed({
                 let studio = s();
                 move |_, a: BindingArgs| {
-                    let op = match a.value {
+                    let op = match a.value.0 {
                         None => Op::RemoveBinding {
                             node: a.node,
                             name: a.name,

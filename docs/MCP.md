@@ -68,6 +68,10 @@ Every `mutate` tool:
 - returns the changed ranges, the new generation and a `history` id;
 - refuses an edit that would not parse (`would_break`) and changes nothing.
 
+`property_set` and `binding_set` remove a binding only when `value` is
+`null`; a call that leaves `value` out is refused (`invalid_argument`), so
+an argument forgotten by mistake removes nothing.
+
 Node addresses are `{"node": "n12"}` (a handle from an earlier answer, which
 follows its object through edits), `{"id": "header"}` or
 `{"path": "root/0/2"}` with an optional `{"value": "background"}` step; paths

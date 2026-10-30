@@ -104,13 +104,14 @@ expression: value
             "type": "null"
           }
         ],
-        "description": "`null` removes the binding."
+        "description": "`null` removes the binding. Required: left out, nothing is removed."
       }
     },
     "required": [
       "doc",
       "node",
-      "name"
+      "name",
+      "value"
     ],
     "title": "PropertyArgs",
     "type": "object"
