@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex};
 use ljos_mcp_core::{CallCtx, Cap, CapSet};
 use serde_json::{Map, Value, json};
 use studio_core::preview::{
-    LogLine, Picture, PreviewError, PreviewHost, PreviewSpec, Reload, Size,
+    Declared, LogLine, Picture, PreviewError, PreviewHost, PreviewSpec, Reload, Size,
 };
 use studio_mcp::{Studio, StudioServer};
 
@@ -19,6 +19,8 @@ struct Seen {
     /// Calls that answer with an error, by how the call's note starts; each
     /// answers once.
     errors: Vec<(String, PreviewError)>,
+    /// What `pick` answers.
+    declared: Option<Declared>,
 }
 
 struct Recorder(Arc<Mutex<Seen>>);
@@ -133,6 +135,11 @@ impl PreviewHost for Recorder {
 
     fn alive(&mut self) -> Result<(), PreviewError> {
         self.answer("alive")
+    }
+
+    fn pick(&mut self, x: f64, y: f64) -> Result<Option<Declared>, PreviewError> {
+        self.note(format!("pick {x},{y}"))?;
+        Ok(self.0.lock().unwrap().declared.clone())
     }
 
     fn close(&mut self) {
@@ -714,4 +721,118 @@ fn a_size_out_of_bounds_is_refused_before_start_or_resize() {
     assert!(f.calls().is_empty());
     open(8192, 8192).unwrap();
     assert_eq!(f.calls(), ["resize 8192x8192"]);
+}
+
+fn declared(file: &str, line: u32, column: u32) -> Option<Declared> {
+    Some(Declared {
+        file: file.to_owned(),
+        line,
+        column,
+    })
+}
+
+#[test]
+fn a_point_selects_the_object_declared_where_the_preview_says() {
+    let f = Fixture::new();
+    f.call("preview_open", json!({ "doc": "Shell.qml" }))
+        .unwrap();
+    f.calls();
+    // `    Text { text: "x" }` is line 6; its type name starts at column 5.
+    f.seen.lock().unwrap().declared = declared("Shell.qml", 6, 5);
+    let out = f
+        .call(
+            "node_select",
+            json!({ "doc": "Shell.qml", "at": { "x": 12.5, "y": 40 } }),
+        )
+        .unwrap();
+    assert_eq!(f.calls(), ["pick 12.5,40"]);
+    assert_eq!(out["selection"][0]["path"], "root/1");
+    assert_eq!(out["selection"][0]["type"], "Text");
+    // The enclosing `Column` starts on line 4, not where the Text does.
+    f.seen.lock().unwrap().declared = declared("Shell.qml", 4, 1);
+    let out = f
+        .call(
+            "node_select",
+            json!({ "doc": "Shell.qml", "at": { "x": 1, "y": 1 } }),
+        )
+        .unwrap();
+    assert_eq!(out["selection"][0]["path"], "root");
+}
+
+#[test]
+fn a_point_with_nothing_there_clears_the_selection() {
+    let f = Fixture::new();
+    f.call("preview_open", json!({ "doc": "Shell.qml" }))
+        .unwrap();
+    f.call(
+        "node_select",
+        json!({ "doc": "Shell.qml", "nodes": [{ "path": "root/1" }] }),
+    )
+    .unwrap();
+    let out = f
+        .call(
+            "node_select",
+            json!({ "doc": "Shell.qml", "at": { "x": 5000, "y": 5000 } }),
+        )
+        .unwrap();
+    assert_eq!(out["selection"], json!([]));
+}
+
+#[test]
+fn a_point_in_a_file_of_a_block_selects_in_that_file() {
+    let f = Fixture::new();
+    f.call("preview_open", json!({ "doc": "Shell.qml" }))
+        .unwrap();
+    f.seen.lock().unwrap().declared = declared("App/Media/Player.qml", 3, 1);
+    let out = f
+        .call(
+            "node_select",
+            json!({ "doc": "Shell.qml", "at": { "x": 1, "y": 1 } }),
+        )
+        .unwrap();
+    assert_eq!(out["selection"][0]["doc"], "App/Media/Player.qml");
+    assert_eq!(out["selection"][0]["type"], "Item");
+    f.seen.lock().unwrap().declared = declared("/elsewhere/Thing.qml", 1, 1);
+    let refused = f
+        .call(
+            "node_select",
+            json!({ "doc": "Shell.qml", "at": { "x": 1, "y": 1 } }),
+        )
+        .unwrap_err();
+    assert_eq!(refused["details"]["kind"], "not_a_document");
+}
+
+#[test]
+fn a_point_needs_a_preview_that_shows_the_text() {
+    let f = Fixture::new();
+    let refused = f
+        .call(
+            "node_select",
+            json!({ "doc": "Shell.qml", "at": { "x": 1, "y": 1 } }),
+        )
+        .unwrap_err();
+    assert_eq!(refused["details"]["kind"], "no_preview");
+    f.call("preview_open", json!({ "doc": "Shell.qml" }))
+        .unwrap();
+    let refused = f
+        .call(
+            "node_select",
+            json!({ "doc": "Other.qml", "at": { "x": 1, "y": 1 } }),
+        )
+        .unwrap_err();
+    assert_eq!(refused["details"]["kind"], "no_preview");
+    f.seen.lock().unwrap().fail_next = true;
+    f.call(
+        "binding_set",
+        json!({ "doc": "Shell.qml", "generation": 1, "node": { "path": "root/1" }, "name": "text", "value": "\"y\"" }),
+    )
+    .unwrap();
+    f.seen.lock().unwrap().declared = declared("Shell.qml", 6, 5);
+    let refused = f
+        .call(
+            "node_select",
+            json!({ "doc": "Shell.qml", "at": { "x": 1, "y": 1 } }),
+        )
+        .unwrap_err();
+    assert_eq!(refused["details"]["kind"], "preview_behind");
 }

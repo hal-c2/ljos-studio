@@ -9,7 +9,7 @@ expression: value
     "open_world": false,
     "read_only": true
   },
-  "description": "Set Studio's selection, shown on the canvas and in the inspector. Empty clears it.",
+  "description": "Set Studio's selection, shown on the canvas and in the inspector, by addresses or by a point `at` in the document's preview (the object declared there). Empty clears it.",
   "inputSchema": {
     "$defs": {
       "Address": {
@@ -55,14 +55,44 @@ expression: value
             "type": "object"
           }
         ]
+      },
+      "Point": {
+        "additionalProperties": false,
+        "properties": {
+          "x": {
+            "format": "double",
+            "type": "number"
+          },
+          "y": {
+            "format": "double",
+            "type": "number"
+          }
+        },
+        "required": [
+          "x",
+          "y"
+        ],
+        "type": "object"
       }
     },
     "additionalProperties": false,
     "properties": {
+      "at": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/Point"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "description": "Instead of `nodes`: a point in the open preview of `doc`, in its\nlogical pixels. Selects the object declared where the preview's\ntopmost object there is declared; nothing there clears it."
+      },
       "doc": {
         "type": "string"
       },
       "nodes": {
+        "default": [],
         "description": "Empty clears the selection.",
         "items": {
           "$ref": "#/$defs/Address"
@@ -71,8 +101,7 @@ expression: value
       }
     },
     "required": [
-      "doc",
-      "nodes"
+      "doc"
     ],
     "title": "SelectArgs",
     "type": "object"

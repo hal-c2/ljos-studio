@@ -35,7 +35,7 @@ documents: export), `run` (start previews).
 | 5 | `document_new` | Create a QML document; undo removes it | mutate |
 | 6 | `document_edit` | Replace a byte range of a document's text, as the code view does | mutate |
 | 7 | `node_find` | Find nodes by `id`, type, property value or text; returns addresses | inspect |
-| 8 | `node_select` | Set Studio's selection (shown on the canvas and in the inspector) | inspect |
+| 8 | `node_select` | Set Studio's selection (shown on the canvas and in the inspector) by addresses or by a point `at` in the preview | inspect |
 | 9 | `node_inspect` | A node's bindings and properties with source spans, its type's members, its states | inspect |
 | 10 | `node_insert` | Insert QML text or a block instance as a child at an index | mutate |
 | 11 | `node_move` | Move a node to a parent and index (reparent or reorder) | mutate |
@@ -150,6 +150,26 @@ shows it; the watcher's quiet time is not on that path.
 - DECISION: starting a preview needs `run` (it runs the project's code);
   looking at one that runs (`preview_screenshot`, `preview_events`) needs
   only `inspect`.
+
+## Selection from the canvas (S3)
+
+`node_select {doc, at: {x, y}}` selects by a point of the open preview of
+`doc`, in its logical pixels, instead of by `nodes`. Studio asks the
+preview which object is topmost there and where it is declared (the
+inspector's `app_inspect` with the target `at=X,Y`, whose answer has
+`source {file, line, column}`), then selects the object whose type name
+starts at that place: the object itself, not one enclosing it.
+
+- DECISION: no new tool. A point is another way to name what `node_select`
+  selects, and the list stays within 25.
+- DECISION: the selected object may be in another document (a block's own
+  file); the answer's `doc` says which. A place outside the project's
+  documents is refused (`not_found`, `details.kind: "not_a_document"`).
+- DECISION: refused (`not_actionable`) with no preview of `doc`
+  (`no_preview`) and while the preview's last reload failed
+  (`preview_behind`): it then runs older text, whose lines name other
+  objects. Nothing at the point clears the selection.
+- Giving both `nodes` and `at` is `invalid_argument`.
 
 ## Prompts
 

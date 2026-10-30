@@ -129,7 +129,7 @@ struct EventsOut {
     open: bool,
 }
 
-fn preview_error(e: PreviewError) -> SurfaceError {
+pub(crate) fn preview_error(e: PreviewError) -> SurfaceError {
     let message = e.to_string();
     let kind = |code: ErrorCode, kind: &str| {
         SurfaceError::new(code, message.clone()).with_details(json!({ "kind": kind }))
@@ -400,6 +400,63 @@ pub(crate) fn screenshot(studio: &Mutex<Studio>, args: Value) -> Result<ToolRepl
     };
     let structured = serde_json::to_value(out).map_err(internal)?;
     Ok(ToolReply::from(structured).with_image("image/png", picture.png))
+}
+
+/// The document object the open preview of `doc` shows at `x`, `y`: as
+/// (document, handle), `None` when nothing is there.
+pub(crate) fn pick(
+    studio: &mut Studio,
+    doc: &str,
+    x: f64,
+    y: f64,
+) -> Result<Option<(String, String)>, SurfaceError> {
+    let previews = studio.previews.clone();
+    let mut previews = preview::lock(&previews);
+    let not_shown = || {
+        SurfaceError::new(
+            ErrorCode::NotActionable,
+            format!("no preview of `{doc}` is open; `preview_open` starts one"),
+        )
+        .with_details(json!({ "kind": "no_preview" }))
+    };
+    if previews.open.as_ref().is_none_or(|o| o.doc != doc) {
+        return Err(not_shown());
+    }
+    // A preview whose last reload failed runs older text than the
+    // session's: its lines would name other objects.
+    let behind = previews.events.iter().rev().find_map(|e| match e {
+        PreviewEvent::Opened { .. } | PreviewEvent::Reloaded { .. } => Some(false),
+        PreviewEvent::ReloadFailed { .. } => Some(true),
+        _ => None,
+    });
+    if behind == Some(true) {
+        return Err(SurfaceError::new(
+            ErrorCode::NotActionable,
+            format!("the preview shows an older `{doc}`: its last reload failed"),
+        )
+        .with_details(json!({ "kind": "preview_behind" })));
+    }
+    let open = previews.open.as_mut().ok_or_else(not_shown)?;
+    let Some(declared) = open.host.pick(x, y).map_err(preview_error)? else {
+        return Ok(None);
+    };
+    drop(previews);
+    if !studio.session.store().exists(&declared.file) {
+        return Err(SurfaceError::not_found(format!(
+            "the object at {x},{y} is declared in `{}`, which is not a document of the project",
+            declared.file
+        ))
+        .with_details(json!({ "kind": "not_a_document" })));
+    }
+    let (handle, _) = studio
+        .session
+        .declared_at(
+            &declared.file,
+            declared.line as usize,
+            declared.column as usize,
+        )
+        .map_err(error)?;
+    Ok(Some((declared.file, handle)))
 }
 
 fn events(studio: &Mutex<Studio>, a: EventsArgs) -> EventsOut {

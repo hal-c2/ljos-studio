@@ -21,7 +21,7 @@ use std::{
 use ljos_child::Reaped;
 use serde_json::{Map, Value, json};
 use studio_core::preview::{
-    LogLine, Picture, PreviewError, PreviewHost, PreviewSpec, Reload, Size,
+    Declared, LogLine, Picture, PreviewError, PreviewHost, PreviewSpec, Reload, Size,
 };
 
 use inspector::{Answer, Fault, Inspector};
@@ -282,11 +282,85 @@ impl PreviewHost for NativeHost {
         self.running().map(|_| ())
     }
 
+    fn pick(&mut self, x: f64, y: f64) -> Result<Option<Declared>, PreviewError> {
+        let answer = match self.call("app_inspect", json!({ "target": format!("at={x},{y}") })) {
+            Ok(answer) => answer,
+            Err(PreviewError::Refused { code, .. })
+                if code == "not_found" || code == "no_match" =>
+            {
+                return Ok(None);
+            }
+            Err(e) => return Err(e),
+        };
+        let source = &answer.structured["source"];
+        let Some(file) = source["file"].as_str() else {
+            return Ok(None);
+        };
+        let number = |name: &str| {
+            source[name]
+                .as_u64()
+                .and_then(|n| u32::try_from(n).ok())
+                .unwrap_or(0)
+        };
+        Ok(Some(Declared {
+            file: self.document(file),
+            line: number("line"),
+            column: number("column"),
+        }))
+    }
+
     fn close(&mut self) {
         if let Some(mut running) = self.running.take() {
             let _ = running.child.stop();
         }
     }
+}
+
+impl NativeHost {
+    /// A file the child names (a `file:` URL, as its engine does) as the
+    /// store names it: relative to the project when it is below it.
+    fn document(&self, file: &str) -> String {
+        let Some(path) = file.strip_prefix("file://") else {
+            return file.to_owned();
+        };
+        let path = PathBuf::from(percent_decoded(path));
+        let root = self
+            .root
+            .canonicalize()
+            .unwrap_or_else(|_| self.root.clone());
+        let path = path.canonicalize().unwrap_or(path);
+        match path.strip_prefix(&root) {
+            Ok(relative) => relative
+                .components()
+                .map(|c| c.as_os_str().to_string_lossy())
+                .collect::<Vec<_>>()
+                .join("/"),
+            Err(_) => file.to_owned(),
+        }
+    }
+}
+
+/// A URL path with its `%XX` escapes turned back into bytes.
+fn percent_decoded(path: &str) -> String {
+    let bytes = path.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        let hex = |b: u8| char::from(b).to_digit(16);
+        if bytes[i] == b'%'
+            && let (Some(hi), Some(lo)) = (
+                bytes.get(i + 1).copied().and_then(hex),
+                bytes.get(i + 2).copied().and_then(hex),
+            )
+        {
+            out.push(u8::try_from(hi * 16 + lo).unwrap_or(b'%'));
+            i += 3;
+            continue;
+        }
+        out.push(bytes[i]);
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
 }
 
 /// The inspector's locator for the object with the QML `id`.

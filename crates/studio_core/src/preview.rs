@@ -123,6 +123,19 @@ impl std::fmt::Debug for Picture {
     }
 }
 
+/// A place in a file of the project where an object of the preview is
+/// declared: the start of its type name.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Declared {
+    /// As the store names it (`Main.qml`, `App/Media/Player.qml`), or as the
+    /// preview gave it when it is not a file of the project.
+    pub file: String,
+    /// One-based.
+    pub line: u32,
+    /// One-based, in characters; 0 when only the line is known.
+    pub column: u32,
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum PreviewError {
     #[error("no preview is open")]
@@ -189,6 +202,11 @@ pub trait PreviewHost: Send {
     /// stopped since the last call. Cheap and local where the host can
     /// tell without asking the preview, since every reopen asks it.
     fn alive(&mut self) -> Result<(), PreviewError>;
+
+    /// Where the object the preview shows at `x`, `y` (its logical pixels)
+    /// is declared: the topmost object there that has a declaration.
+    /// `None` when nothing is there.
+    fn pick(&mut self, x: f64, y: f64) -> Result<Option<Declared>, PreviewError>;
 
     /// Ends the preview.
     fn close(&mut self);

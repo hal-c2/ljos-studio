@@ -206,7 +206,19 @@ struct FindOut {
 struct SelectArgs {
     doc: String,
     /// Empty clears the selection.
+    #[serde(default)]
     nodes: Vec<Address>,
+    /// Instead of `nodes`: a point in the open preview of `doc`, in its
+    /// logical pixels. Selects the object declared where the preview's
+    /// topmost object there is declared; nothing there clears it.
+    at: Option<Point>,
+}
+
+#[derive(Clone, Copy, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct Point {
+    x: f64,
+    y: f64,
 }
 
 #[derive(Serialize, JsonSchema)]
@@ -752,7 +764,9 @@ fn edits(studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
         .with(
             ToolDef::new::<SelectArgs>(
                 "node_select",
-                "Set Studio's selection, shown on the canvas and in the inspector. Empty clears it.",
+                "Set Studio's selection, shown on the canvas and in the inspector, by addresses \
+                 or by a point `at` in the document's preview (the object declared there). \
+                 Empty clears it.",
             )
             .output::<Selection>()
             .requires(Cap::Inspect),
@@ -760,7 +774,27 @@ fn edits(studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
                 let studio = s();
                 move |_, a: SelectArgs| {
                     let mut studio = lock(&studio);
-                    studio.session.select(&a.doc, &a.nodes).map_err(error)?;
+                    match a.at {
+                        Some(_) if !a.nodes.is_empty() => {
+                            return Err(SurfaceError::invalid_argument(
+                                "give `nodes` or a point `at`, not both",
+                            ));
+                        }
+                        Some(at) => match crate::preview_tools::pick(&mut studio, &a.doc, at.x, at.y)? {
+                            Some((doc, handle)) => {
+                                studio
+                                    .session
+                                    .select(&doc, &[Address::Node(handle)])
+                                    .map_err(error)?;
+                            }
+                            None => {
+                                studio.session.select(&a.doc, &[]).map_err(error)?;
+                            }
+                        },
+                        None => {
+                            studio.session.select(&a.doc, &a.nodes).map_err(error)?;
+                        }
+                    }
                     let mut selection = Vec::new();
                     for (doc, handle) in studio.session.selection() {
                         let (handle, node) = studio
