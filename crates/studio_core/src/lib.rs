@@ -230,7 +230,7 @@ pub struct Tokens {
 const CONTRIBUTION: &str = "Contribution";
 
 /// One open document.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 struct Document {
     text: String,
     generation: u64,
@@ -330,12 +330,6 @@ impl Session {
     /// from now on, after the store has it.
     pub fn on_write(&mut self, f: impl FnMut(&str) + Send + 'static) {
         self.on_write.push(Box::new(f));
-    }
-
-    fn put(&mut self, path: &str, text: &str) -> Result<(), StoreError> {
-        self.store.write(path, text)?;
-        self.wrote(path);
-        Ok(())
     }
 
     fn wrote(&mut self, path: &str) {
@@ -967,11 +961,11 @@ impl Session {
                 unchanged: false,
             });
         }
-        self.put(path, text)?;
         let past = self.retired.get(path).copied().unwrap_or(0);
-        self.docs
-            .insert(path.to_owned(), Document::new(text.to_owned(), past));
-        let generation = self.docs[path].generation;
+        let doc = Document::new(text.to_owned(), past);
+        let generation = doc.generation;
+        self.store.write(path, text)?;
+        self.docs.insert(path.to_owned(), doc);
         let entry = self.history.push(Entry {
             id: 0,
             doc: path.to_owned(),
@@ -989,6 +983,7 @@ impl Session {
             handles_after: Vec::new(),
             change: None,
         });
+        self.wrote(path);
         Ok(Outcome {
             doc: path.to_owned(),
             generation,
@@ -1105,11 +1100,11 @@ impl Session {
         let entry = if exists {
             self.commit(file, before, after, None, label)?
         } else {
-            self.put(file, &after)?;
             let past = self.retired.get(file).copied().unwrap_or(0);
-            self.docs
-                .insert(file.to_owned(), Document::new(after.clone(), past));
-            self.history.push(Entry {
+            let doc = Document::new(after.clone(), past);
+            self.store.write(file, &after)?;
+            self.docs.insert(file.to_owned(), doc);
+            let entry = self.history.push(Entry {
                 id: 0,
                 doc: file.to_owned(),
                 label,
@@ -1121,7 +1116,9 @@ impl Session {
                 created: true,
                 handles_before: Vec::new(),
                 handles_after: Vec::new(),
-            })
+            });
+            self.wrote(file);
+            entry
         };
         Ok(Outcome {
             doc: file.to_owned(),
@@ -1133,7 +1130,9 @@ impl Session {
         })
     }
 
-    /// Writes the new text, moves the handles and records the entry.
+    /// Writes the new text, moves the handles and records the entry. The
+    /// session's lock outlives a panic (`studio_mcp::lock`), so what can panic
+    /// comes first, the parts that must agree together, and the telling last.
     fn commit(
         &mut self,
         path: &str,
@@ -1142,12 +1141,16 @@ impl Session {
         change: Option<PathChange>,
         label: String,
     ) -> Result<u64, Error> {
-        self.put(path, &after)?;
-        self.record(path, before, after, change, label)
+        let (next, entry) = self.step(path, before, after.clone(), change, label)?;
+        self.store.write(path, &after)?;
+        *self.doc(path)? = next;
+        let id = self.history.push(entry);
+        self.wrote(path);
+        Ok(id)
     }
 
-    /// Takes `after` as the document's text: moves the handles and records
-    /// the entry.
+    /// Takes `after` as the document's text, which the file already has:
+    /// moves the handles and records the entry.
     fn record(
         &mut self,
         path: &str,
@@ -1156,27 +1159,44 @@ impl Session {
         change: Option<PathChange>,
         label: String,
     ) -> Result<u64, Error> {
+        let (next, entry) = self.step(path, before, after, change, label)?;
+        *self.doc(path)? = next;
+        Ok(self.history.push(entry))
+    }
+
+    /// The document as it is after the edit, and the edit's entry, worked
+    /// out without changing the session.
+    fn step(
+        &mut self,
+        path: &str,
+        before: String,
+        after: String,
+        change: Option<PathChange>,
+        label: String,
+    ) -> Result<(Document, Entry), Error> {
         let doc = self.doc(path)?;
         let handles_before = doc.tracked.clone();
-        for change in diff(&before, &after) {
-            for t in &mut doc.tracked {
-                t.shift(&change);
+        let mut next = doc.clone();
+        let forward = diff(&before, &after);
+        for change in &forward {
+            for t in &mut next.tracked {
+                t.shift(change);
             }
         }
-        doc.set_text(after.clone());
-        remap(doc, change.as_ref());
-        let handles_after = doc.tracked.clone();
-        Ok(self.history.push(Entry {
+        next.set_text(after.clone());
+        remap(&mut next, change.as_ref());
+        let entry = Entry {
             id: 0,
             doc: path.to_owned(),
             label,
-            forward: diff(&before, &after),
+            forward,
             inverse: diff(&after, &before),
             created: false,
             handles_before,
-            handles_after,
+            handles_after: next.tracked.clone(),
             change,
-        }))
+        };
+        Ok((next, entry))
     }
 
     fn handle_at(&mut self, path: &str, at: &NodePath) -> Result<String, Error> {
@@ -1190,7 +1210,9 @@ impl Session {
             })
     }
 
-    /// Undoes the last edit; its document gets the bytes it had before.
+    /// Undoes the last edit; its document gets the bytes it had before. The
+    /// history moves only once the file has: one that could not be written
+    /// can be tried again.
     pub fn undo(&mut self) -> Result<EntrySummary, Error> {
         // A change made outside Studio goes on top here and is what is
         // undone: the entry below it has offsets on a text the file left.
@@ -1210,6 +1232,7 @@ impl Session {
         // to be tried again, and the lists still say where the file is.
         self.replay(&entry, false)?;
         self.history.commit_undo();
+        self.wrote(&entry.doc);
         Ok(entry.summary())
     }
 
@@ -1238,23 +1261,25 @@ impl Session {
         // to be tried again, and the lists still say where the file is.
         self.replay(&entry, true)?;
         self.history.commit_redo();
+        self.wrote(&entry.doc);
         Ok(entry.summary())
     }
 
+    /// Brings the file and the document to that side of `entry`, for the
+    /// caller to move the history and tell who watches.
     fn replay(&mut self, entry: &Entry, forward: bool) -> Result<(), Error> {
         let path = entry.doc.clone();
         if entry.created && !forward {
             self.store.remove(&path)?;
-            self.wrote(&path);
             self.retire(&path);
             return Ok(());
         }
         if entry.created && forward {
             let text = qml_edit::splice("", &entry.forward);
-            self.put(&path, &text)?;
             let past = self.retired.get(&path).copied().unwrap_or(0);
-            let mut doc = Document::new(text, past);
+            let mut doc = Document::new(text.clone(), past);
             doc.tracked = entry.handles_after.clone();
+            self.store.write(&path, &text)?;
             self.docs.insert(path, doc);
             return Ok(());
         }
@@ -1265,15 +1290,13 @@ impl Session {
             &entry.inverse
         };
         let text = qml_edit::splice(&doc.text, changes);
-        self.put(&path, &text)?;
-        let doc = self.doc(&path)?;
-        let shifts = diff(&doc.text, &text);
-        for change in &shifts {
-            for t in &mut doc.tracked {
+        let mut next = doc.clone();
+        for change in &diff(&doc.text, &text) {
+            for t in &mut next.tracked {
                 t.shift(change);
             }
         }
-        doc.set_text(text);
+        next.set_text(text.clone());
         // The handles as they were on that side of the edit: exact, where
         // working them out again from keys could guess.
         let snapshot = if forward {
@@ -1290,14 +1313,14 @@ impl Session {
         // text: a structural edit says where their objects are on this
         // side, and one it made has no place here. A change of the text
         // says nothing, so they are found by bytes and key.
-        for t in &doc.tracked {
+        for t in &next.tracked {
             if tracked.iter().any(|old| old.handle == t.handle) {
                 continue;
             }
             leads.push(match (&entry.change, &t.path) {
                 (Some(change), Some(path)) if forward => Lead::Known(change.apply(path)),
                 (Some(change), Some(path)) => Lead::Known(
-                    doc.nodes
+                    next.nodes
                         .iter()
                         .flatten()
                         .find(|n| change.apply(&n.path).as_ref() == Some(path))
@@ -1308,8 +1331,10 @@ impl Session {
             });
             tracked.push(t.clone());
         }
-        doc.tracked = tracked;
-        place(doc, leads);
+        next.tracked = tracked;
+        place(&mut next, leads);
+        self.store.write(&path, &text)?;
+        *self.doc(&path)? = next;
         Ok(())
     }
 

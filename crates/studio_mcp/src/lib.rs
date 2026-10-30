@@ -267,8 +267,9 @@ impl StudioServer {
     }
 }
 
-/// A poisoned lock means a tool panicked half way through an edit; the
-/// session's state is still whole (edits commit at their end), so carry on.
+/// A poisoned lock means a tool panicked while it held the session; a window
+/// stuck for it would lose the person's work, and the session is still whole:
+/// an edit changes it only after all that can panic (`Session::commit`).
 pub(crate) fn lock(studio: &Mutex<Studio>) -> MutexGuard<'_, Studio> {
     studio
         .lock()

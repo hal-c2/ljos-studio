@@ -1,3 +1,8 @@
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+};
+
 use super::*;
 
 const MAIN: &str = "import QtQuick
@@ -743,4 +748,73 @@ fn a_single_state_becomes_a_list_of_two() {
         s.text("Main.qml").unwrap().0,
         "Item {\n    id: root\n    states: [\n        State { name: \"a\" },\n        State {\n            name: \"b\"\n        }\n    ]\n}\n"
     );
+}
+
+fn set_width(s: &mut Session, width: &str) -> Result<Outcome, Error> {
+    s.edit(
+        "Main.qml",
+        None,
+        &Op::SetBinding {
+            node: Address::Id("root".into()),
+            name: "width".into(),
+            value: width.into(),
+        },
+        false,
+    )
+}
+
+/// What a person sees through every part of the session afterwards: the
+/// text, the file and the history agree, and undo gives the bytes back.
+fn assert_whole(s: &mut Session, before: &str, after: &str) {
+    assert_eq!(s.text("Main.qml").unwrap().0, after);
+    assert_eq!(s.store().read("Main.qml").unwrap(), after);
+    s.undo().unwrap();
+    assert_eq!(s.text("Main.qml").unwrap().0, before);
+    assert_eq!(s.store().read("Main.qml").unwrap(), before);
+}
+
+/// `f` panics as it tells who watches the session about the write.
+fn panicking_on_write(s: &mut Session, f: impl FnOnce(&mut Session)) {
+    let armed = Arc::new(AtomicBool::new(true));
+    let disarm = Arc::clone(&armed);
+    s.on_write(move |_| {
+        if disarm.swap(false, Ordering::SeqCst) {
+            panic!("told of a write");
+        }
+    });
+    let panicked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| f(s))).is_err();
+    assert!(panicked && !armed.load(Ordering::SeqCst));
+}
+
+#[test]
+fn a_panic_telling_of_an_edit_leaves_the_session_whole() {
+    let mut s = session();
+    panicking_on_write(&mut s, |s| {
+        let _ = set_width(s, "300");
+    });
+    assert_whole(&mut s, MAIN, &MAIN.replace("200", "300"));
+}
+
+#[test]
+fn a_panic_telling_of_an_undo_leaves_the_session_whole() {
+    let mut s = session();
+    set_width(&mut s, "300").unwrap();
+    panicking_on_write(&mut s, |s| {
+        let _ = s.undo();
+    });
+    assert_eq!(s.text("Main.qml").unwrap().0, MAIN);
+    assert_eq!(s.store().read("Main.qml").unwrap(), MAIN);
+    s.redo().unwrap();
+    assert_whole(&mut s, MAIN, &MAIN.replace("200", "300"));
+}
+
+#[test]
+fn a_panic_telling_of_a_new_document_leaves_the_session_whole() {
+    let mut s = session();
+    panicking_on_write(&mut s, |s| {
+        let _ = s.create("New.qml", "Item {}\n", false);
+    });
+    assert_eq!(s.text("New.qml").unwrap().0, "Item {}\n");
+    s.undo().unwrap();
+    assert!(!s.store().exists("New.qml"));
 }
