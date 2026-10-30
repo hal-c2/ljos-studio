@@ -68,7 +68,9 @@ impl StudioWorld {
         if self.server.is_none() {
             // Previews run the `ljos` that `LJOS` names (`mise run features`
             // builds it from the Ljós checkout beside this one).
-            let state = self.state.path().to_owned();
+            // A directory for the host to make, as the program names one: a
+            // temporary directory itself is as open as the umask leaves it.
+            let state = self.state.path().join("preview");
             let studio = Studio::open(self.dir.path())
                 .map_err(|e| e.to_string())?
                 .with_previews(Arc::new(move |dir| {

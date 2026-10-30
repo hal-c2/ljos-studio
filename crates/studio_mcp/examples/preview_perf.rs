@@ -36,7 +36,7 @@ fn main() {
     let copy = tempfile::tempdir().unwrap();
     copy_dir(Path::new(&source), copy.path());
     let state = tempfile::tempdir().unwrap();
-    let state_dir = state.path().to_owned();
+    let state_dir = state.path().join("preview");
     let studio = Studio::open(copy.path())
         .unwrap()
         .with_previews(Arc::new(move |dir| {

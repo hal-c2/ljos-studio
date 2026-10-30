@@ -59,10 +59,11 @@ fn main() -> anyhow::Result<()> {
 }
 
 /// Where previews keep their inspector token files and logs: a directory
-/// only this user can read (the token grants control of the preview), and
-/// outside the project, which the preview watches.
+/// only this user can read (`NativeHost` makes it, or refuses what it finds;
+/// the token grants control of the preview), and outside the project, which
+/// the preview watches. One level, by process: a shared parent in a shared
+/// temporary directory would let one other user stop every Studio's previews.
 fn preview_state_dir() -> PathBuf {
     let base = std::env::var_os("XDG_RUNTIME_DIR").map_or_else(std::env::temp_dir, PathBuf::from);
-    base.join("ljos-studio")
-        .join(std::process::id().to_string())
+    base.join(format!("ljos-studio-{}", std::process::id()))
 }

@@ -9,6 +9,7 @@
 //! watcher's quiet time, which is most of the edit-to-preview budget.
 
 mod inspector;
+mod state_dir;
 
 use std::{
     fs::File,
@@ -24,6 +25,7 @@ use studio_core::preview::{
 };
 
 use inspector::{Answer, Fault, Inspector};
+pub use state_dir::private_dir;
 
 /// How long a preview may take to answer its first call: a cold start
 /// compiles the whole project.
@@ -123,8 +125,7 @@ impl NativeHost {
         if !entry.is_file() {
             return Err(PreviewError::Start(format!("no document `{}`", spec.entry)));
         }
-        std::fs::create_dir_all(&self.state)
-            .map_err(|e| PreviewError::Start(format!("{}: {e}", self.state.display())))?;
+        private_dir(&self.state)?;
         let log = self.state.join("preview.log");
         let stderr = File::create(&log)
             .map_err(|e| PreviewError::Start(format!("{}: {e}", log.display())))?;
