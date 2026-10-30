@@ -1,0 +1,231 @@
+---
+source: crates/studio_mcp/tests/golden_tools.rs
+expression: value
+---
+{
+  "annotations": {
+    "destructive": true,
+    "idempotent": true,
+    "open_world": false,
+    "read_only": false
+  },
+  "description": "Write a bundle of the project that runs without Studio: its QML, theme, assets and own blocks, never mocks or `.studio/`, with a manifest (`ljos-bundle.json`) saying what it holds and how to start it (`ljos run`). `dry_run` writes nothing.",
+  "inputSchema": {
+    "$defs": {
+      "Target": {
+        "oneOf": [
+          {
+            "const": "native",
+            "description": "A directory `ljos run` starts.",
+            "type": "string"
+          },
+          {
+            "const": "web",
+            "description": "A static site (not built yet: refused with the reason).",
+            "type": "string"
+          }
+        ]
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "dry_run": {
+        "default": false,
+        "description": "Say what the bundle would hold; write nothing.",
+        "type": "boolean"
+      },
+      "entry": {
+        "description": "The document the app starts with, usually its shell (`Shell.qml`).",
+        "type": "string"
+      },
+      "out": {
+        "description": "Where, relative to the project and below its `build/`; default\n`build/<target>`. A previous bundle there is replaced.",
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "target": {
+        "$ref": "#/$defs/Target",
+        "default": "native",
+        "description": "`native` (default) or `web`."
+      }
+    },
+    "required": [
+      "entry"
+    ],
+    "title": "ExportArgs",
+    "type": "object"
+  },
+  "max_result_bytes": 40960,
+  "name": "export",
+  "outputSchema": {
+    "$defs": {
+      "BlockFile": {
+        "properties": {
+          "block": {
+            "type": "string"
+          },
+          "file": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "block",
+          "file"
+        ],
+        "type": "object"
+      },
+      "FileEntry": {
+        "properties": {
+          "bytes": {
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "path": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "path",
+          "bytes"
+        ],
+        "type": "object"
+      },
+      "LeftOut": {
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "why": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "path",
+          "why"
+        ],
+        "type": "object"
+      },
+      "Manifest": {
+        "description": "What a bundle holds; written beside it as `ljos-bundle.json`.",
+        "properties": {
+          "blocks": {
+            "description": "The project's own blocks, as `Module.Name`, and their files.",
+            "items": {
+              "$ref": "#/$defs/BlockFile"
+            },
+            "type": "array"
+          },
+          "entry": {
+            "type": "string"
+          },
+          "files": {
+            "description": "Every file, by path relative to the bundle.",
+            "items": {
+              "$ref": "#/$defs/FileEntry"
+            },
+            "type": "array"
+          },
+          "format": {
+            "type": "string"
+          },
+          "left_out": {
+            "description": "What of the project is not in the bundle, and why.",
+            "items": {
+              "$ref": "#/$defs/LeftOut"
+            },
+            "type": "array"
+          },
+          "run": {
+            "description": "The command that starts it, run in the bundle's directory.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "target": {
+            "$ref": "#/$defs/Target"
+          },
+          "theme": {
+            "description": "The theme file the app reads, beside its entry.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "version": {
+            "format": "uint32",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "format",
+          "version",
+          "target",
+          "entry",
+          "run",
+          "blocks",
+          "files",
+          "left_out"
+        ],
+        "type": "object"
+      },
+      "Target": {
+        "oneOf": [
+          {
+            "const": "native",
+            "description": "A directory `ljos run` starts.",
+            "type": "string"
+          },
+          {
+            "const": "web",
+            "description": "A static site (not built yet: refused with the reason).",
+            "type": "string"
+          }
+        ]
+      }
+    },
+    "properties": {
+      "bytes": {
+        "format": "uint64",
+        "minimum": 0,
+        "type": "integer"
+      },
+      "files": {
+        "description": "How many files the bundle holds and their size, which stay true when\na long manifest is cut short in this answer (the one written is whole).",
+        "format": "uint",
+        "minimum": 0,
+        "type": "integer"
+      },
+      "manifest": {
+        "$ref": "#/$defs/Manifest"
+      },
+      "ms": {
+        "format": "double",
+        "type": "number"
+      },
+      "out": {
+        "description": "The bundle's directory, relative to the project.",
+        "type": "string"
+      },
+      "written": {
+        "description": "False for a dry run.",
+        "type": "boolean"
+      }
+    },
+    "required": [
+      "out",
+      "files",
+      "bytes",
+      "manifest",
+      "written",
+      "ms"
+    ],
+    "title": "ExportOut",
+    "type": "object"
+  },
+  "required_cap": "fs"
+}

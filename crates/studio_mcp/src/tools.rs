@@ -1109,7 +1109,8 @@ fn edit(
 }
 
 pub(crate) fn registry(studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
-    crate::preview_tools::add(edits(studio), studio)
+    let registry = crate::preview_tools::add(edits(studio), studio);
+    crate::review::add(crate::export::add(registry, studio), studio)
 }
 
 /// The project and edit tools, in wire order.

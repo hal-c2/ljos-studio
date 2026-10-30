@@ -472,6 +472,81 @@ fn file_absent(w: &mut StudioWorld, name: String) -> StepResult {
         .ok_or_else(|| format!("`{name}` exists"))
 }
 
+#[then(regex = r#"^the file "([^"]+)" exists$"#)]
+fn file_exists(w: &mut StudioWorld, name: String) -> StepResult {
+    w.dir
+        .path()
+        .join(&name)
+        .is_file()
+        .then_some(())
+        .ok_or_else(|| format!("`{name}` does not exist"))
+}
+
+#[given(regex = r#"^the directory "([^"]+)" is deleted$"#)]
+fn directory_deleted(w: &mut StudioWorld, name: String) -> StepResult {
+    std::fs::remove_dir_all(w.dir.path().join(&name)).map_err(|e| format!("`{name}`: {e}"))
+}
+
+/// A new server on the same directory: what a session kept in memory is
+/// gone, what it wrote is read again.
+#[given("the studio tools are reconnected")]
+fn reconnected(w: &mut StudioWorld) -> StepResult {
+    w.server = None;
+    w.server().map(|_| ())
+}
+
+/// The bundle is copied somewhere apart from the project, so it can only
+/// run on what it holds, and started as its manifest says.
+#[then(
+    regex = r#"^the bundle "([^"]+)", copied out of the project, runs headless and shows what the preview shows$"#
+)]
+fn bundle_runs(w: &mut StudioWorld, out: String) -> StepResult {
+    use studio_core::preview::{PreviewHost, PreviewSpec, Target};
+
+    w.answer()?;
+    let want = w.preview_outline()?;
+    let copy = tempfile::tempdir().map_err(|e| e.to_string())?;
+    copy_dir(&w.dir.path().join(&out), copy.path())?;
+    let manifest: studio_mcp::export::Manifest = serde_json::from_str(
+        &std::fs::read_to_string(copy.path().join(studio_mcp::export::MANIFEST))
+            .map_err(|e| e.to_string())?,
+    )
+    .map_err(|e| e.to_string())?;
+    let state = tempfile::tempdir().map_err(|e| e.to_string())?;
+    // A directory for the host to make: a temporary directory itself is as
+    // open as the umask leaves it.
+    let mut host = NativeHost::new(
+        copy.path(),
+        NativeHost::default_program(),
+        state.path().join("preview"),
+    );
+    host.open(&PreviewSpec {
+        entry: manifest.entry,
+        // What `preview_open` runs at when no size is given.
+        size: Target::Desktop.size(),
+        aliases: Vec::new(),
+    })
+    .map_err(|e| format!("the bundle does not start: {e}"))?;
+    let got = host.outline().map_err(|e| e.to_string())?;
+    (got == want)
+        .then_some(())
+        .ok_or_else(|| format!("the bundle shows:\n{got}\nthe preview:\n{want}"))
+}
+
+fn copy_dir(from: &std::path::Path, to: &std::path::Path) -> StepResult {
+    for entry in std::fs::read_dir(from).map_err(|e| format!("{}: {e}", from.display()))? {
+        let entry = entry.map_err(|e| e.to_string())?;
+        let target = to.join(entry.file_name());
+        if entry.file_type().map_err(|e| e.to_string())?.is_dir() {
+            std::fs::create_dir_all(&target).map_err(|e| e.to_string())?;
+            copy_dir(&entry.path(), &target)?;
+        } else {
+            std::fs::copy(entry.path(), &target).map_err(|e| e.to_string())?;
+        }
+    }
+    Ok(())
+}
+
 #[then(regex = r#"^the agent is offered the tools "([^"]*)"$"#)]
 fn offered(w: &mut StudioWorld, names: String) -> StepResult {
     let caps = w.caps;

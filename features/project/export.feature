@@ -83,13 +83,15 @@ Feature: A project is exported as a bundle that runs without Studio
       And the answer's "/manifest/files" is:
         """json
         [
-          {"path": "App/Media/Player.qml", "bytes": 109},
-          {"path": "App/Media/qmldir", "bytes": 72},
-          {"path": "Shell.qml", "bytes": 247},
-          {"path": "images/logo.svg", "bytes": 63},
+          {"path": "App/Media/Player.qml", "bytes": 114},
+          {"path": "App/Media/qmldir", "bytes": 73},
+          {"path": "Shell.qml", "bytes": 232},
+          {"path": "images/logo.svg", "bytes": 64},
           {"path": "theme.json", "bytes": 15}
         ]
         """
+      And the answer's "/files" is 5
+      And the answer's "/bytes" is 498
       And the file "build/native/Shell.qml" is:
         """qml
         import QtQuick
