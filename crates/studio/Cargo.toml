@@ -12,11 +12,15 @@ publish.workspace = true
 studio_mcp = { path = "../studio_mcp", features = ["http"] }
 studio_preview = { path = "../studio_preview" }
 studio_blocks = { path = "../studio_blocks" }
-# The window, and `dev-qml` so that `--shell DIR` compiles a shell of the
-# person's own at start: Studio ships the compiler anyway, and a shell is a
+# The window, and `dev-qml` and `dev` so that a shell of the person's own
+# (`--shell DIR`) is compiled and watched as Studio runs, as `--watch`
+# watches any app: Studio ships the compiler anyway, and a shell is a
 # directory of QML anyone may replace.
-ljos = { workspace = true, features = ["shell", "dev-qml"] }
+ljos = { workspace = true, features = ["shell", "dev-qml", "dev"] }
 ljos_mcp_core.workspace = true
+# Studio's own theme file, read and put on a window that watches no shell.
+ljos_design.workspace = true
+ljos_design_qml.workspace = true
 anyhow.workspace = true
 clap.workspace = true
 tokio.workspace = true
@@ -33,6 +37,10 @@ ljos = { workspace = true, features = ["build"] }
 studio_core = { path = "../studio_core" }
 ljos = { workspace = true, features = ["shell", "dev-qml", "testing"] }
 ljos_drive.workspace = true
+# A watched window in-process, for the self-reskin's numbers.
+ljos_dev.workspace = true
+ljos_runtime.workspace = true
+ljos_quick.workspace = true
 serde_json.workspace = true
 tempfile.workspace = true
 

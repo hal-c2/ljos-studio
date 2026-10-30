@@ -4,8 +4,19 @@
 //! directory when left out), and serves the same tools to agents on a
 //! loopback endpoint while it is open. `studio --mcp [DIR]` serves them on
 //! stdio instead, with no window.
+//!
+//! The window shows the person's own shell when they have one: the
+//! directory `--shell DIR` names, else `ljos-studio/shell` in their
+//! configuration directory when it is there. That shell is watched, so an
+//! edit of it, or of Studio's theme file, reskins the window as it runs;
+//! one that does not work gives the window back to the shell Studio ships,
+//! with a banner saying why, until it is mended.
 
-use std::{ffi::OsString, path::PathBuf, sync::Arc};
+use std::{
+    ffi::OsString,
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 
 use anyhow::Context;
 use clap::Parser;
@@ -30,10 +41,18 @@ struct Args {
     /// the `PATH`).
     #[arg(long)]
     ljos: Option<PathBuf>,
-    /// A shell of your own: a directory of QML whose `Main.qml` is the
-    /// window, compiled at start in place of the one Studio ships.
+    /// A shell of your own: a directory of QML whose `Shell.qml` the
+    /// window shows in place of the one Studio ships, watched as it runs.
+    /// A directory without one is given a copy of Studio's to start from.
+    /// Default: `ljos-studio/shell` in the configuration directory, when
+    /// it is there.
     #[arg(long, value_name = "DIR", conflicts_with = "mcp")]
     shell: Option<PathBuf>,
+    /// The roles of `Ljos.Design` Studio's own window is drawn with, a
+    /// theme file as `theme_set` writes one. Default:
+    /// `ljos-studio/theme.json` in the configuration directory.
+    #[arg(long, value_name = "FILE", conflicts_with = "mcp")]
+    theme: Option<PathBuf>,
     /// Serve no tools to agents while the window is open.
     #[arg(long, conflicts_with = "mcp")]
     no_agents: bool,
@@ -83,7 +102,22 @@ fn main() -> anyhow::Result<()> {
         );
         Some(http)
     };
-    window(server, args.shell)
+    let config = config_dir();
+    let shell = match args.shell {
+        Some(dir) => {
+            seed(&dir)?;
+            Some(dir)
+        }
+        None => config
+            .as_ref()
+            .map(|c| c.join("shell"))
+            .filter(|d| d.join("Shell.qml").is_file()),
+    };
+    let theme = args.theme.or_else(|| config.map(|c| c.join("theme.json")));
+    match shell {
+        Some(shell) => watched_window(server, &shell, theme, &state),
+        None => window(server, theme),
+    }
 }
 
 /// What a client may do. The endpoint can be reached by whatever else runs on
@@ -100,29 +134,123 @@ fn granted(args: &Args) -> anyhow::Result<CapSet> {
     Ok(caps.with(Cap::Inspect))
 }
 
-/// Opens the window and runs until it is closed.
-fn window(server: Arc<StudioServer>, shell: Option<PathBuf>) -> anyhow::Result<()> {
-    let app = ljos::App::new("Ljós Studio")
-        .size(1440.0, 900.0)
-        .register(studio_blocks::register);
-    let app = match shell {
-        Some(dir) => app
-            .qml_dir(&dir, "Main")
-            .with_context(|| format!("compiling the shell in {}", dir.display()))?,
-        None => app
-            .source(ljos::include_qml!("shell.pack"))
-            .compiled(ljos::include_compiled!("shell.rs"))
-            .root("Main"),
+/// The window on the shell Studio ships, compiled ahead of time, drawn
+/// with `theme` as the file is when the window opens.
+fn window(server: Arc<StudioServer>, theme: Option<PathBuf>) -> anyhow::Result<()> {
+    let theme = match theme {
+        Some(file) => read_theme(&file)?,
+        None => None,
     };
-    app.run_with(move |setup| {
-        // Before the root is made, so its workspace starts with the session.
-        studio_blocks::serve(setup.engine(), server);
-        setup
-            .engine()
-            .create_from_url("Main", None, Vec::new())
-            .map_err(|e| -> ljos::SetupError { e.to_string().into() })
-    })?;
+    ljos::App::new("Ljós Studio")
+        .size(1440.0, 900.0)
+        .register(studio_blocks::register)
+        .source(ljos::include_qml!("shell.pack"))
+        .compiled(ljos::include_compiled!("shell.rs"))
+        .root("Window")
+        .run_with(move |setup| {
+            if let Some(theme) = &theme {
+                ljos_design_qml::theme::apply(setup.engine(), Some(theme))
+                    .map_err(|errors| -> ljos::SetupError { joined(&errors).into() })?;
+            }
+            // Before the root is made, so its workspace starts with the session.
+            studio_blocks::serve(setup.engine(), server);
+            setup
+                .engine()
+                .create_from_url("Window", None, Vec::new())
+                .map_err(|e| -> ljos::SetupError { e.to_string().into() })
+        })?;
     Ok(())
+}
+
+/// The window on the person's `shell`, with the one Studio ships beneath
+/// it, both watched with Studio's `theme`: a save is applied as the
+/// window runs, and one that fails says why on the window's banner.
+fn watched_window(
+    server: Arc<StudioServer>,
+    shell: &Path,
+    theme: Option<PathBuf>,
+    state: &Path,
+) -> anyhow::Result<()> {
+    // The watched session compiles from the disk, so Studio's own shell is
+    // written out, in the state directory that goes with the process.
+    let builtin = state.join("shell");
+    studio_blocks::shell::write(&builtin)
+        .with_context(|| format!("writing Studio's shell to {}", builtin.display()))?;
+    let user_shell = studio_blocks::shell::url(&shell.join("Shell.qml"))?;
+    let shell = shell.to_owned();
+    ljos::App::new("Ljós Studio")
+        .size(1440.0, 900.0)
+        .register(studio_blocks::register)
+        .run_with(move |setup| {
+            studio_blocks::serve(setup.engine(), server);
+            if let Some(theme) = theme {
+                setup.set_theme_file(theme);
+            }
+            let engine = std::rc::Rc::clone(setup.engine());
+            setup.on_reload(move |report| reported(&engine, report));
+            let oracle = ljos::dev::EngineOracle::from_engine(setup.engine());
+            setup.watch_roots_with(
+                &[&shell, &builtin],
+                &["Window"],
+                vec![("userShell".to_owned(), user_shell.as_str().into())],
+                oracle,
+            )
+        })?;
+    Ok(())
+}
+
+/// Tells the window why a save did not apply, or that the last one did.
+fn reported(engine: &ljos::Engine, report: &ljos::reload::Report) {
+    use ljos::reload::Report;
+    match report {
+        Report::Failed { fault, .. } => studio_blocks::reloaded(engine, Some(fault.to_string())),
+        Report::Reloaded(..) | Report::Cleared => studio_blocks::reloaded(engine, None),
+        _ => {}
+    }
+}
+
+/// Gives `dir` a copy of Studio's shell when it has no `Shell.qml`: a
+/// person's shell starts as Studio's, to be changed.
+fn seed(dir: &Path) -> anyhow::Result<()> {
+    if dir.join("Shell.qml").is_file() {
+        return Ok(());
+    }
+    studio_blocks::shell::seed(dir)
+        .with_context(|| format!("copying Studio's shell to {}", dir.display()))?;
+    eprintln!(
+        "studio: {} had no Shell.qml; it now has a copy of Studio's",
+        dir.display()
+    );
+    Ok(())
+}
+
+/// Studio's own theme from `file`; none when there is no such file.
+fn read_theme(file: &Path) -> anyhow::Result<Option<ljos_design::theme::Theme>> {
+    let text = match std::fs::read_to_string(file) {
+        Ok(text) => text,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(e) => return Err(e).with_context(|| format!("reading {}", file.display())),
+    };
+    ljos_design::theme::parse(&file.to_string_lossy(), &text)
+        .map(Some)
+        .map_err(|errors| anyhow::anyhow!(joined(&errors)))
+}
+
+fn joined(errors: &[ljos_design::theme::ThemeError]) -> String {
+    errors
+        .iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// Where a person's own shell and theme for Studio are.
+fn config_dir() -> Option<PathBuf> {
+    let base = std::env::var_os("XDG_CONFIG_HOME")
+        .filter(|d| !d.is_empty())
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))?;
+    Some(base.join("ljos-studio"))
 }
 
 /// Where previews keep their inspector token files and logs, and where the

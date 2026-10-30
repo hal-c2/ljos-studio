@@ -7,7 +7,14 @@
 //!   that object's bindings;
 //! - inspector edit → picture: Enter in the inspector until the frame draws
 //!   the preview's next generation, back to back and at a person's pace
-//!   (needs `LJOS`, the `ljos` program the preview runs).
+//!   (needs `LJOS`, the `ljos` program the preview runs);
+//! - `theme_set` → picture: Enter in the tokens panel until the frame draws
+//!   the preview's next generation (needs `LJOS`);
+//! - the self-reskin, on Studio's window watching a shell of the person's
+//!   as `studio --shell` runs it: the window opened on a shell that
+//!   throws until the built-in one is shown; a save of Studio's own theme
+//!   file until the window is drawn in it; and what the watched window
+//!   costs while nobody touches it, in CPU time.
 //!
 //! The window's clock is a test clock, so a frame costs only its work; the
 //! tool calls, the preview's reload and the picture's fetch and decode run
@@ -22,7 +29,7 @@
 
 use std::{
     path::Path,
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, mpsc},
     time::{Duration, Instant},
 };
 
@@ -30,7 +37,9 @@ use anyhow::{Context, anyhow, bail};
 use ljos::item::MouseButtons;
 use ljos::prelude::*;
 use ljos::testing::AccessibleNode;
+use ljos_dev::{DevSession, Host, Report};
 use ljos_drive::{Chord, Stage};
+use ljos_runtime::SystemClock;
 use studio_core::preview::{
     Declared, LogLine, Picture, PreviewError, PreviewHost, PreviewSpec, Reload, Size,
 };
@@ -47,6 +56,11 @@ const PACE: Duration = Duration::from_millis(250);
 const CATCH_UP: Duration = Duration::from_millis(1500);
 /// The slowest edits of a round whose breakdown is printed.
 const SLOWEST: usize = 3;
+/// Two canvases the theme edits switch between, each passing the
+/// contrast Ljós asks of the roles drawn on it.
+const CANVASES: [&str; 2] = ["#ffffff", "#fcfcfc"];
+/// How long the idle window is left alone.
+const IDLE: Duration = Duration::from_secs(5);
 /// The value the root's state changes, as the inspector names it: an object
 /// the selection rounds leave alone, so a state that is always on does not
 /// hide their edits of `width`.
@@ -70,6 +84,8 @@ fn main() -> anyhow::Result<()> {
         drop(window);
     }
     report("cold start, 200 files", &mut starts);
+
+    reskin(work.path(), rounds)?;
 
     let mut window = Window::open(&project, &state)?;
     window.open_document("Main.qml")?;
@@ -121,7 +137,221 @@ fn main() -> anyhow::Result<()> {
         ),
         edits,
     );
+
+    std::thread::sleep(Duration::from_secs(1));
+    let mut edits = window.token_edits(rounds, PACE)?;
+    report(
+        &format!(
+            "theme_set in the tokens panel -> new picture, one per {} ms",
+            PACE.as_millis()
+        ),
+        &mut edits,
+    );
     Ok(())
+}
+
+/// The self-reskin's numbers, below `work`.
+fn reskin(work: &Path, rounds: usize) -> anyhow::Result<()> {
+    let builtin = work.join("builtin");
+    studio_blocks::shell::write(&builtin)?;
+    let theme = work.join("theme.json");
+
+    let broken = work.join("broken");
+    studio_blocks::shell::seed(&broken)?;
+    let shell = broken.join("Shell.qml");
+    let text = std::fs::read_to_string(&shell)?.replacen(
+        "id: shell",
+        "id: shell\n    Component.onCompleted: { throw new Error(\"no shell today\") }",
+        1,
+    );
+    std::fs::write(&shell, text)?;
+    let mut opens = Vec::new();
+    for _ in 0..rounds {
+        let started = Instant::now();
+        let window = Watched::open(&broken, &builtin, &theme)?;
+        if window.loader("status").as_number() != Some(2.0) {
+            bail!(
+                "the window does not show the built-in shell: {:?}",
+                window.loader("error")
+            );
+        }
+        opens.push(started.elapsed());
+    }
+    report(
+        "window on a shell that throws -> built-in shown",
+        &mut opens,
+    );
+
+    let own = work.join("own");
+    studio_blocks::shell::seed(&own)?;
+    let mut window = Watched::open(&own, &builtin, &theme)?;
+    if window.loader("status").as_number() != Some(1.0) {
+        bail!(
+            "the window does not show the person's shell: {:?}",
+            window.loader("error")
+        );
+    }
+    let mut saves = Vec::new();
+    for round in 0..rounds {
+        std::thread::sleep(PACE);
+        let canvas = CANVASES[round % 2];
+        let shown = window.stage.state.shown;
+        let started = Instant::now();
+        // As `theme_set` saves it: written beside and renamed over.
+        let tmp = work.join("theme.json.tmp");
+        std::fs::write(
+            &tmp,
+            format!("{{ \"Colors\": {{ \"canvas\": {{ \"light\": \"{canvas}\" }} }} }}\n"),
+        )?;
+        std::fs::rename(&tmp, &theme)?;
+        window.take_theme()?;
+        let drawn = window
+            .stage
+            .engine
+            .read_by_name(window.root(), "color")
+            .to_js_string();
+        if !drawn.eq_ignore_ascii_case(canvas) || window.stage.state.shown == shown {
+            bail!("the window is drawn with {drawn}, not {canvas}");
+        }
+        saves.push(started.elapsed());
+    }
+    report(
+        &format!(
+            "Studio's theme file saved -> window repainted, one per {} ms",
+            PACE.as_millis()
+        ),
+        &mut saves,
+    );
+
+    let frames = window.stage.state.shown;
+    let before = cpu_time()?;
+    std::thread::sleep(IDLE);
+    let spent = cpu_time()? - before;
+    let woken = window.woke.try_iter().count();
+    window.rest()?;
+    println!(
+        "watched window left alone {} s: {:.0} ms CPU, {} wakes, {} frames",
+        IDLE.as_secs(),
+        ms(spent),
+        woken,
+        window.stage.state.shown - frames
+    );
+    Ok(())
+}
+
+/// The CPU time this process has spent, in user and kernel mode.
+fn cpu_time() -> anyhow::Result<Duration> {
+    let stat = std::fs::read_to_string("/proc/self/stat")?;
+    // The fields after the command, which is in parentheses and may hold
+    // spaces; utime and stime are the 14th and 15th of the whole line.
+    let rest = stat
+        .rsplit_once(')')
+        .ok_or(anyhow!("no command in /proc/self/stat"))?
+        .1;
+    let fields: Vec<&str> = rest.split_whitespace().collect();
+    let ticks: u64 = fields[11].parse::<u64>()? + fields[12].parse::<u64>()?;
+    // Linux counts them in USER_HZ, 100 a second on every architecture it
+    // reports to user space.
+    Ok(Duration::from_millis(ticks * 10))
+}
+
+/// Studio's window as `studio --shell` runs it: the person's shell, Studio's
+/// beneath it, watched with Studio's theme file, pumped when the watcher
+/// wakes it.
+struct Watched {
+    /// Dropped first: the watcher's thread ends before the engine goes.
+    session: DevSession,
+    clock: SystemClock,
+    woke: mpsc::Receiver<()>,
+    stage: Stage,
+}
+
+impl Watched {
+    fn open(shell: &Path, builtin: &Path, theme: &Path) -> anyhow::Result<Watched> {
+        let engine = ljos::engine();
+        studio_blocks::register(&engine);
+        let mut stage = Stage::new(&engine, WIDTH, HEIGHT);
+        let user_shell = studio_blocks::shell::url(&shell.join("Shell.qml"))?;
+        let (tx, woke) = mpsc::channel();
+        let session = DevSession::open_roots_themed(
+            &engine,
+            &[shell, builtin],
+            &["Window"],
+            vec![("userShell".to_owned(), user_shell.as_str().into())],
+            ljos_dev::Aliases::default(),
+            Some(theme),
+            ljos::dev::EngineOracle::from_engine(&engine),
+            Arc::new(move || {
+                let _ = tx.send(());
+            }),
+        )?;
+        let root = session
+            .root()
+            .ok_or(anyhow!("the watched shell made no window"))?;
+        stage.scene.set_root(&engine, root)?;
+        let mut window = Watched {
+            session,
+            clock: SystemClock::new(),
+            woke,
+            stage,
+        };
+        window.rest()?;
+        Ok(window)
+    }
+
+    fn root(&self) -> ObjectId {
+        self.stage.scene.root().expect("the window shows its root")
+    }
+
+    fn loader(&self, name: &str) -> Value {
+        ljos_drive::find_below(&self.stage.engine, self.root(), "shellLoader")
+            .map_or(Value::Null, |loader| {
+                self.stage.engine.read_by_name(loader, name)
+            })
+    }
+
+    /// Waits for the watcher to see the theme file saved, pumps the
+    /// session until it has put the theme on, and draws the frame.
+    fn take_theme(&mut self) -> anyhow::Result<()> {
+        loop {
+            self.woke
+                .recv_timeout(Duration::from_secs(30))
+                .map_err(|_| anyhow!("the window took no theme in 30 s"))?;
+            let reports = self.session.pump(
+                &self.stage.engine,
+                &self.clock,
+                &mut SceneHost(&mut self.stage.scene),
+            );
+            if let Some(failed) = reports.iter().find(|r| matches!(r, Report::Failed { .. })) {
+                bail!("the theme did not apply: {failed:?}");
+            }
+            if reports.iter().any(|r| matches!(r, Report::Theme { .. })) {
+                return self.rest();
+            }
+        }
+    }
+
+    fn rest(&mut self) -> anyhow::Result<()> {
+        let mut driver = self.stage.drive();
+        driver.settle()?;
+        driver.finish_promised()?;
+        Ok(())
+    }
+}
+
+/// The scene a reload shows its new root in.
+struct SceneHost<'a>(&'a mut ljos_quick::QuickScene);
+
+impl Host for SceneHost<'_> {
+    fn window(&self) -> Option<ObjectId> {
+        self.0.root()
+    }
+
+    fn show(&mut self, engine: &Engine, _old: Option<ObjectId>, new: ObjectId) {
+        self.0
+            .set_root(engine, new)
+            .expect("Studio's window is an Item");
+    }
 }
 
 /// `Main.qml` with a few objects, and 199 components beside it in modules
@@ -389,7 +619,8 @@ impl Window {
         let mut stage = Stage::new(&engine, WIDTH, HEIGHT);
         studio_blocks::serve(&engine, server);
         let source = ljos::include_qml!("shell.pack");
-        let root = ljos::create_root(&engine, source, "Main")?;
+        // Studio's window with no shell of the person's: it shows its own.
+        let root = ljos::create_root(&engine, source, "Window")?;
         stage.scene.set_root(&engine, root)?;
         stage.scene.set_accessibility_active(&engine, true);
         let workspace = find_workspace(&engine, root).ok_or(anyhow!("no Studio.Workspace"))?;
@@ -460,6 +691,38 @@ impl Window {
         driver.commit(text)?;
         driver.chord(&Chord::parse("Return").map_err(|e| anyhow!(e))?, 0)?;
         self.rest()
+    }
+
+    /// `rounds` sets of `Colors.canvas` in the tokens panel, each timed
+    /// from Enter until the frame draws the preview's reload, one per
+    /// `pace`.
+    fn token_edits(&mut self, rounds: usize, pace: Duration) -> anyhow::Result<Vec<Duration>> {
+        let filter = self.node_with("Tokens", "Filter tokens", |n| n.role == "textinput")?;
+        self.enter(&filter, "Colors.canvas")?;
+        let mut edits = Vec::new();
+        let mut last: Option<Instant> = None;
+        for round in 0..rounds {
+            if let Some(last) = last {
+                std::thread::sleep(pace.saturating_sub(last.elapsed()));
+            }
+            let shown = self.picture()?;
+            let field =
+                self.node_with("Tokens", "Colors.canvas light", |n| n.role == "textinput")?;
+            let started = Instant::now();
+            last = Some(started);
+            self.enter(&field, CANVASES[round % 2])?;
+            let refused = self
+                .stage
+                .engine
+                .read_by_name(self.workspace, "error")
+                .to_js_string();
+            if !refused.is_empty() {
+                bail!("theme_set was refused: {refused}");
+            }
+            self.wait_for_picture(shown + 1)?;
+            edits.push(started.elapsed());
+        }
+        Ok(edits)
     }
 
     fn open_document(&mut self, doc: &str) -> anyhow::Result<()> {
