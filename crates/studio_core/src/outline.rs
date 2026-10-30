@@ -26,10 +26,6 @@ pub struct Node {
     pub end: usize,
     /// One-based line the object starts on.
     pub line: usize,
-    /// Byte offset of the `{` its body opens with: where a running
-    /// application says the object is declared.
-    #[serde(skip)]
-    pub brace: usize,
     pub bindings: Vec<Binding>,
     /// Its place as hot reload names it ([`ljos_ir::ObjectKey`]'s steps): the
     /// most stable step at each level from the root.
@@ -120,7 +116,6 @@ fn walk(
         start: object.span.start as usize,
         end: object.span.end as usize,
         line: qml_syntax::position(source, object.span.start).0,
-        brace: brace(source, object),
         bindings,
         key: key.clone(),
     });
@@ -173,33 +168,6 @@ fn walk(
 
 /// Whether an object has an `id` or a literal `objectName`, so that its key
 /// step is that name and it does not count among its unnamed siblings.
-/// The `{` after the type name (and the `on` target): only blanks and
-/// comments come between them, and a comment may hold a brace of its own.
-fn brace(source: &str, object: &QmlObject<'_>) -> usize {
-    let after = object.on.as_ref().unwrap_or(&object.type_name).span.end as usize;
-    let rest = source.as_bytes().get(after..).unwrap_or_default();
-    let mut at = 0;
-    while at < rest.len() {
-        match (rest[at], rest.get(at + 1)) {
-            (b'{', _) => return after + at,
-            (b'/', Some(b'/')) => {
-                at += rest[at..]
-                    .iter()
-                    .position(|&b| b == b'\n')
-                    .unwrap_or(rest.len() - at);
-            }
-            (b'/', Some(b'*')) => {
-                at += rest[at + 2..]
-                    .windows(2)
-                    .position(|w| w == b"*/")
-                    .map_or(rest.len() - at, |end| end + 4);
-            }
-            _ => at += 1,
-        }
-    }
-    object.span.start as usize
-}
-
 fn is_named(source: &str, object: &QmlObject<'_>) -> bool {
     object.members.iter().any(|m| match m {
         QmlMember::Binding(b) => {

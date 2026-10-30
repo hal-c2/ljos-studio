@@ -663,23 +663,18 @@ fn a_document_made_again_does_not_start_its_generations_over() {
 fn a_place_names_the_object_declared_there_not_its_parent() {
     let mut s = Session::open(Box::new(MemStore::new([(
         "Main.qml".to_owned(),
-        "import QtQuick\n\nItem {\n    Row { Text { text: \"é\" } Text {} }\n    Text /* { */ {}\n}\n"
-            .to_owned(),
+        "import QtQuick\n\nItem {\n    Row { Text { text: \"é\" } Text {} }\n}\n".to_owned(),
     )])));
     let ty = |s: &mut Session, line, column| {
         s.declared_at("Main.qml", line, column)
             .map(|(_, n)| n.path.to_string())
     };
-    // An object is where its body opens, as a running application says.
-    assert_eq!(ty(&mut s, 3, 6).unwrap(), "root");
-    assert_eq!(ty(&mut s, 4, 9).unwrap(), "root/0");
-    assert_eq!(ty(&mut s, 4, 16).unwrap(), "root/0/0");
+    assert_eq!(ty(&mut s, 3, 1).unwrap(), "root");
+    assert_eq!(ty(&mut s, 4, 5).unwrap(), "root/0");
+    assert_eq!(ty(&mut s, 4, 11).unwrap(), "root/0/0");
     // Columns count characters: `é` is one.
-    assert_eq!(ty(&mut s, 4, 35).unwrap(), "root/0/1");
-    assert!(matches!(ty(&mut s, 4, 11), Err(Error::NotFound { .. })));
-    // A brace in a comment opens nothing.
-    assert_eq!(ty(&mut s, 5, 18).unwrap(), "root/1");
-    assert!(matches!(ty(&mut s, 5, 13), Err(Error::NotFound { .. })));
+    assert_eq!(ty(&mut s, 4, 30).unwrap(), "root/0/1");
+    assert!(matches!(ty(&mut s, 4, 12), Err(Error::NotFound { .. })));
     // Without a column the line must say which.
     assert_eq!(ty(&mut s, 3, 0).unwrap(), "root");
     assert!(matches!(ty(&mut s, 4, 0), Err(Error::Invalid(_))));

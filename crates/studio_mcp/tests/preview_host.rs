@@ -738,7 +738,7 @@ fn a_point_selects_the_object_declared_where_the_preview_says() {
         .unwrap();
     f.calls();
     // `    Text { text: "x" }` is line 6; its type name starts at column 5.
-    f.seen.lock().unwrap().declared = declared("Shell.qml", 6, 10);
+    f.seen.lock().unwrap().declared = declared("Shell.qml", 6, 5);
     let out = f
         .call(
             "node_select",
@@ -749,7 +749,7 @@ fn a_point_selects_the_object_declared_where_the_preview_says() {
     assert_eq!(out["selection"][0]["path"], "root/1");
     assert_eq!(out["selection"][0]["type"], "Text");
     // The enclosing `Column` starts on line 4, not where the Text does.
-    f.seen.lock().unwrap().declared = declared("Shell.qml", 4, 8);
+    f.seen.lock().unwrap().declared = declared("Shell.qml", 4, 1);
     let out = f
         .call(
             "node_select",
@@ -783,7 +783,7 @@ fn a_point_in_a_file_of_a_block_selects_in_that_file() {
     let f = Fixture::new();
     f.call("preview_open", json!({ "doc": "Shell.qml" }))
         .unwrap();
-    f.seen.lock().unwrap().declared = declared("App/Media/Player.qml", 3, 6);
+    f.seen.lock().unwrap().declared = declared("App/Media/Player.qml", 3, 1);
     let out = f
         .call(
             "node_select",
@@ -827,7 +827,7 @@ fn a_point_needs_a_preview_that_shows_the_text() {
         json!({ "doc": "Shell.qml", "generation": 1, "node": { "path": "root/1" }, "name": "text", "value": "\"y\"" }),
     )
     .unwrap();
-    f.seen.lock().unwrap().declared = declared("Shell.qml", 6, 10);
+    f.seen.lock().unwrap().declared = declared("Shell.qml", 6, 5);
     let refused = f
         .call(
             "node_select",

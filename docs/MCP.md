@@ -157,11 +157,12 @@ shows it; the watcher's quiet time is not on that path.
 `doc`, in its logical pixels, instead of by `nodes`. Studio asks the
 preview which object is topmost there and where it is declared (the
 inspector's `app_inspect` with the target `at=X,Y`, whose answer has
-`source {file, line, column}`, the place of the `{` the object's body
-opens with), then selects the object whose body opens there: the object
-itself, not one enclosing it. An object of a block's own file answers that
-file; the root of a component file and an inline component's instance
-answer where they are used.
+`source {file, line, column}`, the place of the object's type name, as
+the engine names an object's declaration in its warnings), then selects
+the object whose type name starts there: the object itself, not one
+enclosing it. An object of a block's own file answers that file; the root
+of a component file and an inline component's instance answer where they
+are used.
 
 - DECISION: no new tool. A point is another way to name what `node_select`
   selects, and the list stays within 25.
