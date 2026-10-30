@@ -41,6 +41,10 @@ const FILES: usize = 200;
 const PACE: Duration = Duration::from_millis(250);
 /// Longer than the preview's reload budget takes to allow another reload.
 const CATCH_UP: Duration = Duration::from_millis(1500);
+/// The value the root's state changes, as the inspector names it: an object
+/// the selection rounds leave alone, so a state that is always on does not
+/// hide their edits of `width`.
+const STATE_FIELD: &str = "card7.width";
 
 fn main() -> anyhow::Result<()> {
     let rounds: usize = match std::env::args().nth(1) {
@@ -84,15 +88,29 @@ fn main() -> anyhow::Result<()> {
         return Ok(());
     }
     window.wait_for_picture(1)?;
-    let mut edits = window.edits(rounds, 100, None)?;
+    let mut edits = window.edits("width", rounds, 100, None)?;
     report("inspector edit -> new picture, back to back", &mut edits);
     // The back-to-back calls leave the inspector's one-second window full;
     // the paced edits start once it has emptied.
     std::thread::sleep(Duration::from_secs(1));
-    let mut edits = window.edits(rounds, 200, Some(PACE))?;
+    let mut edits = window.edits("width", rounds, 200, Some(PACE))?;
     report(
         &format!(
             "inspector edit -> new picture, one per {} ms",
+            PACE.as_millis()
+        ),
+        &mut edits,
+    );
+
+    std::thread::sleep(Duration::from_secs(1));
+    let row = window.layer("Rectangle root")?;
+    window.click(&row)?;
+    let state = window.node_with("Inspector", "State on", |n| n.role == "button")?;
+    window.click(&state)?;
+    let mut edits = window.edits(STATE_FIELD, rounds, 20, Some(PACE))?;
+    report(
+        &format!(
+            "state edit in the inspector -> new picture, one per {} ms",
             PACE.as_millis()
         ),
         &mut edits,
@@ -105,7 +123,7 @@ fn main() -> anyhow::Result<()> {
 /// after `Main.qml`, so the documents list shows it without a scroll.
 fn write_project(dir: &Path) -> anyhow::Result<()> {
     let mut main = String::from(
-        "import QtQuick\n\nRectangle {\n    id: root\n    width: 400; height: 300\n    color: \"white\"\n",
+        "import QtQuick\n\nRectangle {\n    id: root\n    width: 400; height: 300\n    color: \"white\"\n    states: [\n        State {\n            name: \"on\"\n            when: true\n            PropertyChanges {\n                target: card7\n                width: 40\n            }\n        }\n    ]\n",
     );
     for i in 0..8 {
         main += &format!(
@@ -248,11 +266,12 @@ impl Window {
         Ok(())
     }
 
-    /// `rounds` edits of the selected object's width, from `first` up, each
+    /// `rounds` edits of the inspector's `field`, from `first` up, each
     /// timed from Enter until the frame draws the reload; with `pace`, each
     /// starts that long after the one before.
     fn edits(
         &mut self,
+        field: &str,
         rounds: usize,
         first: usize,
         pace: Option<Duration>,
@@ -264,7 +283,7 @@ impl Window {
                 std::thread::sleep(pace.saturating_sub(last.elapsed()));
             }
             let shown = self.picture()?;
-            let field = self.inspector_field("width")?;
+            let field = self.inspector_field(field)?;
             let started = Instant::now();
             last = Some(started);
             self.enter(&field, &format!("{}", first + round))?;
