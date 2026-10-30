@@ -667,6 +667,45 @@ S1–S4 scenarios in a headless browser.
 - Prototyping flows (state graph view), CMS-style model binding, export
   bundles, design review comments in the sidecar; multiplayer research.
 
+#### As built: prototyping flows and list data
+
+- **A flow is the app's handlers.** A step of a prototype is what a tap
+  does: go to a state of a component, or open a document in a `Loader` or
+  on a `StackView`. Studio writes it as a signal handler on the object
+  tapped (`onClicked` when the signal is named, otherwise `onTapped` in a
+  `TapHandler`, which any item can hold), so the prototype is the app and
+  runs anywhere QML runs. `state_edit` writes and takes out interactions;
+  `node_inspect` lists them (MCP.md, "Flows and list data").
+- **The state graph is read from the file.** The root's states are its
+  nodes, the base state first; its transitions and its interactions are
+  its edges, an interaction going from any state. There is no flow model
+  beside the file.
+- **The preview plays it.** `preview_state` clicks the running app, by an
+  object's `id` or at a point, and reads the state it reached.
+- **Data is a model document.** A list's content is a `ListModel` written
+  as QML, in its own document of a data module; a JSON file becomes one
+  with `document_new`. The roles the data binds are offered in the
+  inspector of a delegate as `model.<role>`. The mocked state swaps the
+  module for one under `mocks/`, so a fixture is a file beside the other
+  mocks.
+- **The window.** The *Flow* panel (`shell/FlowPanel.qml`) shows the
+  states as nodes ("Flow state Base", "Flow state details"), each with a
+  button that wires the selection to go to it ("Tap selection to go to
+  details"), and the edges as rows ("Flow edge tapped card to details")
+  with "Remove flow …" on interactions. The canvas's "Play" toggle turns a
+  click in a frame into `preview_state` with `click_at`; the panel then
+  marks the state the app is in ("Playing details"). The inspector's
+  *Roles* section lists the roles the selection sees ("Role name"), each
+  with a field ("Bind role name to") that binds a property to it.
+  `features/ui/flows.feature` drives them.
+
+DECISION: an edge's `from` is `*` for every interaction: a handler sets
+its state from wherever the app is, and Studio does not evaluate which
+states make the trigger visible. DECISION: the flow is the root's; an
+interaction that sets another object's state is that object's and is not
+drawn. DECISION: play mode does not select; leaving it, a click selects
+again.
+
 ## 8. Risks
 
 - **Addressing across edits.** Child-index paths shift. Studio gives an

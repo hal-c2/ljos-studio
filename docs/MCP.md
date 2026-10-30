@@ -34,23 +34,23 @@ documents: export), `run` (start previews). They are granted at launch with
 | 1 | `project_open` | Open a project directory below the workspace, or describe the open one: documents, blocks, targets | inspect |
 | 2 | `document_tree` | A document's objects in order: handle, path, type, `id`, bindings; paginated | inspect |
 | 3 | `document_text` | A document's text or a byte range of it, with its generation and whether it parses | inspect |
-| 4 | `document_new` | Create a QML document; undo removes it | mutate |
+| 4 | `document_new` | Create a QML document, or a `ListModel` from a project JSON file (`data`); undo removes it | mutate |
 | 5 | `document_edit` | Replace a byte range of a document's text, as the code view does | mutate |
 | 6 | `node_find` | Find objects by `id`, type, binding name or text in a binding's value | inspect |
 | 7 | `node_select` | Set Studio's selection (shown on the canvas and in the inspector) by addresses or by a point `at` in the preview | inspect |
-| 8 | `node_inspect` | An object's bindings with byte ranges, its parent, its children, its type's members, its states and transitions | inspect |
+| 8 | `node_inspect` | An object's bindings with byte ranges, its parent, its children, its type's members, its states and transitions, its flows and the data it sees | inspect |
 | 9 | `blocks_list` | Registered blocks with contracts: state, actions, events, slots, mocks | inspect |
 | 10 | `node_insert` | Insert QML text or a block instance as a child at an index | mutate |
 | 11 | `node_move` | Move a node to a parent and index (reparent or reorder) | mutate |
 | 12 | `node_remove` | Remove a node with its comments | mutate |
 | 13 | `property_set` | Set or remove a property's value (a literal) | mutate |
 | 14 | `binding_set` | Set a binding expression or a handler, checked before it is written | mutate |
-| 15 | `state_edit` | Add, rename or remove a `State`; set its changes, its `when` or a breakpoint; add or remove a `Transition` | mutate |
+| 15 | `state_edit` | Add, rename or remove a `State`; set its changes, its `when` or a breakpoint; add or remove a `Transition` or an interaction | mutate |
 | 16 | `slot_contribute` | Write a `Contribution` to a block's slot, or take one out | mutate |
 | 17 | `history` | List, undo or redo edits (each with its inverse changes) | inspect to list; mutate to undo or redo |
 | 18 | `theme_set` | Read the tokens (`Ljos.Design` roles and the theme file, light and dark), or set one; the preview reloads live | mutate |
 | 19 | `preview_open` | Start a preview of a shell on a target (desktop, tablet, phone) or size with live or mocked state; on the open one, change size or state in place | run |
-| 20 | `preview_state` | Read a block's published state in the preview; set it when the block is mocked | run |
+| 20 | `preview_state` | Read an object's state and a block's published state in the preview; set it when the block is mocked; click first | run |
 | 21 | `preview_screenshot` | A PNG of the preview (≤ 1280 px), or its outline as text | inspect |
 | 22 | `preview_events` | Since a cursor: opened, reloaded (with ms), reload failed, logs, ended | inspect |
 
@@ -291,6 +291,61 @@ Studio's window shows the same tokens in its *Tokens* panel (DESIGN.md,
 S4 "As built: tokens, shells and the self-reskin"): its `Workspace`
 publishes `theme` (the file) and `tokens` (the rows `theme_set` reads),
 and an edit there is `dispatch("theme_set", …)`.
+## Flows and list data (S6)
+
+A prototype's flow is the app's own QML: a tap goes to one of a
+component's states or opens another document, written as a signal
+handler on the object tapped. `state_edit` carries it:
+
+| `action` | Takes | Does |
+|---|---|---|
+| `interaction` | `trigger`, `signal?`, and `state` (`""` is the base state) or `open` with `navigator` | Write `onTapped` in a new `TapHandler` of `trigger`, or the signal's own handler (`onClicked`) when `signal` is named; its body is `owner.state = "S"`, `navigator.source = "D"` (a `Loader`) or `navigator.push(Qt.resolvedUrl("D"))` (a `StackView`) |
+| `remove_interaction` | `trigger`, `signal?` | Take it out: the whole `TapHandler` when it holds nothing else |
+
+`node` names the owner of the state (the root by default). The history
+labels are `tapped card to details` and `remove tapped interaction`.
+Refusals: `not_found` with `details.kind` `no_state`, `no_document` (the
+document must be beside this one) or `no_interaction`; `invalid_argument`
+for `exists`, an owner or navigator with no `id` (`no_id`), a navigator
+that is not a `Loader` or `StackView` (`not_a_navigator`), `state` and
+`open` together, and a missing argument. `node_inspect` lists
+`interactions` (`trigger`, `trigger_id`, `signal`, and `owner` and `state`
+or `navigator` and `open`) of the object and everything in it, so the
+root's is the document's whole flow; a handler whose body is not one of
+the three forms is the app's own logic and is not listed.
+
+`preview_state {node, click?, click_at?: {x, y}, set?}` plays the flow:
+after `set`, it clicks the object `click` names (by its `id`) or the
+topmost item drawn at `click_at`, through the preview's inspector, then
+reads `node`. `variant` is the state it is in now (empty for the base
+state); `block` and `state` are left out for an object that is not a
+block, and `set` on one is refused (`not_a_block`).
+
+A list's data is a `ListModel`, in the document or in a document of its
+own the list makes (`model: Contacts {}`): content a person edits as any
+QML. `document_new {doc, data}` writes one from a project JSON file of
+flat records, one `ListElement` each with the records' keys in order
+(`invalid_argument` with `not_a_list`, `not_a_role` or `not_flat`
+otherwise, and for `text` and `data` together). `node_inspect` gives the
+`model` the object sees: `roles` (in the order the rows first bind them),
+`rows`, `doc`, and `view`, the list it is a delegate of; a delegate binds
+a role as `model.name` with `binding_set`. The mocked state swaps the data
+for a fixture: a module under `mocks/` of the same name (`mocks/App/Data`)
+replaces the app's (`App/Data`) and the list's text is unchanged.
+
+- DECISION: no new tool. Flows are `state_edit` actions beside states and
+  transitions, which they move between; playing one is `preview_state`
+  with a click, which reads the state the app reached; data is
+  `document_new` and `node_inspect`. The surface stays at 21 tools.
+- DECISION: an interaction is written in one of three forms and read back
+  only in those, so Studio never claims to understand a handler it did
+  not write.
+- DECISION: `click_at` clicks the topmost item drawn at the point, at that
+  item's aim point (its visible middle), since the preview's inspector
+  has no click at an exact point.
+- DECISION: data is QML, not a JSON-backed model. Ljós has no model that
+  reads JSON, and a `ListModel` document is edited, diffed, undone and
+  previewed like the rest; JSON is imported once.
 
 ## Prompts
 
@@ -301,3 +356,6 @@ and an edit there is `dispatch("theme_set", …)`.
   contrast → `preview_events` (the reload) → `preview_screenshot`.
 - **fix-preview:** `preview_events` → `document_text` → `binding_set` /
   `property_set` → `preview_events`.
+- **prototype:** `state_edit` (`add`, a state per screen) → `state_edit`
+  (`interaction`, a trigger per step) → `preview_open` → `preview_state`
+  (`click`) per step, checking `variant` → `preview_screenshot`.
