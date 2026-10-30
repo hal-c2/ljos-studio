@@ -149,6 +149,9 @@ jobs:
       - run: mise run web:browser
       - run: mise run web:shell
       - run: mise run web:serve:check
+      # The @preview scenarios, compiled by ljos-web's qmlc and mounted in a
+      # frame; those waiting on ljos-web must be refused naming the request.
+      - run: mise run features:browser
       - if: always()
         run: df -h /
         working-directory: .

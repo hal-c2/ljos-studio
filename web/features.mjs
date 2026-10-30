@@ -9,6 +9,9 @@
 // and a link, a bundle or a file that is not text is the file system's,
 // which storage is not (`@disk`).
 //
+// A `@preview` scenario runs in Chromium in `web/features.browser.mjs`,
+// with these steps and the preview's own.
+//
 // DECISION: node, not Playwright. These scenarios touch no DOM and no
 // browser storage, and node runs the very module a page loads; the OPFS
 // backend and the preview bridge run in a browser in `web/browser.mjs`.
@@ -249,7 +252,7 @@ function equal(a, b) {
   return ka.length === kb.length && ka.every((k) => Object.hasOwn(b, k) && equal(a[k], b[k]));
 }
 
-class World {
+export class World {
   backend = memoryBackend();
   caps = "inspect,mutate";
   studio = null;
@@ -467,10 +470,10 @@ const STEPS = [
 // runner's source, so a step added there is a failure here until it is
 // written here or listed.
 const NATIVE_ONLY = new Map([
-  ['then ^the preview shows "([^"]*)"$', "a preview is a page of its own (@preview)"],
+  ['then ^the preview shows "([^"]*)"$', "a preview is a page of its own (@preview): web/features.browser.mjs"],
   ['then ^Studio has reported the preview reloaded since it was read$', "a preview is a page of its own (@preview)"],
   ['then ^the preview shows "([^"]*)" within (\\d+) seconds$', "a preview is a page of its own (@preview)"],
-  ["then ^the answer has a PNG picture at most (\\d+) pixels on its longest side$", "a picture is a preview's (@preview)"],
+  ["then ^the answer has a PNG picture at most (\\d+) pixels on its longest side$", "a picture is a preview's (@preview): web/features.browser.mjs"],
   ['given ^the link "([^"]+)" leads to "([^"]+)"$', "storage holds no links (@disk)"],
   ['given ^the named pipe "([^"]+)"$', "storage holds no pipes (@disk)"],
   ['given ^the link "([^"]+)" leads to a directory outside the project holding "([^"]+)"$', "storage holds no links (@disk)"],
@@ -527,7 +530,7 @@ export function stepsDrift(native) {
   return drift;
 }
 
-async function run(s, world) {
+export async function run(s, world) {
   if (s.table) throw new Error("this runner's steps take no table");
   for (const { kinds, pattern, action } of STEPS) {
     if (!kinds.includes(s.kind.toLowerCase())) continue;
@@ -539,7 +542,7 @@ async function run(s, world) {
 
 // --- Running --------------------------------------------------------------
 
-function featureFiles(paths) {
+export function featureFiles(paths) {
   const out = [];
   const walk = (path) => {
     if (statSync(path).isDirectory()) {
