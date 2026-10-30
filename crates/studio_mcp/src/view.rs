@@ -9,7 +9,7 @@
 use qml_edit::Step;
 use serde::Serialize;
 use studio_core::{
-    Address,
+    Address, StateInfo,
     preview::{PreviewEvent, Target},
 };
 
@@ -55,6 +55,8 @@ pub struct Offered {
     pub name: String,
     pub summary: String,
     pub category: String,
+    /// The slots it offers, by name.
+    pub slots: Vec<String>,
 }
 
 /// The preview of the open document, when one runs.
@@ -70,6 +72,9 @@ pub struct Previewed {
     pub generation: u64,
     /// `live` or `mocked`.
     pub state: String,
+    /// The root's state whose `when` is the breakpoint of the preview's
+    /// width, as `state_edit` writes it; empty when none is.
+    pub variant: String,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize)]
@@ -85,6 +90,8 @@ pub struct View {
     pub selected: String,
     pub selection: Span,
     pub inspector: Vec<Shown>,
+    /// The selected object's states.
+    pub states: Vec<StateInfo>,
     pub palette: Vec<Offered>,
     pub done: Vec<String>,
     pub undone: Vec<String>,
@@ -112,9 +119,13 @@ impl Studio {
                 name: b.name.clone(),
                 summary: b.summary.clone().unwrap_or_default(),
                 category: b.category.clone().unwrap_or_default(),
+                slots: b.slots.iter().map(|s| s.name.clone()).collect(),
             })
             .collect();
         view.preview = preview_of(&preview::lock(&self.previews));
+        if let Some(p) = &mut view.preview {
+            p.variant = self.variant(&p.doc, p.width).unwrap_or_default();
+        }
         if doc.is_empty() {
             return view;
         }
@@ -185,9 +196,28 @@ impl Studio {
                     value: b.value.clone(),
                 })
                 .collect();
+            if let Ok(variants) = self.session.variants(doc, &Address::Node(handle.clone())) {
+                view.states = variants.states;
+            }
             view.selected = handle;
         }
         view
+    }
+
+    /// The state of `doc`'s root that a window `width` wide turns on by
+    /// its breakpoint. Only the condition `state_edit` writes for a
+    /// breakpoint is read as one: any other `when` is the app's own logic,
+    /// which only running it can answer.
+    fn variant(&mut self, doc: &str, width: u32) -> Option<String> {
+        let root = Address::Path("root".to_owned());
+        let (_, node) = self.session.resolve(doc, &root).ok()?;
+        let condition = Target::of_width(width).condition(&node.id?);
+        let variants = self.session.variants(doc, &root).ok()?;
+        variants
+            .states
+            .into_iter()
+            .find(|s| s.when.as_deref() == Some(condition.as_str()))
+            .map(|s| s.name)
     }
 }
 
@@ -222,6 +252,7 @@ fn preview_of(previews: &preview::Previews) -> Option<Previewed> {
             preview::State::Mocked => "mocked",
         }
         .to_owned(),
+        variant: String::new(),
     })
 }
 

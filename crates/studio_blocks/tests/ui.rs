@@ -450,6 +450,7 @@ fn places(w: &mut UiWorld, name: String) -> StepResult {
     window.click_node(&button)
 }
 
+#[given(regex = r#"^the person has clicked the button "([^"]+)"$"#)]
 #[when(regex = r#"^the person clicks the button "([^"]+)"$"#)]
 fn clicks_button(w: &mut UiWorld, name: String) -> StepResult {
     let window = w.window()?;
@@ -460,6 +461,134 @@ fn clicks_button(w: &mut UiWorld, name: String) -> StepResult {
     .cloned()
     .ok_or_else(|| format!("no button {name:?}; the window holds {}", names(&tree)))?;
     window.click_node(&button)
+}
+
+#[given(regex = r#"^the person has added the state "([^"]+)" in the inspector$"#)]
+#[when(regex = r#"^the person adds the state "([^"]+)" in the inspector$"#)]
+fn adds_state(w: &mut UiWorld, name: String) -> StepResult {
+    let window = w.window()?;
+    let field = window.node("Inspector", Some("textinput"), "New state")?;
+    window.enter(&field, &name)?;
+    let shown = shown_states(window)?;
+    shown.contains(&name).then_some(()).ok_or_else(|| {
+        format!(
+            "the inspector lists the states {shown:?}; the last refusal {:?}",
+            window.read("error").to_js_string()
+        )
+    })
+}
+
+#[given(regex = r#"^the person has picked the state "([^"]+)" in the inspector$"#)]
+#[when(regex = r#"^the person picks the state "([^"]+)" in the inspector$"#)]
+fn picks_state(w: &mut UiWorld, name: String) -> StepResult {
+    let window = w.window()?;
+    let button = window.node("Inspector", Some("button"), &format!("State {name}"))?;
+    window.click_node(&button)?;
+    // Picking shows the state's condition, which only a picked state has.
+    window
+        .node("Inspector", Some("textinput"), "When")
+        .map(drop)
+}
+
+#[when(regex = r#"^the person renames the state "([^"]+)" to "([^"]+)" in the inspector$"#)]
+fn renames_state(w: &mut UiWorld, name: String, to: String) -> StepResult {
+    let window = w.window()?;
+    let field = window.node("Inspector", Some("textinput"), &format!("Name of {name}"))?;
+    window.enter(&field, &to)
+}
+
+#[when(regex = r#"^the person changes "([^"]+)" of "([^"]+)" to "(.*)" in the state$"#)]
+fn changes_in_state(w: &mut UiWorld, name: String, target: String, value: String) -> StepResult {
+    let value = unescape(&value);
+    let window = w.window()?;
+    for (field, text) in [
+        ("Change target", target.as_str()),
+        ("Change property", name.as_str()),
+        ("Change value", value.as_str()),
+    ] {
+        let field = window.node("Inspector", Some("textinput"), field)?;
+        window.enter(&field, text)?;
+    }
+    Ok(())
+}
+
+#[then(regex = r#"^the inspector lists the states "([^"]*)"$"#)]
+fn lists_states(w: &mut UiWorld, names: String) -> StepResult {
+    let window = w.window()?;
+    let want: Vec<String> = if names.is_empty() {
+        Vec::new()
+    } else {
+        list(&names)
+    };
+    let shown = shown_states(window)?;
+    (shown == want)
+        .then_some(())
+        .ok_or_else(|| format!("the inspector lists the states {shown:?}"))
+}
+
+/// The states the inspector shows a button for, in order.
+fn shown_states(window: &Window) -> Result<Vec<String>, String> {
+    let tree = window.tree();
+    let inspector = find(&tree, &|n| n.name == "Inspector" && n.role != "label")
+        .ok_or("no inspector in the window")?;
+    let mut shown = Vec::new();
+    collect(inspector, &mut |n| {
+        if n.role == "button"
+            && n.key.is_some()
+            && let Some(name) = n.name.strip_prefix("State ")
+        {
+            shown.push(name.to_owned());
+        }
+    });
+    Ok(shown)
+}
+
+#[then(regex = r#"^the frame "([^"]+)" shows the state "([^"]+)"$"#)]
+fn frame_shows_state(w: &mut UiWorld, target: String, state: String) -> StepResult {
+    frame_state_is(w.window()?, &target, &format!("State {state}"))
+}
+
+#[then(regex = r#"^the frame "([^"]+)" shows no state$"#)]
+fn frame_shows_no_state(w: &mut UiWorld, target: String) -> StepResult {
+    frame_state_is(w.window()?, &target, "No state")
+}
+
+fn frame_state_is(window: &Window, target: &str, want: &str) -> StepResult {
+    let frame = window.frame(target)?;
+    let label = ljos_drive::find_below(window.engine(), frame, "frameState")
+        .ok_or("the frame does not say which state it shows")?;
+    let text = window
+        .engine()
+        .read_by_name(label, "text")
+        .to_js_string()
+        .to_string();
+    (text == want).then_some(()).ok_or_else(|| {
+        format!(
+            "the frame says {text:?}; the preview is {}",
+            window.read_json("preview")
+        )
+    })
+}
+
+#[then(regex = r#"^the palette lists the slots "([^"]*)" of "([^"]+)"$"#)]
+fn palette_lists_slots(w: &mut UiWorld, slots: String, block: String) -> StepResult {
+    let window = w.window()?;
+    for slot in list(&slots) {
+        window.node("Palette", None, &format!("Slot {slot} of {block}"))?;
+    }
+    Ok(())
+}
+
+#[when(regex = r#"^the person contributes "(.*)" to the slot "([^"]+)" from the palette$"#)]
+fn contributes(w: &mut UiWorld, text: String, slot: String) -> StepResult {
+    let text = unescape(&text);
+    let window = w.window()?;
+    let field = window.node(
+        "Palette",
+        Some("textinput"),
+        &format!("Contribution to {slot}"),
+    )?;
+    window.enter(&field, &text)
 }
 
 #[when(regex = r#"^the person presses "([^"]+)"$"#)]
@@ -501,6 +630,7 @@ fn replaces_in_code(w: &mut UiWorld, old: String, new: String) -> StepResult {
     window.rest()
 }
 
+#[given(regex = r#"^an agent has called the tool "([^"]+)" with:$"#)]
 #[when(regex = r#"^an agent calls the tool "([^"]+)" with:$"#)]
 fn agent_calls(w: &mut UiWorld, tool: String, step: &Step) -> StepResult {
     let args: Json = serde_json::from_str(&docstring(step)?).map_err(|e| e.to_string())?;

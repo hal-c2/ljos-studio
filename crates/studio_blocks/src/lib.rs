@@ -104,7 +104,12 @@ pub struct Workspace {
     /// The selected object's bindings as written: `name`, `value`.
     #[qml(readonly, notify)]
     pub inspector: Json,
-    /// The project's blocks: `module`, `name`, `summary`, `category`.
+    /// The selected object's states: `name`, `when`?, and `changes`, each
+    /// `target`, `name`, `value` as written.
+    #[qml(readonly, notify)]
+    pub states: Json,
+    /// The project's blocks: `module`, `name`, `summary`, `category`,
+    /// `slots`.
     #[qml(readonly, notify)]
     pub palette: Json,
     /// What undo and redo would take back and do again, latest last.
@@ -113,7 +118,8 @@ pub struct Workspace {
     #[qml(readonly, notify)]
     pub undone: Json,
     /// The preview of `doc`, or `null`: `target`, `width`, `height`,
-    /// `state`, `generation` (what it shows: 1, and one more each reload
+    /// `state`, `variant` (the root's state its breakpoint turns on, or
+    /// empty), `generation` (what it shows: 1, and one more each reload
     /// it applied) and `picture` (the generation of the picture drawn; 0
     /// for none yet).
     #[qml(readonly, notify)]
@@ -491,6 +497,7 @@ fn publish(engine: &Engine, ws: ObjectId, view: View, seen: u64) {
             "height": p.height,
             "generation": p.generation,
             "state": p.state,
+            "variant": p.variant,
             "picture": picture,
         }),
         _ => Json::Null,
@@ -508,6 +515,7 @@ fn publish(engine: &Engine, ws: ObjectId, view: View, seen: u64) {
     let _ = cx.set(Workspace::SELECTED, view.selected);
     let _ = cx.set(Workspace::SELECTION, to_json(&view.selection));
     let _ = cx.set(Workspace::INSPECTOR, to_json(&view.inspector));
+    let _ = cx.set(Workspace::STATES, to_json(&view.states));
     let _ = cx.set(Workspace::PALETTE, to_json(&view.palette));
     let _ = cx.set(Workspace::DONE, to_json(&view.done));
     let _ = cx.set(Workspace::UNDONE, to_json(&view.undone));
