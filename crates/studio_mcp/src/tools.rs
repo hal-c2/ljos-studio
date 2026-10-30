@@ -607,9 +607,12 @@ struct ThemeOut {
     text: Option<String>,
 }
 
-/// The theme file of `doc`: `theme.json` beside it, or `doc` itself when
-/// it is one.
-fn theme_file(doc: &str) -> String {
+/// The theme file of `doc`: `theme.json` beside it, `doc` itself when it
+/// is one, or the project's own when no document is named.
+pub(crate) fn theme_file(doc: &str) -> String {
+    if doc.is_empty() {
+        return studio_core::theme::FILE.to_owned();
+    }
     let file = studio_core::theme::FILE;
     if doc == file || doc.ends_with(&format!("/{file}")) {
         return doc.to_owned();

@@ -8,6 +8,7 @@
 
 use qml_edit::Step;
 use serde::Serialize;
+use serde_json::Value as Json;
 use studio_core::{
     Address, StateInfo,
     preview::{PreviewEvent, Target},
@@ -59,6 +60,23 @@ pub struct Offered {
     pub slots: Vec<String>,
 }
 
+/// A role of `Ljos.Design` as the tokens panel lists it: what the window
+/// shows, the theme file's value where it has one and the module's where it
+/// does not.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct TokenRow {
+    pub token: String,
+    /// `color`, `int`, `real` or `curve`.
+    pub kind: String,
+    /// A colour's light and dark; empty for any other role.
+    pub light: String,
+    pub dark: String,
+    /// Any other role's value as JSON writes it; empty for a colour.
+    pub value: String,
+    /// The theme file sets it, in any variant.
+    pub set: bool,
+}
+
 /// The preview of the open document, when one runs.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct Previewed {
@@ -98,6 +116,11 @@ pub struct View {
     pub preview: Option<Previewed>,
     /// The server can start previews.
     pub previews: bool,
+    /// The theme file beside `doc` (or the project's, with none open).
+    pub theme: String,
+    /// Why the theme file is not read: Ljós would refuse it.
+    pub theme_problem: String,
+    pub tokens: Vec<TokenRow>,
 }
 
 impl Studio {
@@ -125,6 +148,11 @@ impl Studio {
         view.preview = preview_of(&preview::lock(&self.previews));
         if let Some(p) = &mut view.preview {
             p.variant = self.variant(&p.doc, p.width).unwrap_or_default();
+        }
+        view.theme = crate::tools::theme_file(doc);
+        if let Ok(read) = self.session.tokens(&view.theme, None) {
+            view.theme_problem = read.problem.unwrap_or_default();
+            view.tokens = read.tokens.into_iter().map(row).collect();
         }
         if doc.is_empty() {
             return view;
@@ -218,6 +246,33 @@ impl Studio {
             .into_iter()
             .find(|s| s.when.as_deref() == Some(condition.as_str()))
             .map(|s| s.name)
+    }
+}
+
+fn row(t: studio_core::theme::Token) -> TokenRow {
+    let set = t.theme.is_some();
+    let shown = |variant: &str| {
+        t.theme
+            .as_ref()
+            .and_then(|theme| theme.get(variant))
+            .or_else(|| t.module.get(variant))
+            .and_then(Json::as_str)
+            .unwrap_or_default()
+            .to_owned()
+    };
+    let (light, dark, value) = if t.kind == "color" {
+        (shown("light"), shown("dark"), String::new())
+    } else {
+        let value = t.theme.as_ref().unwrap_or(&t.module);
+        (String::new(), String::new(), value.to_string())
+    };
+    TokenRow {
+        token: t.token,
+        kind: t.kind.to_owned(),
+        light,
+        dark,
+        value,
+        set,
     }
 }
 
