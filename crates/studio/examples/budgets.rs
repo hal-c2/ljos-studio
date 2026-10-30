@@ -39,6 +39,8 @@ const FILES: usize = 200;
 /// a call it turns away is asked again after its one-second `Retry-After`:
 /// that wait is the client's, not a reload's.
 const PACE: Duration = Duration::from_millis(250);
+/// Longer than the preview's reload budget takes to allow another reload.
+const CATCH_UP: Duration = Duration::from_millis(1500);
 
 fn main() -> anyhow::Result<()> {
     let rounds: usize = match std::env::args().nth(1) {
@@ -283,14 +285,23 @@ impl Window {
 
     /// That the frame draws `generation` once the window is at rest: the
     /// workspace's wait for the preview's reload and its picture's fetch are
-    /// promised work, which resting waits for.
+    /// promised work, which resting waits for. An edit past the preview's
+    /// reload budget is shown when the budget next allows, which nothing
+    /// promised the window; the harness looks again until then (the window
+    /// itself is told, not polled).
     fn wait_for_picture(&mut self, generation: u64) -> anyhow::Result<()> {
-        self.rest()?;
-        let shown = self.picture()?;
-        if shown < generation {
-            bail!("the frame draws generation {shown}, not {generation}");
+        let deadline = Instant::now() + CATCH_UP;
+        loop {
+            self.rest()?;
+            let shown = self.picture()?;
+            if shown >= generation {
+                return Ok(());
+            }
+            if Instant::now() >= deadline {
+                bail!("the frame draws generation {shown}, not {generation}");
+            }
+            std::thread::sleep(Duration::from_millis(2));
         }
-        Ok(())
     }
 }
 
