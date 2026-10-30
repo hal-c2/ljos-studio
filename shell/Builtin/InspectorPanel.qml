@@ -88,6 +88,23 @@ Panel {
         return out
     }
 
+    // The box keeps its text until the sidecar took the comment, so a
+    // refused one can be sent again rather than typed again.
+    property bool adding: false
+    Connections {
+        target: panel.workspace
+        function onAnswered(tool, answer) {
+            if (tool === "review" && panel.adding) {
+                panel.adding = false
+                newComment.text = ""
+            }
+        }
+        function onRefused(tool, error) {
+            if (tool === "review")
+                panel.adding = false
+        }
+    }
+
     function review(args) {
         refusal.text = ""
         workspace.dispatch("review", args)
@@ -428,21 +445,21 @@ Panel {
                 placeholderText: "comment"
                 Accessible.name: "New comment"
                 Layout.fillWidth: true
-                onAccepted: addComment.clicked()
+                onAccepted: if (addComment.enabled) addComment.clicked()
             }
             Button {
                 id: addComment
                 text: "Comment"
                 Accessible.name: "Add comment"
-                enabled: newComment.text.trim() !== ""
+                enabled: newComment.text.trim() !== "" && panel.workspace.selected !== ""
                 onClicked: {
+                    panel.adding = true
                     panel.review({
                         action: "add",
                         doc: panel.workspace.doc,
                         node: {node: panel.workspace.selected},
                         text: newComment.text
                     })
-                    newComment.text = ""
                 }
             }
         }
