@@ -39,7 +39,8 @@ pub struct NativeHost {
     root: PathBuf,
     /// The `ljos` program.
     ljos: PathBuf,
-    /// Where the child's token file and its stderr go.
+    /// Where the child's token file and its stderr go, and where it runs:
+    /// `ljos run --mcp` writes its token file below its working directory.
     state: PathBuf,
     running: Option<Running>,
 }
@@ -68,10 +69,18 @@ impl NativeHost {
         ljos: impl Into<PathBuf>,
         state: impl Into<PathBuf>,
     ) -> Self {
+        // The child runs in `state`: a relative path would name a place
+        // below it instead of below this process's working directory.
+        let ljos = ljos.into();
         Self {
-            root: root.into(),
-            ljos: ljos.into(),
-            state: state.into(),
+            root: absolute(root.into()),
+            ljos: if ljos.components().count() > 1 {
+                absolute(ljos)
+            } else {
+                // A bare name is looked up on the `PATH`.
+                ljos
+            },
+            state: absolute(state.into()),
             running: None,
         }
     }
@@ -138,6 +147,7 @@ impl NativeHost {
             ));
         }
         command
+            .current_dir(&self.state)
             .env("LJOS_MCP_DIR", &self.state)
             .stdin(Stdio::null())
             .stdout(Stdio::null())
@@ -156,6 +166,12 @@ impl NativeHost {
             log,
         })
     }
+}
+
+/// `path` from the root, or as given when there is no working directory to
+/// resolve it in, which the child's start then reports.
+fn absolute(path: PathBuf) -> PathBuf {
+    std::path::absolute(&path).unwrap_or(path)
 }
 
 impl Drop for NativeHost {
