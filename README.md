@@ -81,6 +81,8 @@ as general pieces any tool can use.
 - [docs/DESIGN.md](docs/DESIGN.md): goals, modules and seams, data flow,
   testing, performance budget and milestones.
 - [docs/MCP.md](docs/MCP.md): the MCP tool surface.
+- [docs/MULTIPLAYER.md](docs/MULTIPLAYER.md): research on two writers
+  editing one document at once, with a recommendation and the seams it needs.
 
 ## Building
 

@@ -59,7 +59,8 @@ code or file formats is read or copied.
   another tool's document format is not.
 - Multiplayer. The edit model is built so it can come later (edits are
   small, ordered, invertible operations on text), but nothing in phase 2–4
-  depends on it.
+  depends on it. [MULTIPLAYER.md](MULTIPLAYER.md) compares the ways to do
+  it and recommends one authority with edits rebased by handle and leases.
 - Code generation from pictures. Studio edits QML; it never produces QML
   from a screenshot or a drawing.
 - A hosted service. Studio is an application; sharing is git and files.
