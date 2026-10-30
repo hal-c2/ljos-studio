@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+#MISE description="Studio's shell as an ljos-web page, against the session in wasm, checked in headless Chromium"
+#MISE depends=["web:build"]
+set -euo pipefail
+# ljos-web compiles QML ahead of time, natively, and puts QtQuick.Controls
+# together from an installed Qt's QML: so this needs an ljos-web checkout
+# with its packages installed (`pnpm install --frozen-lockfile`), its
+# `qmlc`, and Qt 6's QML (QT_INSTALL_QML when `qtpaths6` is not on the
+# path). It downloads nothing.
+: "${LJOS_WEB:?name an ljos-web checkout whose packages are installed}"
+: "${QMLC:?name the qmlc of an ljos-web checkout}"
+: "${PLAYWRIGHT:?name the playwright package to use, e.g. node_modules/playwright/index.mjs in an ljos-web checkout}"
+root="$(cd "$(dirname "$0")/../.." && pwd)"
+target="${CARGO_TARGET_DIR:-$root/target}"
+app="$target/web-shell"
+ui="${LJOS_UI:-$root/../ljos-ui}"
+
+rm -rf "$app"
+mkdir -p "$app/qml" "$app/node_modules/@solidjs"
+cp "$root"/web/shell/* "$app/"
+cp "$root"/shell/*.qml "$app/qml/"
+cp -r "$root/web/standins" "$root/web/pkg" "$app/"
+cp "$root"/web/{store,studio,Workspace}.js "$app/"
+# What compiled QML and the page import, from the checkout: its runtime,
+# and the Solid and Vite the runtime is built with.
+modules="$LJOS_WEB/examples/web/node_modules"
+for m in ljos-web solid-js vite @solidjs/web; do
+  ln -s "$(readlink -f "$modules/$m")" "$app/node_modules/$m"
+done
+
+# Ljós's own design module is plain QML, compiled as the shell is.
+export LJOS_DESIGN="$ui/crates/ljos_design_qml/qml"
+export LJOS_QT_TYPES="${LJOS_QT_TYPES:-$LJOS_WEB/crates/ljos_web/types.txt}"
+(cd "$app" && VITE_CONFIG_NATIVE_IGNORE_WARNING=true node_modules/vite/bin/vite.js build --logLevel warn)
+node "$root/web/shell.mjs" "$app/dist"
