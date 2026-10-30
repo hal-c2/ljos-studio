@@ -168,7 +168,9 @@ pub async fn serve_stdio(server: StudioServer, caps: CapSet) -> Result<(), Serve
 
 pub(crate) fn store_error(e: StoreError) -> SurfaceError {
     match e {
-        StoreError::Outside(_) => SurfaceError::new(ErrorCode::PathDenied, e.to_string()),
+        StoreError::Outside(_) | StoreError::NotDocument(_) => {
+            SurfaceError::new(ErrorCode::PathDenied, e.to_string())
+        }
         StoreError::Missing(_) => SurfaceError::not_found(e.to_string()),
         StoreError::Io { .. } => SurfaceError::new(ErrorCode::Internal, e.to_string()),
     }

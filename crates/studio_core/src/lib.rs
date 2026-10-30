@@ -267,6 +267,7 @@ impl Session {
     /// It does not tell a write observer: this is a change the file already
     /// has, and whatever watches the file has seen it.
     fn sync(&mut self, path: &str) -> Result<(), Error> {
+        self.check_document(path)?;
         let stored = match self.store.read(path) {
             Ok(stored) => stored,
             Err(e @ StoreError::Missing(_)) => {
@@ -298,6 +299,18 @@ impl Session {
             }
         }
         Ok(())
+    }
+
+    /// Refuses a path that is not one of the project's documents, as written
+    /// or where its links lead: the right to edit a document is not the right
+    /// to change `.git/config`.
+    pub fn check_document(&self, path: &str) -> Result<(), Error> {
+        let real = self.store.resolved(path)?;
+        if store::document_path(path) && store::document_path(&real) {
+            Ok(())
+        } else {
+            Err(StoreError::NotDocument(path.to_owned()).into())
+        }
     }
 
     /// Lets go of a document whose file went: its history's offsets have
@@ -676,9 +689,6 @@ impl Session {
 
     /// A new document with `text`.
     pub fn create(&mut self, path: &str, text: &str, dry_run: bool) -> Result<Outcome, Error> {
-        if !path.ends_with(".qml") {
-            return Err(Error::Invalid(format!("`{path}` is not a `.qml` file")));
-        }
         match self.sync(path) {
             Ok(()) => return Err(Error::Exists(path.to_owned())),
             Err(Error::Store(StoreError::Missing(_))) => {}

@@ -5,6 +5,7 @@
 //! three.
 
 use std::collections::BTreeMap;
+use std::io::Write as _;
 use std::path::{Component, Path, PathBuf};
 use std::sync::Mutex;
 
@@ -14,6 +15,8 @@ pub enum StoreError {
     Outside(String),
     #[error("`{0}` does not exist")]
     Missing(String),
+    #[error("`{0}` is not a document of this project")]
+    NotDocument(String),
     #[error("`{path}`: {message}")]
     Io { path: String, message: String },
 }
@@ -29,6 +32,10 @@ pub trait Store: Send + Sync {
     fn exists(&self, path: &str) -> bool;
     /// What to show a person as the project's place.
     fn describe(&self) -> String;
+    /// Where `path` really is, relative to the project, with links followed.
+    fn resolved(&self, path: &str) -> Result<String, StoreError> {
+        Ok(path.to_owned())
+    }
 }
 
 /// A project directory on disk.
@@ -61,8 +68,41 @@ impl FsStore {
         {
             return Err(StoreError::Outside(path.to_owned()));
         }
-        Ok(self.root.join(relative))
+        let full = self.root.join(relative);
+        // The part that exists is judged where it really is, so a link cannot
+        // lead out, and the path written to is that place: a rename over a
+        // link would replace the link and not the file it names.
+        for at in full.ancestors() {
+            if at.symlink_metadata().is_err() {
+                continue;
+            }
+            let real = at
+                .canonicalize()
+                .map_err(|_| StoreError::Outside(path.to_owned()))?;
+            if !real.starts_with(&self.root) {
+                return Err(StoreError::Outside(path.to_owned()));
+            }
+            // Joining nothing would add a `/` and make a file a directory.
+            let rest = full.strip_prefix(at).expect("one of its ancestors");
+            return Ok(if rest.as_os_str().is_empty() {
+                real
+            } else {
+                real.join(rest)
+            });
+        }
+        Ok(full)
     }
+}
+
+/// Whether `path` can be a document: a `.qml` file, in normal form so one
+/// file is not two documents by spelling, outside the directories a walk
+/// leaves out.
+pub(crate) fn document_path(path: &str) -> bool {
+    let mut parts = path.split('/').rev();
+    let file = parts.next().unwrap_or_default();
+    file.ends_with(".qml")
+        && !matches!(file, "." | "..")
+        && parts.all(|dir| !dir.is_empty() && dir != "." && dir != ".." && !skipped(dir))
 }
 
 /// Directories a walk leaves out: build output and tools' own.
@@ -127,7 +167,17 @@ impl Store for FsStore {
         // Written beside and renamed over, so a watcher (the preview's hot
         // reload) never reads half a file.
         let tmp = full.with_extension("qml.studio-tmp");
-        std::fs::write(&tmp, text).map_err(io)?;
+        // A link left at that name would take the text wherever it leads.
+        match std::fs::remove_file(&tmp) {
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(io(e)),
+            _ => {}
+        }
+        std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&tmp)
+            .and_then(|mut file| file.write_all(text.as_bytes()))
+            .map_err(io)?;
         std::fs::rename(&tmp, &full).map_err(io)
     }
 
@@ -145,6 +195,15 @@ impl Store for FsStore {
 
     fn describe(&self) -> String {
         self.root.display().to_string()
+    }
+
+    fn resolved(&self, path: &str) -> Result<String, StoreError> {
+        let full = self.confine(path)?;
+        let relative = full.strip_prefix(&self.root).unwrap_or(&full);
+        relative
+            .to_str()
+            .map(str::to_owned)
+            .ok_or_else(|| StoreError::Outside(path.to_owned()))
     }
 }
 
@@ -216,6 +275,100 @@ mod tests {
                 matches!(store.read(bad), Err(StoreError::Outside(_))),
                 "{bad}"
             );
+        }
+    }
+
+    #[test]
+    fn a_link_cannot_lead_out_of_the_project() {
+        let dir = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        std::fs::write(outside.path().join("Theirs.qml"), "theirs").unwrap();
+        let store = FsStore::new(dir.path()).unwrap();
+        let root = dir.path();
+        std::os::unix::fs::symlink(outside.path(), root.join("dir")).unwrap();
+        std::os::unix::fs::symlink(outside.path().join("Theirs.qml"), root.join("File.qml"))
+            .unwrap();
+        std::os::unix::fs::symlink(root.join("nowhere"), root.join("Dangling.qml")).unwrap();
+        for bad in [
+            "dir/Theirs.qml",
+            "dir/New.qml",
+            "dir/a/b/New.qml",
+            "File.qml",
+            "Dangling.qml",
+        ] {
+            assert!(
+                matches!(store.read(bad), Err(StoreError::Outside(_))),
+                "read {bad}"
+            );
+            assert!(
+                matches!(store.write(bad, "mine"), Err(StoreError::Outside(_))),
+                "write {bad}"
+            );
+            assert!(!store.exists(bad), "exists {bad}");
+        }
+        assert_eq!(
+            std::fs::read_to_string(outside.path().join("Theirs.qml")).unwrap(),
+            "theirs"
+        );
+        assert!(!outside.path().join("New.qml").exists());
+    }
+
+    #[test]
+    fn a_write_through_a_link_inside_keeps_the_link() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = FsStore::new(dir.path()).unwrap();
+        store.write("parts/Card.qml", "old").unwrap();
+        std::os::unix::fs::symlink(
+            dir.path().join("parts/Card.qml"),
+            dir.path().join("Link.qml"),
+        )
+        .unwrap();
+        store.write("Link.qml", "new").unwrap();
+        assert!(
+            dir.path()
+                .join("Link.qml")
+                .symlink_metadata()
+                .unwrap()
+                .is_symlink()
+        );
+        assert_eq!(store.read("parts/Card.qml").unwrap(), "new");
+        assert_eq!(store.resolved("Link.qml").unwrap(), "parts/Card.qml");
+    }
+
+    #[test]
+    fn a_link_left_at_the_temporary_name_is_not_written_through() {
+        let dir = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let theirs = outside.path().join("theirs");
+        std::fs::write(&theirs, "theirs").unwrap();
+        let store = FsStore::new(dir.path()).unwrap();
+        std::os::unix::fs::symlink(&theirs, dir.path().join("Main.qml.studio-tmp")).unwrap();
+        store.write("Main.qml", "mine").unwrap();
+        assert_eq!(std::fs::read_to_string(&theirs).unwrap(), "theirs");
+        assert_eq!(store.read("Main.qml").unwrap(), "mine");
+    }
+
+    #[test]
+    fn a_document_is_a_qml_file_outside_the_skipped_directories() {
+        for good in ["Main.qml", "a/b/Card.qml", ".hidden.qml"] {
+            assert!(document_path(good), "{good}");
+        }
+        for bad in [
+            "",
+            ".env",
+            ".git/config",
+            "README.md",
+            ".git/Hook.qml",
+            "a/.cache/B.qml",
+            "node_modules/x/Y.qml",
+            "target/G.qml",
+            "build/G.qml",
+            "a//B.qml",
+            "./B.qml",
+            "a/./B.qml",
+            "a/../B.qml",
+        ] {
+            assert!(!document_path(bad), "{bad}");
         }
     }
 
