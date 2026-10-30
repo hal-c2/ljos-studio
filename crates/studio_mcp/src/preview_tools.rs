@@ -227,7 +227,17 @@ fn open(studio: &Mutex<Studio>, a: OpenArgs) -> Result<OpenOut, SurfaceError> {
         State::Mocked => mocks,
     };
     let started_at = Instant::now();
-    let reuse = previous.is_some_and(|o| o.doc == a.doc);
+    // A process that ended while nothing read it would otherwise be reused
+    // as it is when no change needs a host call: ask, and start another.
+    if let Some(open) = previews.open.as_mut().filter(|o| o.doc == a.doc)
+        && let Err(e) = open.host.alive()
+    {
+        let e = previews.failed(e);
+        if previews.open.is_some() {
+            return Err(preview_error(e));
+        }
+    }
+    let reuse = previews.open.as_ref().is_some_and(|o| o.doc == a.doc);
     if reuse {
         let open = previews.open.as_mut().expect("checked");
         let mut reloads = Vec::new();

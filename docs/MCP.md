@@ -133,7 +133,8 @@ shows it; the watcher's quiet time is not on that path.
   `desktop` 1280×800, `tablet` 820×1180, `phone` 390×844, or any `size`.
 - DECISION: re-opening the open document changes its size and its aliases
   in place (`started: false`) and keeps the app's state; another document
-  starts another process.
+  starts another process. A re-open first asks the host whether the
+  process still runs: one that ended (an `ended` event) is started again.
 - DECISION: mock modules are the project's `mocks/` directory, one
   `qmldir` per module, found by its `module` line. `state: "mocked"`
   imports each from there (`--alias`, then `app_alias` to switch); the

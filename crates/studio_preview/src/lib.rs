@@ -278,6 +278,10 @@ impl PreviewHost for NativeHost {
         Ok((lines, next))
     }
 
+    fn alive(&mut self) -> Result<(), PreviewError> {
+        self.running().map(|_| ())
+    }
+
     fn close(&mut self) {
         if let Some(mut running) = self.running.take() {
             let _ = running.child.stop();

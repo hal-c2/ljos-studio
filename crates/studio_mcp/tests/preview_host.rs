@@ -131,6 +131,10 @@ impl PreviewHost for Recorder {
         Ok((lines, 1))
     }
 
+    fn alive(&mut self) -> Result<(), PreviewError> {
+        self.answer("alive")
+    }
+
     fn close(&mut self) {
         let _ = self.note("close".to_owned());
     }
@@ -489,6 +493,25 @@ fn a_call_that_finds_the_preview_ended_ends_it_and_the_next_open_starts_one() {
         assert_eq!(f.calls()[0], "open Shell.qml 1280x800 []", "{call}");
         assert_eq!(*f.opened.lock().unwrap(), 2, "{call}");
     }
+}
+
+/// Review 4429187143: a preview whose process ended while nothing read it
+/// is found ended by the reopen itself, which starts a new one rather than
+/// answering for a process that is gone.
+#[test]
+fn a_reopen_that_finds_the_preview_ended_starts_one() {
+    let f = Fixture::new();
+    f.call("preview_open", json!({ "doc": "Shell.qml" }))
+        .unwrap();
+    f.calls();
+    f.fail("alive", ended());
+    let out = f
+        .call("preview_open", json!({ "doc": "Shell.qml" }))
+        .unwrap();
+    assert_eq!(out["started"], true);
+    assert_eq!(f.calls(), ["open Shell.qml 1280x800 []"]);
+    assert_eq!(*f.opened.lock().unwrap(), 2);
+    assert_eq!(event_kinds(&f.events())[..3], ["opened", "ended", "opened"]);
 }
 
 #[test]

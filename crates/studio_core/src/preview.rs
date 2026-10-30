@@ -169,6 +169,11 @@ pub trait PreviewHost: Send {
     /// next.
     fn logs(&mut self, since: u64) -> Result<(Vec<LogLine>, u64), PreviewError>;
 
+    /// Whether the preview still runs: `Ended` (or `NotOpen`) when it has
+    /// stopped since the last call. Cheap and local where the host can
+    /// tell without asking the preview, since every reopen asks it.
+    fn alive(&mut self) -> Result<(), PreviewError>;
+
     /// Ends the preview.
     fn close(&mut self);
 }
