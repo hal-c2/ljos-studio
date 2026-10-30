@@ -285,8 +285,13 @@ fn open(studio: &Mutex<Studio>, a: OpenArgs) -> Result<OpenOut, SurfaceError> {
             last.host.close();
         }
         let mut host = hosts.make(dir.as_deref()).expect("checked: it runs here");
-        host.open(&preview::spec(&a.doc, size, &aliases))
-            .map_err(preview_error)?;
+        host.open(&preview::spec(
+            studio.session.store(),
+            &a.doc,
+            size,
+            &aliases,
+        ))
+        .map_err(preview_error)?;
         previews.log_mark = 0;
         previews.events.push(PreviewEvent::Opened {
             entry: a.doc.clone(),

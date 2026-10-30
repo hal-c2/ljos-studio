@@ -126,6 +126,10 @@ pub struct PreviewSpec {
     pub entry: String,
     pub size: Size,
     pub aliases: Vec<Alias>,
+    /// The project's type dumps (`ljostypes.json`), relative to it: the
+    /// types an application registers from Rust, which the preview stands
+    /// in for with the members they declare.
+    pub types: Vec<String>,
 }
 
 /// What a reload did.
@@ -188,8 +192,8 @@ pub struct Declared {
 pub enum Click {
     /// The object with this `id`.
     Id(String),
-    /// The topmost item drawn at this point, in the preview's logical
-    /// pixels.
+    /// This point, in the preview's logical pixels: whatever is on top
+    /// there gets the click.
     Point { x: f64, y: f64 },
 }
 

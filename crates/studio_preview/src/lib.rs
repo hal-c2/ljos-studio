@@ -40,6 +40,9 @@ const CAPS: &str = "inspect,input,mutate";
 /// one-second `Retry-After` at a brisk pace.
 const CALLS_PER_SECOND: u32 = 200;
 
+/// The project's type dumps run as one, in the state directory.
+const MERGED_TYPES: &str = "types.json";
+
 /// A preview as a child process.
 pub struct NativeHost {
     /// The project's directory: documents and alias directories are below it.
@@ -154,6 +157,15 @@ impl NativeHost {
             .arg(CALLS_PER_SECOND.to_string())
             .arg("--size")
             .arg(format!("{}x{}", spec.size.width, spec.size.height));
+        match spec.types.as_slice() {
+            [] => {}
+            [one] => {
+                command.arg("--types").arg(self.root.join(one));
+            }
+            several => {
+                command.arg("--types").arg(self.merged(several)?);
+            }
+        }
         for alias in &spec.aliases {
             command.arg("--alias").arg(format!(
                 "{}={}",
@@ -181,6 +193,50 @@ impl NativeHost {
             log,
             reported: 0,
         })
+    }
+}
+
+impl NativeHost {
+    /// The project's dumps as one, in the state directory: `ljos run` reads
+    /// one file, and a project may keep a dump beside each crate that
+    /// registers types. Their modules and unnamed types are put side by
+    /// side, as a build that links every crate has them all.
+    fn merged(&self, files: &[String]) -> Result<PathBuf, PreviewError> {
+        let mut format = None;
+        let (mut modules, mut unnamed) = (Vec::new(), Vec::new());
+        for file in files {
+            let fail = |why: String| PreviewError::Start(format!("{file}: {why}"));
+            let text =
+                std::fs::read_to_string(self.root.join(file)).map_err(|e| fail(e.to_string()))?;
+            let dump: Value = serde_json::from_str(&text).map_err(|e| fail(e.to_string()))?;
+            let this = dump.get("format").cloned().unwrap_or(Value::Null);
+            match &format {
+                None => format = Some(this),
+                Some(first) if *first != this => {
+                    return Err(fail(format!(
+                        "its format is {this}, and {}'s is {first}",
+                        files[0]
+                    )));
+                }
+                Some(_) => {}
+            }
+            for (key, into) in [("modules", &mut modules), ("unnamed", &mut unnamed)] {
+                match dump.get(key) {
+                    None => {}
+                    Some(Value::Array(list)) => into.extend(list.iter().cloned()),
+                    Some(_) => return Err(fail(format!("`{key}` is not a list"))),
+                }
+            }
+        }
+        let path = self.state.join(MERGED_TYPES);
+        let merged = json!({
+            "format": format,
+            "modules": modules,
+            "unnamed": unnamed,
+        });
+        std::fs::write(&path, merged.to_string())
+            .map_err(|e| PreviewError::Start(format!("{}: {e}", path.display())))?;
+        Ok(path)
     }
 }
 

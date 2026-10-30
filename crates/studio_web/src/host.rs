@@ -382,6 +382,7 @@ pub(crate) mod tests {
                 height: 844,
             },
             aliases: vec![],
+            types: vec![],
         }
     }
 

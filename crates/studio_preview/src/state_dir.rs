@@ -118,6 +118,7 @@ mod tests {
             entry: "Main.qml".to_owned(),
             size: studio_core::preview::Target::Desktop.size(),
             aliases: Vec::new(),
+            types: Vec::new(),
         };
         use studio_core::preview::PreviewHost as _;
         match host.open(&spec) {

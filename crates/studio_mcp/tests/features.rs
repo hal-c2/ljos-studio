@@ -679,6 +679,7 @@ fn bundle_runs(w: &mut StudioWorld, out: String) -> StepResult {
         // What `preview_open` runs at when no size is given.
         size: Target::Desktop.size(),
         aliases: Vec::new(),
+        types: Vec::new(),
     })
     .map_err(|e| format!("the bundle does not start: {e}"))?;
     let got = host.outline().map_err(|e| e.to_string())?;
