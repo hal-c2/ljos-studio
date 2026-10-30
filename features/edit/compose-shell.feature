@@ -76,12 +76,12 @@ Feature: An agent composes a shell from the app's blocks
       """
     And the agent has called the tool "node_insert" with:
       """json
-      {"doc": "Shell.qml", "parent": {"path": "root"}, "block": "App.Media.Player"}
+      {"doc": "Shell.qml", "generation": 1, "parent": {"path": "root"}, "block": "App.Media.Player"}
       """
     And the agent keeps the answer's "/node" as "player"
     And the agent has called the tool "node_insert" with:
       """json
-      {"doc": "Shell.qml", "parent": {"path": "root"}, "block": "App.Chat.Thread", "text": "Thread { title: \"Inbox\" }"}
+      {"doc": "Shell.qml", "generation": 2, "parent": {"path": "root"}, "block": "App.Chat.Thread", "text": "Thread { title: \"Inbox\" }"}
       """
     And the agent has called the tool "property_set" with:
       """json
@@ -136,7 +136,7 @@ Feature: An agent composes a shell from the app's blocks
   Scenario: A block that is not there is refused
     When the agent calls the tool "node_insert" with:
       """json
-      {"doc": "App/Chat/Thread.qml", "parent": {"path": "root"}, "block": "App.Chat.Missing"}
+      {"doc": "App/Chat/Thread.qml", "generation": 1, "parent": {"path": "root"}, "block": "App.Chat.Missing"}
       """
     Then the agent is refused with "not_found"
     And the refusal's "/details/kind" is "no_block"
@@ -144,7 +144,7 @@ Feature: An agent composes a shell from the app's blocks
   Scenario: Text of another type is not a block
     When the agent calls the tool "node_insert" with:
       """json
-      {"doc": "App/Chat/Thread.qml", "parent": {"path": "root"}, "block": "App.Media.Player", "text": "Rectangle {}"}
+      {"doc": "App/Chat/Thread.qml", "generation": 1, "parent": {"path": "root"}, "block": "App.Media.Player", "text": "Rectangle {}"}
       """
     Then the agent is refused with "invalid_argument"
     And the file "App/Chat/Thread.qml" is:

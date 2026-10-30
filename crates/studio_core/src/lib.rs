@@ -124,6 +124,16 @@ pub enum Op {
 }
 
 impl Op {
+    fn addresses(&self) -> Vec<&Address> {
+        match self {
+            Op::Insert { parent, .. } => vec![parent],
+            Op::Move { node, parent, .. } => vec![node, parent],
+            Op::Remove { node } | Op::SetBinding { node, .. } | Op::RemoveBinding { node, .. } => {
+                vec![node]
+            }
+        }
+    }
+
     fn label(&self) -> String {
         match self {
             Op::Insert { text, .. } => {
@@ -469,11 +479,14 @@ impl Session {
         }
     }
 
-    /// Applies a structural edit.
+    /// Applies a structural edit. An edit that names an object by path needs
+    /// the `generation` the path was read at: a path is true of one text,
+    /// and the only address that would name another object without notice.
     ///
     /// # Errors
-    /// A stale `generation`, an address that names nothing, a document that
-    /// does not parse, or the edit's own refusal; nothing changes then.
+    /// A path without a `generation`, a stale `generation`, an address that
+    /// names nothing, a document that does not parse, or the edit's own
+    /// refusal; nothing changes then.
     pub fn edit(
         &mut self,
         path: &str,
@@ -482,6 +495,17 @@ impl Session {
         dry_run: bool,
     ) -> Result<Outcome, Error> {
         let path = &self.canonical(path)?;
+        if generation.is_none()
+            && let Some(Address::Path(p)) = op
+                .addresses()
+                .into_iter()
+                .find(|a| matches!(a, Address::Path(_)))
+        {
+            return Err(Error::Invalid(format!(
+                "the path `{p}` names an object only in the generation it was read at: give \
+                 `generation`"
+            )));
+        }
         self.check_generation(path, generation)?;
         let before = self.doc(path)?.text.clone();
         let (text, change, focus) = self.plan(path, &before, op)?;

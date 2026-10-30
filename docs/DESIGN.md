@@ -275,9 +275,10 @@ Each milestone ends with its exit criteria met and its scenarios green.
   `id` only to an object it inserts itself (one not yet used in the
   document); it never adds an `id` to an object the author wrote, since
   that writes bytes nobody asked for (goal 2). Existing objects are
-  re-resolved by `id`, `ObjectKey` or path within the document's
-  generation check, so an address from an older generation is refused
-  rather than applied to the wrong object.
+  followed by handle, `id` or `ObjectKey`. A path is true of one
+  generation, so an edit that names an object by path must give that
+  generation and is refused when the document has moved on, rather than
+  applied to the wrong object.
 - **Partial files.** A code view produces broken files; structural edits
   wait for a parse, which a person may find surprising.
 - **Members sharing a line with a brace** cannot yet take a multi-line

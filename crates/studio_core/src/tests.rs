@@ -58,9 +58,11 @@ fn undo_gives_back_the_bytes() {
     let mut s = session();
     s.edit("Main.qml", None, &insert("Rectangle {}", None), false)
         .unwrap();
+    // A path is true of one text: an edit by path names its generation.
+    let g = now(&mut s);
     s.edit(
         "Main.qml",
-        None,
+        g,
         &Op::SetBinding {
             node: Address::Path("root/1".into()),
             name: "font.bold".into(),
@@ -69,9 +71,10 @@ fn undo_gives_back_the_bytes() {
         false,
     )
     .unwrap();
+    let g = now(&mut s);
     s.edit(
         "Main.qml",
-        None,
+        g,
         &Op::Move {
             node: Address::Path("root/0".into()),
             parent: Address::Id("root".into()),
@@ -428,25 +431,29 @@ fn only_an_object_studio_inserts_is_given_an_id() {
         name: "width".into(),
         value: "10".into(),
     };
-    s.edit("Main.qml", None, &set, false).unwrap();
+    let g = now(&mut s);
+    s.edit("Main.qml", g, &set, false).unwrap();
     assert_eq!(ids(&mut s), 1, "a binding set");
     let unset = Op::RemoveBinding {
         node: rect.clone(),
         name: "width".into(),
     };
-    s.edit("Main.qml", None, &unset, false).unwrap();
+    let g = now(&mut s);
+    s.edit("Main.qml", g, &unset, false).unwrap();
     assert_eq!(ids(&mut s), 1, "a binding removed");
     let moved = Op::Move {
         node: text,
         parent: root,
         index: Some(0),
     };
-    s.edit("Main.qml", None, &moved, false).unwrap();
+    let g = now(&mut s);
+    s.edit("Main.qml", g, &moved, false).unwrap();
     assert_eq!(ids(&mut s), 1, "a move");
     s.replace_text("Main.qml", None, Some(0..0), "// A note.\n", false)
         .unwrap();
     assert_eq!(ids(&mut s), 1, "a text edit");
-    s.edit("Main.qml", None, &Op::Remove { node: rect }, false)
+    let g = now(&mut s);
+    s.edit("Main.qml", g, &Op::Remove { node: rect }, false)
         .unwrap();
     assert_eq!(ids(&mut s), 1, "a removal");
 
@@ -462,6 +469,23 @@ fn only_an_object_studio_inserts_is_given_an_id() {
     };
     s.edit("Main.qml", None, &plain, false).unwrap();
     assert_eq!(ids(&mut s), 2, "asked not to");
+}
+
+fn now(s: &mut Session) -> Option<u64> {
+    Some(s.generation("Main.qml").unwrap())
+}
+
+#[test]
+fn an_edit_by_path_needs_the_generation_the_path_was_read_at() {
+    let mut s = session();
+    let remove = Op::Remove {
+        node: Address::Path("root/0".into()),
+    };
+    let err = s.edit("Main.qml", None, &remove, false).unwrap_err();
+    assert!(matches!(err, Error::Invalid(_)), "{err:?}");
+    assert_eq!(s.text("Main.qml").unwrap().0, MAIN);
+    let g = now(&mut s);
+    s.edit("Main.qml", g, &remove, false).unwrap();
 }
 
 fn one_file(text: &str) -> Session {
@@ -549,10 +573,11 @@ fn an_undone_insert_leaves_its_handle_gone_until_redo() {
     // The reviewer's probe: nothing listed before the insert, so every
     // handle but the snapshot's is given out on the text after it.
     let mut s = one_file("Column {\n    Rectangle { width: 1 }\n}\n");
+    let g = now(&mut s);
     let out = s
         .edit(
             "Main.qml",
-            None,
+            g,
             &Op::Insert {
                 parent: Address::Path("root".into()),
                 index: Some(0),

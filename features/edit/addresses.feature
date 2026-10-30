@@ -285,3 +285,28 @@ Feature: An object keeps its handle across everyone's edits
       """
     Then the answer's "/path" is "root/0"
     And the answer's "/bindings/0/value" is "2"
+
+  Scenario: An edit names an object by path only with the generation the path was read at
+    When the agent calls the tool "node_remove" with:
+      """json
+      {"doc": "Main.qml", "node": {"path": "root/0"}}
+      """
+    Then the agent is refused with "invalid_argument"
+    And the refusal's "/details/kind" is "invalid"
+    When the agent calls the tool "node_remove" with:
+      """json
+      {"doc": "Main.qml", "generation": 1, "node": {"path": "root/0"}}
+      """
+    Then the answer's "/generation" is 2
+    And the file "Main.qml" is:
+      """qml
+      import QtQuick
+
+      Item {
+          id: root
+
+          Text {
+              text: "hello"
+          }
+      }
+      """

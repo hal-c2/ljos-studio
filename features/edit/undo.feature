@@ -37,7 +37,7 @@ Feature: Undo gives back the bytes
       """
     And the agent has called the tool "node_move" with:
       """json
-      {"doc": "Main.qml", "node": {"path": "root/2"}, "parent": {"id": "root"}, "index": 0}
+      {"doc": "Main.qml", "generation": 3, "node": {"path": "root/2"}, "parent": {"id": "root"}, "index": 0}
       """
     When the agent calls the tool "history" with:
       """json

@@ -9,7 +9,7 @@ Studio composes three servers rather than duplicating them:
 - **`ljos mcp`** (Ljós's authoring server, `ljos_mcp_author`): checking,
   linting, formatting, types, docs, scenarios. Studio forwards to it and
   adds `qml_edit_apply` and `blocks_list` *to Ljós* (general tools).
-  Studio's own `blocks_list` (#15) is the same registry, built by the
+  Studio's own `blocks_list` is the same registry, built by the
   same `ljos_blocks` code, for the project Studio has open: an agent
   talking only to Studio should not need a second server to see the
   blocks it composes. The two answer alike; neither adds to the other.
@@ -66,7 +66,10 @@ Every `mutate` tool:
 - takes the document's `generation` and refuses a stale one, so two
   writers do not silently overwrite each other. A file changed by another
   program takes a new generation and an entry in the history when it is next
-  read or edited;
+  read or edited. An edit that names an object by `path` must give the
+  generation (`invalid_argument` otherwise): a path is true of one text and
+  would name another object without notice. A handle or an `id` follows
+  its object, so the generation stays optional with them;
 - takes `dry_run` and then returns the changed ranges without writing;
 - returns the changed ranges, the new generation and a `history` id; an
   edit that would write the bytes already there writes nothing, keeps the

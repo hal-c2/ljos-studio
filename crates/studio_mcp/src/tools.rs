@@ -254,7 +254,8 @@ struct Inspected {
 #[serde(deny_unknown_fields)]
 struct InsertArgs {
     doc: String,
-    /// The generation read; refused if the document moved on.
+    /// The generation read; refused if the document moved on. Needed when
+    /// an address is a `path`, which is true of one generation only.
     generation: Option<u64>,
     parent: Address,
     /// Child position; the end when left out.
@@ -277,6 +278,8 @@ struct InsertArgs {
 #[serde(deny_unknown_fields)]
 struct MoveArgs {
     doc: String,
+    /// The generation read; refused if the document moved on. Needed when
+    /// an address is a `path`, which is true of one generation only.
     generation: Option<u64>,
     node: Address,
     parent: Address,
@@ -291,6 +294,8 @@ struct MoveArgs {
 #[serde(deny_unknown_fields)]
 struct RemoveArgs {
     doc: String,
+    /// The generation read; refused if the document moved on. Needed when
+    /// an address is a `path`, which is true of one generation only.
     generation: Option<u64>,
     node: Address,
     #[serde(default)]
@@ -341,6 +346,8 @@ impl<T: JsonSchema> JsonSchema for Present<T> {
 #[serde(deny_unknown_fields)]
 struct PropertyArgs {
     doc: String,
+    /// The generation read; refused if the document moved on. Needed when
+    /// an address is a `path`, which is true of one generation only.
     generation: Option<u64>,
     node: Address,
     /// `width`, `font.bold`; written grouped or dotted as the file already does.
@@ -355,6 +362,8 @@ struct PropertyArgs {
 #[serde(deny_unknown_fields)]
 struct BindingArgs {
     doc: String,
+    /// The generation read; refused if the document moved on. Needed when
+    /// an address is a `path`, which is true of one generation only.
     generation: Option<u64>,
     node: Address,
     /// A property (`width`) or a handler (`onClicked`).
