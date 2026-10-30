@@ -495,3 +495,51 @@ fn a_value_object_is_not_counted_as_a_child_of_its_parent() {
     );
     assert_eq!(s.history().0.len(), 0);
 }
+
+#[test]
+fn a_link_and_the_document_it_leads_to_are_one_document() {
+    // The reviewer's steps: read through one name, edit through the other,
+    // edit through the first, undo. Held twice, each copy took the other's
+    // write for a change made outside Studio, and undo wrote one copy's old
+    // text over the other's edit.
+    let dir = tempfile::tempdir().unwrap();
+    let store = store::FsStore::new(dir.path()).unwrap();
+    store.write("parts/Card.qml", "Item {\n}\n").unwrap();
+    std::os::unix::fs::symlink(
+        dir.path().join("parts/Card.qml"),
+        dir.path().join("Link.qml"),
+    )
+    .unwrap();
+    let mut s = Session::open(Box::new(store));
+    let set = |name: &str, value: &str| Op::SetBinding {
+        node: Address::Path("root".into()),
+        name: name.into(),
+        value: value.into(),
+    };
+    let g = s.generation("parts/Card.qml").unwrap();
+    let out = s
+        .edit("Link.qml", Some(g), &set("width", "10"), false)
+        .unwrap();
+    assert_eq!(out.doc, "parts/Card.qml");
+    let g = s.generation("parts/Card.qml").unwrap();
+    assert_eq!(g, out.generation);
+    s.edit("parts/Card.qml", Some(g), &set("height", "20"), false)
+        .unwrap();
+    let (done, _) = s.history();
+    assert_eq!(
+        done.iter().map(|e| e.label.as_str()).collect::<Vec<_>>(),
+        ["set width", "set height"]
+    );
+    s.undo().unwrap();
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join("parts/Card.qml")).unwrap(),
+        "Item {\n    width: 10\n}\n"
+    );
+    s.undo().unwrap();
+    s.redo().unwrap();
+    s.redo().unwrap();
+    assert_eq!(
+        s.text("Link.qml").unwrap().0,
+        "Item {\n    width: 10\n    height: 20\n}\n"
+    );
+}

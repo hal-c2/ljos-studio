@@ -57,6 +57,9 @@ documents: export), `run` (start previews).
 
 A document is a `.qml` file of the project outside the directories a walk
 leaves out, judged where its links lead; anything else is `path_denied`.
+A file reached by two names is one document: answers name it by where it
+really is, and it has one generation and one history whichever name an
+edit uses.
 
 Every `mutate` tool:
 

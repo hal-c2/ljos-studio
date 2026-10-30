@@ -558,7 +558,8 @@ pub(crate) fn registry(studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
                 let studio = s();
                 move |_, a: TreeArgs| {
                     let mut studio = lock(&studio);
-                    let (tree, generation) = studio.session.tree(&a.doc).map_err(error)?;
+                    let doc = studio.session.canonical(&a.doc).map_err(error)?;
+                    let (tree, generation) = studio.session.tree(&doc).map_err(error)?;
                     let nodes = tree
                         .into_iter()
                         .map(|(node, n)| TreeNode {
@@ -578,7 +579,7 @@ pub(crate) fn registry(studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
                     let limit = a.limit.unwrap_or(TREE_PAGE).clamp(1, TREE_PAGE);
                     let (nodes, next) = paginate(nodes, a.cursor.as_deref(), limit)?;
                     Ok(Tree {
-                        doc: a.doc,
+                        doc,
                         generation,
                         nodes,
                         next,
@@ -597,15 +598,16 @@ pub(crate) fn registry(studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
                 let studio = s();
                 move |_, a: TextArgs| {
                     let mut studio = lock(&studio);
-                    let parses = studio.session.tree(&a.doc).is_ok();
-                    let (text, generation) = studio.session.text(&a.doc).map_err(error)?;
+                    let doc = studio.session.canonical(&a.doc).map_err(error)?;
+                    let parses = studio.session.tree(&doc).is_ok();
+                    let (text, generation) = studio.session.text(&doc).map_err(error)?;
                     let start = a.start.unwrap_or(0);
                     let end = a.end.unwrap_or(text.len());
                     let slice = text.get(start..end).ok_or_else(|| {
                         SurfaceError::invalid_argument(format!("{start}..{end} is not a range of the text"))
                     })?;
                     Ok(Text {
-                        doc: a.doc,
+                        doc,
                         generation,
                         start,
                         end,
@@ -679,15 +681,28 @@ pub(crate) fn registry(studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
                 move |_, a: FindArgs| {
                     let mut studio = lock(&studio);
                     let docs = match &a.doc {
-                        Some(doc) => vec![doc.clone()],
+                        Some(doc) => vec![studio.session.canonical(doc).map_err(error)?],
                         None => studio.session.documents(),
                     };
+                    // A file the project reaches by two names is searched once.
+                    let mut seen = std::collections::BTreeSet::new();
                     let mut out = FindOut {
                         nodes: Vec::new(),
                         broken: Vec::new(),
                         unreadable: Vec::new(),
                     };
                     for doc in docs {
+                        let doc = match studio.session.canonical(&doc) {
+                            Ok(real) => real,
+                            Err(studio_core::Error::Store(_)) if a.doc.is_none() => {
+                                out.unreadable.push(doc);
+                                continue;
+                            }
+                            Err(e) => return Err(error(e)),
+                        };
+                        if !seen.insert(doc.clone()) {
+                            continue;
+                        }
                         let tree = match studio.session.tree(&doc) {
                             Ok((tree, _)) => tree,
                             Err(studio_core::Error::Broken { .. }) if a.doc.is_none() => {
@@ -755,8 +770,9 @@ pub(crate) fn registry(studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
                 let studio = s();
                 move |_, a: NodeArgs| {
                     let mut studio = lock(&studio);
-                    let (handle, node) = studio.session.resolve(&a.doc, &a.node).map_err(error)?;
-                    let (tree, generation) = studio.session.tree(&a.doc).map_err(error)?;
+                    let doc = studio.session.canonical(&a.doc).map_err(error)?;
+                    let (handle, node) = studio.session.resolve(&doc, &a.node).map_err(error)?;
+                    let (tree, generation) = studio.session.tree(&doc).map_err(error)?;
                     let parent_path = (!node.path.0.is_empty())
                         .then(|| studio_core::NodePath(node.path.0[..node.path.0.len() - 1].to_vec()));
                     let parent = parent_path.and_then(|p| {
@@ -767,10 +783,10 @@ pub(crate) fn registry(studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
                         .filter(|(_, n)| {
                             n.path.0.len() == node.path.0.len() + 1 && n.path.0.starts_with(&node.path.0)
                         })
-                        .map(|(h, n)| found(&a.doc, h.clone(), n))
+                        .map(|(h, n)| found(&doc, h.clone(), n))
                         .collect();
                     Ok(Inspected {
-                        doc: a.doc,
+                        doc,
                         generation,
                         node: handle,
                         path: node.path.to_string(),

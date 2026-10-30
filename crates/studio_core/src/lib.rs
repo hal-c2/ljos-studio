@@ -316,6 +316,15 @@ impl Session {
         }
     }
 
+    /// The name a document is held under: where `path` really is, links
+    /// followed, so one file reached by two names is one document with one
+    /// generation and one history. Refuses what [`Session::check_document`]
+    /// refuses.
+    pub fn canonical(&self, path: &str) -> Result<String, Error> {
+        self.check_document(path)?;
+        Ok(self.store.resolved(path)?)
+    }
+
     /// Lets go of a document whose file went: its history's offsets have
     /// nothing left to apply to.
     fn forget(&mut self, path: &str) {
@@ -331,12 +340,14 @@ impl Session {
     }
 
     pub fn text(&mut self, path: &str) -> Result<(&str, u64), Error> {
+        let path = &self.canonical(path)?;
         self.sync(path)?;
         let doc = self.doc(path)?;
         Ok((&doc.text, doc.generation))
     }
 
     pub fn generation(&mut self, path: &str) -> Result<u64, Error> {
+        let path = &self.canonical(path)?;
         self.sync(path)?;
         Ok(self.doc(path)?.generation)
     }
@@ -344,6 +355,7 @@ impl Session {
     /// The document's objects, each with a handle. Fails while the text does
     /// not parse.
     pub fn tree(&mut self, path: &str) -> Result<(Vec<(String, Node)>, u64), Error> {
+        let path = &self.canonical(path)?;
         self.sync(path)?;
         self.tree_now(path)
     }
@@ -386,6 +398,7 @@ impl Session {
 
     /// The object an address names now, with its handle.
     pub fn resolve(&mut self, path: &str, address: &Address) -> Result<(String, Node), Error> {
+        let path = &self.canonical(path)?;
         self.sync(path)?;
         self.resolve_now(path, address)
     }
@@ -459,6 +472,7 @@ impl Session {
         op: &Op,
         dry_run: bool,
     ) -> Result<Outcome, Error> {
+        let path = &self.canonical(path)?;
         self.check_generation(path, generation)?;
         let before = self.doc(path)?.text.clone();
         let (text, change, focus) = self.plan(path, &before, op)?;
@@ -667,6 +681,7 @@ impl Session {
         text: &str,
         dry_run: bool,
     ) -> Result<Outcome, Error> {
+        let path = &self.canonical(path)?;
         self.check_generation(path, generation)?;
         let before = self.doc(path)?.text.clone();
         let range = range.unwrap_or(0..before.len());
@@ -716,6 +731,7 @@ impl Session {
 
     /// A new document with `text`.
     pub fn create(&mut self, path: &str, text: &str, dry_run: bool) -> Result<Outcome, Error> {
+        let path = &self.canonical(path)?;
         match self.sync(path) {
             Ok(()) => return Err(Error::Exists(path.to_owned())),
             Err(Error::Store(StoreError::Missing(_))) => {}
@@ -951,6 +967,7 @@ impl Session {
 
     /// Sets the selection; every address must name an object.
     pub fn select(&mut self, path: &str, addresses: &[Address]) -> Result<Vec<String>, Error> {
+        let path = &self.canonical(path)?;
         let mut handles = Vec::new();
         for address in addresses {
             handles.push(self.resolve(path, address)?.0);

@@ -100,3 +100,46 @@ Feature: The document tools reach the project's documents and nothing else
       {"doc": "cards/Card.qml"}
       """
     Then the answer's "/generation" is 1
+
+  Scenario: A link and the document it leads to are one document
+    Given the file "parts/Card.qml":
+      """qml
+      Item {
+      }
+      """
+    And the link "Link.qml" leads to "parts/Card.qml"
+    And the agent has called the tool "document_text" with:
+      """json
+      {"doc": "parts/Card.qml"}
+      """
+    When the agent calls the tool "property_set" with:
+      """json
+      {"doc": "Link.qml", "generation": 1, "node": {"path": "root"}, "name": "width", "value": 10}
+      """
+    Then the answer's "/doc" is "parts/Card.qml"
+    And the answer's "/generation" is 2
+    When the agent calls the tool "property_set" with:
+      """json
+      {"doc": "parts/Card.qml", "generation": 2, "node": {"path": "root"}, "name": "height", "value": 20}
+      """
+    Then the answer's "/generation" is 3
+    When the agent calls the tool "history" with:
+      """json
+      {"action": "list"}
+      """
+    Then the answer's "/done" has 2 entries
+    And the answer's "/done/0/doc" is "parts/Card.qml"
+    And the answer's "/done/1/label" is "set height"
+    When the agent calls the tool "history" with:
+      """json
+      {"action": "undo"}
+      """
+    And the agent calls the tool "history" with:
+      """json
+      {"action": "undo"}
+      """
+    Then the file "parts/Card.qml" is:
+      """qml
+      Item {
+      }
+      """
