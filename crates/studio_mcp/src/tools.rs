@@ -7,7 +7,10 @@ use ljos_mcp_core::{
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use studio_core::{Address, Literal, Node, Op, Outcome};
+use studio_core::{
+    Address, Literal, Mode, Node, Op, Outcome, StateEdit, StateInfo, TransitionInfo,
+    preview::Target,
+};
 
 use crate::{Studio, blocks, error, lock};
 use serde_json::json;
@@ -260,6 +263,9 @@ struct Inspected {
     parent: Option<String>,
     bindings: Vec<BindingOut>,
     children: Vec<Found>,
+    /// Its `State`s in order, each with the values it changes as written.
+    states: Vec<StateInfo>,
+    transitions: Vec<TransitionInfo>,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -383,6 +389,79 @@ struct BindingArgs {
     /// QML after the `:` (`parent.width / 2`, `{ count++ }`); `null` removes it.
     /// Required: left out, nothing is removed.
     value: Present<String>,
+    #[serde(default)]
+    dry_run: bool,
+}
+
+#[derive(Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+enum StateAction {
+    Add,
+    Rename,
+    Remove,
+    /// Set or remove one value the state changes.
+    Change,
+    /// Set or remove the state's `when`.
+    When,
+    AddTransition,
+    RemoveTransition,
+}
+
+#[derive(Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct StateEditArgs {
+    doc: String,
+    generation: Option<u64>,
+    /// The object whose states these are; the root when left out.
+    node: Option<Address>,
+    action: StateAction,
+    /// The state's name; every action but the transition ones needs it.
+    state: Option<String>,
+    /// `rename`: the new name.
+    new_name: Option<String>,
+    /// `add`, `when`: the condition, QML after `when:`. Left out of `when`,
+    /// it removes it.
+    when: Option<String>,
+    /// `add`, `when`: a preview target whose width bound becomes the `when`
+    /// (`root.width < 600`); not with `when`.
+    breakpoint: Option<Target>,
+    /// `change`: the object, which must have an id.
+    target: Option<Address>,
+    /// `change`: its property (`text`, `anchors.left`).
+    name: Option<String>,
+    /// `change`: a literal. With neither this nor `binding`, the value is
+    /// removed.
+    value: Option<LiteralArg>,
+    /// `change`: an expression (`root.width / 2`).
+    binding: Option<String>,
+    /// Transitions: the states it runs between; `*` (any) when left out.
+    from: Option<String>,
+    to: Option<String>,
+    /// `add_transition`: the animations it runs, in QML.
+    animations: Option<String>,
+    #[serde(default)]
+    dry_run: bool,
+}
+
+#[derive(Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct ContributeArgs {
+    doc: String,
+    generation: Option<u64>,
+    /// The slot, as `blocks_list` lists it (`controls`).
+    slot: Option<String>,
+    /// Where the `Contribution` goes; the root when left out.
+    parent: Option<Address>,
+    /// How it joins what the slot holds; the runtime's default when left out.
+    mode: Option<Mode>,
+    /// Its place among the slot's contributions.
+    order: Option<i64>,
+    /// What it shows: one object in QML.
+    text: Option<String>,
+    /// Or a block from `blocks_list`, `Module.Name`, shown bare.
+    block: Option<String>,
+    /// Take this `Contribution` out instead.
+    remove: Option<Address>,
     #[serde(default)]
     dry_run: bool,
 }
@@ -528,6 +607,163 @@ fn insert_text(
         }
     };
     Ok((text, Some(block.module.clone())))
+}
+
+fn literal(value: LiteralArg) -> Literal {
+    match value {
+        LiteralArg::Bool(b) => Literal::Bool(b),
+        LiteralArg::Number(n) => Literal::Number(n.to_string()),
+        LiteralArg::String(s) => Literal::String(s),
+    }
+}
+
+/// The id of the object `address` names: states name objects by id.
+fn id_of(studio: &Mutex<Studio>, doc: &str, address: &Address) -> Result<String, SurfaceError> {
+    let (handle, node) = lock(studio).session.resolve(doc, address).map_err(error)?;
+    node.id.ok_or_else(|| {
+        error(studio_core::Error::NoId(format!(
+            "{handle} (`{}`)",
+            node.ty
+        )))
+    })
+}
+
+fn needs(field: &str, action: &str) -> SurfaceError {
+    SurfaceError::invalid_argument(format!("`{action}` needs `{field}`"))
+}
+
+/// The edit a `state_edit` call asks for, with a breakpoint turned into the
+/// condition it stands for.
+fn state_op(studio: &Mutex<Studio>, a: StateEditArgs) -> Result<Op, SurfaceError> {
+    let node = a.node.unwrap_or_else(|| Address::Path("root".to_owned()));
+    let state = |action: &str| a.state.clone().ok_or_else(|| needs("state", action));
+    let when = match (a.when, a.breakpoint) {
+        (Some(_), Some(_)) => {
+            return Err(SurfaceError::invalid_argument(
+                "give `when` or `breakpoint`, not both",
+            ));
+        }
+        (when, None) => when,
+        (None, Some(target)) => {
+            // The bound compares the root's width: the window a breakpoint
+            // is about, not the object the state belongs to.
+            let root = id_of(studio, &a.doc, &Address::Path("root".to_owned()))?;
+            Some(target.condition(&root))
+        }
+    };
+    let edit = match a.action {
+        StateAction::Add => StateEdit::Add {
+            name: state("add")?,
+            when,
+        },
+        StateAction::Rename => StateEdit::Rename {
+            name: state("rename")?,
+            to: a.new_name.ok_or_else(|| needs("new_name", "rename"))?,
+        },
+        StateAction::Remove => StateEdit::Remove {
+            name: state("remove")?,
+        },
+        StateAction::When => StateEdit::When {
+            name: state("when")?,
+            when,
+        },
+        StateAction::Change => {
+            let target = a.target.ok_or_else(|| needs("target", "change"))?;
+            let value = match (a.value, a.binding) {
+                (Some(_), Some(_)) => {
+                    return Err(SurfaceError::invalid_argument(
+                        "give `value` or `binding`, not both",
+                    ));
+                }
+                (Some(v), None) => Some(literal(v).to_qml()),
+                (None, binding) => binding,
+            };
+            StateEdit::Change {
+                name: state("change")?,
+                target: id_of(studio, &a.doc, &target)?,
+                property: a.name.ok_or_else(|| needs("name", "change"))?,
+                value,
+            }
+        }
+        StateAction::AddTransition => StateEdit::AddTransition {
+            from: a.from.unwrap_or_else(|| "*".to_owned()),
+            to: a.to.unwrap_or_else(|| "*".to_owned()),
+            animations: a
+                .animations
+                .ok_or_else(|| needs("animations", "add_transition"))?,
+        },
+        StateAction::RemoveTransition => StateEdit::RemoveTransition {
+            from: a.from.unwrap_or_else(|| "*".to_owned()),
+            to: a.to.unwrap_or_else(|| "*".to_owned()),
+        },
+    };
+    Ok(Op::State { node, edit })
+}
+
+/// The edit a `slot_contribute` call asks for.
+fn contribute_op(studio: &Mutex<Studio>, a: &ContributeArgs) -> Result<Op, SurfaceError> {
+    if let Some(node) = &a.remove {
+        if a.slot.is_some() || a.text.is_some() || a.block.is_some() {
+            return Err(SurfaceError::invalid_argument(
+                "`remove` takes a contribution out; leave `slot`, `text` and `block` out",
+            ));
+        }
+        return Ok(Op::RemoveContribution { node: node.clone() });
+    }
+    let slot = a
+        .slot
+        .clone()
+        .ok_or_else(|| SurfaceError::invalid_argument("give the `slot`, or `remove`"))?;
+    let mut studio = lock(studio);
+    let registry = blocks::registry(studio.session.store());
+    // Slot names are global (ADR 0003): any block that offers one makes a
+    // contribution to it meaningful.
+    if !registry
+        .blocks()
+        .any(|b| b.slots.iter().any(|s| s.name == slot))
+    {
+        return Err(SurfaceError::not_found(format!(
+            "no block offers a slot `{slot}`; `blocks_list` lists them"
+        ))
+        .with_details(json!({ "kind": "no_slot" })));
+    }
+    let mut imports = vec![blocks::RUNTIME.to_owned()];
+    let delegate = match (&a.text, &a.block) {
+        (Some(_), Some(_)) => {
+            return Err(SurfaceError::invalid_argument(
+                "give the delegate's `text` or a `block`, not both",
+            ));
+        }
+        (None, None) => {
+            return Err(SurfaceError::invalid_argument(
+                "give the delegate's `text` or a `block`",
+            ));
+        }
+        (Some(text), None) => text.clone(),
+        (None, Some(qualified)) => {
+            let Some(block) = blocks::find(&registry, qualified) else {
+                return Err(SurfaceError::not_found(format!(
+                    "no block `{qualified}`; `blocks_list` lists them"
+                ))
+                .with_details(json!({ "kind": "no_block" })));
+            };
+            imports.push(block.module.clone());
+            format!("{} {{}}", block.name)
+        }
+    };
+    let (text, _) = studio.session.text(&a.doc).map_err(error)?;
+    let unit = studio_core::states::unit(text);
+    let text = studio_core::slots::contribution(&slot, a.mode, a.order, &delegate, &unit)
+        .map_err(error)?;
+    Ok(Op::Contribute {
+        parent: a
+            .parent
+            .clone()
+            .unwrap_or_else(|| Address::Path("root".to_owned())),
+        slot,
+        text,
+        imports,
+    })
 }
 
 fn edit(
@@ -810,7 +1046,8 @@ fn edits(studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
         .with(
             ToolDef::new::<NodeArgs>(
                 "node_inspect",
-                "An object's bindings with their byte ranges, its parent and its children.",
+                "An object's bindings with their byte ranges, its parent, its children, and its \
+                 states and transitions.",
             )
             .output::<Inspected>()
             .requires(Cap::Inspect),
@@ -820,6 +1057,7 @@ fn edits(studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
                     let mut studio = lock(&studio);
                     let doc = studio.session.canonical(&a.doc).map_err(error)?;
                     let (handle, node) = studio.session.resolve(&doc, &a.node).map_err(error)?;
+                    let variants = studio.session.variants(&doc, &a.node).map_err(error)?;
                     let (tree, generation) = studio.session.tree(&doc).map_err(error)?;
                     let parent_path = (!node.path.0.is_empty())
                         .then(|| studio_core::NodePath(node.path.0[..node.path.0.len() - 1].to_vec()));
@@ -856,6 +1094,8 @@ fn edits(studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
                             })
                             .collect(),
                         children,
+                        states: variants.states,
+                        transitions: variants.transitions,
                     })
                 }
             }),
@@ -965,18 +1205,11 @@ fn edits(studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
                             node: a.node,
                             name: a.name,
                         },
-                        Some(value) => {
-                            let literal = match value {
-                                LiteralArg::Bool(b) => Literal::Bool(b),
-                                LiteralArg::Number(n) => Literal::Number(n.to_string()),
-                                LiteralArg::String(s) => Literal::String(s),
-                            };
-                            Op::SetBinding {
-                                node: a.node,
-                                name: a.name,
-                                value: literal.to_qml(),
-                            }
-                        }
+                        Some(value) => Op::SetBinding {
+                            node: a.node,
+                            name: a.name,
+                            value: literal(value).to_qml(),
+                        },
                     };
                     edit(&studio, &a.doc, a.generation, &op, a.dry_run)
                 }
@@ -1005,6 +1238,43 @@ fn edits(studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
                             value,
                         },
                     };
+                    edit(&studio, &a.doc, a.generation, &op, a.dry_run)
+                }
+            }),
+        )
+        .with(
+            ToolDef::new::<StateEditArgs>(
+                "state_edit",
+                "Add, rename or remove an object's State; set or remove a value it changes or its \
+                 `when` (a `breakpoint` writes the root's width bound); add or remove a Transition. \
+                 Refused with `would_break` if the file would not parse.",
+            )
+            .output::<EditOut>()
+            .requires(Cap::Mutate)
+            .annotated(DESTRUCTIVE),
+            typed({
+                let studio = s();
+                move |_, a: StateEditArgs| {
+                    let (doc, generation, dry_run) = (a.doc.clone(), a.generation, a.dry_run);
+                    let op = state_op(&studio, a)?;
+                    edit(&studio, &doc, generation, &op, dry_run)
+                }
+            }),
+        )
+        .with(
+            ToolDef::new::<ContributeArgs>(
+                "slot_contribute",
+                "Write a Contribution to a block's slot, showing QML `text` or a `block`, importing \
+                 Ljos.Blocks and the block's module once; or `remove` one. Refuses a slot no block \
+                 offers (`blocks_list`).",
+            )
+            .output::<EditOut>()
+            .requires(Cap::Mutate)
+            .annotated(DESTRUCTIVE),
+            typed({
+                let studio = s();
+                move |_, a: ContributeArgs| {
+                    let op = contribute_op(&studio, &a)?;
                     edit(&studio, &a.doc, a.generation, &op, a.dry_run)
                 }
             }),
