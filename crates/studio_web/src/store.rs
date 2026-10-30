@@ -74,13 +74,14 @@ impl WebStore {
             .collect()
     }
 
-    /// Storage did not do `pending`: it is queued again, unless the file
-    /// was written since, whose newer text then goes in its place.
+    /// Storage did not do `pending`: the file goes again with the next
+    /// take, as the session holds it now. Not `pending`'s own text: a newer
+    /// one may have been taken by a call storing alongside, and stored
+    /// already, and the older text must not land after it.
     pub fn unstored(&self, pending: Pending) {
-        self.held()
-            .queued
-            .entry(pending.path)
-            .or_insert(pending.text);
+        let mut held = self.held();
+        let now = held.files.get(&pending.path).cloned();
+        held.queued.entry(pending.path).or_insert(now);
     }
 
     /// Storage has `pending` from somewhere other than this session (another
@@ -251,6 +252,26 @@ mod tests {
                     text: Some("C {}\n".into())
                 },
             ]
+        );
+    }
+
+    /// Two calls store at once: the later one's text was taken, and may be
+    /// stored already, when the earlier one's write fails. Storing the
+    /// failed text again would put the older file back over the newer.
+    #[test]
+    fn a_refused_write_goes_again_as_the_newest_text_even_when_that_was_taken() {
+        let store = store();
+        store.write("One.qml", "A {}\n").unwrap();
+        let [first] = <[Pending; 1]>::try_from(store.take()).unwrap();
+        store.write("One.qml", "B {}\n").unwrap();
+        let [_second] = <[Pending; 1]>::try_from(store.take()).unwrap();
+        store.unstored(first);
+        assert_eq!(
+            store.take(),
+            [Pending {
+                path: "One.qml".into(),
+                text: Some("B {}\n".into())
+            }]
         );
     }
 
