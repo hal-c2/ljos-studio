@@ -5289,6 +5289,7 @@ dependencies = [
  "ljos_mcp_core",
  "serde_json",
  "studio_blocks",
+ "studio_core",
  "studio_mcp",
  "studio_preview",
  "tempfile",

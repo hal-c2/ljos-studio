@@ -30,6 +30,7 @@ ljos = { workspace = true, features = ["build"] }
 # The budgets harness (examples/budgets.rs) drives the shipped shell on a
 # window without a platform.
 [dev-dependencies]
+studio_core = { path = "../studio_core" }
 ljos = { workspace = true, features = ["shell", "dev-qml", "testing"] }
 ljos_drive.workspace = true
 serde_json.workspace = true
