@@ -489,6 +489,142 @@ shell does not cost a compile at every start.
 - Studio on ljos-web; the web `PreviewHost`; `Store` on browser storage.
 - **Exit:** the S1–S4 scenarios pass in a headless browser.
 
+#### As built (first half)
+
+The session, its tools and the shell run in a browser; the second half
+(previews drawn by ljos-web, the S1–S4 scenarios in a browser) waits on
+the ljos-web requests below.
+
+- **wasm32.** `studio_core` builds without its `fs` feature (no `FsStore`,
+  no `notify`), and `studio_mcp` without `native` (no rmcp server, no
+  process previews, no wall-clock timer). Time comes through the `Timer`
+  seam (`studio_mcp::timer`), so the reload budget runs on `setTimeout` in
+  a page and on threads natively. Previews are made by a
+  `StoreHostFactory` (`Studio::with_preview_hosts`), not by spawning.
+  `mise run check:wasm` is clippy `-D warnings` for `wasm32-unknown-unknown`.
+  `ljos_mcp_core` still pulls tokio with its unstable cfg; `.cargo/config.toml`
+  sets `tokio_unstable` until ljos-ui gates it (request below).
+- **`studio_web`** (crate): `WebStore`, the preview protocol, the
+  `WebPreviewHost`, and `Face`, the JSON surface a page calls; `wasm.rs` is
+  the only `wasm-bindgen` code, so everything else is tested natively.
+- **`WebStore`** holds the project in memory, loaded whole on open, and
+  queues writes for storage (OPFS, else IndexedDB, else memory:
+  `web/store.js`). The page drains the queue after each call and answers
+  the call only once storage has its files. Against `FsStore`: both
+  replace whole files and neither leaves half of one; but a write reaches
+  storage after `write` returns, so a page closed in between loses it, and
+  a write storage refuses refuses its call after the edit is in the
+  session (`details.kind = "not_stored"`, which files, and the files are
+  queued again).
+- **Preview protocol**: `{"ljos-preview": 1, id, request | answer}` with
+  `open`, `reload` (carrying the files), `alias`, `resize`, `screenshot`,
+  `outline`, `read`, `write`, `logs`, `pick`, `close`: the `PreviewHost`
+  surface, one request each. The session's `PreviewHost` is synchronous, a page is not:
+  `web/worker.js` runs the session in a worker and blocks on
+  `Atomics.wait` over a `SharedArrayBuffer` while the page answers
+  (`web/preview.js`, `web/page.js`). That needs cross-origin isolation
+  (COOP/COEP). Tested against a fake page natively (`host.rs`) and in
+  Chromium (`web/browser.mjs`).
+- **JS face** (`web/studio.js`): `openStudio({backend, caps, ask})` gives
+  `call(tool, args)`, answered as an MCP client's call is, plus `tools()`,
+  `view(doc)`, `watch(stale)`, `text(doc)` and `replaceText` (offsets in
+  UTF-16 units, as JavaScript counts). `web/features.mjs` runs the
+  `features/` scenarios that need no preview and no window against it in
+  node (`mise run features:web`); `@web` scenarios
+  (`features/web/storage.feature`) run only there.
+- **The shell on ljos-web** (item 5, below): `Studio.Workspace` has a
+  hand-written face (`web/Workspace.js`) that publishes
+  `studio_mcp::view`, the projection the native block publishes, read
+  through `Face::view`, so the two cannot say different things. The
+  compiler sees QML stand-ins (`web/standins/Studio/`), checked against
+  `crates/studio_blocks/ljostypes.json` by `studio_web`'s `standins` test.
+  `mise run web:shell` compiles `shell/*.qml` with ljos-web's `qmlc`,
+  bundles it with ljos-web's vite plugin and drives it in headless
+  Chromium (`web/shell.mjs`, `features/web/shell.feature`).
+
+DECISION: QML stand-ins plus a hand-written face, the interim of
+ljos-web's LJOS_WEB.md §3, until its generated `web` backend exists.
+DECISION: the face reads `studio_mcp::view` through wasm rather than
+restating it in JavaScript. DECISION: the shell's Workspace runs on the
+page's thread without previews; previews need the worker bridge and a
+picture ljos-web cannot take yet. DECISION: `Ljos.Design` is compiled from
+its real QML (`--with`), not stood in for. DECISION: `web:shell` assembles
+the app in the target dir with `node_modules` linked to an ljos-web
+checkout; nothing is written into ljos-web. DECISION: `wasm-bindgen` is
+pinned at 0.2.129, ahead of ljos-web's 0.2.114; one page loading both
+needs one version (risk below). DECISION: the browser storage order is
+OPFS, then IndexedDB, then memory; a call resolves after storage.
+
+**Compiling `shell/*.qml` with `qmlc`** (ljos-web 55ea53b, its
+`types.txt`):
+
+| Inputs | Result |
+|---|---|
+| stand-ins + `Ljos.Design` | 9 of 9 compile, no diagnostics |
+| no Studio stand-ins | 7 of 9: ``Main.qml:18:5: `Workspace` is not a type of anything the file imports``, ``CanvasPanel.qml:66:25: `PreviewPicture` …`` |
+| no `Ljos.Design` | 9 of 9 "compile", but import `{Colors, Spacing}` from `ljos-web/Ljos/Design`, which does not exist: fails at bundle time |
+| `Ljos.Design` alone | 8 of 8 compile |
+| `Workspace { nosuch: 3 }`, `Rectangle { colour: "red" }` | compile: members are not checked |
+
+In Chromium the compiled shell lists documents, opens one, lists its
+layers, selects one, sets `width` from the inspector, shows no refusal
+and undoes, all through `dispatch`, with nothing logged (7 of 7 checks).
+What it showed that the desktop does not:
+
+- The window ignores its declared 1440×900 and fills its host element.
+- Under ljos-web's Basic style the Inspector's new-property value field
+  is 0 px wide (two 100 px buttons in a 300 px panel) and Layers'
+  "Remove" is clipped: the shell's fixed panel widths assume Ljós
+  metrics. A shell finding, left for S4's skins.
+- Buttons get `aria-label` but no `role`; lists get `role=list`.
+- `PreviewPicture` has no face (a visual native type, ljos-web W4), so
+  `preview.picture` is always 0.
+
+**Numbers** (this machine, release, `profile.web`):
+
+| What | Value |
+|---|---|
+| `studio_web` wasm | 2,430,949 B raw, 527,275 B gzip |
+| shell page JS (308 modules) | 773,618 B raw, 246,248 B gzip |
+| `property_set`, 200 objects, node | p50 1.7 ms, p95 2.9 ms |
+| same, OPFS in Chromium | p50 2.33 ms, p95 3.83 ms |
+| OPFS write alone | p50 0.63 ms, p95 0.85 ms |
+| memory store write | ~0.002 ms |
+| `preview_open` over the bridge | 3.4 ms |
+
+**Requests to ljos-web** (with evidence in the S5 report):
+
+1. A QML compiler in the browser: `document_open` of a new file, reload
+   and alias all need one; today `qmlc` is native and AOT.
+2. A screenshot of a mounted root, for `preview_screenshot` and
+   `PreviewPicture`.
+3. An outline (object tree) of a mounted root.
+4. Read and write a property by `id`; ids are private to `$context`.
+5. Source locations on objects, so `pick` can name file, line, column.
+6. File and line on logged messages.
+7. Runtime module aliasing (the preview's import of a document under
+   edit).
+8. Resizing a mounted root is already feasible; noted, not requested.
+9. Member checks for stand-ins and runtime types: unknown properties
+   compile.
+10. An unresolved module import as a compile error, not an import from
+    `ljos-web/<Module>`.
+11. `qmlc --types ljostypes.json` (W1), to retire the stand-ins.
+12. The generated `web` face backend (§2) and visual faces (W4, for
+    `PreviewPicture`).
+13. Controls without an installed Qt (precompiled styles), and finding
+    Qt when only Qt 5's `qtpaths` is on `PATH` (`qtpaths: Unknown option
+    'query'`).
+14. ARIA roles for controls (`button`, `textbox`).
+15. Perhaps a Controls style with Ljós metrics on the web.
+
+**Request to ljos-ui:** gate rmcp and tokio in `ljos_mcp_core` behind a
+feature, so a wasm build needs no `tokio_unstable`.
+
+Left for the second half: requests 1–7 and 11–12, then previews drawn by
+ljos-web behind the protocol, `PreviewPicture`, Playwright in CI, and the
+S1–S4 scenarios in a headless browser.
+
 ### S6: polish and later
 
 - Prototyping flows (state graph view), CMS-style model binding, export
@@ -513,4 +649,9 @@ shell does not cost a compile at every start.
 - **Purity of skins** is a convention plus a heuristic lint; authors can
   still put state in a skin.
 - **Ljós dependencies.** S1 needs the Ljós lead to integrate `qml_edit`
-  and build `ljos_blocks`; S5 depends on the ljos-web alignment track.
+  and build `ljos_blocks`; S5 depends on the ljos-web alignment track
+  (its requests are listed under S5).
+- **Web.** The wasm is 2.4 MB; previews need COOP/COEP; a page closed
+  before storage has a write loses it; `wasm-bindgen` must match
+  ljos-web's; `web:shell` needs an installed Qt's QML and an ljos-web
+  checkout.
