@@ -33,11 +33,11 @@ documents: export), `run` (start previews). They are granted at launch with
 | 1 | `project_open` | Open a project directory below the workspace, or describe the open one: documents, blocks, targets | inspect |
 | 2 | `document_tree` | A document's objects in order: handle, path, type, `id`, bindings; paginated | inspect |
 | 3 | `document_text` | A document's text or a byte range of it, with its generation and whether it parses | inspect |
-| 4 | `document_new` | Create a QML document, or a `ListModel` from a project JSON file (`data`); undo removes it | mutate |
+| 4 | `document_new` | Create a QML document, or one keeping a project JSON file's records (`data`): a `JsonListModel` of the file, or a `ListModel` copy; undo removes it | mutate |
 | 5 | `document_edit` | Replace a byte range of a document's text, as the code view does | mutate |
 | 6 | `node_find` | Find objects by `id`, type, binding name or text in a binding's value | inspect |
 | 7 | `node_select` | Set Studio's selection (shown on the canvas and in the inspector) by addresses or by a point `at` in the preview | inspect |
-| 8 | `node_inspect` | An object's bindings with byte ranges, its parent, its children, its type's members, its states and transitions, its flows and the data it sees | inspect |
+| 8 | `node_inspect` | An object's bindings with byte ranges, its parent, its children, its type's members, its signals, its states and transitions, its flows and the data it sees | inspect |
 | 9 | `blocks_list` | Registered blocks with contracts: state, actions, events, slots, mocks | inspect |
 | 10 | `node_insert` | Insert QML text or a block instance as a child at an index | mutate |
 | 11 | `node_move` | Move a node to a parent and index (reparent or reorder) | mutate |
@@ -159,6 +159,14 @@ shows it; the watcher's quiet time is not on that path.
 - DECISION: `preview_screenshot {format: "outline"}` gives the preview's
   items as text (the inspector's outline) instead of a separate tool:
   Studio's list of 24 stays within 25 tools.
+- DECISION (phase 3): the native preview runs with the project's type
+  dumps (every `ljostypes.json` in it, `--types`), so the types an app
+  registers from Rust stand in with the members they declare and a shell
+  that uses them previews. Several dumps run as one, merged into the
+  state directory; a dump that does not read stops the start, naming it.
+  A dump is read when the preview starts: an edit of it shows when the
+  preview is opened again. Export still refuses a project whose types
+  are written in Rust.
 - DECISION: starting a preview needs `run` (it runs the project's code);
   looking at one that runs (`preview_screenshot`, `preview_events`) needs
   only `inspect`.
@@ -302,15 +310,26 @@ Refusals: `not_found` with `details.kind` `no_state`, `no_document` (the
 document must be beside this one) or `no_interaction`; `invalid_argument`
 for `exists`, an owner or navigator with no `id` (`no_id`), a navigator
 that is not a `Loader` or `StackView` (`not_a_navigator`), `state` and
-`open` together, and a missing argument. `node_inspect` lists
-`interactions` (`trigger`, `trigger_id`, `signal`, and `owner` and `state`
+`open` together, and a missing argument. With `signal`, the trigger must
+have it: `not_found` with `details.kind` `no_signal`, `type`, and
+`signals`, the names it has other than its properties' change signals,
+which the message names too. `node_inspect` lists the object's `signals`,
+each with `name`, `arguments` (`name` and `type`; an argument the type's
+description leaves unnamed has an empty name) and `change` for a
+property's change signal: those the object declares and its properties'
+first, then its type's and its bases', a derived type's before its base's.
+A type is looked up as the document imports it: a dump of the project
+(`ljostypes.json`, a type written in Rust), a project module's `qmldir`, a
+QML file beside the document, then Ljós's own table of types. A type
+described nowhere has no `signals`, and a flow on it is written as asked.
+`node_inspect` lists `interactions` (`trigger`, `trigger_id`, `signal`, and `owner` and `state`
 or `navigator` and `open`) of the object and everything in it, so the
 root's is the document's whole flow; a handler whose body is not one of
 the three forms is the app's own logic and is not listed.
 
 `preview_state {node?, click?, click_at?: {x, y}, set?}` plays the flow:
-after `set`, it clicks the object `click` names (by its `id`) or the
-topmost item drawn at `click_at`, through the preview's inspector, then
+after `set`, it clicks the object `click` names (by its `id`, at its
+middle) or the point `click_at`, through the preview's inspector, then
 reads `node`. Without `node` it only clicks and answers nothing (`id` and
 `variant` are left out), so a document whose root has no `id` can be
 played; with neither `node` nor a click, or `set` without `node`, it is
@@ -318,20 +337,32 @@ refused (`invalid_argument`). `variant` is the state it is in now (empty for the
 state); `block` and `state` are left out for an object that is not a
 block, and `set` on one is refused (`not_a_block`).
 
-A list's data is a `ListModel`, in the document or in a document of its
-own the list makes (`model: Contacts {}`): content a person edits as any
-QML. `document_new {doc, data}` writes one from a project JSON file of
+A list's data is a model, in the document or in a document of its own
+the list makes (`model: Contacts {}`). `document_new {doc, data,
+model?}` makes one from a project JSON file. By default (`model:
+"json"`) it is a `JsonListModel` whose `source` is the file, relative to
+the new document and written `Qt.resolvedUrl("…")` so that it resolves
+against that file wherever the model is used (`import Ljos.Models`); the file must be an array of
+records (`invalid_argument` with `not_a_list`), whose values may be
+anything JSON holds. With `model: "list"` it is a `ListModel` copy of
 flat records, one `ListElement` each with the records' keys in order
 (`invalid_argument` with `not_a_list`, `not_a_role` (also for a key
 named `id`, which QML reads as the object's id), `repeated_role` for a
-key a record has twice, or `not_flat` otherwise, and for `text` and
-`data` together). `node_inspect` gives the
-`model` the object sees (a view's delegate only, not its header or
-footer): `roles` (in the order the rows first bind them),
-`rows`, `doc`, and `view`, the list it is a delegate of; a delegate binds
-a role as `model.name` with `binding_set`. The mocked state swaps the data
-for a fixture: a module under `mocks/` of the same name (`mocks/App/Data`)
-replaces the app's (`App/Data`) and the list's text is unchanged.
+key a record has twice, or `not_flat` otherwise); `text` and `data`
+together are refused either way. `node_inspect` gives the `model` the
+object sees (a view's delegate only, not its header or footer): `roles`
+(in the order the rows first bind them; a `JsonListModel`'s are its
+records' keys in the order first seen, read from the file when asked),
+`rows`, `doc`, `source` (the JSON file, for a `JsonListModel`), and
+`view`, the list it is a delegate of; a delegate binds a role as
+`model.name` with `binding_set`. A `JsonListModel` whose `source` is not
+a project file (a URL, a binding) or whose file is not an array of
+records sees no roles Studio knows. In the native preview a save of the
+JSON, by anything, shows without a reload of the QML: `ljos run --watch`
+reads a watched `source` again. The mocked state swaps the data for a
+fixture: a module under `mocks/` of the same name (`mocks/App/Data`)
+replaces the app's (`App/Data`), its document reading a JSON file of its
+own beside it, and the list's text is unchanged.
 
 - DECISION: no new tool. Flows are `state_edit` actions beside states and
   transitions, which they move between; playing one is `preview_state`
@@ -340,12 +371,27 @@ replaces the app's (`App/Data`) and the list's text is unchanged.
 - DECISION: an interaction is written in one of three forms and read back
   only in those, so Studio never claims to understand a handler it did
   not write.
-- DECISION: `click_at` clicks the topmost item drawn at the point, at that
-  item's aim point (its visible middle), since the preview's inspector
-  has no click at an exact point.
-- DECISION: data is QML, not a JSON-backed model. Ljós has no model that
-  reads JSON, and a `ListModel` document is edited, diffed, undone and
-  previewed like the rest; JSON is imported once.
+- DECISION: `click_at` clicks at the point itself, through the preview
+  inspector's `app_click` with `at` (phase 3): whatever is on top there
+  gets it, as under a person's pointer, so a thin trigger under a larger
+  item's edge is reached where it shows. It used to click the middle of
+  the topmost item drawn there, which missed such a trigger. A point
+  outside the preview's window is refused (`not_actionable`, `details.kind`
+  `refused`) and the preview runs on.
+- DECISION (phase 3): JSON stays JSON by default. `document_new` with
+  `data` makes a `JsonListModel` reading the file, because the file has
+  an owner outside Studio (an export, a script, a person's editor, the
+  server it mirrors): a copy would fork the data the first time either
+  side changed, and a `JsonListModel` takes nested values a `ListModel`
+  cannot hold. `model: "list"` keeps the phase 2 path, a `ListModel` copy,
+  for data the design itself owns and edits row by row as QML. It used to
+  be the only path: Ljós had no model that read JSON.
+- DECISION: a flow's handler is checked against the trigger's signals,
+  and `binding_set` of an `on…` handler is not: `binding_set` already
+  compiles what it writes, and Ljós names a handler of nothing.
+- DECISION: the signals a person is offered, and a refusal names, leave
+  out properties' change signals: every property has one, and they hide
+  the few a trigger is for. `node_inspect` lists them, marked `change`.
 ## Export and review (S6)
 
 `export {entry, target?, out?, dry_run?}` (`fs`) writes a bundle of the
@@ -419,6 +465,40 @@ comment is not made and the sidecar on disk is what Studio holds now.
   orphaned comment to an object again.
 - DECISION: comments are not in the undo history. `reopen` takes back
   `resolve`; a comment is not deleted, it is resolved.
+
+## Phase 3 / M1: as built
+
+What changed, for an agent: no tool was added (24 of the 25 budgeted).
+
+- `document_new` with `data` writes a `JsonListModel` by default; `model:
+  "list"` writes the `ListModel` copy it wrote before.
+- `node_inspect` answers `signals`, and a model's `source` for a
+  `JsonListModel`, whose `roles` are the JSON's keys.
+- `state_edit`'s `interaction` with `signal` is refused (`no_signal`) when
+  the trigger lacks the signal, naming those it has.
+- `preview_state`'s `click_at` clicks at the point itself (`app_click`
+  with `at`).
+- `preview_open` starts the native preview with the project's type dumps.
+
+The DECISIONs are with the tools above: JSON stays JSON, `click_at` at
+the point, which handlers are checked, which signals are offered, the
+preview's type dumps; DESIGN.md has the rest and the numbers.
+
+Each changed tool, called as an agent does in a release build
+(`cargo run --release -p studio_mcp --example inspect_json`, 200 calls
+each, on a project whose list reads 1,000 JSON records and that keeps a
+type dump):
+
+| Tool call | p50 | p95 |
+|---|---|---|
+| `node_inspect` of a list reading 1,000 JSON records (roles, rows, source) | 0.39 ms | 0.44 ms |
+| `node_inspect` of a `Button` (signals from Ljós's table of types) | 0.10 ms | 0.11 ms |
+| `node_inspect` of a type a dump describes (signals from `ljostypes.json`) | 0.10 ms | 0.10 ms |
+| `state_edit` `interaction` with `signal`, the signal checked | 0.13 ms | 0.18 ms |
+| `document_new` with `data`, a `JsonListModel` of 1,000 records | 0.27 ms | 0.32 ms |
+
+`preview_open` and `preview_state` wait on the preview; DESIGN.md has a
+JSON save's time to show.
 
 ## Prompts
 

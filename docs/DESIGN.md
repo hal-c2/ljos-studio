@@ -695,9 +695,10 @@ S1–S4 scenarios in a headless browser.
   reached; a click with no `node` plays and reads nothing, which is how
   the window plays a document whose root has no `id`. Setting a state
   needs the `node` it is set on.
-- **Data is a model document.** A list's content is a `ListModel` written
-  as QML, in its own document of a data module; a JSON file becomes one
-  with `document_new`. The roles the data binds are offered in the
+- **Data is a model document.** A list's content is a model in its own
+  document of a data module: a `JsonListModel` reading a JSON file of the
+  project (phase 3), or a `ListModel` written as QML; a JSON file becomes
+  either with `document_new`. The roles the data binds are offered in the
   inspector of a delegate as `model.<role>`. The mocked state swaps the
   module for one under `mocks/`, so a fixture is a file beside the other
   mocks. Only a view's delegate sees its roles, not its header or footer.
@@ -818,6 +819,92 @@ Measured in a release build on the reference desktop:
 | Path | p50 | p95 |
 |---|---|---|
 | `export` of a project whose bundle holds 200 files (415 677 bytes), 20 exports (`studio_mcp` example `export_perf`, release) | 9.41 ms | 9.95 ms |
+
+#### Phase 3 / M1: as built
+
+Studio uses five pieces Ljós gained in 2582cba2, each with its scenarios.
+MCP.md has the arguments, answers and refusals.
+
+- **A JSON file stays JSON.** `document_new {doc, data}` makes a document
+  that reads the file, `JsonListModel { source: Qt.resolvedUrl("…json") }`
+  (relative to the new document); `model: "list"` makes the `ListModel` copy phase 2
+  made. `node_inspect` reads a `JsonListModel`'s file when asked, so its
+  `roles` are the records' keys in the order first seen and `rows` their
+  count, with `source` naming the file; the inspector of a delegate offers
+  them as it does a `ListModel`'s. A save of the file shows in the native
+  preview without a reload of the QML, by whatever saved it, since
+  `ljos run --watch` reads a watched `source` again; a mock module
+  under `mocks/` reads a fixture beside it
+  (`features/edit/models.feature`, `features/preview/json-models.feature`,
+  `features/ui/flows.feature`).
+- **A click lands at its point.** `preview_state`'s `click_at` and the
+  canvas's Play mode call the preview's `app_click` with `at`, so whatever
+  is on top there gets the click, as under a person's pointer; it used to
+  click the middle of the topmost item drawn at the point
+  (`features/preview/flows.feature`, `features/ui/flows.feature`).
+- **Signals are the type's.** `node_inspect` lists an object's signals
+  with their arguments, and the inspector's *Signals* section and the
+  Flow panel's *Wire* list offer them; a native block's come from its
+  dump. A flow on a signal the trigger lacks is refused, naming those it
+  has (`features/edit/flows.feature`). Studio reads Ljós's own table of
+  types (`qt_types`) for the toolkit's, the project's dumps and QML files
+  for its own, in the order the document's imports name them.
+  `studio_blocks`' `ljostypes.json` and the web stand-ins carry the
+  workspace's `signals`, which the stand-ins test checks.
+- **A project with types written in Rust previews.** The native preview
+  starts `ljos run` with the project's type dumps (`--types`; several are
+  merged in the state directory), so the types stand in with the members
+  they declare (`features/preview/native-types.feature`). Export still
+  refuses such a project: only the app's program registers them.
+- **No tokio in the web build.** `ljos_mcp_core` is linked without its
+  `server` feature in the wasm, so `.cargo/config.toml` no longer sets
+  `tokio_unstable`, and `check:wasm` fails if rmcp or tokio is linked.
+
+DECISION: JSON is the default and the `ListModel` copy the choice, because
+a JSON file has an owner outside Studio and a copy forks it (MCP.md).
+DECISION: a type Studio finds described nowhere has no signals listed and
+none refused; Ljós names a missing one when it compiles. DECISION: the
+signals offered leave out properties' change signals, which `node_inspect`
+lists marked `change`. DECISION: a dump is read when the preview starts,
+as `ljos run` reads it once; an edit of the dump shows when the preview is
+opened again. DECISION: in the mocked state a mock module stands in for a
+module a dump describes, as for one of QML. DECISION: the Flow panel
+offers the signals in a short scrolling list, not a row of buttons (a
+`MouseArea` has ten, which pushed the graph out of the panel) and not a
+`ComboBox`: in 2582cba2 a `ComboBox` whose model changes after its popup
+was open panics the scene (`records.rs:57`, a removed record removed
+again), and the selection's signals change with every edit (a Ljós
+request). DECISION: `document_new`
+writes the source as `Qt.resolvedUrl("…")`, which resolves against the
+file it is written in; in 2582cba2 a plain relative `source` resolves
+against the document the model is created from, so a data module's model
+used by a screen elsewhere would read nothing (a Ljós request). Studio
+reads either form as relative to the model's own file, which is what both
+mean once Ljós resolves them alike.
+
+Measured in a release build of Studio on the reference desktop, which
+other builds kept at a load average near 7.5; only a debug `ljos` was
+available to this lane, so the preview's side is a debug build's, and a
+release `ljos` will read and lay out the file faster:
+
+| Path | p50 | p95 |
+|---|---|---|
+| A 1,000-record JSON file (50,779 bytes) saved → the preview's outline shows the edit, 30 rounds (`LJOS=… cargo run --release -p studio_preview --example json_edit`) | 32.3 ms | 114.1 ms |
+| `node_inspect` of a list reading 1,000 records (74,781 bytes), 200 calls (`cargo run --release -p studio_mcp --example inspect_json`) | 0.39 ms | 0.44 ms |
+
+The JSON save's time includes the watcher noticing the file, `ljos run`
+reading and parsing it, the list's delegates updating and the next
+outline call; the outline is asked every 5 ms, so a sample is late by at
+most that. MCP.md has each changed tool's time.
+
+The wasm (`web/pkg/studio_web_bg.wasm`, `mise run web:build`, `web`
+profile) is 3,650,408 bytes, 772,022 gzipped (`gzip -9`). It was
+3,245,818 (697,691) before phase 3; without tokio and rmcp it is
+3,224,088 (694,368), and Ljós's table of types (`qt_types`), which the
+browser's `node_inspect` reads a toolkit type's signals from, adds
+426,320 (77,654). DECISION: the table is linked in the web build too, so
+an agent and a person see the same signals in either; a smaller table
+for the browser is a Ljós request (the signals alone, not every member).
 
 #### As built: running it
 
