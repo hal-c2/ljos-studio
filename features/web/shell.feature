@@ -9,10 +9,12 @@
 
 @web @ui
 Feature: Studio's shell in a browser
-  The shell that runs natively runs on ljos-web, compiled from the same
-  QML, against the same session built for wasm. Studio.Workspace has a face
+  Studio's built-in shell runs on ljos-web, compiled from the same QML,
+  against the same session built for wasm. Studio.Workspace has a face
   there that does what the native block does: a gesture is a tool call,
-  and what the session holds after it is what the shell shows.
+  and what the session holds after it is what the shell shows. A person's
+  own shell is the native window's (`Ljos.Blocks`' ShellLoader), which
+  ljos-web does not have yet.
 
   Background:
     Given the project in the browser's memory has the file "Main.qml":
@@ -45,4 +47,11 @@ Feature: Studio's shell in a browser
     And the window's status is empty
     When the person clicks "Undo"
     Then "Main.qml" has "width: 120"
+    And the page logged no errors
+
+  Scenario: A person sets a token in the tokens panel
+    When the person types "Spacing.md" in "Filter tokens"
+    And the person types "20" in the tokens panel's "Spacing.md" field and presses Enter
+    Then "theme.json" has "\"md\": 20"
+    And the tokens panel's "Spacing.md" field shows "20"
     And the page logged no errors
