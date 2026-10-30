@@ -3,7 +3,8 @@
 use std::sync::{Arc, Mutex};
 
 use ljos_mcp_core::{
-    CallCtx, Cap, SurfaceError, ToolAnnotations, ToolDef, ToolRegistry, denied, paginate, typed,
+    CallCtx, Cap, ErrorCode, SurfaceError, ToolAnnotations, ToolDef, ToolRegistry, denied,
+    paginate, typed,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -513,6 +514,179 @@ struct HistoryOut {
     done: Vec<EntryOut>,
     /// Next to redo first.
     undone: Vec<EntryOut>,
+}
+
+#[derive(Deserialize, JsonSchema, Clone, Copy)]
+enum Variant {
+    #[serde(rename = "light")]
+    Light,
+    #[serde(rename = "dark")]
+    Dark,
+    #[serde(rename = "lightHigh")]
+    LightHigh,
+    #[serde(rename = "darkHigh")]
+    DarkHigh,
+}
+
+impl Variant {
+    fn name(self) -> &'static str {
+        match self {
+            Variant::Light => "light",
+            Variant::Dark => "dark",
+            Variant::LightHigh => "lightHigh",
+            Variant::DarkHigh => "darkHigh",
+        }
+    }
+}
+
+#[derive(Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct ThemeArgs {
+    /// A document whose theme it is: the `theme.json` beside it. The open
+    /// preview's when left out, else the project's own.
+    doc: Option<String>,
+    /// `Colors.accent`; a singleton (`Spacing`) reads its roles. Every role
+    /// when left out.
+    token: Option<String>,
+    /// What the token becomes; `null` gives it back to the module. Left
+    /// out, the tokens are read.
+    #[serde(default, deserialize_with = "present")]
+    #[schemars(with = "Option<serde_json::Value>")]
+    value: Option<Option<serde_json::Value>>,
+    /// One variant of a colour; a colour string sets light and dark.
+    variant: Option<Variant>,
+    /// The theme file's generation the edit was read at; 0 while it does
+    /// not exist.
+    generation: Option<u64>,
+    #[serde(default)]
+    dry_run: bool,
+}
+
+/// A field that is there, `null` or not: `Some(None)` for `null`.
+fn present<'de, D: serde::Deserializer<'de>>(
+    d: D,
+) -> Result<Option<Option<serde_json::Value>>, D::Error> {
+    Option::<serde_json::Value>::deserialize(d).map(Some)
+}
+
+#[derive(Serialize, JsonSchema)]
+struct TokenOut {
+    token: String,
+    /// `color`, `int`, `real` or `curve`.
+    kind: &'static str,
+    /// The module's value; a colour's light, dark, lightHigh and darkHigh.
+    module: serde_json::Value,
+    /// The theme file's, absent when it sets none.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    theme: Option<serde_json::Value>,
+}
+
+#[derive(Serialize, JsonSchema)]
+struct ThemeOut {
+    /// The theme file.
+    file: String,
+    /// Its generation; 0 while it does not exist.
+    generation: u64,
+    /// Read: whether the file exists.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    exists: Option<bool>,
+    /// Read: why Ljós would not load the file; its values are left out.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    problem: Option<String>,
+    /// Read: the tokens asked for.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tokens: Option<Vec<TokenOut>>,
+    /// Written: the edit, as other edits answer it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    doc: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    changes: Option<Vec<ChangeOut>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    history: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    text: Option<String>,
+}
+
+/// The theme file of `doc`: `theme.json` beside it, or `doc` itself when
+/// it is one.
+fn theme_file(doc: &str) -> String {
+    let file = studio_core::theme::FILE;
+    if doc == file || doc.ends_with(&format!("/{file}")) {
+        return doc.to_owned();
+    }
+    match doc.rsplit_once('/') {
+        Some((dir, _)) => format!("{dir}/{file}"),
+        None => file.to_owned(),
+    }
+}
+
+fn theme_set(studio: &Mutex<Studio>, a: ThemeArgs) -> Result<ThemeOut, SurfaceError> {
+    let mut studio = lock(studio);
+    let doc = a.doc.or_else(|| {
+        crate::preview::lock(&studio.previews)
+            .open
+            .as_ref()
+            .map(|o| o.doc.clone())
+    });
+    let file = doc
+        .as_deref()
+        .map_or_else(|| studio_core::theme::FILE.to_owned(), theme_file);
+    let Some(value) = a.value else {
+        let read = studio
+            .session
+            .tokens(&file, a.token.as_deref())
+            .map_err(error)?;
+        return Ok(ThemeOut {
+            file: read.file,
+            generation: read.generation,
+            exists: Some(read.exists),
+            problem: read.problem,
+            tokens: Some(
+                read.tokens
+                    .into_iter()
+                    .map(|t| TokenOut {
+                        token: t.token,
+                        kind: t.kind,
+                        module: t.module,
+                        theme: t.theme,
+                    })
+                    .collect(),
+            ),
+            doc: None,
+            changes: None,
+            history: None,
+            text: None,
+        });
+    };
+    let token = a.token.ok_or_else(|| {
+        SurfaceError::new(
+            ErrorCode::InvalidArgument,
+            "a `value` needs the `token` it is for",
+        )
+    })?;
+    let outcome = studio
+        .session
+        .set_token(
+            &file,
+            a.generation,
+            &token,
+            a.variant.map(Variant::name),
+            value.as_ref(),
+            a.dry_run,
+        )
+        .map_err(error)?;
+    let edit = EditOut::from(outcome);
+    Ok(ThemeOut {
+        file,
+        generation: edit.generation,
+        exists: None,
+        problem: None,
+        tokens: None,
+        doc: Some(edit.doc),
+        changes: Some(edit.changes),
+        history: edit.history,
+        text: edit.text,
+    })
 }
 
 fn found(doc: &str, handle: String, node: &Node) -> Found {
@@ -1316,6 +1490,21 @@ fn edits(studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
                         undone: undone.into_iter().map(EntryOut::from).collect(),
                     })
                 }
+            }),
+        )
+        .with(
+            ToolDef::new::<ThemeArgs>(
+                "theme_set",
+                "Read the tokens of Ljos.Design, the module's value beside the theme file's; or set \
+                 one (`null` gives it back) in the `theme.json` beside the entry, made when missing, \
+                 the rest kept byte for byte. A theme Ljós would refuse is refused with its message.",
+            )
+            .output::<ThemeOut>()
+            .requires(Cap::Mutate)
+            .annotated(DESTRUCTIVE),
+            typed({
+                let studio = s();
+                move |_, a: ThemeArgs| theme_set(&studio, a)
             }),
         )
 }

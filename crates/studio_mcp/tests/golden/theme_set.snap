@@ -1,0 +1,199 @@
+---
+source: crates/studio_mcp/tests/golden_tools.rs
+expression: value
+---
+{
+  "annotations": {
+    "destructive": true,
+    "idempotent": false,
+    "open_world": false,
+    "read_only": false
+  },
+  "description": "Read the tokens of Ljos.Design, the module's value beside the theme file's; or set one (`null` gives it back) in the `theme.json` beside the entry, made when missing, the rest kept byte for byte. A theme Ljós would refuse is refused with its message.",
+  "inputSchema": {
+    "$defs": {
+      "Variant": {
+        "enum": [
+          "light",
+          "dark",
+          "lightHigh",
+          "darkHigh"
+        ],
+        "type": "string"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "doc": {
+        "description": "A document whose theme it is: the `theme.json` beside it. The open\npreview's when left out, else the project's own.",
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "dry_run": {
+        "default": false,
+        "type": "boolean"
+      },
+      "generation": {
+        "description": "The theme file's generation the edit was read at; 0 while it does\nnot exist.",
+        "format": "uint64",
+        "minimum": 0,
+        "type": [
+          "integer",
+          "null"
+        ]
+      },
+      "token": {
+        "description": "`Colors.accent`; a singleton (`Spacing`) reads its roles. Every role\nwhen left out.",
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "value": {
+        "default": null,
+        "description": "What the token becomes; `null` gives it back to the module. Left\nout, the tokens are read."
+      },
+      "variant": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/Variant"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "description": "One variant of a colour; a colour string sets light and dark."
+      }
+    },
+    "title": "ThemeArgs",
+    "type": "object"
+  },
+  "max_result_bytes": 40960,
+  "name": "theme_set",
+  "outputSchema": {
+    "$defs": {
+      "ChangeOut": {
+        "properties": {
+          "end": {
+            "format": "uint",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "start": {
+            "description": "Byte range of the text before the edit.",
+            "format": "uint",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "text": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "start",
+          "end",
+          "text"
+        ],
+        "type": "object"
+      },
+      "TokenOut": {
+        "properties": {
+          "kind": {
+            "description": "`color`, `int`, `real` or `curve`.",
+            "type": "string"
+          },
+          "module": {
+            "description": "The module's value; a colour's light, dark, lightHigh and darkHigh."
+          },
+          "theme": {
+            "description": "The theme file's, absent when it sets none."
+          },
+          "token": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "token",
+          "kind",
+          "module"
+        ],
+        "type": "object"
+      }
+    },
+    "properties": {
+      "changes": {
+        "items": {
+          "$ref": "#/$defs/ChangeOut"
+        },
+        "type": [
+          "array",
+          "null"
+        ]
+      },
+      "doc": {
+        "description": "Written: the edit, as other edits answer it.",
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "exists": {
+        "description": "Read: whether the file exists.",
+        "type": [
+          "boolean",
+          "null"
+        ]
+      },
+      "file": {
+        "description": "The theme file.",
+        "type": "string"
+      },
+      "generation": {
+        "description": "Its generation; 0 while it does not exist.",
+        "format": "uint64",
+        "minimum": 0,
+        "type": "integer"
+      },
+      "history": {
+        "format": "uint64",
+        "minimum": 0,
+        "type": [
+          "integer",
+          "null"
+        ]
+      },
+      "problem": {
+        "description": "Read: why Ljós would not load the file; its values are left out.",
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "text": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "tokens": {
+        "description": "Read: the tokens asked for.",
+        "items": {
+          "$ref": "#/$defs/TokenOut"
+        },
+        "type": [
+          "array",
+          "null"
+        ]
+      }
+    },
+    "required": [
+      "file",
+      "generation"
+    ],
+    "title": "ThemeOut",
+    "type": "object"
+  },
+  "required_cap": "mutate"
+}

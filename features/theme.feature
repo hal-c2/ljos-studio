@@ -64,14 +64,14 @@ Feature: Tokens are read and set in the project's theme file
     Scenario: The theme file's value is read beside the module's
       Given the file "app/theme.json":
         """json
-        { "Colors": { "accent": { "light": "#6a1b9a", "dark": "#ce93d8" } }, "Spacing": { "md": 20 } }
+        { "Colors": { "accent": { "light": "#6a1b9a", "dark": "#9c4dc4" } }, "Spacing": { "md": 20 } }
         """
       When the agent calls the tool "theme_set" with:
         """json
         {"doc": "app/Main.qml", "token": "Colors.accent"}
         """
       Then the answer's "/exists" is true
-      And the answer's "/tokens/0/theme" is {"light": "#6a1b9a", "dark": "#ce93d8"}
+      And the answer's "/tokens/0/theme" is {"light": "#6a1b9a", "dark": "#9c4dc4"}
       When the agent calls the tool "theme_set" with:
         """json
         {"doc": "app/Main.qml", "token": "Spacing.md"}
@@ -132,7 +132,7 @@ Feature: Tokens are read and set in the project's theme file
         """json
         {
             "Colors": {
-                "accent": "#6a1b9a"
+                "accent": "#9c4dc4"
             }
         }
         """
@@ -148,7 +148,7 @@ Feature: Tokens are read and set in the project's theme file
         """json
         {
             "Colors": {
-                "accent": "#6a1b9a",
+                "accent": "#9c4dc4",
                 "scrim": "#80000000"
             },
             "Spacing": {
@@ -160,15 +160,15 @@ Feature: Tokens are read and set in the project's theme file
     Scenario: A variant turns one colour into light and dark
       Given the file "app/theme.json":
         """json
-        { "Colors": { "accent": "#6a1b9a" } }
+        { "Colors": { "accent": "#9c4dc4" } }
         """
       When the agent calls the tool "theme_set" with:
         """json
-        {"doc": "app/Main.qml", "token": "Colors.accent", "variant": "dark", "value": "#ce93d8"}
+        {"doc": "app/Main.qml", "token": "Colors.accent", "variant": "light", "value": "#6a1b9a"}
         """
       Then the file "app/theme.json" is:
         """json
-        { "Colors": { "accent": { "light": "#6a1b9a", "dark": "#ce93d8" } } }
+        { "Colors": { "accent": { "light": "#6a1b9a", "dark": "#9c4dc4" } } }
         """
 
     Scenario: A null value gives the role back to the module
@@ -188,7 +188,7 @@ Feature: Tokens are read and set in the project's theme file
     Scenario Outline: A theme Ljós would refuse is refused with Ljós's message
       Given the file "app/theme.json":
         """json
-        { "Colors": { "accent": "#6a1b9a" } }
+        { "Colors": { "accent": "#9c4dc4" } }
         """
       When the agent calls the tool "theme_set" with:
         """json
@@ -199,15 +199,15 @@ Feature: Tokens are read and set in the project's theme file
       And the refusal's message matches "<message>"
       And the file "app/theme.json" is:
         """json
-        { "Colors": { "accent": "#6a1b9a" } }
+        { "Colors": { "accent": "#9c4dc4" } }
         """
 
       Examples:
         | token        | value      | message                                                          |
-        | Colors.text  | "#f0f0f0"  | app/theme.json:1:\d+: Colors.text on canvas is 1.\d+:1 in light   |
-        | Colors.text  | 12         | app/theme.json:1:\d+: Colors.text is a colour                     |
-        | Colors.text  | "#12345z"  | app/theme.json:1:\d+: Colors.text: .#12345z. is no colour         |
-        | Colors.dark  | true       | app/theme.json:1:\d+: Colors.dark is the user's to choose         |
+        | Colors.text  | "#f0f0f0"  | app/theme.json:1:[0-9]+: Colors.text on canvas is 1.[0-9]+:1 in light   |
+        | Colors.text  | 12         | app/theme.json:1:[0-9]+: Colors.text is a colour                     |
+        | Colors.text  | "#12345z"  | app/theme.json:1:[0-9]+: Colors.text: .#12345z. is no colour         |
+        | Colors.dark  | true       | app/theme.json:1:[0-9]+: Colors.dark is the user's to choose         |
 
     Scenario: A dry run says what would be written and writes nothing
       When the agent calls the tool "theme_set" with:
@@ -228,7 +228,7 @@ Feature: Tokens are read and set in the project's theme file
     Scenario: A write against an old generation is refused
       Given the file "app/theme.json":
         """json
-        { "Colors": { "accent": "#6a1b9a" } }
+        { "Colors": { "accent": "#9c4dc4" } }
         """
       And the agent has called the tool "theme_set" with:
         """json
@@ -254,7 +254,7 @@ Feature: Tokens are read and set in the project's theme file
     Scenario: Undo gives the theme file back byte for byte
       Given the file "app/theme.json":
         """json
-        {"Colors": {"accent": "#6a1b9a"}}
+        {"Colors": {"accent": "#9c4dc4"}}
         """
       And the agent has called the tool "theme_set" with:
         """json
@@ -267,5 +267,5 @@ Feature: Tokens are read and set in the project's theme file
       Then the answer's "/done" has 0 entries
       And the file "app/theme.json" is:
         """json
-        {"Colors": {"accent": "#6a1b9a"}}
+        {"Colors": {"accent": "#9c4dc4"}}
         """

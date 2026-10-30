@@ -94,13 +94,13 @@ impl FsStore {
     }
 }
 
-/// Whether `path` can be a document: a `.qml` file, in normal form so one
-/// file is not two documents by spelling, outside the directories a walk
-/// leaves out.
+/// Whether `path` can be a document: a `.qml` file or a theme file, in
+/// normal form so one file is not two documents by spelling, outside the
+/// directories a walk leaves out.
 pub(crate) fn document_path(path: &str) -> bool {
     let mut parts = path.split('/').rev();
     let file = parts.next().unwrap_or_default();
-    file.ends_with(".qml")
+    (file.ends_with(".qml") || file == crate::theme::FILE)
         && !matches!(file, "." | "..")
         && parts.all(|dir| !dir.is_empty() && dir != "." && dir != ".." && !skipped(dir))
 }
@@ -377,8 +377,14 @@ mod tests {
     }
 
     #[test]
-    fn a_document_is_a_qml_file_outside_the_skipped_directories() {
-        for good in ["Main.qml", "a/b/Card.qml", ".hidden.qml"] {
+    fn a_document_is_a_qml_or_theme_file_outside_the_skipped_directories() {
+        for good in [
+            "Main.qml",
+            "a/b/Card.qml",
+            ".hidden.qml",
+            "theme.json",
+            "app/theme.json",
+        ] {
             assert!(document_path(good), "{good}");
         }
         for bad in [
@@ -386,6 +392,9 @@ mod tests {
             ".env",
             ".git/config",
             "README.md",
+            "other.json",
+            "theme.json.bak",
+            ".git/theme.json",
             ".git/Hook.qml",
             "a/.cache/B.qml",
             "node_modules/x/Y.qml",

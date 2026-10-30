@@ -18,6 +18,7 @@ pub mod preview;
 pub mod slots;
 pub mod states;
 mod store;
+pub mod theme;
 
 use std::collections::BTreeMap;
 
@@ -68,6 +69,12 @@ pub enum Error {
     NoId(String),
     #[error("{0} is not a `Contribution`")]
     NotAContribution(String),
+    #[error("`Ljos.Design` has no token `{0}`")]
+    NoToken(String),
+    /// Ljós would not load the theme; its reasons, each
+    /// `file:line:column: message`.
+    #[error("{}", .0.iter().map(ToString::to_string).collect::<Vec<_>>().join("\n"))]
+    Theme(Vec<theme::ThemeError>),
 }
 
 /// A literal a property can be set to.
@@ -203,6 +210,20 @@ pub struct Outcome {
     /// The document already said this: nothing was written and no history
     /// entry made.
     pub unchanged: bool,
+}
+
+/// The tokens [`Session::tokens`] read.
+#[derive(Clone, Debug)]
+pub struct Tokens {
+    /// The theme file, as the session names it.
+    pub file: String,
+    pub exists: bool,
+    /// The file's generation, 0 while it does not exist.
+    pub generation: u64,
+    /// Why Ljós would not load the file, when it would not; its values
+    /// are then left out.
+    pub problem: Option<String>,
+    pub tokens: Vec<theme::Token>,
 }
 
 /// The type a slot's elements have (`ljos_blocks::CONTRIBUTION`).
@@ -380,9 +401,9 @@ impl Session {
         Ok(())
     }
 
-    /// Refuses a path that is not one of the project's documents, as written
-    /// or where its links lead: the right to edit a document is not the right
-    /// to change `.git/config`.
+    /// Refuses a path that is not one of the project's documents (its `.qml`
+    /// files and theme files), as written or where its links lead: the right
+    /// to edit a document is not the right to change `.git/config`.
     pub fn check_document(&self, path: &str) -> Result<(), Error> {
         let real = self.store.resolved(path)?;
         if store::document_path(path) && store::document_path(&real) {
@@ -993,6 +1014,122 @@ impl Session {
             node,
             text: None,
             unchanged: true,
+        })
+    }
+
+    /// The tokens of `Ljos.Design` (`filter`: one, or one singleton's) with
+    /// the theme file's values.
+    pub fn tokens(&mut self, file: &str, filter: Option<&str>) -> Result<Tokens, Error> {
+        let exists = self.store.exists(file) || self.docs.contains_key(file);
+        let (theme, generation, problem) = if exists {
+            let (text, generation) = self.text(file)?;
+            match theme::read(file, text) {
+                Ok(theme) => (Some(theme), generation, None),
+                Err(errors) => (None, generation, Some(Error::Theme(errors).to_string())),
+            }
+        } else {
+            (None, 0, None)
+        };
+        let tokens = theme::tokens(theme.as_ref(), filter);
+        if let Some(filter) = filter
+            && tokens.is_empty()
+        {
+            return Err(Error::NoToken(filter.to_owned()));
+        }
+        Ok(Tokens {
+            file: file.to_owned(),
+            exists,
+            generation,
+            problem,
+            tokens,
+        })
+    }
+
+    /// Sets `token` (in `variant` of a colour) in the theme file `file`,
+    /// creating it, or gives it back to the module when `value` is `None`.
+    /// Refused unless Ljós would load the result.
+    pub fn set_token(
+        &mut self,
+        file: &str,
+        generation: Option<u64>,
+        token: &str,
+        variant: Option<&str>,
+        value: Option<&serde_json::Value>,
+        dry_run: bool,
+    ) -> Result<Outcome, Error> {
+        let exists = self.store.exists(file) || self.docs.contains_key(file);
+        let before = if exists {
+            self.check_generation(file, generation)?;
+            self.doc(file)?.text.clone()
+        } else {
+            if let Some(given) = generation.filter(|g| *g != 0) {
+                return Err(Error::Stale {
+                    doc: file.to_owned(),
+                    given,
+                    current: 0,
+                });
+            }
+            String::new()
+        };
+        let after = theme::set(&before, token, variant, value).map_err(|e| match e {
+            theme::SetError::NotSet(_) => Error::NothingTo("remove"),
+            // Ljós's reasons say where the file is wrong; Studio's only that
+            // it cannot edit it.
+            theme::SetError::NotJson(_) if theme::read(file, &before).is_err() => {
+                Error::Theme(theme::read(file, &before).err().unwrap_or_default())
+            }
+            e => Error::Invalid(e.to_string()),
+        })?;
+        theme::check(file, &after).map_err(Error::Theme)?;
+        let label = match (value, variant) {
+            (None, None) => format!("remove {token}"),
+            (None, Some(v)) => format!("remove {token} {v}"),
+            (Some(_), None) => format!("set {token}"),
+            (Some(_), Some(v)) => format!("set {token} {v}"),
+        };
+        let changes = diff(&before, &after);
+        if dry_run {
+            return Ok(Outcome {
+                doc: file.to_owned(),
+                generation: if exists {
+                    self.doc(file)?.generation
+                } else {
+                    0
+                },
+                changes,
+                history: None,
+                node: None,
+                text: Some(after),
+            });
+        }
+        let entry = if exists {
+            self.commit(file, before, after, None, label)?
+        } else {
+            self.put(file, &after)?;
+            let past = self.retired.get(file).copied().unwrap_or(0);
+            self.docs
+                .insert(file.to_owned(), Document::new(after.clone(), past));
+            self.history.push(Entry {
+                id: 0,
+                doc: file.to_owned(),
+                label,
+                forward: changes.clone(),
+                inverse: vec![Change {
+                    range: 0..after.len(),
+                    replacement: String::new(),
+                }],
+                created: true,
+                handles_before: Vec::new(),
+                handles_after: Vec::new(),
+            })
+        };
+        Ok(Outcome {
+            doc: file.to_owned(),
+            generation: self.doc(file)?.generation,
+            changes,
+            history: Some(entry),
+            node: None,
+            text: None,
         })
     }
 

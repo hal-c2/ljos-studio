@@ -45,17 +45,17 @@ Feature: A person reads and sets tokens in Studio's window
 
   Scenario: A colour's light and dark are set apart
     When the person sets "Colors.accent light" to "#6a1b9a" in the tokens panel
-    And the person sets "Colors.accent dark" to "#ce93d8" in the tokens panel
+    And the person sets "Colors.accent dark" to "#9c4dc4" in the tokens panel
     Then the file "theme.json" is:
       """json
       {
         "Colors": {
-          "accent": { "light": "#6a1b9a", "dark": "#ce93d8" }
+          "accent": { "light": "#6a1b9a", "dark": "#9c4dc4" }
         }
       }
       """
     And the tokens panel shows "Colors.accent light: #6a1b9a"
-    And the tokens panel shows "Colors.accent dark: #ce93d8"
+    And the tokens panel shows "Colors.accent dark: #9c4dc4"
 
   Scenario: A token Ljós refuses is refused in the panel with Ljós's message
     When the person sets "Colors.text light" to "#f0f0f0" in the tokens panel

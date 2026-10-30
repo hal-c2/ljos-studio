@@ -442,6 +442,19 @@ fn refusal_is(w: &mut StudioWorld, pointer: String, want: String) -> StepResult 
         .ok_or_else(|| format!("`{pointer}` is {got}, not {want}"))
 }
 
+/// Ljós's messages name a column and a contrast that are its to choose;
+/// a scenario pins what it means and leaves those to a pattern.
+#[then(regex = r#"^the refusal's message matches "(.+)"$"#)]
+fn refusal_matches(w: &mut StudioWorld, pattern: String) -> StepResult {
+    let error = w.refusal()?;
+    let message = error["message"].as_str().unwrap_or_default();
+    let pattern = regex::Regex::new(&pattern).map_err(|e| e.to_string())?;
+    pattern
+        .is_match(message)
+        .then_some(())
+        .ok_or_else(|| format!("the message is {message:?}"))
+}
+
 #[then(regex = r#"^the file "([^"]+)" is:$"#)]
 fn file_is(w: &mut StudioWorld, name: String, step: &Step) -> StepResult {
     let want = file_text(step)?;

@@ -5318,6 +5318,7 @@ dependencies = [
 name = "studio_core"
 version = "0.0.0"
 dependencies = [
+ "ljos_design",
  "ljos_ir",
  "qml_edit",
  "qml_syntax",
@@ -5337,6 +5338,7 @@ dependencies = [
  "ljos_blocks",
  "ljos_mcp_core",
  "qml_edit",
+ "regex",
  "schemars",
  "serde",
  "serde_json",

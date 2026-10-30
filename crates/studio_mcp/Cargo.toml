@@ -29,6 +29,7 @@ studio_mcp = { path = ".", features = ["http"] }
 studio_preview = { path = "../studio_preview" }
 cucumber.workspace = true
 insta.workspace = true
+regex.workspace = true
 tempfile.workspace = true
 tokio.workspace = true
 
