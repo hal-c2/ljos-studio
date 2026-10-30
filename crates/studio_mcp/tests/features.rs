@@ -18,6 +18,8 @@ use studio_mcp::{Studio, StudioServer};
 #[world(init = Self::new)]
 struct StudioWorld {
     dir: tempfile::TempDir,
+    /// Directories links lead out of the project to.
+    outside: Vec<tempfile::TempDir>,
     server: Option<StudioServer>,
     caps: CapSet,
     answer: Option<Result<Value, SurfaceError>>,
@@ -40,6 +42,7 @@ impl StudioWorld {
     fn new() -> Self {
         Self {
             dir: tempfile::tempdir().expect("a temporary directory"),
+            outside: Vec::new(),
             server: None,
             caps: CapSet::of([Cap::Inspect, Cap::Mutate]),
             answer: None,
@@ -165,6 +168,34 @@ fn the_file(w: &mut StudioWorld, name: String, step: &Step) -> StepResult {
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
     std::fs::write(path, file_text(step)?).map_err(|e| e.to_string())
+}
+
+#[when(regex = r#"^the file "([^"]+)" is rewritten outside Studio:$"#)]
+fn rewritten(w: &mut StudioWorld, name: String, step: &Step) -> StepResult {
+    std::fs::write(w.dir.path().join(&name), file_text(step)?).map_err(|e| e.to_string())
+}
+
+#[when(regex = r#"^the file "([^"]+)" is deleted outside Studio$"#)]
+fn deleted(w: &mut StudioWorld, name: String) -> StepResult {
+    std::fs::remove_file(w.dir.path().join(&name)).map_err(|e| e.to_string())
+}
+
+#[given(regex = r#"^the link "([^"]+)" leads to "([^"]+)"$"#)]
+fn link_inside(w: &mut StudioWorld, name: String, to: String) -> StepResult {
+    std::os::unix::fs::symlink(w.dir.path().join(to), w.dir.path().join(name))
+        .map_err(|e| e.to_string())
+}
+
+#[given(
+    regex = r#"^the link "([^"]+)" leads to a directory outside the project holding "([^"]+)"$"#
+)]
+fn link_outside(w: &mut StudioWorld, name: String, file: String) -> StepResult {
+    let outside = tempfile::tempdir().map_err(|e| e.to_string())?;
+    std::fs::write(outside.path().join(file), "Item {}\n").map_err(|e| e.to_string())?;
+    std::os::unix::fs::symlink(outside.path(), w.dir.path().join(name))
+        .map_err(|e| e.to_string())?;
+    w.outside.push(outside);
+    Ok(())
 }
 
 #[given("the studio tools are connected")]

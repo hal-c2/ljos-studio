@@ -167,10 +167,12 @@ struct Document {
 }
 
 impl Document {
-    fn new(text: String) -> Self {
+    /// `past` is the last generation an earlier life of this path had: one
+    /// read then can never pass for current now.
+    fn new(text: String, past: u64) -> Self {
         let mut doc = Self {
             text: String::new(),
-            generation: 0,
+            generation: past,
             nodes: None,
             problem: None,
             tracked: Vec::new(),
@@ -205,6 +207,8 @@ pub struct Session {
     history: History,
     selection: Vec<(String, String)>,
     next_handle: u64,
+    /// The last generation of documents no longer held.
+    retired: BTreeMap<String, u64>,
 }
 
 impl std::fmt::Debug for Session {
@@ -236,6 +240,7 @@ impl Session {
             history: History::default(),
             selection: Vec::new(),
             next_handle: 1,
+            retired: BTreeMap::new(),
         }
     }
 
@@ -248,26 +253,86 @@ impl Session {
         self.store.list(".qml")
     }
 
+    /// A document [`Session::sync`] has brought up to date.
     fn doc(&mut self, path: &str) -> Result<&mut Document, Error> {
-        if !self.docs.contains_key(path) {
-            let text = self.store.read(path)?;
-            self.docs.insert(path.to_owned(), Document::new(text));
+        self.docs
+            .get_mut(path)
+            .ok_or_else(|| StoreError::Missing(path.to_owned()).into())
+    }
+
+    /// Brings the held document level with the file, which other programs
+    /// write too. Every public way in calls this once, so nothing is read or
+    /// edited on text the file no longer has.
+    ///
+    /// It does not tell a write observer: this is a change the file already
+    /// has, and whatever watches the file has seen it.
+    fn sync(&mut self, path: &str) -> Result<(), Error> {
+        let stored = match self.store.read(path) {
+            Ok(stored) => stored,
+            Err(e @ StoreError::Missing(_)) => {
+                // Only a document held went away. One undo removed is not
+                // held, and redo can still bring it back.
+                if self.docs.contains_key(path) {
+                    self.forget(path);
+                }
+                return Err(e.into());
+            }
+            Err(e) => return Err(e.into()),
+        };
+        match self.docs.get(path) {
+            None => {
+                let past = self.retired.get(path).copied().unwrap_or(0);
+                self.docs
+                    .insert(path.to_owned(), Document::new(stored, past));
+            }
+            Some(doc) if doc.text == stored => {}
+            Some(doc) => {
+                let before = doc.text.clone();
+                self.record(
+                    path,
+                    before,
+                    stored,
+                    None,
+                    "changed outside Studio".to_owned(),
+                )?;
+            }
         }
-        Ok(self.docs.get_mut(path).expect("just loaded"))
+        Ok(())
+    }
+
+    /// Lets go of a document whose file went: its history's offsets have
+    /// nothing left to apply to.
+    fn forget(&mut self, path: &str) {
+        self.retire(path);
+        self.history.forget(path);
+    }
+
+    fn retire(&mut self, path: &str) {
+        if let Some(doc) = self.docs.remove(path) {
+            self.retired.insert(path.to_owned(), doc.generation);
+        }
+        self.selection.retain(|(d, _)| d != path);
     }
 
     pub fn text(&mut self, path: &str) -> Result<(&str, u64), Error> {
+        self.sync(path)?;
         let doc = self.doc(path)?;
         Ok((&doc.text, doc.generation))
     }
 
     pub fn generation(&mut self, path: &str) -> Result<u64, Error> {
+        self.sync(path)?;
         Ok(self.doc(path)?.generation)
     }
 
     /// The document's objects, each with a handle. Fails while the text does
     /// not parse.
     pub fn tree(&mut self, path: &str) -> Result<(Vec<(String, Node)>, u64), Error> {
+        self.sync(path)?;
+        self.tree_now(path)
+    }
+
+    fn tree_now(&mut self, path: &str) -> Result<(Vec<(String, Node)>, u64), Error> {
         let mut next = self.next_handle;
         let doc = self.doc(path)?;
         let Some(nodes) = &doc.nodes else {
@@ -305,7 +370,12 @@ impl Session {
 
     /// The object an address names now, with its handle.
     pub fn resolve(&mut self, path: &str, address: &Address) -> Result<(String, Node), Error> {
-        let (tree, _) = self.tree(path)?;
+        self.sync(path)?;
+        self.resolve_now(path, address)
+    }
+
+    fn resolve_now(&mut self, path: &str, address: &Address) -> Result<(String, Node), Error> {
+        let (tree, _) = self.tree_now(path)?;
         let not_found = || Error::NotFound {
             doc: path.to_owned(),
             address: match address {
@@ -349,6 +419,7 @@ impl Session {
     }
 
     fn check_generation(&mut self, path: &str, given: Option<u64>) -> Result<(), Error> {
+        self.sync(path)?;
         let current = self.doc(path)?.generation;
         match given {
             Some(given) if given != current => Err(Error::Stale {
@@ -436,8 +507,8 @@ impl Session {
                 add_id,
                 import,
             } => {
-                let (_, parent_node) = self.resolve(path, parent)?;
-                let (tree, _) = self.tree(path)?;
+                let (_, parent_node) = self.resolve_now(path, parent)?;
+                let (tree, _) = self.tree_now(path)?;
                 let count = child_count(&tree, &parent_node.path);
                 let index = index.unwrap_or(count);
                 let mut text = text.trim().to_owned();
@@ -471,9 +542,9 @@ impl Session {
                 parent,
                 index,
             } => {
-                let (_, moved) = self.resolve(path, node)?;
-                let (_, parent_node) = self.resolve(path, parent)?;
-                let (tree, _) = self.tree(path)?;
+                let (_, moved) = self.resolve_now(path, node)?;
+                let (_, parent_node) = self.resolve_now(path, parent)?;
+                let (tree, _) = self.tree_now(path)?;
                 let mut count = child_count(&tree, &parent_node.path);
                 let same_parent = moved.path.0.len() == parent_node.path.0.len() + 1
                     && moved.path.0.starts_with(&parent_node.path.0);
@@ -499,7 +570,7 @@ impl Session {
                 Ok((out, change, at))
             }
             Op::Remove { node } => {
-                let (_, removed) = self.resolve(path, node)?;
+                let (_, removed) = self.resolve_now(path, node)?;
                 let out = qml_edit::apply(
                     before,
                     &qml_edit::Edit::RemoveObject {
@@ -522,7 +593,7 @@ impl Session {
                 if value.trim().is_empty() {
                     return Err(Error::Invalid("a binding needs a value".to_owned()));
                 }
-                let (_, target) = self.resolve(path, node)?;
+                let (_, target) = self.resolve_now(path, node)?;
                 let out = qml_edit::apply(
                     before,
                     &qml_edit::Edit::SetBinding {
@@ -535,7 +606,7 @@ impl Session {
                 Ok((out, PathChange::Same, None))
             }
             Op::RemoveBinding { node, name } => {
-                let (_, target) = self.resolve(path, node)?;
+                let (_, target) = self.resolve_now(path, node)?;
                 let out = qml_edit::apply(
                     before,
                     &qml_edit::Edit::RemoveBinding {
@@ -608,8 +679,10 @@ impl Session {
         if !path.ends_with(".qml") {
             return Err(Error::Invalid(format!("`{path}` is not a `.qml` file")));
         }
-        if self.store.exists(path) || self.docs.contains_key(path) {
-            return Err(Error::Exists(path.to_owned()));
+        match self.sync(path) {
+            Ok(()) => return Err(Error::Exists(path.to_owned())),
+            Err(Error::Store(StoreError::Missing(_))) => {}
+            Err(e) => return Err(e),
         }
         if outline::outline(text).is_none() {
             return Err(Error::Broken {
@@ -631,8 +704,9 @@ impl Session {
             });
         }
         self.store.write(path, text)?;
+        let past = self.retired.get(path).copied().unwrap_or(0);
         self.docs
-            .insert(path.to_owned(), Document::new(text.to_owned()));
+            .insert(path.to_owned(), Document::new(text.to_owned(), past));
         let generation = self.docs[path].generation;
         let entry = self.history.push(Entry {
             id: 0,
@@ -673,6 +747,19 @@ impl Session {
         label: String,
     ) -> Result<u64, Error> {
         self.store.write(path, &after)?;
+        self.record(path, before, after, change, label)
+    }
+
+    /// Takes `after` as the document's text: moves the handles and records
+    /// the entry.
+    fn record(
+        &mut self,
+        path: &str,
+        before: String,
+        after: String,
+        change: Option<PathChange>,
+        label: String,
+    ) -> Result<u64, Error> {
         let doc = self.doc(path)?;
         let handles_before = doc.tracked.clone();
         for change in diff(&before, &after) {
@@ -696,7 +783,7 @@ impl Session {
     }
 
     fn handle_at(&mut self, path: &str, at: &NodePath) -> Result<String, Error> {
-        let (tree, _) = self.tree(path)?;
+        let (tree, _) = self.tree_now(path)?;
         tree.into_iter()
             .find(|(_, n)| n.path == *at)
             .map(|(h, _)| h)
@@ -708,12 +795,36 @@ impl Session {
 
     /// Undoes the last edit; its document gets the bytes it had before.
     pub fn undo(&mut self) -> Result<EntrySummary, Error> {
+        // A change made outside Studio goes on top here and is what is
+        // undone: the entry below it has offsets on a text the file left.
+        while let Some(doc) = self.history.peek_undo().map(|e| e.doc.clone()) {
+            match self.sync(&doc) {
+                Ok(()) => break,
+                Err(Error::Store(StoreError::Missing(_))) => self.history.forget(&doc),
+                Err(e) => return Err(e),
+            }
+        }
         let entry = self.history.undo().ok_or(Error::NothingTo("undo"))?;
         self.replay(&entry, false)?;
         Ok(entry.summary())
     }
 
     pub fn redo(&mut self) -> Result<EntrySummary, Error> {
+        // A change found here ends what could be redone, like any edit.
+        while let Some(top) = self.history.peek_redo() {
+            let doc = top.doc.clone();
+            if top.created {
+                if self.store.exists(&doc) {
+                    return Err(Error::Exists(doc));
+                }
+                break;
+            }
+            match self.sync(&doc) {
+                Ok(()) => break,
+                Err(Error::Store(StoreError::Missing(_))) => self.history.forget(&doc),
+                Err(e) => return Err(e),
+            }
+        }
         let entry = self.history.redo().ok_or(Error::NothingTo("redo"))?;
         self.replay(&entry, true)?;
         Ok(entry.summary())
@@ -723,14 +834,14 @@ impl Session {
         let path = entry.doc.clone();
         if entry.created && !forward {
             self.store.remove(&path)?;
-            self.docs.remove(&path);
-            self.selection.retain(|(d, _)| *d != path);
+            self.retire(&path);
             return Ok(());
         }
         if entry.created && forward {
             let text = qml_edit::splice("", &entry.forward);
             self.store.write(&path, &text)?;
-            self.docs.insert(path, Document::new(text));
+            let past = self.retired.get(&path).copied().unwrap_or(0);
+            self.docs.insert(path, Document::new(text, past));
             return Ok(());
         }
         let doc = self.doc(&path)?;

@@ -61,6 +61,20 @@ impl History {
         self.next_id
     }
 
+    pub fn peek_undo(&self) -> Option<&Entry> {
+        self.done.last()
+    }
+
+    pub fn peek_redo(&self) -> Option<&Entry> {
+        self.undone.last()
+    }
+
+    /// Drops every entry of a document whose file went.
+    pub fn forget(&mut self, doc: &str) {
+        self.done.retain(|e| e.doc != doc);
+        self.undone.retain(|e| e.doc != doc);
+    }
+
     pub fn undo(&mut self) -> Option<Entry> {
         let entry = self.done.pop()?;
         self.undone.push(entry.clone());
