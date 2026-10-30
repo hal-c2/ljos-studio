@@ -64,8 +64,9 @@ struct OpenOut {
 #[serde(deny_unknown_fields)]
 struct StateArgs {
     /// The object to read; it needs an `id`. In the previewed document
-    /// unless `doc` names another.
-    node: Address,
+    /// unless `doc` names another. Left out, the call only clicks: a
+    /// prototype plays without an `id` on the object whose state it reads.
+    node: Option<Address>,
     doc: Option<String>,
     /// Values to assign to a block's state (mocked previews only).
     set: Option<Map<String, Value>>,
@@ -89,13 +90,16 @@ struct StateOut {
     /// `Module.Name`, when the object is a block.
     #[serde(skip_serializing_if = "Option::is_none")]
     block: Option<String>,
-    id: String,
+    /// The object read; absent when only a click was asked for.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    id: Option<String>,
     /// A block's published state as the preview has it now.
     state: Map<String, Value>,
     mocked: bool,
     /// The object's QML `state` now: the variant it shows, `""` for its
-    /// base state.
-    variant: String,
+    /// base state. Absent when no object was read.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    variant: Option<String>,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -321,10 +325,8 @@ fn state(studio: &Mutex<Studio>, a: StateArgs) -> Result<StateOut, SurfaceError>
         .as_mut()
         .ok_or_else(|| preview_error(PreviewError::NotOpen))?;
     let doc = a.doc.unwrap_or_else(|| open.doc.clone());
-    let (_, node) = studio.session.resolve(&doc, &a.node).map_err(error)?;
     let no_id =
         || SurfaceError::invalid_argument("the preview finds objects by `id`; this one has none");
-    let id = node.id.clone().ok_or_else(no_id)?;
     let click = match (a.click, a.click_at) {
         (Some(_), Some(_)) => {
             return Err(SurfaceError::invalid_argument(
@@ -338,6 +340,28 @@ fn state(studio: &Mutex<Studio>, a: StateArgs) -> Result<StateOut, SurfaceError>
         (None, Some(at)) => Some(Click::Point { x: at.x, y: at.y }),
         (None, None) => None,
     };
+    let Some(address) = a.node else {
+        if a.set.is_some() {
+            return Err(SurfaceError::invalid_argument(
+                "`set` needs the `node` whose state it sets",
+            ));
+        }
+        let click = click.ok_or_else(|| {
+            SurfaceError::invalid_argument("give the `node` to read, a click, or both")
+        })?;
+        if let Err(e) = open.host.click(&click) {
+            return Err(preview_error(previews.failed(e)));
+        }
+        return Ok(StateOut {
+            block: None,
+            id: None,
+            state: Map::new(),
+            mocked: false,
+            variant: None,
+        });
+    };
+    let (_, node) = studio.session.resolve(&doc, &address).map_err(error)?;
+    let id = node.id.clone().ok_or_else(no_id)?;
     let registry = blocks::registry(studio.session.store());
     let text = studio.session.text(&doc).map_err(error)?.0.to_owned();
     let imported = |module: &str| {
@@ -403,10 +427,10 @@ fn state(studio: &Mutex<Studio>, a: StateArgs) -> Result<StateOut, SurfaceError>
     state.retain(|name, _| names.contains(name));
     Ok(StateOut {
         block,
-        id,
+        id: Some(id),
         state,
         mocked,
-        variant,
+        variant: Some(variant),
     })
 }
 

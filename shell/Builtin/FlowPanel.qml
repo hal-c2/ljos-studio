@@ -33,8 +33,9 @@ Panel {
         target: panel.workspace
 
         function onAnswered(tool, answer) {
+            // A click that read nothing leaves where the flow is unknown.
             if (tool === "preview_state")
-                panel.playing = answer.variant
+                panel.playing = answer.variant !== undefined ? answer.variant : null
         }
     }
 

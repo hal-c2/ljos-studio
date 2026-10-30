@@ -87,10 +87,18 @@ Panel {
                                     x: Math.floor(point.position.x / panel.zoom),
                                     y: Math.floor(point.position.y / panel.zoom)
                                 }
-                                if (panel.playing)
-                                    panel.workspace.dispatch("preview_state", {node: {path: "root"}, click_at: at})
-                                else
+                                if (panel.playing) {
+                                    // The root's state says where the flow is, when the
+                                    // preview can find the root: by its `id`.
+                                    const layers = panel.workspace.layers
+                                    const args = {click_at: at}
+                                    if (layers.length > 0 && layers[0].id !== "")
+                                        args.node = {path: "root"}
+                                    panel.workspace.dispatch("preview_state", args)
+                                }
+                                else {
                                     panel.workspace.dispatch("node_select", {doc: panel.workspace.doc, at: at})
+                                }
                             }
                         }
                     }

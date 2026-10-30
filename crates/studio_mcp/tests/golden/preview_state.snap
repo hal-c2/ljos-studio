@@ -107,8 +107,15 @@ expression: value
         ]
       },
       "node": {
-        "$ref": "#/$defs/Address",
-        "description": "The object to read; it needs an `id`. In the previewed document\nunless `doc` names another."
+        "anyOf": [
+          {
+            "$ref": "#/$defs/Address"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "description": "The object to read; it needs an `id`. In the previewed document\nunless `doc` names another. Left out, the call only clicks: a\nprototype plays without an `id` on the object whose state it reads."
       },
       "set": {
         "additionalProperties": true,
@@ -119,9 +126,6 @@ expression: value
         ]
       }
     },
-    "required": [
-      "node"
-    ],
     "title": "StateArgs",
     "type": "object"
   },
@@ -137,7 +141,11 @@ expression: value
         ]
       },
       "id": {
-        "type": "string"
+        "description": "The object read; absent when only a click was asked for.",
+        "type": [
+          "string",
+          "null"
+        ]
       },
       "mocked": {
         "type": "boolean"
@@ -148,15 +156,16 @@ expression: value
         "type": "object"
       },
       "variant": {
-        "description": "The object's QML `state` now: the variant it shows, `\"\"` for its\nbase state.",
-        "type": "string"
+        "description": "The object's QML `state` now: the variant it shows, `\"\"` for its\nbase state. Absent when no object was read.",
+        "type": [
+          "string",
+          "null"
+        ]
       }
     },
     "required": [
-      "id",
       "state",
-      "mocked",
-      "variant"
+      "mocked"
     ],
     "title": "StateOut",
     "type": "object"
