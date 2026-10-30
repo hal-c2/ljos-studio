@@ -147,12 +147,15 @@ pub struct Outcome {
     pub generation: u64,
     /// Ranges of the text before the edit and what replaced them.
     pub changes: Vec<Change>,
-    /// The history entry, `None` for a dry run.
+    /// The history entry, `None` for a dry run or an unchanged document.
     pub history: Option<u64>,
     /// The handle of the object the edit put or moved, if it did.
     pub node: Option<String>,
     /// The new text, for a dry run.
     pub text: Option<String>,
+    /// The document already said this: nothing was written and no history
+    /// entry made.
+    pub unchanged: bool,
 }
 
 /// One open document.
@@ -464,11 +467,19 @@ impl Session {
             return Ok(Outcome {
                 doc: path.to_owned(),
                 generation: self.doc(path)?.generation,
+                unchanged: text == before,
                 changes,
                 history: None,
                 node: None,
                 text: Some(text),
             });
+        }
+        if text == before {
+            let node = match focus {
+                Some(at) => Some(self.handle_at(path, &at)?),
+                None => None,
+            };
+            return self.unchanged(path, node);
         }
         let entry = self.commit(path, before, text, Some(change), op.label())?;
         let node = match focus {
@@ -482,6 +493,7 @@ impl Session {
             history: Some(entry),
             node,
             text: None,
+            unchanged: false,
         })
     }
 
@@ -680,11 +692,15 @@ impl Session {
             return Ok(Outcome {
                 doc: path.to_owned(),
                 generation: self.doc(path)?.generation,
+                unchanged: after == before,
                 changes,
                 history: None,
                 node: None,
                 text: Some(after),
             });
+        }
+        if after == before {
+            return self.unchanged(path, None);
         }
         let entry = self.commit(path, before, after, None, "edit text".to_owned())?;
         Ok(Outcome {
@@ -694,6 +710,7 @@ impl Session {
             history: Some(entry),
             node: None,
             text: None,
+            unchanged: false,
         })
     }
 
@@ -721,6 +738,7 @@ impl Session {
                 history: None,
                 node: None,
                 text: Some(text.to_owned()),
+                unchanged: false,
             });
         }
         self.store.write(path, text)?;
@@ -754,6 +772,21 @@ impl Session {
             history: Some(entry),
             node: None,
             text: None,
+            unchanged: false,
+        })
+    }
+
+    /// An edit that would write the bytes already there: the file, the
+    /// generation and the history stay as they are.
+    fn unchanged(&mut self, path: &str, node: Option<String>) -> Result<Outcome, Error> {
+        Ok(Outcome {
+            doc: path.to_owned(),
+            generation: self.doc(path)?.generation,
+            changes: Vec::new(),
+            history: None,
+            node,
+            text: None,
+            unchanged: true,
         })
     }
 

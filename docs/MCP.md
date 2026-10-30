@@ -65,7 +65,9 @@ Every `mutate` tool:
   program takes a new generation and an entry in the history when it is next
   read or edited;
 - takes `dry_run` and then returns the changed ranges without writing;
-- returns the changed ranges, the new generation and a `history` id;
+- returns the changed ranges, the new generation and a `history` id; an
+  edit that would write the bytes already there writes nothing, keeps the
+  generation, makes no entry and says `unchanged: true`;
 - refuses an edit that would not parse (`would_break`) and changes nothing.
 
 `property_set` and `binding_set` remove a binding only when `value` is

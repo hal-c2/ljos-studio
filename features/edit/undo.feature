@@ -113,3 +113,24 @@ Feature: Undo gives back the bytes
       """
     Then the agent is refused with "not_actionable"
     And the refusal's "/details/kind" is "nothing_to_do"
+
+  Scenario: An edit that changes nothing is said so and leaves no entry
+    When the agent calls the tool "property_set" with:
+      """json
+      {"doc": "Main.qml", "generation": 1, "node": {"id": "root"}, "name": "width", "value": 200}
+      """
+    Then the answer's "/unchanged" is true
+    And the answer's "/generation" is 1
+    And the answer's "/changes" has 0 entries
+    And the answer's "/history" is absent
+    When the agent calls the tool "document_edit" with:
+      """json
+      {"doc": "Main.qml", "generation": 1, "start": 0, "end": 6, "text": "import"}
+      """
+    Then the answer's "/unchanged" is true
+    And the answer's "/generation" is 1
+    When the agent calls the tool "history" with:
+      """json
+      {"action": "list"}
+      """
+    Then the answer's "/done" has 0 entries

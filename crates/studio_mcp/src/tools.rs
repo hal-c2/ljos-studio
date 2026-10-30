@@ -127,7 +127,7 @@ struct EditOut {
     /// The document's generation now; pass it with the next edit.
     generation: u64,
     changes: Vec<ChangeOut>,
-    /// The history entry; absent for a dry run.
+    /// The history entry; absent for a dry run or an unchanged document.
     #[serde(skip_serializing_if = "Option::is_none")]
     history: Option<u64>,
     /// The handle of the object put or moved.
@@ -136,6 +136,10 @@ struct EditOut {
     /// The text the edit would give, for a dry run.
     #[serde(skip_serializing_if = "Option::is_none")]
     text: Option<String>,
+    /// The document already said this: nothing was written and no history
+    /// entry made.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    unchanged: bool,
 }
 
 impl From<Outcome> for EditOut {
@@ -154,6 +158,7 @@ impl From<Outcome> for EditOut {
                 .collect(),
             history: o.history,
             node: o.node,
+            unchanged: o.unchanged,
             text: o.text,
         }
     }

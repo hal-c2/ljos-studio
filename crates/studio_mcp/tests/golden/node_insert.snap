@@ -169,7 +169,7 @@ expression: value
         "type": "integer"
       },
       "history": {
-        "description": "The history entry; absent for a dry run.",
+        "description": "The history entry; absent for a dry run or an unchanged document.",
         "format": "uint64",
         "minimum": 0,
         "type": [
@@ -190,12 +190,17 @@ expression: value
           "string",
           "null"
         ]
+      },
+      "unchanged": {
+        "description": "The document already said this: nothing was written and no history\nentry made.",
+        "type": "boolean"
       }
     },
     "required": [
       "doc",
       "generation",
-      "changes"
+      "changes",
+      "unchanged"
     ],
     "title": "EditOut",
     "type": "object"
