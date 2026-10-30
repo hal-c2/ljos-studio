@@ -273,6 +273,34 @@ fn link_outside(w: &mut StudioWorld, name: String, file: String) -> StepResult {
     Ok(())
 }
 
+#[given(regex = r#"^the link "([^"]+)" leads to the file "([^"]+)" outside the project$"#)]
+fn link_file_outside(w: &mut StudioWorld, name: String, file: String) -> StepResult {
+    let outside = tempfile::tempdir().map_err(|e| e.to_string())?;
+    let target = outside.path().join(file);
+    std::fs::write(&target, "Item {}\n").map_err(|e| e.to_string())?;
+    std::os::unix::fs::symlink(target, w.dir.path().join(name)).map_err(|e| e.to_string())?;
+    w.outside.push(outside);
+    Ok(())
+}
+
+#[then("nothing was written outside the project")]
+fn nothing_outside(w: &mut StudioWorld) -> StepResult {
+    // Each place a link leads to holds the one file the scenario put there.
+    for outside in &w.outside {
+        let entries: Vec<_> = std::fs::read_dir(outside.path())
+            .map_err(|e| e.to_string())?
+            .flatten()
+            .map(|e| e.path())
+            .collect();
+        let untouched = matches!(entries.as_slice(), [one]
+            if std::fs::read_to_string(one).is_ok_and(|text| text == "Item {}\n"));
+        if !untouched {
+            return Err(format!("{entries:?}"));
+        }
+    }
+    Ok(())
+}
+
 #[given("the studio tools are connected")]
 fn connected(w: &mut StudioWorld) -> StepResult {
     w.server().map(|_| ())

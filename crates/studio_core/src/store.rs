@@ -279,6 +279,25 @@ mod tests {
     }
 
     #[test]
+    fn a_link_that_stays_in_the_project_works() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = FsStore::new(dir.path()).unwrap();
+        store.write("real/One.qml", "Item {}").unwrap();
+        std::os::unix::fs::symlink("real", dir.path().join("alias")).unwrap();
+        assert_eq!(store.read("alias/One.qml").unwrap(), "Item {}");
+        store.write("alias/Two.qml", "Item {}").unwrap();
+        assert!(store.exists("real/Two.qml"));
+    }
+
+    #[test]
+    fn a_new_file_in_a_new_directory_is_inside() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = FsStore::new(dir.path()).unwrap();
+        store.write("a/b/c/New.qml", "Item {}").unwrap();
+        assert!(store.exists("a/b/c/New.qml"));
+    }
+
+    #[test]
     fn a_link_cannot_lead_out_of_the_project() {
         let dir = tempfile::tempdir().unwrap();
         let outside = tempfile::tempdir().unwrap();
@@ -303,6 +322,10 @@ mod tests {
             assert!(
                 matches!(store.write(bad, "mine"), Err(StoreError::Outside(_))),
                 "write {bad}"
+            );
+            assert!(
+                matches!(store.remove(bad), Err(StoreError::Outside(_))),
+                "remove {bad}"
             );
             assert!(!store.exists(bad), "exists {bad}");
         }
