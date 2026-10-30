@@ -99,11 +99,27 @@ struct NewArgs {
     doc: String,
     /// Its text; an empty `Item` importing QtQuick when left out.
     text: Option<String>,
-    /// A project JSON file, an array of flat records: the document is a
-    /// `ListModel` with a `ListElement` for each. Not with `text`.
+    /// A project JSON file, an array of records: the document is a
+    /// `JsonListModel` reading it, or with `model: "list"` a `ListModel`
+    /// copy, a `ListElement` for each (flat) record. Not with `text`.
     data: Option<String>,
+    /// How `data` is kept: `json` (the default), or `list`.
+    #[serde(default)]
+    model: DataModel,
     #[serde(default)]
     dry_run: bool,
+}
+
+/// How a document keeps a JSON file's records.
+#[derive(Clone, Copy, Default, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+enum DataModel {
+    /// A `JsonListModel` whose `source` is the file: the file stays the
+    /// data.
+    #[default]
+    Json,
+    /// A `ListModel` copy of the records, edited as QML from then on.
+    List,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -849,31 +865,21 @@ fn root(studio: &mut Studio, doc: &str) -> Result<Address, SurfaceError> {
     Ok(Address::Node(handle))
 }
 
-/// A JSON object's members in the order written, which are a row's roles
-/// in the order a person reads them; a map would sort them.
-struct Record(Vec<(String, serde_json::Value)>);
-
-impl<'de> Deserialize<'de> for Record {
-    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        struct Members;
-        impl<'de> serde::de::Visitor<'de> for Members {
-            type Value = Record;
-            fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                f.write_str("a record")
-            }
-            fn visit_map<A: serde::de::MapAccess<'de>>(
-                self,
-                mut map: A,
-            ) -> Result<Record, A::Error> {
-                let mut out = Vec::new();
-                while let Some(member) = map.next_entry()? {
-                    out.push(member);
-                }
-                Ok(Record(out))
-            }
-        }
-        d.deserialize_map(Members)
-    }
+/// A `JsonListModel` document `doc` reading the project's JSON file `data`,
+/// which must be an array of records: what a list of it shows is then
+/// what the file says, whatever saves it.
+fn json_model(doc: &str, data: &str, json: &str) -> Result<String, SurfaceError> {
+    studio_core::models::records(json).map_err(|e| {
+        SurfaceError::invalid_argument(format!("`{data}` is not an array of records: {e}"))
+            .with_details(serde_json::json!({ "kind": "not_a_list" }))
+    })?;
+    let source = Literal::String(studio_core::models::relative_url(doc, data)).to_qml();
+    // Resolved against this file whoever makes the model: a relative
+    // `source` is the file's, and saying so keeps it so when the model is
+    // made by a document elsewhere.
+    Ok(format!(
+        "import Ljos.Models\n\nJsonListModel {{\n    source: Qt.resolvedUrl({source})\n}}\n"
+    ))
 }
 
 /// A `ListModel` document holding `json`'s records, each a `ListElement`
@@ -883,7 +889,7 @@ fn list_model(path: &str, json: &str) -> Result<String, SurfaceError> {
         SurfaceError::invalid_argument(format!("`{path}` {why}"))
             .with_details(serde_json::json!({ "kind": kind }))
     };
-    let records: Vec<Record> = serde_json::from_str(json)
+    let records = studio_core::models::records(json)
         .map_err(|e| refuse("not_a_list", format!("is not an array of records: {e}")))?;
     if records.is_empty() {
         return Ok("import QtQuick\n\nListModel {\n}\n".to_owned());
@@ -1283,8 +1289,9 @@ fn edits(studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
         .with(
             ToolDef::new::<NewArgs>(
                 "document_new",
-                "Create a QML document, from `text` or as a ListModel of a JSON file's records \
-                 (`data`). Refused if it exists or does not parse. Undo removes it.",
+                "Create a QML document, from `text` or reading a JSON file's records (`data`): a \
+                 JsonListModel of the file, or with `model: \"list\"` a ListModel copy. Refused \
+                 if it exists or does not parse. Undo removes it.",
             )
             .output::<EditOut>()
             .requires(Cap::Mutate)
@@ -1302,7 +1309,10 @@ fn edits(studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
                         (Some(text), None) => text,
                         (None, Some(data)) => {
                             let json = studio.session.store().read(&data).map_err(store_error)?;
-                            list_model(&data, &json)?
+                            match a.model {
+                                DataModel::Json => json_model(&a.doc, &data, &json)?,
+                                DataModel::List => list_model(&data, &json)?,
+                            }
                         }
                         (None, None) => NEW_DOCUMENT.to_owned(),
                     };

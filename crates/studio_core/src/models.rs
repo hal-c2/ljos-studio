@@ -1,16 +1,20 @@
 //! The data a list shows: a `ListModel`, written in the document or in a
 //! document of its own (`model: Contacts {}`), whose `ListElement`s are
-//! its rows and whose roles are the names their members bind.
+//! its rows and whose roles are the names their members bind; or a
+//! `JsonListModel` (Ljós's own) reading a JSON file of the project, whose
+//! records are its rows and whose roles are their keys.
 //!
-//! Only data written as QML is read: a model made by code (an array, a
-//! request's answer) has roles nobody knows before it runs.
+//! Only data the project holds is read: a model made by code (an array, a
+//! request's answer) or read from a URL has roles nobody knows before it
+//! runs.
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
-use crate::{Address, Error, Node, Session, flows::beside};
+use crate::{Address, Error, Node, Session, flows::beside, outline::literal_string};
 use qml_edit::Step;
 
 const LIST_MODEL: &str = "ListModel";
+const JSON_LIST_MODEL: &str = "JsonListModel";
 const LIST_ELEMENT: &str = "ListElement";
 /// The types that make one delegate for each row of a `model`.
 const VIEWS: [&str; 5] = ["ListView", "GridView", "Repeater", "PathView", "TableView"];
@@ -21,8 +25,11 @@ pub struct Model {
     /// Its roles, in the order the rows first bind them.
     pub roles: Vec<String>,
     pub rows: usize,
-    /// The document the `ListModel` is written in.
+    /// The document the model is written in.
     pub doc: String,
+    /// The JSON file a `JsonListModel` reads, relative to the project.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
     /// The handle of the list whose delegate the object is in.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub view: Option<String>,
@@ -55,8 +62,91 @@ fn read(tree: &[(String, Node)], model: &Node, doc: &str) -> Model {
         roles,
         rows,
         doc: doc.to_owned(),
+        source: None,
         view: None,
     }
+}
+
+/// A JSON object's members in the order written, which are a row's roles
+/// in the order a person reads them; a map would sort them.
+pub struct Record(pub Vec<(String, serde_json::Value)>);
+
+impl<'de> Deserialize<'de> for Record {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        struct Members;
+        impl<'de> serde::de::Visitor<'de> for Members {
+            type Value = Record;
+            fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.write_str("a record")
+            }
+            fn visit_map<A: serde::de::MapAccess<'de>>(
+                self,
+                mut map: A,
+            ) -> Result<Record, A::Error> {
+                let mut out = Vec::new();
+                while let Some(member) = map.next_entry()? {
+                    out.push(member);
+                }
+                Ok(Record(out))
+            }
+        }
+        d.deserialize_map(Members)
+    }
+}
+
+/// The records of a JSON array of objects, which a `JsonListModel` makes
+/// its rows.
+///
+/// # Errors
+/// Text that is not such an array.
+pub fn records(json: &str) -> Result<Vec<Record>, serde_json::Error> {
+    serde_json::from_str(json)
+}
+
+/// The project path a QML file `doc` names with the relative URL `url`;
+/// `None` for one with a scheme or a root, or one that climbs out of the
+/// project, which the project does not hold.
+fn resolve_url(doc: &str, url: &str) -> Option<String> {
+    if url.contains(':') || url.starts_with('/') {
+        return None;
+    }
+    let mut parts: Vec<&str> = doc.split('/').collect();
+    parts.pop();
+    for part in url.split('/') {
+        match part {
+            "" | "." => {}
+            ".." => {
+                parts.pop()?;
+            }
+            _ => parts.push(part),
+        }
+    }
+    Some(parts.join("/"))
+}
+
+/// The relative URL a binding writes: a string, or a string the file
+/// resolves against itself (`Qt.resolvedUrl("…")`), which is the same URL.
+fn url_written(value: &str) -> Option<String> {
+    let inner = value
+        .strip_prefix("Qt.resolvedUrl(")
+        .and_then(|v| v.strip_suffix(')'))
+        .map_or(value, str::trim);
+    literal_string(inner)
+}
+
+/// `to`, a project path, as a URL relative to the QML file `doc`.
+pub fn relative_url(doc: &str, to: &str) -> String {
+    let from: Vec<&str> = doc.split('/').collect();
+    let from = &from[..from.len() - 1];
+    let to: Vec<&str> = to.split('/').collect();
+    let shared = from
+        .iter()
+        .zip(&to[..to.len() - 1])
+        .take_while(|(a, b)| a == b)
+        .count();
+    let mut out: Vec<&str> = vec![".."; from.len() - shared];
+    out.extend(&to[shared..]);
+    out.join("/")
 }
 
 impl Session {
@@ -71,6 +161,9 @@ impl Session {
         let (tree, _) = self.tree(path)?;
         if short(&node.ty) == LIST_MODEL {
             return Ok(Some(read(&tree, &node, path)));
+        }
+        if short(&node.ty) == JSON_LIST_MODEL {
+            return Ok(self.read_json(&node, path));
         }
         if VIEWS.contains(&short(&node.ty)) {
             return self.model_of(path, &tree, &node);
@@ -168,6 +261,9 @@ impl Session {
             if short(&value.ty) == LIST_MODEL {
                 return Ok(Some(read(tree, value, path)));
             }
+            if short(&value.ty) == JSON_LIST_MODEL {
+                return Ok(self.read_json(value, path));
+            }
             let Some(doc) = self.type_document(path, &value.ty)? else {
                 return Ok(None);
             };
@@ -176,18 +272,50 @@ impl Session {
                 Err(Error::Broken { .. }) => return Ok(None),
                 Err(e) => return Err(e),
             };
-            return Ok(other
-                .first()
-                .filter(|(_, root)| short(&root.ty) == LIST_MODEL)
-                .map(|(_, root)| read(&other, root, &doc)));
+            return Ok(match other.first() {
+                Some((_, root)) if short(&root.ty) == LIST_MODEL => Some(read(&other, root, &doc)),
+                Some((_, root)) if short(&root.ty) == JSON_LIST_MODEL => self.read_json(root, &doc),
+                _ => None,
+            });
         }
         let Some(binding) = view.bindings.iter().find(|b| b.name == "model") else {
             return Ok(None);
         };
         let id = binding.value.trim();
-        Ok(tree
-            .iter()
-            .find(|(_, n)| n.id.as_deref() == Some(id) && short(&n.ty) == LIST_MODEL)
-            .map(|(_, n)| read(tree, n, path)))
+        let Some((_, model)) = tree.iter().find(|(_, n)| n.id.as_deref() == Some(id)) else {
+            return Ok(None);
+        };
+        Ok(match short(&model.ty) {
+            LIST_MODEL => Some(read(tree, model, path)),
+            JSON_LIST_MODEL => self.read_json(model, path),
+            _ => None,
+        })
+    }
+
+    /// The roles and rows of the `JsonListModel` `model` of the document
+    /// `doc`, read from its file now: the file is the data, which anything
+    /// may have saved since. `None` when it names no file of the project
+    /// (`json` text, a URL, a binding) or the file is not an array of
+    /// records, whose roles are then not known.
+    fn read_json(&self, model: &Node, doc: &str) -> Option<Model> {
+        let binding = model.bindings.iter().find(|b| b.name == "source")?;
+        let source = resolve_url(doc, &url_written(binding.value.trim())?)?;
+        let text = self.store().read(&source).ok()?;
+        let records = records(&text).ok()?;
+        let mut roles: Vec<String> = Vec::new();
+        for record in &records {
+            for (key, _) in &record.0 {
+                if !roles.contains(key) {
+                    roles.push(key.clone());
+                }
+            }
+        }
+        Some(Model {
+            roles,
+            rows: records.len(),
+            doc: doc.to_owned(),
+            source: Some(source),
+            view: None,
+        })
     }
 }
