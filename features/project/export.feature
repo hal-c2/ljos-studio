@@ -4,6 +4,7 @@
 #   ljos-ui docs/ARCHITECTURE.md section 12.2 (production bundles) and
 #   `ljos run` (a project directory and its entry document)
 
+@disk
 Feature: A project is exported as a bundle that runs without Studio
   An export writes what the app needs and nothing of Studio's: the
   project's QML, its theme, its assets and its own blocks, with a manifest
