@@ -103,7 +103,7 @@ code or file formats is read or copied.
 |---|---|---|
 | **Edit** | `qml_edit::apply(text, Edit) -> Applied{text, changes}`, and `Applied::inverse(&self, source) -> Vec<Change>` | One. Studio's `History` keeps the inverse changes for undo. |
 | **Document store** | `trait Store { read, write, watch }` | Filesystem (native); browser storage / File System Access (web); in-memory (tests). |
-| **Preview host** | `trait PreviewHost { load(files, aliases), snapshot, screenshot, set_state, events }` | Native: a child Ljós process with the live inspector (`ljos_dev`, `app_*` tools) and hot reload. Web: an ljos-web runtime in an iframe/worker. Test: in-process `TestWindow`. |
+| **Preview host** | `trait PreviewHost { open(spec), reload, alias, resize, screenshot, outline, read, write, logs, close }` (`studio_core::preview`) | Native: a child Ljós process with the live inspector (`ljos_dev`, `app_*` tools) and hot reload. Web: an ljos-web runtime in an iframe/worker. Test: in-process `TestWindow`. |
 | **Block source** | `BlockRegistry::from_type_dump` | `ljostypes.json` + qmldir `block` lines on disk; a running app's `Engine::type_dump()`. |
 | **Agent surface** | MCP tools (MCP.md) | stdio (`studio --mcp`), and the same tools on the running Studio's loopback endpoint, guarded as below. |
 | **Canvas renderer** | Studio's `Canvas` block draws the preview's frames | Native: textures from the preview host. Web: the preview iframe is the canvas frame. |
@@ -237,9 +237,9 @@ Each milestone ends with its exit criteria met and its scenarios green.
 ### S2: preview
 
 - `PreviewHost` native adapter (child Ljós process, inspector, hot reload).
-- Mock modules through aliases; `preview_open`, `preview_screenshot`,
-  `preview_state` (read or set mocked state); the target (desktop,
-  phone-sized, web) is an argument of `preview_open`, not a tool.
+- Mock modules through aliases; `preview_open` (the target, desktop,
+  phone-sized or web, is an argument, not a tool), `preview_state` (read
+  or set mocked state), `preview_screenshot`, `preview_events` (MCP.md).
 - **Exit:** a block edited through MCP shows in the preview within the
   latency budget; live and mocked state preview the same shell unchanged.
 

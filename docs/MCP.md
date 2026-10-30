@@ -49,10 +49,10 @@ documents: export), `run` (start previews).
 | 19 | `theme_tokens` | Read tokens (`Ljos.Design` roles and the theme file), light and dark | inspect |
 | 20 | `theme_set` | Set a token's value; preview reloads live | mutate |
 | 21 | `history` | List, undo or redo edits (each with its inverse changes) | inspect to list; mutate to undo or redo |
-| 22 | `preview_open` | Start a preview of a shell on a target (desktop, phone-sized, web) with live or mocked state | run |
-| 23 | `preview_state` | Read or set mocked block state in the preview | run |
-| 24 | `preview_screenshot` | Screenshot a preview or a frame (≤ 1280 px, ≤ 1 MB) | inspect |
-| 25 | `preview_events` | Since a cursor: reloads, errors, block events, logs from the preview | inspect |
+| 22 | `preview_open` | Start a preview of a shell on a target (desktop, tablet, phone) or size with live or mocked state; on the open one, change size or state in place | run |
+| 23 | `preview_state` | Read a block's published state in the preview; set it when the block is mocked | run |
+| 24 | `preview_screenshot` | A PNG of the preview (≤ 1280 px), or its outline as text | inspect |
+| 25 | `preview_events` | Since a cursor: opened, reloaded (with ms), reload failed, logs, ended | inspect |
 | 26 | `export` | Write a build bundle or a site for a target | fs |
 
 A document is a `.qml` file of the project outside the directories a walk
@@ -109,7 +109,37 @@ first version:
 | `ljos mcp` | `blocks_list` | The block registry from the project's type dump and qmldir `block` lines |
 | inspector | `app_blocks` | The live app's blocks with their current published state |
 | inspector | `app_block_invoke` | Call a block action by name with arguments (`mutate`) |
-| inspector | `app_preview_alias` | Map a module to its mock module and reload (`mutate`, dev builds) |
+| inspector | `app_alias` | Import a module from another directory (its mock module) and reload, keeping state (`mutate`, `--watch`) |
+| `ljos run` | `--headless`, `--alias MODULE=DIR` | Run an application with no window (every `app_*` tool still works) and with a module imported from elsewhere |
+
+## Previews (S2)
+
+One preview runs at a time, of one document, in a child `ljos run
+--headless --watch --mcp=inspect,input,mutate` process that Studio drives
+through the child's inspector. After every write of the session (an
+agent's edit, a person's typing, undo) Studio asks the child to reload at
+once (`app_reload`), so the edit's tool call answers after the preview
+shows it; the watcher's quiet time is not on that path.
+
+- DECISION: targets are a parameter of `preview_open`, not a tool:
+  `desktop` 1280×800, `tablet` 820×1180, `phone` 390×844, or any `size`.
+- DECISION: re-opening the open document changes its size and its aliases
+  in place (`started: false`) and keeps the app's state; another document
+  starts another process.
+- DECISION: mock modules are the project's `mocks/` directory, one
+  `qmldir` per module, found by its `module` line. `state: "mocked"`
+  imports each from there (`--alias`, then `app_alias` to switch); the
+  shell's text is the same either way.
+- DECISION: `preview_state` names a block's object by node and needs its
+  `id`; state names come from the block's contract. Setting is refused
+  (`not_actionable`) unless the block is mocked: a live block's state is the
+  app's own.
+- DECISION: `preview_screenshot {format: "outline"}` gives the preview's
+  items as text (the inspector's outline) instead of a separate tool:
+  Studio's list stays within 25 tools with the ones still to come.
+- DECISION: starting a preview needs `run` (it runs the project's code);
+  looking at one that runs (`preview_screenshot`, `preview_events`) needs
+  only `inspect`.
 
 ## Prompts
 
