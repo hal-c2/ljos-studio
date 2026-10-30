@@ -190,6 +190,10 @@ struct FindOut {
     /// Documents left out because they do not parse.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     broken: Vec<String>,
+    /// Documents left out because they could not be read (not UTF-8, gone
+    /// since they were listed); `document_text` on one says why.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    unreadable: Vec<String>,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -661,7 +665,7 @@ pub(crate) fn registry(studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
             ToolDef::new::<FindArgs>(
                 "node_find",
                 "Find objects by id, type, binding name or text in a binding's value, in one \
-                 document or all. Returns handles.",
+                 document or all (naming those it could not parse or read). Returns handles.",
             )
             .output::<FindOut>()
             .requires(Cap::Inspect),
@@ -676,12 +680,19 @@ pub(crate) fn registry(studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
                     let mut out = FindOut {
                         nodes: Vec::new(),
                         broken: Vec::new(),
+                        unreadable: Vec::new(),
                     };
                     for doc in docs {
                         let tree = match studio.session.tree(&doc) {
                             Ok((tree, _)) => tree,
                             Err(studio_core::Error::Broken { .. }) if a.doc.is_none() => {
                                 out.broken.push(doc);
+                                continue;
+                            }
+                            // One file a search cannot read does not hide
+                            // what the others hold.
+                            Err(studio_core::Error::Store(_)) if a.doc.is_none() => {
+                                out.unreadable.push(doc);
                                 continue;
                             }
                             Err(e) => return Err(error(e)),

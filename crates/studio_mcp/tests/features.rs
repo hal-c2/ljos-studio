@@ -170,6 +170,11 @@ fn the_file(w: &mut StudioWorld, name: String, step: &Step) -> StepResult {
     std::fs::write(path, file_text(step)?).map_err(|e| e.to_string())
 }
 
+#[given(regex = r#"^the file "([^"]+)" holds bytes that are not UTF-8$"#)]
+fn not_utf8(w: &mut StudioWorld, name: String) -> StepResult {
+    std::fs::write(w.dir.path().join(&name), b"Item { \xff }\n").map_err(|e| e.to_string())
+}
+
 #[when(regex = r#"^the file "([^"]+)" is rewritten outside Studio:$"#)]
 fn rewritten(w: &mut StudioWorld, name: String, step: &Step) -> StepResult {
     std::fs::write(w.dir.path().join(&name), file_text(step)?).map_err(|e| e.to_string())

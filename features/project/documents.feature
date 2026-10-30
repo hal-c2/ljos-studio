@@ -101,3 +101,13 @@ Feature: An agent opens a project and reads and makes its documents
       """
     Then the answer's "/nodes" has 1 entry
     And the answer's "/nodes/0/doc" is "parts/Card.qml"
+
+  Scenario: A document that cannot be read is named and the others are searched
+    Given the file "Latin1.qml" holds bytes that are not UTF-8
+    When the agent calls the tool "node_find" with:
+      """json
+      {"type": "Rectangle"}
+      """
+    Then the answer's "/nodes" has 1 entry
+    And the answer's "/nodes/0/doc" is "parts/Card.qml"
+    And the answer's "/unreadable" is ["Latin1.qml"]

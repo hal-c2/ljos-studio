@@ -9,7 +9,7 @@ expression: value
     "open_world": false,
     "read_only": true
   },
-  "description": "Find objects by id, type, binding name or text in a binding's value, in one document or all. Returns handles.",
+  "description": "Find objects by id, type, binding name or text in a binding's value, in one document or all (naming those it could not parse or read). Returns handles.",
   "inputSchema": {
     "additionalProperties": false,
     "properties": {
@@ -97,11 +97,19 @@ expression: value
           "$ref": "#/$defs/Found"
         },
         "type": "array"
+      },
+      "unreadable": {
+        "description": "Documents left out because they could not be read (not UTF-8, gone\nsince they were listed); `document_text` on one says why.",
+        "items": {
+          "type": "string"
+        },
+        "type": "array"
       }
     },
     "required": [
       "nodes",
-      "broken"
+      "broken",
+      "unreadable"
     ],
     "title": "FindOut",
     "type": "object"
