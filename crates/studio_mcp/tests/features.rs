@@ -313,6 +313,15 @@ fn links_out(w: &mut StudioWorld, link: String, file: String) -> StepResult {
     link_outside(w, link, file)
 }
 
+#[given(regex = r#"^"([^"]+)" links to "([^"]+)" in the project$"#)]
+fn links_in(w: &mut StudioWorld, link: String, target: String) -> StepResult {
+    #[cfg(unix)]
+    return std::os::unix::fs::symlink(w.dir.path().join(&target), w.dir.path().join(&link))
+        .map_err(|e| e.to_string());
+    #[cfg(not(unix))]
+    return Err(format!("`{link}`: links are made on unix only"));
+}
+
 #[then(regex = r#"^the directory outside the project holds only "([^"]*)"$"#)]
 fn outside_holds(w: &mut StudioWorld, names: String) -> StepResult {
     let outside = w.outside.last().ok_or("no directory outside the project")?;

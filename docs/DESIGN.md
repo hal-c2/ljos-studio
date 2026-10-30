@@ -123,7 +123,8 @@ rewrite the user's QML (`mutate`), start a preview that runs project code
   in the server;
 - every path a tool takes, `export`'s output among them, is canonicalised
   and confined to the open project; a path outside it is refused, and so
-  is one a link leads out of. `export` leaves a link out of the project
+  is one a link leads out of. `export` leaves a link out of the project,
+  or to anything it leaves out itself (mocks, the sidecar, build output),
   out of the bundle, and refuses a build directory that is a link.
 
 `studio --mcp` on stdio needs no token: its client started it.

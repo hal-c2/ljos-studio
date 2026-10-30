@@ -147,6 +147,20 @@ fn left_out_why(name: &str, is_dir: bool, top: bool) -> Option<&'static str> {
     }
 }
 
+/// Why a bundle leaves out where a link in the project leads: any part of
+/// the way from `root` to `real` that the walk would not go down itself.
+fn target_left_out_why(root: &Path, real: &Path, is_dir: bool) -> Option<&'static str> {
+    let parts: Vec<_> = real.strip_prefix(root).ok()?.components().collect();
+    parts.iter().enumerate().find_map(|(at, part)| {
+        let last = at + 1 == parts.len();
+        left_out_why(
+            &part.as_os_str().to_string_lossy(),
+            !last || is_dir,
+            at == 0,
+        )
+    })
+}
+
 /// The project's files that go in a bundle, sorted, and what is left out.
 /// `root` is canonical.
 ///
@@ -185,7 +199,14 @@ fn walk(root: &Path) -> Result<(Vec<FileEntry>, Vec<LeftOut>), SurfaceError> {
                 within[0].join(&name)
             };
             let meta = fs::metadata(&full).map_err(|e| io(&full, &e))?;
-            if let Some(why) = left_out_why(&name, meta.is_dir(), prefix.is_empty()) {
+            let own = left_out_why(&name, meta.is_dir(), prefix.is_empty());
+            // A link's name says nothing: `shim -> mocks` is still mocks.
+            let target = if link {
+                target_left_out_why(root, &real, meta.is_dir())
+            } else {
+                None
+            };
+            if let Some(why) = own.or(target) {
                 left_out.push(LeftOut {
                     path,
                     why: why.to_owned(),

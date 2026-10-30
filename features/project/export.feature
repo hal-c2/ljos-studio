@@ -136,6 +136,23 @@ Feature: A project is exported as a bundle that runs without Studio
         ]
         """
 
+    Scenario: A link to what the bundle leaves out is left out with it
+      Given "shim" links to "mocks" in the project
+      And "notes" links to ".studio" in the project
+      When the agent calls the tool "export" with:
+        """json
+        {"entry": "Shell.qml", "dry_run": true}
+        """
+      Then the answer's "/manifest/left_out" is:
+        """json
+        [
+          {"path": ".studio", "why": "Studio's sidecar"},
+          {"path": "mocks", "why": "mock modules stand in for blocks in previews only"},
+          {"path": "notes", "why": "Studio's sidecar"},
+          {"path": "shim", "why": "mock modules stand in for blocks in previews only"}
+        ]
+        """
+
     Scenario: A dry run says what the bundle would hold and writes nothing
       When the agent calls the tool "export" with:
         """json
@@ -270,6 +287,21 @@ Feature: A project is exported as a bundle that runs without Studio
         module App.Store
         Cart 1.0 Cart.qml
         """
+      When the agent calls the tool "export" with:
+        """json
+        {"entry": "Shell.qml"}
+        """
+      Then the agent is refused with "not_actionable"
+      And the refusal's "/details/kind" is "mocked_only"
+      And the refusal's "/details/modules" is ["App.Store"]
+
+    Scenario: A module only a mock provides is that still behind a link
+      Given the file "mocks/App/Store/qmldir":
+        """
+        module App.Store
+        Cart 1.0 Cart.qml
+        """
+      And "shim" links to "mocks" in the project
       When the agent calls the tool "export" with:
         """json
         {"entry": "Shell.qml"}
