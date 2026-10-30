@@ -5241,10 +5241,13 @@ dependencies = [
  "anyhow",
  "clap",
  "ljos",
+ "ljos_drive",
  "ljos_mcp_core",
+ "serde_json",
  "studio_blocks",
  "studio_mcp",
  "studio_preview",
+ "tempfile",
  "tokio",
 ]
 
