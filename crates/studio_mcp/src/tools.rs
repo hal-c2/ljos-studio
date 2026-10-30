@@ -2,7 +2,9 @@
 
 use std::sync::{Arc, Mutex};
 
-use ljos_mcp_core::{Cap, SurfaceError, ToolAnnotations, ToolDef, ToolRegistry, paginate, typed};
+use ljos_mcp_core::{
+    CallCtx, Cap, SurfaceError, ToolAnnotations, ToolDef, ToolRegistry, denied, paginate, typed,
+};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use studio_core::{Address, Literal, Node, Op, Outcome};
@@ -930,14 +932,20 @@ pub(crate) fn registry(studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
         .with(
             ToolDef::new::<HistoryArgs>(
                 "history",
-                "List edits, or undo or redo the last one. Undo gives back the document's bytes.",
+                "List edits (`inspect`), or undo or redo the last one (`mutate`). Undo gives back \
+                 the document's bytes.",
             )
             .output::<HistoryOut>()
-            .requires(Cap::Mutate)
+            .requires(Cap::Inspect)
             .annotated(DESTRUCTIVE),
             typed({
                 let studio = s();
-                move |_, a: HistoryArgs| {
+                move |ctx: &CallCtx, a: HistoryArgs| {
+                    // Listing only reads; the registry checked `inspect`, the
+                    // rest is checked here, refused the way the registry does.
+                    if !matches!(a.action, HistoryAction::List) && !ctx.caps.contains(Cap::Mutate) {
+                        return Err(denied("history", Cap::Mutate, ctx));
+                    }
                     let mut studio = lock(&studio);
                     let entry = match a.action {
                         HistoryAction::List => None,

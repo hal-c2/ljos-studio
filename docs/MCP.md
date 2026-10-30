@@ -48,7 +48,7 @@ documents: export), `run` (start previews).
 | 18 | `slot_contribute` | Add a `Contribution` to a block's slot | mutate |
 | 19 | `theme_tokens` | Read tokens (`Ljos.Design` roles and the theme file), light and dark | inspect |
 | 20 | `theme_set` | Set a token's value; preview reloads live | mutate |
-| 21 | `history` | List, undo or redo edits (each with its inverse changes) | mutate |
+| 21 | `history` | List, undo or redo edits (each with its inverse changes) | inspect to list; mutate to undo or redo |
 | 22 | `preview_open` | Start a preview of a shell on a target (desktop, phone-sized, web) with live or mocked state | run |
 | 23 | `preview_state` | Read or set mocked block state in the preview | run |
 | 24 | `preview_screenshot` | Screenshot a preview or a frame (≤ 1280 px, ≤ 1 MB) | inspect |
