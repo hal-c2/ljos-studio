@@ -122,7 +122,9 @@ rewrite the user's QML (`mutate`), start a preview that runs project code
 - capabilities are granted at launch (`inspect` by default) and enforced
   in the server;
 - every path a tool takes, `export`'s output among them, is canonicalised
-  and confined to the open project; a path outside it is refused.
+  and confined to the open project; a path outside it is refused, and so
+  is one a link leads out of. `export` leaves a link out of the project
+  out of the bundle, and refuses a build directory that is a link.
 
 `studio --mcp` on stdio needs no token: its client started it.
 
@@ -683,13 +685,18 @@ S1–S4 scenarios in a headless browser.
   its edges, an interaction going from any state. There is no flow model
   beside the file.
 - **The preview plays it.** `preview_state` clicks the running app, by an
-  object's `id` or at a point, and reads the state it reached.
+  object's `id` or at a point, and reads the state the `node` it names
+  reached; a click with no `node` plays and reads nothing, which is how
+  the window plays a document whose root has no `id`. Setting a state
+  needs the `node` it is set on.
 - **Data is a model document.** A list's content is a `ListModel` written
   as QML, in its own document of a data module; a JSON file becomes one
   with `document_new`. The roles the data binds are offered in the
   inspector of a delegate as `model.<role>`. The mocked state swaps the
   module for one under `mocks/`, so a fixture is a file beside the other
-  mocks.
+  mocks. Only a view's delegate sees its roles, not its header or footer.
+  A record's keys are its roles, so a key may not repeat within a record,
+  and `id` is not a role: QML reads it as the object's id.
 - **The window.** The *Flow* panel (`shell/FlowPanel.qml`) shows the
   states as nodes ("Flow state Base", "Flow state details"), each with a
   button that wires the selection to go to it ("Tap selection to go to
@@ -731,13 +738,24 @@ their arguments, answers and refusals.
   Deleting `.studio/` loses the comments and nothing else.
 - **A removed object orphans its comments.** They are kept with the
   place the object last had and can still be answered; undoing the
-  removal gives them their object back.
+  removal gives them their object back, and so does redoing the creation
+  of a document whose undo orphaned them.
+- **The sidecar is never written over blindly.** Each review call reads
+  `.studio/review.json` again when it changed on disk. A sidecar that
+  does not read, or one a later Studio wrote (a higher `version`), is
+  left alone and every call says so (`review_unreadable`) until it is
+  mended or deleted. A sidecar changed by somebody else between Studio's
+  read and its write is not overwritten: the call is refused with
+  `review_changed` and the new file is what Studio holds from then on. A
+  comment the sidecar did not take is not made.
 - **The window.** A layer with open comments says how many ("1 comment on
   Text title"). The inspector's *Comments* section lists the selected
   object's comments and the document's orphaned ones ("Open comment: Too
   small", "Resolved comment: …", "Orphaned comment: …"), each with a
   "Resolve …" or "Reopen …" button, and "New comment" with "Add comment"
-  adds one. Every gesture is the `review` call an agent makes.
+  adds one to the selected object. The box keeps its text until the
+  comment is taken, so a refused one is sent again rather than typed
+  again. Every gesture is the `review` call an agent makes.
 
 DECISION: the bundle is a directory, not Ljós's production bundle
 (ARCHITECTURE.md 12.2) nor an AOT binary: both need a build Studio does
@@ -745,7 +763,14 @@ not make. Its manifest has no hashes or signature until Ljós defines them.
 DECISION: a bundle is written below the project's `build/`, which the
 store does not list, so it is never a document nor part of the next one.
 DECISION: comments are not edits: they are not in the undo history, and
-they change no document's generation.
+they change no document's generation. DECISION: while the sidecar does
+not read, the window shows no comments rather than a refusal on every
+repaint; the next review gesture shows the refusal. DECISION: a sidecar
+changed on disk replaces Studio's comments as a whole, so comments made
+in this session and not yet written are not merged into it; the refusal
+says so. DECISION: export leaves a link out of the project out of the
+bundle (named in `left_out`) rather than refusing the export, as it does
+for the mocks; an entry that is left out is refused (`entry_left_out`).
 
 Measured in a release build on the reference desktop:
 

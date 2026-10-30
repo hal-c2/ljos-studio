@@ -308,10 +308,13 @@ or `navigator` and `open`) of the object and everything in it, so the
 root's is the document's whole flow; a handler whose body is not one of
 the three forms is the app's own logic and is not listed.
 
-`preview_state {node, click?, click_at?: {x, y}, set?}` plays the flow:
+`preview_state {node?, click?, click_at?: {x, y}, set?}` plays the flow:
 after `set`, it clicks the object `click` names (by its `id`) or the
 topmost item drawn at `click_at`, through the preview's inspector, then
-reads `node`. `variant` is the state it is in now (empty for the base
+reads `node`. Without `node` it only clicks and answers nothing (`id` and
+`variant` are left out), so a document whose root has no `id` can be
+played; with neither `node` nor a click, or `set` without `node`, it is
+refused (`invalid_argument`). `variant` is the state it is in now (empty for the base
 state); `block` and `state` are left out for an object that is not a
 block, and `set` on one is refused (`not_a_block`).
 
@@ -319,9 +322,12 @@ A list's data is a `ListModel`, in the document or in a document of its
 own the list makes (`model: Contacts {}`): content a person edits as any
 QML. `document_new {doc, data}` writes one from a project JSON file of
 flat records, one `ListElement` each with the records' keys in order
-(`invalid_argument` with `not_a_list`, `not_a_role` or `not_flat`
-otherwise, and for `text` and `data` together). `node_inspect` gives the
-`model` the object sees: `roles` (in the order the rows first bind them),
+(`invalid_argument` with `not_a_list`, `not_a_role` (also for a key
+named `id`, which QML reads as the object's id), `repeated_role` for a
+key a record has twice, or `not_flat` otherwise, and for `text` and
+`data` together). `node_inspect` gives the
+`model` the object sees (a view's delegate only, not its header or
+footer): `roles` (in the order the rows first bind them),
 `rows`, `doc`, and `view`, the list it is a delegate of; a delegate binds
 a role as `model.name` with `binding_set`. The mocked state swaps the data
 for a fixture: a module under `mocks/` of the same name (`mocks/App/Data`)
@@ -367,7 +373,10 @@ for an entry that is not a document; `unsupported` for `target: "web"`
 `details.files`); `syntax` for a document that does not parse (`broken`,
 `details.doc`); `not_actionable` for a module only a mock provides
 (`mocked_only`, `details.modules`) and for a project not in a directory
-(`no_directory`); `path_denied` for an `out` not below `build/`;
+(`no_directory`) and for an entry that is not in the bundle
+(`entry_left_out`, `details.why`); `path_denied` for an `out` not below
+`build/` or one a link leads elsewhere; a link out of the project is left
+out (`left_out`, "a link out of the project");
 `invalid_argument` (`exists`) for an `out` that holds something other
 than a bundle.
 
@@ -395,8 +404,11 @@ orphaned), `anchor` (`path`, `line`, `type`, `id?`: where the object is or
 last was), `orphaned`, `resolved` and `thread` (`author?`, `text`, `at`,
 milliseconds since the epoch). Listing needs `inspect`; the rest `mutate`.
 Refusals: `not_found` (`no_comment`), `invalid_argument` for a comment
-with no text, `not_actionable` (`review_unreadable`) for writing over a
-sidecar this version cannot read.
+with no text, `not_actionable` (`review_unreadable`) for any call while
+the sidecar does not read or a later Studio wrote it (it is read again on
+each call, so mending it is enough), `stale_ref` (`review_changed`) for a
+write when somebody else changed the sidecar since Studio read it: the
+comment is not made and the sidecar on disk is what Studio holds now.
 
 - DECISION: a comment follows its object as a handle does, through
   anybody's edits; on disk it carries the object's key, so the next
