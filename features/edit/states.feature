@@ -158,6 +158,30 @@ Feature: An agent edits a component's states and transitions
         }
         """
 
+    Scenario: A one-line list with a trailing comma takes a state with one comma
+      Given the file "Line.qml":
+        """qml
+        import QtQuick
+
+        Item {
+            states: [State { name: "a" },]
+        }
+        """
+      When the agent calls the tool "state_edit" with:
+        """json
+        {"doc": "Line.qml", "action": "add", "state": "b"}
+        """
+      Then the file "Line.qml" is:
+        """qml
+        import QtQuick
+
+        Item {
+            states: [State { name: "a" }, State {
+                name: "b"
+            }]
+        }
+        """
+
     Scenario: Two states of one name are refused
       Given the agent has called the tool "state_edit" with:
         """json

@@ -491,7 +491,8 @@ fn add(
                 let lead = if trailing { "" } else { "," };
                 format!("{lead}{nl}{indent}{}{comma}", indented(indent))
             } else {
-                format!(", {}", indented(&outer))
+                let lead = if trailing { "" } else { "," };
+                format!("{lead} {}", indented(&outer))
             };
             Ok(splice(source, at, at, &put))
         }
