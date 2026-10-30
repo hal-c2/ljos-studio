@@ -1,0 +1,93 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gates:
+    runs-on: ubuntu-latest
+    env:
+      # Ljós's table of Qt's types is generated from an installed Qt and never
+      # committed; none is installed here, and this says so outright.
+      LJOS_QT_TYPES: none
+    steps:
+      - uses: actions/checkout@v5
+      # The Rust version and its components come from mise.toml and rust-toolchain.toml.
+      - uses: jdx/mise-action@v3
+      - uses: Swatinem/rust-cache@v2
+      # After rust-cache: steps' saves run in reverse, and rust-cache's trims
+      # target/, which holds the ljos and wasm-bindgen this restores.
+      - uses: actions/cache@v4
+        with:
+          path: target/tools
+          key: tools-${{ runner.os }}-${{ hashFiles('Cargo.toml', 'Cargo.lock') }}
+      # The render tests need a wgpu adapter (lavapipe is a software Vulkan);
+      # Ljós links fontconfig and ALSA on Linux.
+      - run: sudo apt-get update && sudo apt-get install -y mesa-vulkan-drivers libfontconfig1-dev libasound2-dev pkg-config
+      - run: mise run check
+      - run: mise run check:tasks
+      - run: mise run check:wasm
+      - run: mise run test
+      # Builds ljos from the rev Cargo.toml pins, unless the cache above has it.
+      - run: mise run features
+      - run: mise run features:web
+
+  browser:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: studio
+    env:
+      # ljos-web's mise.toml sets Rust's options, which mise wants trusted.
+      MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}/ljos-web
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          path: studio
+      # The pin's one place is web/ljos-web.rev; the tasks read it too.
+      - id: pin
+        run: echo "rev=$(cat web/ljos-web.rev)" >> "$GITHUB_OUTPUT"
+      # Beside this checkout, where the tasks look with nothing set.
+      - uses: actions/checkout@v5
+        with:
+          repository: hal-c2/ljos-web
+          ref: ${{ steps.pin.outputs.rev }}
+          path: ljos-web
+      - uses: jdx/mise-action@v3
+        with:
+          working_directory: studio
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: ljos-web/package.json
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            studio
+            ljos-web
+      - uses: actions/cache@v4
+        with:
+          path: studio/target/tools
+          key: tools-${{ runner.os }}-${{ hashFiles('studio/Cargo.toml', 'studio/Cargo.lock') }}
+      # Qt 6.11's QML, as Ljós's own CI uses: the shell's Controls are read from
+      # it, and Ubuntu's Qt is older and split across packages. Only QML is
+      # wanted, so no archives beyond the base.
+      - uses: jurplel/install-qt-action@v4
+        with:
+          version: "6.11.2"
+          cache: true
+      - run: sudo apt-get update && sudo apt-get install -y libfontconfig1-dev libasound2-dev pkg-config
+      # ljos-web names ljos-ui by ssh://; both are public, and a runner has no key.
+      - run: git config --global url."https://github.com/".insteadOf "ssh://git@github.com/"
+      - run: pnpm install --frozen-lockfile
+        working-directory: ljos-web
+      - run: pnpm --filter ljos-web-example-web exec playwright install --with-deps chromium
+        working-directory: ljos-web
+      - run: mise run web:browser
+      - run: mise run web:shell
+      - run: mise run web:serve:check
