@@ -238,7 +238,7 @@ Each milestone ends with its exit criteria met and its scenarios green.
 
 - `PreviewHost` native adapter (child Ljós process, inspector, hot reload).
 - Mock modules through aliases; `preview_open` (the target, desktop,
-  phone-sized or web, is an argument, not a tool), `preview_state` (read
+  tablet, phone or any size, is an argument, not a tool), `preview_state` (read
   or set mocked state), `preview_screenshot`, `preview_events` (MCP.md).
 - **Exit:** a block edited through MCP shows in the preview within the
   latency budget; live and mocked state preview the same shell unchanged.
