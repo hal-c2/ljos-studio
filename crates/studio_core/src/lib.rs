@@ -12,7 +12,9 @@
 //! inverses, and undo gives back the bytes.
 
 mod address;
+pub mod flows;
 mod history;
+pub mod models;
 pub mod outline;
 pub mod preview;
 pub mod slots;
@@ -23,7 +25,9 @@ pub mod theme;
 use std::collections::BTreeMap;
 
 pub use address::{Address, PathChange, parse_path};
+pub use flows::{Goal, Interaction};
 pub use history::{Entry, EntrySummary};
+pub use models::Model;
 pub use outline::{Binding, Node};
 pub use qml_edit::{Change, Error as EditError, NodePath};
 pub use slots::Mode;
@@ -77,6 +81,13 @@ pub enum Error {
     /// `file:line:column: message`.
     #[error("{}", .0.iter().map(ToString::to_string).collect::<Vec<_>>().join("\n"))]
     Theme(Vec<theme::ThemeError>),
+    #[error("no document `{0}` beside this one")]
+    NoDocument(String),
+    /// Only these open a document in place: a flow names one by `id`.
+    #[error("{0} is not a `Loader` or a `StackView`")]
+    NotANavigator(String),
+    #[error("no flow Studio wrote on {0}")]
+    NoInteraction(String),
 }
 
 /// A literal a property can be set to.
@@ -164,6 +175,18 @@ pub enum Op {
     RemoveContribution {
         node: Address,
     },
+    /// A flow: when `trigger` sends `signal` (a `TapHandler`'s tap when
+    /// `None`), go to `goal` ([`flows`]).
+    Interaction {
+        trigger: Address,
+        signal: Option<String>,
+        goal: Goal,
+    },
+    /// Take out the flow `Interaction` wrote on `trigger` for `signal`.
+    RemoveInteraction {
+        trigger: Address,
+        signal: Option<String>,
+    },
 }
 
 impl Op {
@@ -195,6 +218,15 @@ impl Op {
             Op::State { edit, .. } => edit.label(),
             Op::Contribute { slot, .. } => format!("contribute to {slot}"),
             Op::RemoveContribution { .. } => "remove contribution".to_owned(),
+            Op::Interaction { signal, .. } => {
+                format!("{} interaction", signal.as_deref().unwrap_or("tapped"))
+            }
+            Op::RemoveInteraction { signal, .. } => {
+                format!(
+                    "remove {} interaction",
+                    signal.as_deref().unwrap_or("tapped")
+                )
+            }
         }
     }
 }
@@ -663,7 +695,15 @@ impl Session {
             };
             return self.unchanged(path, node);
         }
-        let entry = self.commit(path, before, text, Some(change), op.label())?;
+        let label = match op {
+            Op::Interaction {
+                trigger,
+                signal,
+                goal,
+            } => self.interaction_label(path, trigger, signal.as_deref(), goal),
+            _ => op.label(),
+        };
+        let entry = self.commit(path, before, text, Some(change), label)?;
         let node = match focus {
             Some(at) => Some(self.handle_at(path, &at)?),
             None => None,
@@ -876,6 +916,18 @@ impl Session {
                     )));
                 }
                 self.plan(path, before, &Op::Remove { node: node.clone() })
+            }
+            Op::Interaction {
+                trigger,
+                signal,
+                goal,
+            } => {
+                let edit = self.plan_interaction(path, trigger, signal.as_deref(), goal)?;
+                self.plan(path, before, &edit)
+            }
+            Op::RemoveInteraction { trigger, signal } => {
+                let edit = self.plan_remove_interaction(path, trigger, signal.as_deref())?;
+                self.plan(path, before, &edit)
             }
         }
     }

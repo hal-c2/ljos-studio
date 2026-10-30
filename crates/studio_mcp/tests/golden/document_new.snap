@@ -9,10 +9,17 @@ expression: value
     "open_world": false,
     "read_only": false
   },
-  "description": "Create a QML document. Refused if it exists or does not parse. Undo removes it.",
+  "description": "Create a QML document, from `text` or as a ListModel of a JSON file's records (`data`). Refused if it exists or does not parse. Undo removes it.",
   "inputSchema": {
     "additionalProperties": false,
     "properties": {
+      "data": {
+        "description": "A project JSON file, an array of flat records: the document is a\n`ListModel` with a `ListElement` for each. Not with `text`.",
+        "type": [
+          "string",
+          "null"
+        ]
+      },
       "doc": {
         "description": "A new `.qml` path relative to the project.",
         "type": "string"

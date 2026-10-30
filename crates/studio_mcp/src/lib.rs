@@ -409,6 +409,9 @@ pub(crate) fn error(e: Error) -> SurfaceError {
                     }))
                     .collect::<Vec<_>>(),
             })),
+        Error::NoDocument(_) => kind(ErrorCode::NotFound, "no_document"),
+        Error::NotANavigator(_) => kind(ErrorCode::InvalidArgument, "not_a_navigator"),
+        Error::NoInteraction(_) => kind(ErrorCode::NotFound, "no_interaction"),
         Error::Edit(e) => match e {
             studio_core::EditError::WouldBreak(_) => kind(ErrorCode::WouldBreak, "would_break"),
             studio_core::EditError::Unsupported(_) => kind(ErrorCode::Unsupported, "unsupported"),
