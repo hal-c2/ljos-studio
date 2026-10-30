@@ -9,7 +9,12 @@ let started;
 // `preview.js`, when this page shows previews; `wasm` the module's bytes
 // or URL (node passes bytes, a page may leave it to the default URL).
 export async function openStudio({ backend, caps = "inspect,mutate", ask, wasm } = {}) {
-  started ??= init(wasm === undefined ? undefined : { module_or_path: wasm });
+  // A module that did not load is loaded again by the next open, not
+  // refused until the page reloads.
+  started ??= init(wasm === undefined ? undefined : { module_or_path: wasm }).catch((e) => {
+    started = undefined;
+    throw e;
+  });
   await started;
   const files = await backend.load();
   return new Studio(new StudioCore(backend.place, JSON.stringify(files), caps, ask), backend);
