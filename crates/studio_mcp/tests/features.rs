@@ -10,6 +10,8 @@
 //! Every answer is also held to the `outputSchema` the tool advertises: a
 //! client SDK that validates rejects an answer that breaks it.
 
+mod site;
+
 use std::{collections::HashMap, sync::Arc};
 
 use cucumber::{
@@ -689,6 +691,33 @@ fn bundle_runs(w: &mut StudioWorld, out: String) -> StepResult {
     (got == want)
         .then_some(())
         .ok_or_else(|| format!("the bundle shows:\n{got}\nthe preview:\n{want}"))
+}
+
+#[then(regex = r#"^the answer's "(/[^"]*)" names the ljos-web commit Studio is pinned to$"#)]
+fn names_pinned_ljos_web(w: &mut StudioWorld, pointer: String) -> StepResult {
+    // The pin's one place, read as the tasks and CI read it.
+    let rev = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../web/ljos-web.rev"),
+    )
+    .map_err(|e| e.to_string())?;
+    let got = at(w.answer()?, &pointer)?;
+    (got == rev.trim())
+        .then_some(())
+        .ok_or_else(|| format!("{got} is not the pin {}", rev.trim()))
+}
+
+/// The site bundle is copied out of the project, so the builder can only
+/// build what it holds.
+#[then(regex = r#"^a site builder held to the contract builds "([^"]+)", starting at "([^"]+)"$"#)]
+fn site_builds(w: &mut StudioWorld, out: String, entry: String) -> StepResult {
+    w.answer()?;
+    let copy = tempfile::tempdir().map_err(|e| e.to_string())?;
+    copy_dir(&w.dir.path().join(&out), copy.path())?;
+    let site = site::build(copy.path(), &entry)?;
+    site.documents
+        .contains_key(&site.entry)
+        .then_some(())
+        .ok_or_else(|| format!("the site compiles no `{}`: {site:?}", site.entry))
 }
 
 fn copy_dir(from: &std::path::Path, to: &std::path::Path) -> StepResult {

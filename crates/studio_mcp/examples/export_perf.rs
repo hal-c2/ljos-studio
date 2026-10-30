@@ -2,9 +2,10 @@
 //! files: a shell, 160 documents of 40 objects each, 20 blocks in four
 //! modules with their qmldirs, a theme and assets, beside four mock
 //! modules that are left out. Every export after the first
-//! replaces the last bundle, as re-exporting after an edit does.
+//! replaces the last bundle, as re-exporting after an edit does. `web`
+//! writes the site bundle instead, whose imports are checked too.
 //!
-//! `cargo run --release -p studio_mcp --example export_perf [-- EXPORTS]`
+//! `cargo run --release -p studio_mcp --example export_perf [-- EXPORTS [native|web]]`
 
 use std::{
     path::Path,
@@ -31,6 +32,9 @@ fn main() {
     let exports: usize = std::env::args()
         .nth(1)
         .map_or(20, |n| n.parse().expect("EXPORTS is a number"));
+    let target = std::env::args()
+        .nth(2)
+        .unwrap_or_else(|| "native".to_owned());
     let dir = tempfile::tempdir().unwrap();
     let root = dir.path();
     let mut files = 0;
@@ -80,21 +84,32 @@ fn main() {
     let ctx = CallCtx::new(CapSet::default().with(Cap::Inspect).with(Cap::Fs));
     let mut samples: Vec<Duration> = Vec::new();
     let mut bytes = 0;
+    let mut manifest = 0;
     for _ in 0..exports {
         let started = Instant::now();
-        let (out, _) = server
-            .tools()
-            .call("export", &ctx, json!({ "entry": "Shell.qml" }));
+        let (out, _) = server.tools().call(
+            "export",
+            &ctx,
+            json!({ "entry": "Shell.qml", "target": target }),
+        );
         samples.push(started.elapsed());
         let out = out.unwrap_or_else(|e| panic!("export was refused: {}", e.to_value()));
         assert_eq!(out["files"], 200);
         bytes = out["bytes"].as_u64().unwrap();
+        let name = if target == "web" {
+            studio_mcp::export::SITE_MANIFEST
+        } else {
+            studio_mcp::export::MANIFEST
+        };
+        manifest = std::fs::metadata(root.join(out["out"].as_str().unwrap()).join(name))
+            .unwrap()
+            .len();
     }
     samples.sort();
     let at = |p: f64| samples[((samples.len() - 1) as f64 * p).round() as usize];
     let ms = |d: Duration| d.as_secs_f64() * 1e3;
     println!(
-        "export of 200 files ({bytes} bytes): p50 {:.2} ms, p95 {:.2} ms, max {:.2} ms over {}",
+        "{target} export of 200 files ({bytes} bytes and a manifest of {manifest}): p50 {:.2} ms, p95 {:.2} ms, max {:.2} ms over {}",
         ms(at(0.5)),
         ms(at(0.95)),
         ms(at(1.0)),

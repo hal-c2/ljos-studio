@@ -497,6 +497,8 @@ const NATIVE_ONLY = new Map([
   ["then ^it answered within (\\d+) seconds?$", "a call's time is measured on the native side, where the disk is"],
   ['then ^the bundle "([^"]+)", copied out of the project, runs headless and shows what the preview shows$', "a bundle runs as a native process (@preview)"],
   ['then ^the directory outside the project holds only "([^"]*)"$', "storage holds no links (@disk)"],
+  ['then ^the answer\'s "(/[^"]*)" names the ljos-web commit Studio is pinned to$', "a bundle is written to disk (@disk)"],
+  ['then ^a site builder held to the contract builds "([^"]+)", starting at "([^"]+)"$', "a bundle is written to disk (@disk)"],
 ]);
 const WEB_ONLY = new Set(['given ^storage refuses to keep "([^"]+)"$', "when ^storage keeps files again$"]);
 
