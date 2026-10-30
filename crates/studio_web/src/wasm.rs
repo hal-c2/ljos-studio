@@ -2,7 +2,12 @@
 //! `setTimeout` as the server's [`Timer`], and the page's `ask` as the
 //! preview [`Port`].
 
-use std::{cell::RefCell, sync::Arc, time::Duration};
+use std::{
+    cell::{Cell, RefCell},
+    collections::HashMap,
+    sync::Arc,
+    time::Duration,
+};
 
 use studio_mcp::timer::Timer;
 use wasm_bindgen::{closure::Closure, prelude::*};
@@ -35,26 +40,33 @@ impl Timer for WebTimer {
     }
 }
 
+/// Which [`StudioCore`] a JS function belongs to. One wasm instance serves
+/// every core a page or runner opens, so what is kept per instance below
+/// is kept per core.
+type CoreId = u32;
+
 thread_local! {
-    /// The page's `ask(requestJson) -> answerJson`. A wasm instance has one
+    /// Each core's `ask(requestJson) -> answerJson`. A wasm instance has one
     /// thread, and a JS function cannot cross threads, so it is kept here
     /// rather than in the host (which must be `Send`).
-    static ASK: RefCell<Option<js_sys::Function>> = const { RefCell::new(None) };
-    /// What `watch` was given, for the same reason: the session's watcher
-    /// must be `Send`, a JS function is not.
-    static WATCHERS: RefCell<Vec<js_sys::Function>> = const { RefCell::new(Vec::new()) };
+    static ASK: RefCell<HashMap<CoreId, js_sys::Function>> = RefCell::new(HashMap::new());
+    /// What each core's `watch` was given, for the same reason: the
+    /// session's watcher must be `Send`, a JS function is not.
+    static WATCHERS: RefCell<HashMap<CoreId, Vec<js_sys::Function>>> =
+        RefCell::new(HashMap::new());
+    static NEXT_CORE: Cell<CoreId> = const { Cell::new(0) };
 }
 
-/// Asks the page through [`ASK`]: the function throws when the page is
-/// gone or does not answer in time (`web/preview.js`).
-struct JsPort;
+/// Asks the page through its core's [`ASK`]: the function throws when the
+/// page is gone or does not answer in time (`web/preview.js`).
+struct JsPort(CoreId);
 
 impl Port for JsPort {
     fn ask(&mut self, request: &Request) -> Result<Answer, PortError> {
         let request = serde_json::to_string(request).expect("a request is JSON");
-        let answer = ASK.with_borrow(|ask| {
-            let ask = ask
-                .as_ref()
+        let answer = ASK.with_borrow(|asks| {
+            let ask = asks
+                .get(&self.0)
                 .ok_or_else(|| PortError::Gone("this page has no preview".to_owned()))?;
             ask.call1(&JsValue::NULL, &JsValue::from_str(&request))
                 .map_err(|e| {
@@ -94,6 +106,16 @@ fn error(e: impl std::fmt::Display) -> JsError {
 #[wasm_bindgen]
 pub struct StudioCore {
     face: Face,
+    id: CoreId,
+    /// Whether the session already calls this core's watchers.
+    watching: Cell<bool>,
+}
+
+impl Drop for StudioCore {
+    fn drop(&mut self) {
+        ASK.with_borrow_mut(|asks| asks.remove(&self.id));
+        WATCHERS.with_borrow_mut(|all| all.remove(&self.id));
+    }
 }
 
 #[wasm_bindgen]
@@ -110,16 +132,21 @@ impl StudioCore {
         let files: std::collections::BTreeMap<String, String> =
             serde_json::from_str(files).map_err(error)?;
         let store = crate::WebStore::new(place, files);
+        let id = NEXT_CORE.replace(NEXT_CORE.get().wrapping_add(1));
         let hosts = ask.map(|ask| {
-            ASK.with_borrow_mut(|slot| *slot = Some(ask));
+            ASK.with_borrow_mut(|asks| asks.insert(id, ask));
             let store = store.clone();
             Arc::new(move || {
-                Box::new(WebPreviewHost::new(JsPort, store.clone()))
+                Box::new(WebPreviewHost::new(JsPort(id), store.clone()))
                     as Box<dyn studio_core::preview::PreviewHost>
             }) as studio_mcp::preview::StoreHostFactory
         });
         let face = Face::new(store, caps, Arc::new(WebTimer), hosts).map_err(error)?;
-        Ok(StudioCore { face })
+        Ok(StudioCore {
+            face,
+            id,
+            watching: Cell::new(false),
+        })
     }
 
     /// A tool's answer or refusal, as JSON (see [`Face::call`]).
@@ -169,13 +196,11 @@ impl StudioCore {
     /// the session is held: it must only note that the view is stale and
     /// read it later (`web/studio.js` does so in a microtask).
     pub fn watch(&self, watcher: js_sys::Function) {
-        let first = WATCHERS.with_borrow_mut(|all| {
-            all.push(watcher);
-            all.len() == 1
-        });
-        if first {
-            self.face.watch(Arc::new(|| {
-                let all = WATCHERS.with_borrow(Clone::clone);
+        let id = self.id;
+        WATCHERS.with_borrow_mut(|all| all.entry(id).or_default().push(watcher));
+        if !self.watching.replace(true) {
+            self.face.watch(Arc::new(move || {
+                let all = WATCHERS.with_borrow(|all| all.get(&id).cloned().unwrap_or_default());
                 for watcher in all {
                     let _ = watcher.call0(&JsValue::NULL);
                 }
