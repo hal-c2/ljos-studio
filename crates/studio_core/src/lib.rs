@@ -493,7 +493,7 @@ impl Session {
         }
     }
 
-    /// The object whose type name starts at `line`, `column` (one-based,
+    /// The object whose body opens (its `{`) at `line`, `column` (one-based,
     /// in characters, as [`qml_syntax::position`] counts) of `path`: the
     /// one declared there, never one enclosing it. A `column` of 0 means
     /// only the line is known, and then the line must hold one object.
@@ -506,8 +506,8 @@ impl Session {
         let (tree, _) = self.tree(path)?;
         let text = &self.doc(path)?.text;
         let at = |node: &Node| {
-            let start = u32::try_from(node.start).unwrap_or(u32::MAX);
-            qml_syntax::position(text, start)
+            let brace = u32::try_from(node.brace).unwrap_or(u32::MAX);
+            qml_syntax::position(text, brace)
         };
         let mut found: Vec<(String, Node)> = tree
             .into_iter()

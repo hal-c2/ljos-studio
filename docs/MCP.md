@@ -157,8 +157,11 @@ shows it; the watcher's quiet time is not on that path.
 `doc`, in its logical pixels, instead of by `nodes`. Studio asks the
 preview which object is topmost there and where it is declared (the
 inspector's `app_inspect` with the target `at=X,Y`, whose answer has
-`source {file, line, column}`), then selects the object whose type name
-starts at that place: the object itself, not one enclosing it.
+`source {file, line, column}`, the place of the `{` the object's body
+opens with), then selects the object whose body opens there: the object
+itself, not one enclosing it. An object of a block's own file answers that
+file; the root of a component file and an inline component's instance
+answer where they are used.
 
 - DECISION: no new tool. A point is another way to name what `node_select`
   selects, and the list stays within 25.
@@ -168,7 +171,8 @@ starts at that place: the object itself, not one enclosing it.
 - DECISION: refused (`not_actionable`) with no preview of `doc`
   (`no_preview`) and while the preview's last reload failed
   (`preview_behind`): it then runs older text, whose lines name other
-  objects. Nothing at the point clears the selection.
+  objects. A point that names no object of a document (the window's own
+  content, under every stack) clears the selection.
 - Giving both `nodes` and `at` is `invalid_argument`.
 
 ## Prompts
