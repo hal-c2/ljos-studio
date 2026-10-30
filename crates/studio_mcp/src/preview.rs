@@ -296,6 +296,9 @@ mod tests {
         fn pick(&mut self, _: f64, _: f64) -> Result<Option<Declared>, PreviewError> {
             unreachable!()
         }
+        fn alive(&mut self) -> Result<(), PreviewError> {
+            Ok(())
+        }
         fn close(&mut self) {}
     }
 
