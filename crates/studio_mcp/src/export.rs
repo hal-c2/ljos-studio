@@ -148,25 +148,57 @@ fn left_out_why(name: &str, is_dir: bool, top: bool) -> Option<&'static str> {
 }
 
 /// The project's files that go in a bundle, sorted, and what is left out.
+/// `root` is canonical.
+///
+/// A link is followed as `ljos run` would read through it while it stays
+/// in the project; one that leads out of it is left out, so a link a
+/// checked-out project brings cannot copy somebody's directory into the
+/// bundle, and one back to a directory the walk is inside would never end.
 fn walk(root: &Path) -> Result<(Vec<FileEntry>, Vec<LeftOut>), SurfaceError> {
     let mut files = Vec::new();
     let mut left_out = Vec::new();
-    let mut stack = vec![(root.to_owned(), String::new())];
-    while let Some((dir, prefix)) = stack.pop() {
+    // Each directory with the real directories it is below, itself first.
+    let mut stack = vec![(root.to_owned(), String::new(), vec![root.to_owned()])];
+    while let Some((dir, prefix, within)) = stack.pop() {
         let entries = fs::read_dir(&dir).map_err(|e| io(&dir, &e))?;
         for entry in entries {
             let entry = entry.map_err(|e| io(&dir, &e))?;
             let name = entry.file_name().to_string_lossy().into_owned();
             let path = format!("{prefix}{name}");
-            // Links are followed as `ljos run` would read through them.
-            let meta = fs::metadata(entry.path()).map_err(|e| io(&entry.path(), &e))?;
+            let full = entry.path();
+            let link = fs::symlink_metadata(&full)
+                .map_err(|e| io(&full, &e))?
+                .file_type()
+                .is_symlink();
+            let real = if link {
+                match full.canonicalize() {
+                    Ok(real) if real.starts_with(root) => real,
+                    _ => {
+                        left_out.push(LeftOut {
+                            path,
+                            why: "a link out of the project".to_owned(),
+                        });
+                        continue;
+                    }
+                }
+            } else {
+                within[0].join(&name)
+            };
+            let meta = fs::metadata(&full).map_err(|e| io(&full, &e))?;
             if let Some(why) = left_out_why(&name, meta.is_dir(), prefix.is_empty()) {
                 left_out.push(LeftOut {
                     path,
                     why: why.to_owned(),
                 });
+            } else if meta.is_dir() && within.contains(&real) {
+                left_out.push(LeftOut {
+                    path,
+                    why: "a link back to a directory it is in".to_owned(),
+                });
             } else if meta.is_dir() {
-                stack.push((entry.path(), format!("{path}/")));
+                let mut below = vec![real];
+                below.extend(within.iter().cloned());
+                stack.push((full, format!("{path}/"), below));
             } else {
                 files.push(FileEntry {
                     path,
@@ -216,6 +248,20 @@ fn plan(
         )));
     }
     let (files, left_out) = walk(root)?;
+    // The store has every file of the project; the bundle only what the
+    // walk keeps, and a manifest that starts a file it does not hold
+    // would not start.
+    if !files.iter().any(|f| f.path == entry) {
+        let why = left_out
+            .iter()
+            .find(|l| entry == l.path || entry.starts_with(&format!("{}/", l.path)))
+            .map_or("not a file of the project", |l| l.why.as_str());
+        return Err(SurfaceError::new(
+            ErrorCode::NotActionable,
+            format!("`{entry}` is left out of the bundle ({why}); start the app with a document it holds"),
+        )
+        .with_details(json!({ "kind": "entry_left_out", "why": why })));
+    }
     let read = |path: &str| {
         let full = root.join(path);
         fs::read_to_string(&full).map_err(|e| io(&full, &e))
@@ -319,8 +365,11 @@ fn plan(
     Ok(manifest)
 }
 
-/// `out` as a place below the project's `build/`.
-fn out_dir(out: Option<&str>, target: Target) -> Result<String, SurfaceError> {
+/// `out` as a place below the project's `build/`, by its names and on
+/// disk: `root` is canonical, and a link on the way (a `build` a
+/// checked-out project brings, say) would send the bundle's write and the
+/// removal of the last one somewhere else.
+fn out_dir(root: &Path, out: Option<&str>, target: Target) -> Result<String, SurfaceError> {
     let out = out.map_or_else(|| format!("{BUILD}/{}", target.word()), str::to_owned);
     let path = Path::new(&out);
     let plain = path.components().all(|c| matches!(c, Component::Normal(_)));
@@ -333,7 +382,33 @@ fn out_dir(out: Option<&str>, target: Target) -> Result<String, SurfaceError> {
             format!("`{out}` is not below the project's `{BUILD}/`, where bundles are written"),
         ));
     }
+    let full = root.join(&out);
+    if leads_elsewhere(root, &full) {
+        return Err(SurfaceError::new(
+            ErrorCode::PathDenied,
+            format!(
+                "`{out}` goes through a link; bundles are written to the project's own `{BUILD}/`"
+            ),
+        ));
+    }
     Ok(out.trim_end_matches('/').to_owned())
+}
+
+/// Whether a part of `full` below `root` that exists is a link. One out of
+/// the project is somebody else's directory; even one that stays in it
+/// would put the bundle where the walk reads the design from.
+fn leads_elsewhere(root: &Path, full: &Path) -> bool {
+    let mut at = full;
+    while at != root {
+        if fs::symlink_metadata(at).is_ok_and(|m| m.file_type().is_symlink()) {
+            return true;
+        }
+        match at.parent() {
+            Some(parent) => at = parent,
+            None => return true,
+        }
+    }
+    false
 }
 
 /// Copies the files into a place beside `out` and swaps it in, so a
@@ -388,8 +463,9 @@ fn export(studio: &Mutex<Studio>, a: ExportArgs) -> Result<ExportOut, SurfaceErr
             "this project is not in a directory: there are no files to bundle",
         ));
     };
+    let root = root.canonicalize().map_err(|e| io(&root, &e))?;
     let manifest = plan(&root, &studio, &a.entry, a.target)?;
-    let out = out_dir(a.out.as_deref(), a.target)?;
+    let out = out_dir(&root, a.out.as_deref(), a.target)?;
     if !a.dry_run {
         write(&root, &root.join(&out), &manifest)?;
     }
