@@ -152,6 +152,13 @@ impl StudioCore {
         Ok(())
     }
 
+    /// Storage has this (one of `take`'s records) from somewhere other than
+    /// this session: reads see it, and it is not stored again.
+    pub fn stored(&self, pending: &str) -> Result<(), JsError> {
+        let pending: Pending = serde_json::from_str(pending).map_err(error)?;
+        self.face.stored(pending).map_err(error)
+    }
+
     /// What a window showing `doc` sees of the session, as JSON (see
     /// [`Face::view`]).
     pub fn view(&self, doc: &str) -> String {

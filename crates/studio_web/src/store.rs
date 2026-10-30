@@ -83,6 +83,23 @@ impl WebStore {
             .or_insert(pending.text);
     }
 
+    /// Storage has `pending` from somewhere other than this session (another
+    /// tab, a file a person dropped in): reads see it from now on, as
+    /// `FsStore`'s see a file written into the directory. Nothing is queued,
+    /// since storage has it, and a write of the file still queued is older
+    /// and is dropped. A document the session has open keeps its text, as
+    /// it does natively.
+    pub fn stored(&self, pending: Pending) -> Result<(), StoreError> {
+        Self::checked(&pending.path)?;
+        let mut held = self.held();
+        held.queued.remove(&pending.path);
+        match pending.text {
+            Some(text) => held.files.insert(pending.path, text),
+            None => held.files.remove(&pending.path),
+        };
+        Ok(())
+    }
+
     /// Every file and its text, as a preview is given them.
     pub fn files(&self) -> BTreeMap<String, String> {
         self.held().files.clone()
@@ -235,6 +252,40 @@ mod tests {
                 },
             ]
         );
+    }
+
+    #[test]
+    fn what_storage_got_elsewhere_is_read_and_not_stored_again() {
+        let store = store();
+        store.write("One.qml", "A {}\n").unwrap();
+        store
+            .stored(Pending {
+                path: "One.qml".into(),
+                text: Some("B {}\n".into()),
+            })
+            .unwrap();
+        store
+            .stored(Pending {
+                path: "New.qml".into(),
+                text: Some("C {}\n".into()),
+            })
+            .unwrap();
+        store
+            .stored(Pending {
+                path: "b/Two.qml".into(),
+                text: None,
+            })
+            .unwrap();
+        assert_eq!(store.read("One.qml").unwrap(), "B {}\n");
+        assert_eq!(store.list(".qml"), ["New.qml", "One.qml"]);
+        assert!(store.take().is_empty());
+        assert!(matches!(
+            store.stored(Pending {
+                path: "../x.qml".into(),
+                text: None
+            }),
+            Err(StoreError::Outside(_))
+        ));
     }
 
     #[test]

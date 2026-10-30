@@ -100,6 +100,11 @@ impl Face {
         }
     }
 
+    /// What storage got from elsewhere (see [`WebStore::stored`]).
+    pub fn stored(&self, pending: Pending) -> Result<(), studio_core::StoreError> {
+        self.store.stored(pending)
+    }
+
     /// A document's text and generation, as a code view shows it.
     pub fn text(&self, doc: &str) -> Result<(String, u64), FaceError> {
         let studio = self.server.studio();

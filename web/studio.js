@@ -71,6 +71,13 @@ export class Studio {
     });
   }
 
+  // Storage has `text` for `path` (`null`: no such file) from somewhere
+  // other than this session, such as another tab: what the tools read from
+  // now on, as a native project sees a file written into its directory.
+  stored(path, text) {
+    this.#core.stored(JSON.stringify({ path, text }));
+  }
+
   // A document as a code view shows it: `{text, generation}`.
   text(doc) {
     return JSON.parse(this.#core.text(doc));
