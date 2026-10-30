@@ -3,7 +3,7 @@
 use qml_edit::Change;
 use serde::Serialize;
 
-use crate::address::Tracked;
+use crate::address::{PathChange, Tracked};
 
 /// One edit as history keeps it.
 #[derive(Clone, Debug)]
@@ -18,7 +18,11 @@ pub struct Entry {
     /// The edit made the document; undoing it removes the file.
     pub created: bool,
     pub(crate) handles_before: Vec<Tracked>,
+    /// Also every handle given out on the text after it while that was the
+    /// document's text: redo puts each back where it was.
     pub(crate) handles_after: Vec<Tracked>,
+    /// What a structural edit did to paths; `None` for a change of the text.
+    pub(crate) change: Option<PathChange>,
 }
 
 /// What a list of the history shows of an entry.
@@ -59,6 +63,12 @@ impl History {
         self.done.push(entry);
         self.undone.clear();
         self.next_id
+    }
+
+    /// The last done entry of `doc`: the document's text is the one it
+    /// left.
+    pub fn latest_mut(&mut self, doc: &str) -> Option<&mut Entry> {
+        self.done.iter_mut().rev().find(|e| e.doc == doc)
     }
 
     pub fn peek_undo(&self) -> Option<&Entry> {

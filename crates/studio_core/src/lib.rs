@@ -370,6 +370,7 @@ impl Session {
             });
         };
         let mut out = Vec::with_capacity(nodes.len());
+        let mut given = Vec::new();
         for node in nodes {
             let handle = match doc
                 .tracked
@@ -379,13 +380,15 @@ impl Session {
                 Some(t) => t.handle,
                 None => {
                     next += 1;
-                    doc.tracked.push(Tracked {
+                    let t = Tracked {
                         handle: next - 1,
                         path: Some(node.path.clone()),
                         key: node.key.clone(),
                         ty: node.ty.clone(),
                         span: Some((node.start, node.end)),
-                    });
+                    };
+                    given.push(t.clone());
+                    doc.tracked.push(t);
                     next - 1
                 }
             };
@@ -393,6 +396,12 @@ impl Session {
         }
         let generation = doc.generation;
         self.next_handle = next;
+        // A handle given out on the text an edit left is one that edit's
+        // redo must put back: an object the edit made has no other way to
+        // be found again once undo took it out.
+        if let Some(entry) = self.history.latest_mut(path) {
+            entry.handles_after.extend(given);
+        }
         Ok((out, generation))
     }
 
@@ -777,6 +786,7 @@ impl Session {
             created: true,
             handles_before: Vec::new(),
             handles_after: Vec::new(),
+            change: None,
         });
         Ok(Outcome {
             doc: path.to_owned(),
@@ -848,6 +858,7 @@ impl Session {
             created: false,
             handles_before,
             handles_after,
+            change,
         }))
     }
 
@@ -924,7 +935,9 @@ impl Session {
             let text = qml_edit::splice("", &entry.forward);
             self.store.write(&path, &text)?;
             let past = self.retired.get(&path).copied().unwrap_or(0);
-            self.docs.insert(path, Document::new(text, past));
+            let mut doc = Document::new(text, past);
+            doc.tracked = entry.handles_after.clone();
+            self.docs.insert(path, doc);
             return Ok(());
         }
         let doc = self.doc(&path)?;
@@ -945,19 +958,40 @@ impl Session {
         doc.set_text(text);
         // The handles as they were on that side of the edit: exact, where
         // working them out again from keys could guess.
-        let mut tracked = if forward {
-            entry.handles_after.clone()
+        let snapshot = if forward {
+            &entry.handles_after
         } else {
-            entry.handles_before.clone()
+            &entry.handles_before
         };
-        // Handles given out since then stay, matched by key.
+        let mut tracked = snapshot.clone();
+        let mut leads: Vec<Lead> = tracked
+            .iter()
+            .map(|t| Lead::Known(t.path.clone()))
+            .collect();
+        // Handles given out since then were given out on the other side's
+        // text: a structural edit says where their objects are on this
+        // side, and one it made has no place here. A change of the text
+        // says nothing, so they are found by bytes and key.
         for t in &doc.tracked {
-            if !tracked.iter().any(|old| old.handle == t.handle) {
-                tracked.push(t.clone());
+            if tracked.iter().any(|old| old.handle == t.handle) {
+                continue;
             }
+            leads.push(match (&entry.change, &t.path) {
+                (Some(change), Some(path)) if forward => Lead::Known(change.apply(path)),
+                (Some(change), Some(path)) => Lead::Known(
+                    doc.nodes
+                        .iter()
+                        .flatten()
+                        .find(|n| change.apply(&n.path).as_ref() == Some(path))
+                        .map(|n| n.path.clone()),
+                ),
+                (Some(_), None) => Lead::Known(None),
+                (None, _) => Lead::Search,
+            });
+            tracked.push(t.clone());
         }
         doc.tracked = tracked;
-        remap_unknown(doc);
+        place(doc, leads);
         Ok(())
     }
 
@@ -1001,20 +1035,6 @@ fn remap(doc: &mut Document, change: Option<&PathChange>) {
             // object there is still of its type.
             (Some(change), Some(path)) => Lead::Known(change.apply(path)),
             _ => Lead::Search,
-        })
-        .collect();
-    place(doc, leads);
-}
-
-/// Handles from [`Session::replay`] whose path no longer names an object of
-/// their type are found again by key.
-fn remap_unknown(doc: &mut Document) {
-    let leads = doc
-        .tracked
-        .iter()
-        .map(|t| match &t.path {
-            Some(path) => Lead::Known(Some(path.clone())),
-            None => Lead::Search,
         })
         .collect();
     place(doc, leads);

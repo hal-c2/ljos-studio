@@ -206,3 +206,82 @@ Feature: An object keeps its handle across everyone's edits
       """
     Then the answer's "/path" is "root/0"
     And the answer's "/bindings/0/value" is "2"
+
+  Scenario: An undone insert's handle is gone until redo puts its object back
+    Given the file "Column.qml":
+      """qml
+      Column {
+          Rectangle { width: 1 }
+      }
+      """
+    And the agent has called the tool "node_insert" with:
+      """json
+      {"doc": "Column.qml", "parent": {"path": "root"}, "generation": 1, "index": 0, "text": "Rectangle { width: 2 }"}
+      """
+    And the agent keeps the answer's "/node" as "new"
+    And the agent has called the tool "history" with:
+      """json
+      {"action": "undo"}
+      """
+    When the agent calls the tool "node_remove" with:
+      """json
+      {"doc": "Column.qml", "node": {"node": "$new"}}
+      """
+    Then the agent is refused with "stale_ref"
+    And the refusal's "/details/kind" is "gone"
+    And the file "Column.qml" is:
+      """qml
+      Column {
+          Rectangle { width: 1 }
+      }
+      """
+    When the agent calls the tool "history" with:
+      """json
+      {"action": "redo"}
+      """
+    And the agent calls the tool "node_inspect" with:
+      """json
+      {"doc": "Column.qml", "node": {"node": "$new"}}
+      """
+    Then the answer's "/path" is "root/0"
+    And the answer's "/bindings/1/value" is "2"
+
+  Scenario: An object typed in the code view is gone after undo and back after redo
+    Given the file "Column.qml":
+      """qml
+      Column {
+          Rectangle { width: 1 }
+      }
+      """
+    When a person types in the code view of "Column.qml", replacing "Column {\n" with "Column {\n    Rectangle { width: 2 }\n"
+    And the agent calls the tool "node_find" with:
+      """json
+      {"doc": "Column.qml", "type": "Rectangle"}
+      """
+    And the agent keeps the answer's "/nodes/0/node" as "typed"
+    And the agent keeps the answer's "/nodes/1/node" as "first"
+    And the agent calls the tool "history" with:
+      """json
+      {"action": "undo"}
+      """
+    And the agent calls the tool "node_inspect" with:
+      """json
+      {"doc": "Column.qml", "node": {"node": "$typed"}}
+      """
+    Then the agent is refused with "stale_ref"
+    And the refusal's "/details/kind" is "gone"
+    When the agent calls the tool "node_inspect" with:
+      """json
+      {"doc": "Column.qml", "node": {"node": "$first"}}
+      """
+    Then the answer's "/path" is "root/0"
+    When the agent calls the tool "history" with:
+      """json
+      {"action": "redo"}
+      """
+    And the agent calls the tool "node_inspect" with:
+      """json
+      {"doc": "Column.qml", "node": {"node": "$typed"}}
+      """
+    Then the answer's "/path" is "root/0"
+    And the answer's "/bindings/0/value" is "2"

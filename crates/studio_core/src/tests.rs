@@ -543,3 +543,77 @@ fn a_link_and_the_document_it_leads_to_are_one_document() {
         "Item {\n    width: 10\n    height: 20\n}\n"
     );
 }
+
+#[test]
+fn an_undone_insert_leaves_its_handle_gone_until_redo() {
+    // The reviewer's probe: nothing listed before the insert, so every
+    // handle but the snapshot's is given out on the text after it.
+    let mut s = one_file("Column {\n    Rectangle { width: 1 }\n}\n");
+    let out = s
+        .edit(
+            "Main.qml",
+            None,
+            &Op::Insert {
+                parent: Address::Path("root".into()),
+                index: Some(0),
+                text: "Rectangle { width: 2 }".into(),
+                add_id: true,
+                import: None,
+            },
+            false,
+        )
+        .unwrap();
+    let new = out.node.unwrap();
+    s.undo().unwrap();
+    let after_undo = s.resolve("Main.qml", &Address::Node(new.clone()));
+    assert!(
+        matches!(after_undo, Err(Error::Gone { .. })),
+        "{after_undo:?}"
+    );
+    let (tree, _) = s.tree("Main.qml").unwrap();
+    let old = tree.iter().find(|(_, n)| n.ty == "Rectangle").unwrap();
+    assert_ne!(old.0, new);
+    s.redo().unwrap();
+    let (_, node) = s.resolve("Main.qml", &Address::Node(new)).unwrap();
+    assert_eq!(node.path.to_string(), "root/0");
+    assert!(node.bindings.iter().any(|b| b.value == "2"));
+}
+
+#[test]
+fn an_undone_code_view_insert_leaves_its_handle_gone_until_redo() {
+    // Typed in the code view, nothing listed first: no handle existed
+    // before the edit, so none is in the history's snapshot of that side.
+    let mut s = one_file("Column {\n    Rectangle { width: 1 }\n}\n");
+    let g = s.generation("Main.qml").unwrap();
+    s.replace_text(
+        "Main.qml",
+        Some(g),
+        Some(9..9),
+        "    Rectangle { width: 2 }\n",
+        false,
+    )
+    .unwrap();
+    let (tree, _) = s.tree("Main.qml").unwrap();
+    let handle = |at: &str| {
+        tree.iter()
+            .find(|(_, n)| n.path.to_string() == at)
+            .unwrap()
+            .0
+            .clone()
+    };
+    let (new, old) = (handle("root/0"), handle("root/1"));
+    s.undo().unwrap();
+    let after_undo = s.resolve("Main.qml", &Address::Node(new.clone()));
+    assert!(
+        matches!(after_undo, Err(Error::Gone { .. })),
+        "{after_undo:?}"
+    );
+    let (_, node) = s.resolve("Main.qml", &Address::Node(old.clone())).unwrap();
+    assert_eq!(node.path.to_string(), "root/0");
+    s.redo().unwrap();
+    let (_, node) = s.resolve("Main.qml", &Address::Node(new)).unwrap();
+    assert_eq!(node.path.to_string(), "root/0");
+    assert_eq!(node.bindings[0].value, "2");
+    let (_, node) = s.resolve("Main.qml", &Address::Node(old)).unwrap();
+    assert_eq!(node.path.to_string(), "root/1");
+}
