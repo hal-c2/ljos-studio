@@ -21,7 +21,7 @@ use std::{
 use ljos_child::Reaped;
 use serde_json::{Map, Value, json};
 use studio_core::preview::{
-    Declared, LogLine, Picture, PreviewError, PreviewHost, PreviewSpec, Reload, Size,
+    Click, Declared, LogLine, Picture, PreviewError, PreviewHost, PreviewSpec, Reload, Size,
 };
 
 use inspector::{Answer, Fault, Inspector};
@@ -299,6 +299,20 @@ impl PreviewHost for NativeHost {
 
     fn alive(&mut self) -> Result<(), PreviewError> {
         self.running().map(|_| ())
+    }
+
+    fn click(&mut self, at: &Click) -> Result<(), PreviewError> {
+        match at {
+            Click::Id(id) => self
+                .call("app_click", json!({ "target": locator(id) }))
+                .map_err(|e| no_object(e, id))?,
+            // `at=` names every item drawn there, topmost first.
+            Click::Point { x, y } => self.call(
+                "app_click",
+                json!({ "target": format!("at={x},{y} >> nth=0") }),
+            )?,
+        };
+        Ok(())
     }
 
     fn pick(&mut self, x: f64, y: f64) -> Result<Option<Declared>, PreviewError> {

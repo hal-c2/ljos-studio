@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 use studio_core::{
     Address,
-    preview::{Alias, PreviewError, PreviewEvent, Reload, Size, Target, ms},
+    preview::{Alias, Click, PreviewError, PreviewEvent, Reload, Size, Target, ms},
 };
 
 use crate::{
@@ -63,22 +63,39 @@ struct OpenOut {
 #[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct StateArgs {
-    /// The block's object; it needs an `id`. In the previewed document
+    /// The object to read; it needs an `id`. In the previewed document
     /// unless `doc` names another.
     node: Address,
     doc: Option<String>,
-    /// Values to assign to the block's state (mocked previews only).
+    /// Values to assign to a block's state (mocked previews only).
     set: Option<Map<String, Value>>,
+    /// An object (with an `id`) to click first, after `set`, as a person
+    /// does: the app's own handlers answer, so a flow plays.
+    click: Option<Address>,
+    /// A point to click instead: the topmost item drawn there.
+    click_at: Option<ClickAt>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct ClickAt {
+    /// The preview's logical pixels.
+    x: f64,
+    y: f64,
 }
 
 #[derive(Serialize, JsonSchema)]
 struct StateOut {
-    /// `Module.Name`.
-    block: String,
+    /// `Module.Name`, when the object is a block.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    block: Option<String>,
     id: String,
-    /// The block's published state as the preview has it now.
+    /// A block's published state as the preview has it now.
     state: Map<String, Value>,
     mocked: bool,
+    /// The object's QML `state` now: the variant it shows, `""` for its
+    /// base state.
+    variant: String,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -305,9 +322,22 @@ fn state(studio: &Mutex<Studio>, a: StateArgs) -> Result<StateOut, SurfaceError>
         .ok_or_else(|| preview_error(PreviewError::NotOpen))?;
     let doc = a.doc.unwrap_or_else(|| open.doc.clone());
     let (_, node) = studio.session.resolve(&doc, &a.node).map_err(error)?;
-    let id = node.id.clone().ok_or_else(|| {
-        SurfaceError::invalid_argument("the preview finds objects by `id`; this one has none")
-    })?;
+    let no_id =
+        || SurfaceError::invalid_argument("the preview finds objects by `id`; this one has none");
+    let id = node.id.clone().ok_or_else(no_id)?;
+    let click = match (a.click, a.click_at) {
+        (Some(_), Some(_)) => {
+            return Err(SurfaceError::invalid_argument(
+                "give `click` or `click_at`, not both",
+            ));
+        }
+        (Some(address), None) => {
+            let (_, clicked) = studio.session.resolve(&doc, &address).map_err(error)?;
+            Some(Click::Id(clicked.id.ok_or_else(no_id)?))
+        }
+        (None, Some(at)) => Some(Click::Point { x: at.x, y: at.y }),
+        (None, None) => None,
+    };
     let registry = blocks::registry(studio.session.store());
     let text = studio.session.text(&doc).map_err(error)?.0.to_owned();
     let imported = |module: &str| {
@@ -318,15 +348,18 @@ fn state(studio: &Mutex<Studio>, a: StateArgs) -> Result<StateOut, SurfaceError>
     };
     let contract = registry
         .blocks()
-        .find(|b| b.name == node.ty && imported(&b.module))
-        .ok_or_else(|| {
-            SurfaceError::invalid_argument(format!("`{id}` is a `{}`, not a block", node.ty))
-                .with_details(json!({ "kind": "not_a_block" }))
-        })?;
-    let block = format!("{}.{}", contract.module, contract.name);
-    let names: Vec<String> = contract.state.iter().map(|s| s.name.clone()).collect();
-    let mocked = open.mocked.iter().any(|m| m.module == contract.module);
+        .find(|b| b.name == node.ty && imported(&b.module));
+    let not_a_block = || {
+        SurfaceError::invalid_argument(format!("`{id}` is a `{}`, not a block", node.ty))
+            .with_details(json!({ "kind": "not_a_block" }))
+    };
+    let block = contract.map(|c| format!("{}.{}", c.module, c.name));
+    let names: Vec<String> = contract
+        .map(|c| c.state.iter().map(|s| s.name.clone()).collect())
+        .unwrap_or_default();
+    let mocked = contract.is_some_and(|c| open.mocked.iter().any(|m| m.module == c.module));
     if let Some(set) = a.set {
+        let block = block.as_deref().ok_or_else(not_a_block)?;
         if !mocked {
             return Err(SurfaceError::new(
                 ErrorCode::NotActionable,
@@ -348,15 +381,32 @@ fn state(studio: &Mutex<Studio>, a: StateArgs) -> Result<StateOut, SurfaceError>
             }
         }
     }
-    let state = match open.host.read(&id, &names) {
+    if let Some(click) = click
+        && let Err(e) = open.host.click(&click)
+    {
+        return Err(preview_error(previews.failed(e)));
+    }
+    let mut asked = names.clone();
+    // A block may publish a `state` of its own; the variant is QML's.
+    let qml_state = "state".to_owned();
+    if !asked.contains(&qml_state) {
+        asked.push(qml_state.clone());
+    }
+    let mut state = match open.host.read(&id, &asked) {
         Ok(state) => state,
         Err(e) => return Err(preview_error(previews.failed(e))),
     };
+    let variant = match state.get(&qml_state) {
+        Some(Value::String(s)) => s.clone(),
+        _ => String::new(),
+    };
+    state.retain(|name, _| names.contains(name));
     Ok(StateOut {
         block,
         id,
         state,
         mocked,
+        variant,
     })
 }
 
@@ -519,8 +569,9 @@ pub(crate) fn add(registry: ToolRegistry, studio: &Arc<Mutex<Studio>>) -> ToolRe
         .with(
             ToolDef::new::<StateArgs>(
                 "preview_state",
-                "Read a block's published state in the preview, or `set` it when the block is \
-                 mocked. The block's object needs an `id`.",
+                "Read an object in the preview: its QML state (`variant`) and a block's published \
+                 state, which `set` assigns when the block is mocked. `click` or `click_at` clicks \
+                 first, as a person does, so a flow plays. Objects are found by `id`.",
             )
             .output::<StateOut>()
             .requires(Cap::Run)

@@ -9,7 +9,7 @@ expression: value
     "open_world": false,
     "read_only": false
   },
-  "description": "Read a block's published state in the preview, or `set` it when the block is mocked. The block's object needs an `id`.",
+  "description": "Read an object in the preview: its QML state (`variant`) and a block's published state, which `set` assigns when the block is mocked. `click` or `click_at` clicks first, as a person does, so a flow plays. Objects are found by `id`.",
   "inputSchema": {
     "$defs": {
       "Address": {
@@ -55,10 +55,51 @@ expression: value
             "type": "object"
           }
         ]
+      },
+      "ClickAt": {
+        "additionalProperties": false,
+        "properties": {
+          "x": {
+            "description": "The preview's logical pixels.",
+            "format": "double",
+            "type": "number"
+          },
+          "y": {
+            "format": "double",
+            "type": "number"
+          }
+        },
+        "required": [
+          "x",
+          "y"
+        ],
+        "type": "object"
       }
     },
     "additionalProperties": false,
     "properties": {
+      "click": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/Address"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "description": "An object (with an `id`) to click first, after `set`, as a person\ndoes: the app's own handlers answer, so a flow plays."
+      },
+      "click_at": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/ClickAt"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "description": "A point to click instead: the topmost item drawn there."
+      },
       "doc": {
         "type": [
           "string",
@@ -67,11 +108,11 @@ expression: value
       },
       "node": {
         "$ref": "#/$defs/Address",
-        "description": "The block's object; it needs an `id`. In the previewed document\nunless `doc` names another."
+        "description": "The object to read; it needs an `id`. In the previewed document\nunless `doc` names another."
       },
       "set": {
         "additionalProperties": true,
-        "description": "Values to assign to the block's state (mocked previews only).",
+        "description": "Values to assign to a block's state (mocked previews only).",
         "type": [
           "object",
           "null"
@@ -89,8 +130,11 @@ expression: value
   "outputSchema": {
     "properties": {
       "block": {
-        "description": "`Module.Name`.",
-        "type": "string"
+        "description": "`Module.Name`, when the object is a block.",
+        "type": [
+          "string",
+          "null"
+        ]
       },
       "id": {
         "type": "string"
@@ -100,15 +144,19 @@ expression: value
       },
       "state": {
         "additionalProperties": true,
-        "description": "The block's published state as the preview has it now.",
+        "description": "A block's published state as the preview has it now.",
         "type": "object"
+      },
+      "variant": {
+        "description": "The object's QML `state` now: the variant it shows, `\"\"` for its\nbase state.",
+        "type": "string"
       }
     },
     "required": [
-      "block",
       "id",
       "state",
-      "mocked"
+      "mocked",
+      "variant"
     ],
     "title": "StateOut",
     "type": "object"

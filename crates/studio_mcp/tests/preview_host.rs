@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex};
 use ljos_mcp_core::{CallCtx, Cap, CapSet};
 use serde_json::{Map, Value, json};
 use studio_core::preview::{
-    Declared, LogLine, Picture, PreviewError, PreviewHost, PreviewSpec, Reload, Size,
+    Click, Declared, LogLine, Picture, PreviewError, PreviewHost, PreviewSpec, Reload, Size,
 };
 use studio_mcp::{Studio, StudioServer};
 
@@ -149,6 +149,14 @@ impl PreviewHost for Recorder {
         self.answer("alive")
     }
 
+    fn click(&mut self, at: &Click) -> Result<(), PreviewError> {
+        self.note(match at {
+            Click::Id(id) => format!("click {id}"),
+            Click::Point { x, y } => format!("click at {x},{y}"),
+        })?;
+        Ok(())
+    }
+
     fn pick(&mut self, x: f64, y: f64) -> Result<Option<Declared>, PreviewError> {
         self.note(format!("pick {x},{y}"))?;
         Ok(self.0.lock().unwrap().declared.clone())
@@ -159,7 +167,7 @@ impl PreviewHost for Recorder {
     }
 }
 
-const SHELL: &str = "import QtQuick\nimport App.Media\n\nColumn {\n    Player { id: player1 }\n    Text { text: \"x\" }\n}\n";
+const SHELL: &str = "import QtQuick\nimport App.Media\n\nColumn { id: shell\n    Player { id: player1 }\n    Text { text: \"x\" }\n}\n";
 
 struct Fixture {
     _dir: tempfile::TempDir,
@@ -494,7 +502,7 @@ fn a_live_block_is_read_but_not_set() {
         )
         .unwrap_err();
     assert_eq!(refused["code"], "not_actionable");
-    assert_eq!(f.calls(), ["read player1 playing"]);
+    assert_eq!(f.calls(), ["read player1 playing,state"]);
 }
 
 #[test]
@@ -520,19 +528,84 @@ fn a_mocked_block_is_set_by_its_state_names_only() {
     .unwrap();
     assert_eq!(
         f.calls(),
-        ["write player1.playing=false", "read player1 playing"]
+        ["write player1.playing=false", "read player1 playing,state"]
     );
 }
 
 #[test]
-fn an_object_that_is_not_a_block_has_no_state() {
+fn an_object_that_is_not_a_block_has_only_its_variant() {
     let f = Fixture::new();
     f.call("preview_open", json!({ "doc": "Shell.qml" }))
         .unwrap();
+    f.calls();
+    let out = f
+        .call("preview_state", json!({ "node": { "path": "root" } }))
+        .unwrap();
+    assert_eq!(out.get("block"), None);
+    assert_eq!(out["state"], json!({}));
+    assert_eq!(out["variant"], "");
+    assert_eq!(f.calls(), ["read shell state"]);
     let refused = f
-        .call("preview_state", json!({ "node": { "path": "root/1" } }))
+        .call(
+            "preview_state",
+            json!({ "node": { "path": "root" }, "set": { "state": "open" } }),
+        )
         .unwrap_err();
-    assert_eq!(refused["code"], "invalid_argument");
+    assert_eq!(refused["details"]["kind"], "not_a_block");
+}
+
+#[test]
+fn a_click_comes_after_set_and_before_the_read() {
+    let f = Fixture::new();
+    f.call(
+        "preview_open",
+        json!({ "doc": "Shell.qml", "state": "mocked" }),
+    )
+    .unwrap();
+    f.calls();
+    f.call(
+        "preview_state",
+        json!({ "node": { "id": "player1" }, "set": { "playing": true }, "click": { "id": "player1" } }),
+    )
+    .unwrap();
+    f.call(
+        "preview_state",
+        json!({ "node": { "path": "root" }, "click_at": { "x": 4, "y": 8.5 } }),
+    )
+    .unwrap();
+    assert_eq!(
+        f.calls(),
+        [
+            "write player1.playing=true",
+            "click player1",
+            "read player1 playing,state",
+            "click at 4,8.5",
+            "read shell state",
+        ]
+    );
+}
+
+#[test]
+fn a_click_needs_an_object_with_an_id_and_one_place() {
+    let f = Fixture::new();
+    f.call("preview_open", json!({ "doc": "Shell.qml" }))
+        .unwrap();
+    f.calls();
+    let no_id = f
+        .call(
+            "preview_state",
+            json!({ "node": { "path": "root" }, "click": { "path": "root/1" } }),
+        )
+        .unwrap_err();
+    assert_eq!(no_id["code"], "invalid_argument");
+    let both = f
+        .call(
+            "preview_state",
+            json!({ "node": { "path": "root" }, "click": { "id": "player1" }, "click_at": { "x": 1, "y": 1 } }),
+        )
+        .unwrap_err();
+    assert_eq!(both["code"], "invalid_argument");
+    assert!(f.calls().is_empty());
 }
 
 #[test]
