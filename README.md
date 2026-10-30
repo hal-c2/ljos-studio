@@ -54,7 +54,7 @@ set or a `../ljos-ui` checkout is beside this one, which they build from), and
 the `wasm-bindgen` CLI at the version Cargo.toml pins (`mise run web:build`
 and every web task after it). A task that needs one and lacks it says to run
 `mise run setup` and the command it would run. `mise run web:browser`,
-`web:shell` and `web:serve:check` drive headless Chromium, which also needs
+`web:shell`, `web:serve:check` and `features:browser` drive headless Chromium, which also needs
 `(cd ../ljos-web && pnpm --filter ljos-web-example-web exec playwright install chromium)`.
 
 ## Status
@@ -64,11 +64,13 @@ and every web task after it). A task that needs one and lacks it says to run
 - **S0–S4 built.** The lossless edit seam; headless Studio over MCP; previews
   in a child Ljós process; the canvas, layers, inspector, palette and code
   view; variants, breakpoints, slots, tokens, user shells and the self-reskin.
-- **S5 half built.** The session, its tools and the shell run in a browser,
-  with projects in browser storage and previews drawn by ljos-web in the page's
-  own pane. Studio's Canvas panel in a browser still says previews are off, and
-  the S1–S4 scenarios do not run there yet: both wait on requests to ljos-web
-  (DESIGN.md, S5).
+- **S5 built, as far as ljos-web goes.** The session, its tools and the
+  shell run in a browser, with projects in browser storage. The document
+  under edit is compiled by ljos-web's `qmlc` and mounted in a frame laid
+  over the Canvas panel. 15 of the 24 `@preview` scenarios run in Chromium
+  (`mise run features:browser`). The other 9 wait on numbered ljos-web
+  requests (screenshots, reading by id, themes), and the preview refuses
+  those calls as `not_supported` (DESIGN.md, S5).
 - **S6 built, but for multiplayer.** Prototyping flows, list data, export
   bundles and review comments. Multiplayer research has not started.
 

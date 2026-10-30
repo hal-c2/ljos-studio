@@ -596,8 +596,8 @@ picture ljos-web cannot take yet. DECISION: `Ljos.Design` is compiled from
 its real QML (`--with`), not stood in for. DECISION: `web:shell` assembles
 the app in the target dir with `node_modules` linked to an ljos-web
 checkout; nothing is written into ljos-web. DECISION: `wasm-bindgen` is
-pinned at 0.2.129, ahead of ljos-web's 0.2.114; one page loading both
-needs one version (risk below). DECISION: the browser storage order is
+pinned at 0.2.129, ahead of ljos-web's 0.2.114 (since bf49026 only an
+example's; see the second half). DECISION: the browser storage order is
 OPFS, then IndexedDB, then memory; a call resolves after storage.
 
 **Compiling `shell/*.qml` with `qmlc`** (ljos-web 55ea53b, its
@@ -671,6 +671,139 @@ What it showed that the desktop does not:
 Left for the second half: requests 1–7 and 11–12, then previews drawn by
 ljos-web behind the protocol, `PreviewPicture`, Playwright in CI, and the
 S1–S4 scenarios in a headless browser.
+
+#### As built (second half): previews through ljos-web
+
+Against ljos-web main bf49026 (`web/ljos-web.rev`, the pin's one place).
+In a browser the document under edit is compiled by ljos-web's `qmlc`
+and mounted in the preview frame, which answers the preview protocol
+(`web/page.js`) as the child `ljos run` answers natively.
+
+**The Compiler** (`web/compiler.js`) is the one seam between a page and how
+QML becomes JavaScript:
+
+    compile({files, entry, aliases}) -> {component} | {diagnostics: [{file?, line?, column?, message}]}
+
+`serverCompiler()` posts to the server that served the page (`serve.mjs`
+`/compile`, which runs `qmlc` through ljos-web's Vite plugin, one
+directory per compile, `--root` that directory) and imports what it
+answers; qmlc's `path:line:col: message` lines become diagnostics.
+`fakeCompiler()` is the tests' (`web/browser.mjs`). A compiler in the page
+(request 1) is a drop-in: the page does not change.
+
+What the page answers:
+
+| Call | Answer |
+|---|---|
+| `open`, `reload` | compiled and mounted; a reload remounts (the app's state starts over, request 18); a reload that does not compile keeps the last good mount and answers `failed` with the diagnostics |
+| `alias` | answered by the Compiler: the aliased module's files are the alias directory's (as `--alias`) |
+| `resize` | the mount element's size, which the DOM gives honestly |
+| `logs` | the frame's console lines, without file and line (request 6) |
+| `screenshot` | `not_supported`, request 2 |
+| `outline` | `not_supported`, request 3; the DOM's tree is not the QML object tree and is not given as one |
+| `read`, `write` | `not_supported`, request 4 |
+| `pick` | `not_supported`, request 5 |
+| `click` (the host's, by id or point) | `not_supported`, request 4, without asking the page |
+
+`Answer::NotSupported {message, ljos_web_request}` is the protocol's,
+`PreviewError::NotSupported` the session's, and the agent sees
+`not_actionable` with `details.kind: "not_supported"` and
+`details.ljos_web_request` (MCP.md). The native host never gives it.
+
+**Scenarios in Chromium** (`mise run features:browser`,
+`web/features.browser.mjs`): every `@preview` scenario of
+`features/preview/` runs with the session in a worker and its preview in a
+frame that `serve.mjs` compiles, the same steps as `web/features.mjs`
+plus the native runner's two preview steps (`the preview shows`, the PNG
+step), which features.mjs lists as run there; a step of this runner the
+native one lacks is a failure. 15 of 24 pass. The other 9 are in
+`WAITING` with the request they wait on and the failure that says so
+(a `not_supported` refusal naming it, or for request 20 the drawn text);
+one that passes, or fails another way, fails the run:
+
+- request 4: the five flow scenarios that read or click (`preview_state`),
+  a mocked block's state set from outside, a live block's state read;
+- request 2: a picture of the preview;
+- request 20: a token set shows in the preview.
+
+CI's `browser` job runs it after `web:serve:check`.
+
+- DECISION: "the preview shows" is, in a browser, what the frame draws
+  as text: an element whose own text is the text, as the native outline
+  names a Text by its text. It is the test's eye; the agent is never given
+  a DOM outline in place of the object tree.
+- DECISION: two `qmldir`s declaring one module (`App/Media` and
+  `mocks/App/Media`) are shown to qmlc as Qt resolves them: the one at the
+  module's import path. qmlc takes either (request 17); without this, a
+  live preview ran the mocks.
+- DECISION: a Ljós block's `# block Name Version File` qmldir line is
+  shown to qmlc as a type line too: Ljós declares the type by it, qmlc reads
+  only Qt's lines (request 19). Both are `forQmlc` in `serve.mjs`, to go
+  when ljos-web resolves modules as Ljós does.
+- DECISION: in `web:serve` the preview frame is an element beside the
+  shell's root, laid over the Canvas panel's box (`aria-label="Canvas"`)
+  while the shell shows one, followed by a ResizeObserver and a
+  MutationObserver (nothing polled), and resized with it; with no Canvas
+  panel it is the column beside the shell. `PreviewPicture` has no web
+  face: a native picture is a PNG the preview draws, and a frame draws
+  itself (a picture would need request 2).
+- DECISION: `web:serve`'s page still drives its frame itself (`open` after
+  each write), now through the Compiler; the session's `preview_*` tools
+  drive a frame through the worker bridge, which is what the scenarios run.
+- DECISION (wasm-bindgen): neither side moves. At bf49026 ljos-web's
+  workspace builds its kernel (`ljos_web_kernel`) with raw `u32` imports,
+  no wasm-bindgen; only `examples/wasm-counter` pins `=0.2.114`. Studio
+  links no ljos-web Rust crate, and its wasm is a module of its own with
+  its own glue, so the two never share a wasm-bindgen runtime. Studio stays
+  on 0.2.129; the risk below is retired.
+
+**Numbers** (release `qmlc`, the `web` wasm profile, headless Chromium,
+`node web/preview.bench.mjs <app> 20` after `mise run features:browser`
+assembled the app; `samples/hello/Main.qml`):
+
+| What | Measured |
+|---|---|
+| first preview after the project opens (worker, session, Qt Quick's first compile, mount), cold server | 472.8 ms |
+| a reload (`property_set` answered after the remount), cold | 34.7 ms |
+| `preview_open` of another document, warm | p50 28.7 ms, p95 33.1 ms (n 20) |
+| a reload, warm | p50 29.1 ms, p95 31.5 ms (n 20) |
+| Studio's wasm (`studio_web_bg.wasm`) | 3,257,162 B, 705,316 gzip |
+| `web:serve`'s page JS (`dist/assets/index-*.js`) | 796,946 B, 252,606 gzip |
+
+The frame's JS is Vite's dev server's, module by module; its size is not
+a shipped size and is not given.
+
+**Requests to ljos-web, at bf49026.** Nothing of 1–16 is done by ljos-web
+since 55ea53b (the commits add the wasm property kernel only); Studio now
+does 7 and 8 itself:
+
+1. Open. A QML compiler in the browser. A9's live-shell compiler (tier-1
+   IR, shell mode, no arbitrary JS) would not compile a general Studio
+   document; request it general, or say which documents it takes.
+2. Open. A screenshot of a mounted root.
+3. Open. An outline (object tree) of a mounted root.
+4. Open. Read and write a property by `id`, and a click by object.
+5. Open. Source locations on objects (`pick`).
+6. Open. File and line on logged messages.
+7. Done on Studio's side (aliases are the Compiler's); not needed.
+8. Done (resize through the DOM).
+9. Open: `Rectangle { colour: "red" }` still compiles (exit 0).
+10. Open: `import No.Such.Module` still compiles (exit 0).
+11. Open: qmlc has no `--types`.
+12. Open (W4 is not done).
+13. Open.
+14. Open: a compiled `Button` carries no role.
+15. Open.
+16. Open.
+17. New. Module resolution: of two `qmldir`s declaring one module, qmlc
+    takes either (here `mocks/App/Media` over `App/Media`). Resolve by
+    import path, as Qt does, or refuse the ambiguity.
+18. New. A reload of a mounted root that keeps its state (hot reload), as
+    `ljos run --watch` keeps it; today a reload is a remount.
+19. New. Read Ljós's `# block Name Version File` qmldir lines as type
+    declarations (ADR 0003), or say Ljós's qmldir is not ljos-web's.
+20. New. A theme file beside the entry (`theme.json`) applied to
+    `Ljos.Design`'s tokens at mount and on change, as Ljós does.
 
 ### S6: polish and later
 
@@ -954,6 +1087,7 @@ What each task finds and what it says when something is missing is pinned by
   and build `ljos_blocks`; S5 depends on the ljos-web alignment track
   (its requests are listed under S5).
 - **Web.** The wasm is 2.4 MB; previews need COOP/COEP; a page closed
-  before storage has a write loses it; `wasm-bindgen` must match
-  ljos-web's; `web:shell` needs an installed Qt's QML and an ljos-web
+  before storage has a write loses it; a browser preview needs a server's
+  `qmlc` until ljos-web compiles in the page, remounts on reload, and
+  `forQmlc` stands in for module resolution ljos-web lacks; `web:shell` needs an installed Qt's QML and an ljos-web
   checkout.
