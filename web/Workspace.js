@@ -19,8 +19,11 @@ const live = new Set();
 
 // Gives this page's workspaces `studio` (an `openStudio` one), as the
 // native `studio_blocks::serve` does. A workspace made before has no
-// session to read and refuses every gesture until then.
+// session to read and refuses every gesture until then. The Studio this
+// replaces is closed: nothing else here reaches it.
 export function serve(studio) {
+  // Storage's refusal of what it had left has no call left to tell.
+  if (served !== studio) served?.close().catch((e) => console.error(e));
   served = studio;
   studio.watch(() => {
     for (const ws of live) if (ws.published < studio.writes) ws.enqueue({ refresh: true });

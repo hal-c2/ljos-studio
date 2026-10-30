@@ -530,6 +530,9 @@ the ljos-web requests below.
   natively (`host.rs`) and in Chromium (`web/browser.mjs`).
 - **JS face** (`web/studio.js`): every Studio a page opens shares one
   wasm instance; each keeps its own `ask` and watchers (`web/cores.mjs`).
+  `close()` stores what is left and lets go of them and of the session (the
+  page's `pagehide` does it, and whoever replaces a Studio): the instance
+  holds a watcher that holds the Studio, so no finalizer ever would.
   `openStudio({backend, caps, ask})` gives
   `call(tool, args)`, answered as an MCP client's call is, plus `tools()`,
   `view(doc)`, `watch(stale)`, `text(doc)` and `replaceText` (offsets in

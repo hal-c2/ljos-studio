@@ -17,7 +17,9 @@ self.addEventListener("message", async ({ data }) => {
     if (open) {
       const backend = open.backend === "memory" ? memoryBackend(open.files) : await openBackend(open.backend);
       const ask = open.buffer && workerAsk(open.buffer, (m) => self.postMessage(m), { timeoutMs: open.timeoutMs });
+      const replaced = studio;
       studio = await openStudio({ backend, caps: open.caps, ask });
+      await replaced?.close();
       self.postMessage({ id, result: { place: backend.place } });
     } else {
       self.postMessage({ id, result: await studio.call(call, args) });

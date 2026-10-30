@@ -530,6 +530,8 @@ async function main(args) {
           break;
         }
       }
+      // A refused write left over is that scenario's own business.
+      await world.studio?.close().catch(() => {});
       if (failed) {
         counts.failed += 1;
         failures.push(failed);

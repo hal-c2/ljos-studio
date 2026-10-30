@@ -15,17 +15,42 @@ export async function openStudio({ backend, caps = "inspect,mutate", ask, wasm }
   return new Studio(new StudioCore(backend.place, JSON.stringify(files), caps, ask), backend);
 }
 
+// How many functions this page's Studios still hold (`Studio.close`).
+export { heldFunctions } from "./pkg/studio_web.js";
+
 export class Studio {
   #core;
   #backend;
   // Storage is told in the order the calls wrote, one call's files after
   // the last's.
   #stored = Promise.resolve();
+  #leaving = (e) => {
+    // A page kept to come back to (`persisted`) still needs its Studio.
+    if (!e.persisted) this.close().catch(() => {});
+  };
 
   constructor(core, backend) {
     this.#core = core;
     this.#backend = backend;
     core.watch(() => this.#heard());
+    globalThis.addEventListener?.("pagehide", this.#leaving);
+  }
+
+  // Stores what is still to be stored, then lets go of the session and of
+  // the functions the page gave it, `ask` and `watch`'s. Without this a
+  // Studio lives as long as the wasm instance: the instance holds the
+  // watcher, the watcher holds this. A page replacing a Studio closes the
+  // old one. Rejects as a call does if storage refused what was left, and
+  // is closed all the same. After it `call` answers a refusal with
+  // `details.kind = "closed"`, and the other methods throw.
+  async close() {
+    globalThis.removeEventListener?.("pagehide", this.#leaving);
+    this.#watchers = [];
+    try {
+      await this.#store();
+    } finally {
+      this.#core.close();
+    }
   }
 
   // `{ok, text, images}` or `{error: {code, message, details}}`, the
