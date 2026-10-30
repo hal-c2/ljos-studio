@@ -142,6 +142,20 @@ const kept = await page.evaluate(async () => {
 });
 check("the project is in OPFS after the page reloads", kept?.includes(`width: ${5000 + RUNS - 1}`), kept?.slice(0, 80));
 
+// --- OPFS refuses removing what it does not have; the backend does not ---
+const removed = await page.evaluate(async () => {
+  const { opfsBackend } = await import("./store.js");
+  const backend = await opfsBackend("bench");
+  try {
+    await backend.remove("Never.qml");
+    await backend.remove("gone/too/Never.qml");
+    return null;
+  } catch (e) {
+    return `${e.name}: ${e.message}`;
+  }
+});
+check("removing what OPFS does not have is done", removed === null, removed);
+
 // --- The preview bridge: worker → page thread → frame and back -----------
 const bridge = await page.evaluate(async (origin) => {
   const files = { "Main.qml": "import QtQuick\n\nItem {\n    id: root\n    width: 10\n}\n" };

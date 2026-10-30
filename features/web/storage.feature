@@ -8,8 +8,8 @@ Feature: A project kept in the browser's storage
   later than a tool does. A call's answer comes once storage has every
   file the call wrote, so an answer that says a file changed is true of
   storage too. A write storage refuses refuses the call that made it,
-  naming the file, and goes to storage again with the next call unless a
-  newer text of the file came since.
+  naming the file, and goes to storage again with the next call as the
+  session then holds it. Removing a file storage does not have is done.
 
   Background:
     Given the file "Main.qml":
@@ -76,5 +76,33 @@ Feature: A project kept in the browser's storage
       import QtQuick
 
       Item {
+      }
+      """
+
+  Scenario: Undoing a create storage refused does not refuse every call after it
+    Given storage refuses to keep "New.qml"
+    When the agent calls the tool "document_new" with:
+      """json
+      {"doc": "New.qml"}
+      """
+    Then the agent is refused with "internal"
+    And the refusal's "/details/files/0/path" is "New.qml"
+    When storage keeps files again
+    And the agent calls the tool "history" with:
+      """json
+      {"action": "undo"}
+      """
+    And the agent calls the tool "property_set" with:
+      """json
+      {"doc": "Main.qml", "node": {"id": "root"}, "name": "width", "value": 20}
+      """
+    Then the answer's "/doc" is "Main.qml"
+    And the file "Main.qml" is:
+      """qml
+      import QtQuick
+
+      Item {
+          id: root
+          width: 20
       }
       """

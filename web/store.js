@@ -71,8 +71,15 @@ export async function opfsBackend(name, root) {
       }
     },
     async remove(path) {
-      const [dir, file] = await directory(path, false);
-      await dir.removeEntry(file);
+      // No such file or directory is what removing asks for: the memory
+      // and IndexedDB backends answer the same, and `Studio.#store` would
+      // otherwise take this removal again with every call.
+      try {
+        const [dir, file] = await directory(path, false);
+        await dir.removeEntry(file);
+      } catch (e) {
+        if (e?.name !== "NotFoundError") throw e;
+      }
     },
   };
 }

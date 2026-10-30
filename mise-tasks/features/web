@@ -3,7 +3,9 @@
 #MISE depends=["web:build"]
 set -euo pipefail
 # What the scenarios cannot set up by hand: two Studios in one wasm
-# instance, and a preview's late answer racing the next request.
+# instance, a preview's late answer racing the next request, and OPFS's
+# refusals, which node's memory backend does not make.
 node web/cores.mjs
+node web/opfs.mjs
 node web/bridge.mjs
 node web/features.mjs "$@"
