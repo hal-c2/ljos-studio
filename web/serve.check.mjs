@@ -51,6 +51,17 @@ const widthOf = () => page.frames().find((f) => f !== page.mainFrame()).evaluate
   return found ? Math.round(found.getBoundingClientRect().width) : null;
 });
 check("the preview shows the document's rectangle", (await widthOf()) === 120, await widthOf());
+const over = await page
+  .waitForFunction(() => {
+    const canvas = document.querySelector('#app [aria-label="Canvas"]')?.getBoundingClientRect();
+    const shown = document.getElementById("preview").getBoundingClientRect();
+    return canvas && ["left", "top", "width", "height"].every((k) => Math.abs(canvas[k] - shown[k]) < 1);
+  }, null, { timeout: 10000 })
+  .then(
+    () => true,
+    () => page.evaluate(() => ({ canvas: document.querySelector('#app [aria-label="Canvas"]')?.getBoundingClientRect().toJSON() ?? null, preview: document.getElementById("preview").getBoundingClientRect().toJSON() })),
+  );
+check("the preview is laid over the shell's Canvas panel", over === true, over);
 
 await labelled("Main.qml").click();
 await shows("Rectangle card");

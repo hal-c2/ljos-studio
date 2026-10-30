@@ -15,6 +15,9 @@
       #preview iframe { flex: 1; min-height: 0; border: 0; background: #fff; }
       #problem { color: #b00020; padding: 6px 10px; white-space: pre-wrap; max-height: 30%; overflow: auto; }
       #problem:empty { display: none; }
+      /* Laid over the shell's Canvas panel while it is on show (main.js). */
+      body:has(#preview.over) { grid-template-columns: minmax(0, 1fr) 0; }
+      #preview.over { position: fixed; z-index: 1; box-sizing: border-box; border: 1px solid #8884; background: Canvas; }
     </style>
   </head>
   <body>

@@ -164,5 +164,39 @@ async function refresh() {
 element("entry").onchange = refresh;
 refresh();
 
+// --- Where the preview is. DECISION: the frame is an element beside the
+// shell's root, laid over the Canvas panel's box while the shell shows one
+// (the column beside the shell otherwise). `PreviewPicture` has no face on
+// the web: a native picture is a PNG the preview draws, and a page has none
+// to give (ljos-web request 2) and needs none, as its frame draws itself.
+// It follows the panel as the shell lays it out: observers, nothing polled.
+const aside = element("preview");
+let placing = false;
+const place = () => {
+  if (placing) return;
+  placing = true;
+  requestAnimationFrame(() => {
+    placing = false;
+    const canvas = element("app").querySelector('[aria-label="Canvas"]');
+    const box = canvas?.getBoundingClientRect();
+    const over = box !== undefined && box.width > 0 && box.height > 0;
+    aside.classList.toggle("over", over);
+    Object.assign(aside.style, over ? { left: `${box.left}px`, top: `${box.top}px`, width: `${box.width}px`, height: `${box.height}px` } : { left: "", top: "", width: "", height: "" });
+    // The document is laid out at the size it now has.
+    const frameBox = frame.getBoundingClientRect();
+    if (generation > 0) ask({ call: "resize", size: { width: Math.round(frameBox.width), height: Math.round(frameBox.height) } });
+    if (canvas !== watched) {
+      if (watched) sized.unobserve(watched);
+      if (canvas) sized.observe(canvas);
+      watched = canvas;
+    }
+  });
+};
+let watched = null;
+const sized = new ResizeObserver(place);
+new MutationObserver(place).observe(element("app"), { childList: true, subtree: true, attributes: true, attributeFilter: ["style"] });
+addEventListener("resize", place);
+place();
+
 // `files`: what storage was given, for a check to read.
 Object.assign(window, { studio, files, shell: object, mounted: true });
