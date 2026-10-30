@@ -907,6 +907,7 @@ checksum = "47d9d19d1d6efa0109d2f65ff4c85cddd50bd572e5a00127ab10987290bcefae"
 [[package]]
 name = "ljos_blocks"
 version = "0.0.0"
+source = "git+https://github.com/hal-c2/ljos-ui?rev=63ec3fa4ad17dbc7ed126be86796703201e30403#63ec3fa4ad17dbc7ed126be86796703201e30403"
 dependencies = [
  "qml_syntax",
  "serde",
@@ -917,6 +918,7 @@ dependencies = [
 [[package]]
 name = "ljos_ir"
 version = "0.0.0"
+source = "git+https://github.com/hal-c2/ljos-ui?rev=63ec3fa4ad17dbc7ed126be86796703201e30403#63ec3fa4ad17dbc7ed126be86796703201e30403"
 dependencies = [
  "blake3",
  "postcard",
@@ -927,6 +929,7 @@ dependencies = [
 [[package]]
 name = "ljos_mcp_core"
 version = "0.0.0"
+source = "git+https://github.com/hal-c2/ljos-ui?rev=63ec3fa4ad17dbc7ed126be86796703201e30403#63ec3fa4ad17dbc7ed126be86796703201e30403"
 dependencies = [
  "rmcp",
  "schemars",
@@ -939,6 +942,7 @@ dependencies = [
 [[package]]
 name = "ljos_oxc_parser"
 version = "0.144.0"
+source = "git+https://github.com/hal-c2/ljos-ui?rev=63ec3fa4ad17dbc7ed126be86796703201e30403#63ec3fa4ad17dbc7ed126be86796703201e30403"
 dependencies = [
  "bitflags",
  "cow-utils",
@@ -1376,6 +1380,7 @@ dependencies = [
 [[package]]
 name = "qml_edit"
 version = "0.0.0"
+source = "git+https://github.com/hal-c2/ljos-ui?rev=63ec3fa4ad17dbc7ed126be86796703201e30403#63ec3fa4ad17dbc7ed126be86796703201e30403"
 dependencies = [
  "qml_syntax",
  "thiserror",
@@ -1384,6 +1389,7 @@ dependencies = [
 [[package]]
 name = "qml_syntax"
 version = "0.0.0"
+source = "git+https://github.com/hal-c2/ljos-ui?rev=63ec3fa4ad17dbc7ed126be86796703201e30403#63ec3fa4ad17dbc7ed126be86796703201e30403"
 dependencies = [
  "ljos_oxc_parser",
  "oxc_allocator",

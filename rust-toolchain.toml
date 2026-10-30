@@ -1,0 +1,4 @@
+# The toolchain Ljós pins, with what `mise run check` needs.
+[toolchain]
+channel = "1.98.1"
+components = ["rustfmt", "clippy"]

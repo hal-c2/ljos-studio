@@ -1,0 +1,9 @@
+# Ljós comes from GitHub as a git dependency (Cargo.toml). Fetching with the
+# git command line honours the user's git configuration (an `insteadOf` that
+# turns https into ssh, credential helpers), which cargo's built-in git does
+# not, and would then fail to authenticate.
+[net]
+git-fetch-with-cli = true
+
+[term]
+color = "always"

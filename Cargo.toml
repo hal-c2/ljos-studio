@@ -10,16 +10,17 @@ license = "MIT"
 repository = "https://github.com/hal-c2/ljos-studio"
 publish = false
 
-# Ljós's general pieces, from a checkout of ljos-ui beside this one
-# (`../ljos-ui`). They become git dependencies once Ljós publishes the
-# commits Studio needs; until then a path keeps both in step while the
-# track lead integrates them.
+# Ljós's general pieces, from ljos-ui at a commit on its main branch, so a
+# checkout of this repository builds on its own. To build against a local
+# ljos-ui instead (to change both at once), see "Building against a local
+# ljos-ui" in README.md. Every ljos-ui crate names the same `rev`: move them
+# together.
 [workspace.dependencies]
-qml_syntax = { path = "../ljos-ui/crates/qml_syntax" }
-qml_edit = { path = "../ljos-ui/crates/qml_edit" }
-ljos_ir = { path = "../ljos-ui/crates/ljos_ir" }
-ljos_mcp_core = { path = "../ljos-ui/crates/ljos_mcp_core" }
-ljos_blocks = { path = "../ljos-ui/crates/ljos_blocks", features = ["source"] }
+qml_syntax = { git = "https://github.com/hal-c2/ljos-ui", rev = "63ec3fa4ad17dbc7ed126be86796703201e30403" }
+qml_edit = { git = "https://github.com/hal-c2/ljos-ui", rev = "63ec3fa4ad17dbc7ed126be86796703201e30403" }
+ljos_ir = { git = "https://github.com/hal-c2/ljos-ui", rev = "63ec3fa4ad17dbc7ed126be86796703201e30403" }
+ljos_mcp_core = { git = "https://github.com/hal-c2/ljos-ui", rev = "63ec3fa4ad17dbc7ed126be86796703201e30403" }
+ljos_blocks = { git = "https://github.com/hal-c2/ljos-ui", rev = "63ec3fa4ad17dbc7ed126be86796703201e30403", features = ["source"] }
 
 # Pins match ljos-ui's, so the two lock files agree.
 anyhow = "1.0"
