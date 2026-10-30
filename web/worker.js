@@ -19,7 +19,10 @@ self.addEventListener("message", async ({ data }) => {
       const ask = open.buffer && workerAsk(open.buffer, (m) => self.postMessage(m), { timeoutMs: open.timeoutMs });
       const replaced = studio;
       studio = await openStudio({ backend, caps: open.caps, ask });
-      await replaced?.close();
+      // The open worked, and every later call goes to the new Studio: a
+      // refusal of the old one's leftover writes is the old project's, told
+      // on its own, not the open's answer (as `Workspace.js` does).
+      await replaced?.close().catch((e) => console.error(e));
       self.postMessage({ id, result: { place: backend.place } });
     } else {
       self.postMessage({ id, result: await studio.call(call, args) });
