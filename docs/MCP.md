@@ -9,6 +9,10 @@ Studio composes three servers rather than duplicating them:
 - **`ljos mcp`** (Ljós's authoring server, `ljos_mcp_author`): checking,
   linting, formatting, types, docs, scenarios. Studio forwards to it and
   adds `qml_edit_apply` and `blocks_list` *to Ljós* (general tools).
+  Studio's own `blocks_list` (#15) is the same registry, built by the
+  same `ljos_blocks` code, for the project Studio has open: an agent
+  talking only to Studio should not need a second server to see the
+  blocks it composes. The two answer alike; neither adds to the other.
 - **The live inspector** (`ljos_dev`, `app_*` tools) of the preview
   process: snapshot, inspect, click, screenshot, reload.
 - **Studio's own server** (`studio_mcp`), below: project, document, canvas

@@ -90,7 +90,7 @@ code or file formats is read or copied.
 
 | Module | Kind | Does |
 |---|---|---|
-| `studio_core` | Rust library | The session: open project, documents, selection, history (undo = inverse changes), preview targets. No UI. Depends on `qml_edit`, `ljos_blocks`, the compiler (Studio opts in, goal 9). |
+| `studio_core` | Rust library | The session: open project, documents, selection, history (undo = inverse changes), preview targets. No UI. Depends on `qml_edit`, `ljos_blocks`, the compiler (Studio links it on purpose, as Ljós's ARCHITECTURE.md goal 9 lets an application do). |
 | `studio_blocks` | Rust, Ljós blocks | Studio's own functional blocks (`Session`, `Selection`, `Canvas`, `Palette`, `Inspector`, `History`, `Tokens`) publishing state to the shell and taking actions. |
 | `studio_mcp` | Rust | Studio's MCP server on `ljos_mcp_core`: each tool calls a `studio_core` action. |
 | `shell/` | QML | The default Studio shell and its skins; users can replace it. |
@@ -101,12 +101,30 @@ code or file formats is read or copied.
 
 | Seam | Interface | Adapters |
 |---|---|---|
-| **Edit** | `qml_edit::apply(text, Edit) -> Applied{text, changes}` | One. Studio's `History` keeps `Applied::inverse` for undo. |
+| **Edit** | `qml_edit::apply(text, Edit) -> Applied{text, changes}`, and `Applied::inverse(&self, source) -> Vec<Change>` | One. Studio's `History` keeps the inverse changes for undo. |
 | **Document store** | `trait Store { read, write, watch }` | Filesystem (native); browser storage / File System Access (web); in-memory (tests). |
 | **Preview host** | `trait PreviewHost { load(files, aliases), snapshot, screenshot, set_state, events }` | Native: a child Ljós process with the live inspector (`ljos_dev`, `app_*` tools) and hot reload. Web: an ljos-web runtime in an iframe/worker. Test: in-process `TestWindow`. |
 | **Block source** | `BlockRegistry::from_type_dump` | `ljostypes.json` + qmldir `block` lines on disk; a running app's `Engine::type_dump()`. |
-| **Agent surface** | MCP tools (MCP.md) | stdio (`studio --mcp`), and the same tools on the running Studio's loopback inspector-style endpoint. |
+| **Agent surface** | MCP tools (MCP.md) | stdio (`studio --mcp`), and the same tools on the running Studio's loopback endpoint, guarded as below. |
 | **Canvas renderer** | Studio's `Canvas` block draws the preview's frames | Native: textures from the preview host. Web: the preview iframe is the canvas frame. |
+
+**Guarding the loopback endpoint.** The running Studio's endpoint can
+rewrite the user's QML (`mutate`), start a preview that runs project code
+(`run`) and write files (`fs`), so it is guarded as a Ljós inspector is
+(ARCHITECTURE.md section 19.7, through `ljos_mcp_core`):
+
+- it binds to loopback only;
+- every call needs a 256-bit bearer token made for each start of Studio
+  and written to a 0600 file in Studio's state directory, compared in
+  constant time;
+- `Origin` and `Host` are checked, so a web page that can reach localhost
+  is refused;
+- capabilities are granted at launch (`inspect` by default) and enforced
+  in the server;
+- every path a tool takes, `export`'s output among them, is canonicalised
+  and confined to the open project; a path outside it is refused.
+
+`studio --mcp` on stdio needs no token: its client started it.
 
 DECISION: the preview runs **out of Studio's process** (a child Ljós app
 natively, a sandboxed frame on the web). A design under edit runs user
@@ -211,7 +229,7 @@ Each milestone ends with its exit criteria met and its scenarios green.
 - `studio_core` Session with Store (fs), History, Selection.
 - `studio --mcp`: `project_open`, `document_tree`, `node_select`,
   `node_insert`, `node_move`, `node_remove`, `property_set`,
-  `binding_set`, `blocks_list`, `history_undo/redo`.
+  `binding_set`, `blocks_list`, `history` (list, undo, redo).
 - **Exit:** an agent builds a two-block shell from an empty project using
   only MCP; Gherkin scenarios assert the file text; undo returns the
   original bytes; tool schemas golden.
@@ -220,7 +238,8 @@ Each milestone ends with its exit criteria met and its scenarios green.
 
 - `PreviewHost` native adapter (child Ljós process, inspector, hot reload).
 - Mock modules through aliases; `preview_open`, `preview_screenshot`,
-  `preview_state_set`, `preview_target`.
+  `preview_state` (read or set mocked state); the target (desktop,
+  phone-sized, web) is an argument of `preview_open`, not a tool.
 - **Exit:** a block edited through MCP shows in the preview within the
   latency budget; live and mocked state preview the same shell unchanged.
 
@@ -252,9 +271,13 @@ Each milestone ends with its exit criteria met and its scenarios green.
 
 ## 8. Risks
 
-- **Addressing across edits.** Child-index paths shift; Studio keeps
-  `id`s on what it touches (adding one when it inserts) and re-resolves by
-  `id`/`ObjectKey` after each edit.
+- **Addressing across edits.** Child-index paths shift. Studio gives an
+  `id` only to an object it inserts itself (one not yet used in the
+  document); it never adds an `id` to an object the author wrote, since
+  that writes bytes nobody asked for (goal 2). Existing objects are
+  re-resolved by `id`, `ObjectKey` or path within the document's
+  generation check, so an address from an older generation is refused
+  rather than applied to the wrong object.
 - **Partial files.** A code view produces broken files; structural edits
   wait for a parse, which a person may find surprising.
 - **Members sharing a line with a brace** cannot yet take a multi-line
