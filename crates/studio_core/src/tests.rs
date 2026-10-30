@@ -317,3 +317,95 @@ fn an_added_line_is_read_as_a_whole_line() {
     assert_eq!(back[0].range, 2..14);
     assert_eq!(qml_edit::splice(after, &back), before);
 }
+
+/// A store whose writes fail while the flag is up.
+struct Flaky {
+    files: MemStore,
+    failing: std::sync::Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl Flaky {
+    fn check(&self, path: &str) -> Result<(), StoreError> {
+        if self.failing.load(std::sync::atomic::Ordering::SeqCst) {
+            return Err(StoreError::Io {
+                path: path.to_owned(),
+                message: "disk full".to_owned(),
+            });
+        }
+        Ok(())
+    }
+}
+
+impl Store for Flaky {
+    fn list(&self, extension: &str) -> Vec<String> {
+        self.files.list(extension)
+    }
+    fn read(&self, path: &str) -> Result<String, StoreError> {
+        self.files.read(path)
+    }
+    fn write(&self, path: &str, text: &str) -> Result<(), StoreError> {
+        self.check(path)?;
+        self.files.write(path, text)
+    }
+    fn remove(&self, path: &str) -> Result<(), StoreError> {
+        self.check(path)?;
+        self.files.remove(path)
+    }
+    fn exists(&self, path: &str) -> bool {
+        self.files.exists(path)
+    }
+    fn describe(&self) -> String {
+        "flaky".to_owned()
+    }
+}
+
+fn flaky() -> (Session, std::sync::Arc<std::sync::atomic::AtomicBool>) {
+    let failing = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let store = Flaky {
+        files: MemStore::new([("Main.qml".to_owned(), MAIN.to_owned())]),
+        failing: failing.clone(),
+    };
+    (Session::open(Box::new(store)), failing)
+}
+
+#[test]
+fn a_failed_undo_or_redo_leaves_the_history_where_it_was() {
+    use std::sync::atomic::Ordering::SeqCst;
+    let (mut s, failing) = flaky();
+    s.edit("Main.qml", None, &insert("Item {}", None), false)
+        .unwrap();
+    let edited = s.text("Main.qml").unwrap().0.to_owned();
+    let lists = s.history();
+
+    failing.store(true, SeqCst);
+    assert!(matches!(s.undo(), Err(Error::Store(_))));
+    assert_eq!(s.history(), lists, "the entry stays to be undone");
+    failing.store(false, SeqCst);
+    assert_eq!(s.text("Main.qml").unwrap().0, edited);
+
+    s.undo().unwrap();
+    assert_eq!(s.text("Main.qml").unwrap().0, MAIN);
+    let lists = s.history();
+
+    failing.store(true, SeqCst);
+    assert!(matches!(s.redo(), Err(Error::Store(_))));
+    assert_eq!(s.history(), lists, "the entry stays to be redone");
+    failing.store(false, SeqCst);
+    assert_eq!(s.text("Main.qml").unwrap().0, MAIN);
+
+    s.redo().unwrap();
+    assert_eq!(s.text("Main.qml").unwrap().0, edited);
+}
+
+#[test]
+fn a_failed_undo_of_a_created_document_keeps_it() {
+    use std::sync::atomic::Ordering::SeqCst;
+    let (mut s, failing) = flaky();
+    s.create("New.qml", "Item {}\n", false).unwrap();
+    failing.store(true, SeqCst);
+    assert!(s.undo().is_err());
+    failing.store(false, SeqCst);
+    assert_eq!(s.text("New.qml").unwrap().0, "Item {}\n");
+    s.undo().unwrap();
+    assert!(!s.store().exists("New.qml"));
+}

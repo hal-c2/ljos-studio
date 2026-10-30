@@ -75,16 +75,18 @@ impl History {
         self.undone.retain(|e| e.doc != doc);
     }
 
-    pub fn undo(&mut self) -> Option<Entry> {
-        let entry = self.done.pop()?;
-        self.undone.push(entry.clone());
-        Some(entry)
+    /// The entry [`Self::peek_undo`] showed has been replayed.
+    pub fn commit_undo(&mut self) {
+        if let Some(entry) = self.done.pop() {
+            self.undone.push(entry);
+        }
     }
 
-    pub fn redo(&mut self) -> Option<Entry> {
-        let entry = self.undone.pop()?;
-        self.done.push(entry.clone());
-        Some(entry)
+    /// The entry [`Self::peek_redo`] showed has been replayed.
+    pub fn commit_redo(&mut self) {
+        if let Some(entry) = self.undone.pop() {
+            self.done.push(entry);
+        }
     }
 
     /// Done (oldest first) and undone (next to redo first).

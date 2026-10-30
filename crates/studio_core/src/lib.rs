@@ -814,8 +814,15 @@ impl Session {
                 Err(e) => return Err(e),
             }
         }
-        let entry = self.history.undo().ok_or(Error::NothingTo("undo"))?;
+        let entry = self
+            .history
+            .peek_undo()
+            .cloned()
+            .ok_or(Error::NothingTo("undo"))?;
+        // It moves only once it has happened: a write that failed leaves it
+        // to be tried again, and the lists still say where the file is.
         self.replay(&entry, false)?;
+        self.history.commit_undo();
         Ok(entry.summary())
     }
 
@@ -835,8 +842,15 @@ impl Session {
                 Err(e) => return Err(e),
             }
         }
-        let entry = self.history.redo().ok_or(Error::NothingTo("redo"))?;
+        let entry = self
+            .history
+            .peek_redo()
+            .cloned()
+            .ok_or(Error::NothingTo("redo"))?;
+        // It moves only once it has happened: a write that failed leaves it
+        // to be tried again, and the lists still say where the file is.
         self.replay(&entry, true)?;
+        self.history.commit_redo();
         Ok(entry.summary())
     }
 
