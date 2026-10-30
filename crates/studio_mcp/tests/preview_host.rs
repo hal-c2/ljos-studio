@@ -475,6 +475,55 @@ fn three_mocks(f: &Fixture) {
     std::fs::remove_dir_all(f._dir.path().join("mocks/App")).unwrap();
 }
 
+/// Review 4427296683.
+#[test]
+fn a_failure_on_the_second_of_three_aliases_keeps_the_record_true() {
+    let f = Fixture::new();
+    three_mocks(&f);
+    f.call("preview_open", json!({ "doc": "Shell.qml" }))
+        .unwrap();
+    f.calls();
+    let before = f.events().len();
+
+    f.fail("alias B", refused());
+    f.call(
+        "preview_open",
+        json!({ "doc": "Shell.qml", "state": "mocked" }),
+    )
+    .unwrap_err();
+    assert_eq!(f.calls(), ["alias A mocks/A", "alias B mocks/B"]);
+    // The reload the first alias caused is on record.
+    let events = f.events();
+    assert_eq!(event_kinds(&events[before..])[0], "reloaded");
+
+    // A retry does only what the host has not done.
+    f.calls();
+    let out = f
+        .call(
+            "preview_open",
+            json!({ "doc": "Shell.qml", "state": "mocked" }),
+        )
+        .unwrap();
+    assert_eq!(out["started"], false);
+    assert_eq!(out["mocked"], json!(["A", "B", "C"]));
+    assert_eq!(f.calls(), ["alias B mocks/B", "alias C mocks/C"]);
+
+    // Going back, each alias is taken off once even after a failure.
+    f.fail("alias B -", refused());
+    f.call(
+        "preview_open",
+        json!({ "doc": "Shell.qml", "state": "live" }),
+    )
+    .unwrap_err();
+    assert_eq!(f.calls(), ["alias A -", "alias B -"]);
+    f.call(
+        "preview_open",
+        json!({ "doc": "Shell.qml", "state": "live" }),
+    )
+    .unwrap();
+    assert_eq!(f.calls(), ["alias B -", "alias C -"]);
+}
+
 #[test]
 fn a_preview_opens_only_on_a_document() {
     let f = Fixture::new();

@@ -16,7 +16,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 use studio_core::{
     Address,
-    preview::{Alias, PreviewError, PreviewEvent, Size, Target, ms},
+    preview::{Alias, PreviewError, PreviewEvent, Reload, Size, Target, ms},
 };
 
 use crate::{
@@ -145,6 +145,40 @@ fn preview_error(e: PreviewError) -> SurfaceError {
     }
 }
 
+/// Changes the open preview, keeping the record true after each step: the
+/// host has done what came before a failure, and a retry does only the rest.
+fn change(
+    open: &mut Open,
+    size: Size,
+    target: Option<Target>,
+    state: State,
+    aliases: &[Alias],
+    reloads: &mut Vec<Reload>,
+) -> Result<(), PreviewError> {
+    if open.size != size {
+        open.host.resize(size)?;
+        open.size = size;
+    }
+    open.target = target;
+    let old = open.mocked.clone();
+    for alias in old.iter().filter(|o| !aliases.contains(o)) {
+        reloads.push(open.host.alias(&alias.module, None)?);
+        open.mocked.retain(|m| m != alias);
+        open.state = if open.mocked.is_empty() {
+            State::Live
+        } else {
+            State::Mocked
+        };
+    }
+    for alias in aliases.iter().filter(|n| !old.contains(n)) {
+        reloads.push(open.host.alias(&alias.module, Some(&alias.dir))?);
+        open.mocked.push(alias.clone());
+        open.state = State::Mocked;
+    }
+    open.state = state;
+    Ok(())
+}
+
 fn open(studio: &Mutex<Studio>, a: OpenArgs) -> Result<OpenOut, SurfaceError> {
     let studio = lock(studio);
     studio.session.check_document(&a.doc).map_err(error)?;
@@ -196,32 +230,12 @@ fn open(studio: &Mutex<Studio>, a: OpenArgs) -> Result<OpenOut, SurfaceError> {
     let reuse = previous.is_some_and(|o| o.doc == a.doc);
     if reuse {
         let open = previews.open.as_mut().expect("checked");
-        if open.size != size {
-            open.host.resize(size).map_err(preview_error)?;
-            open.size = size;
-        }
-        let old = std::mem::take(&mut open.mocked);
         let mut reloads = Vec::new();
-        for alias in old.iter().filter(|o| !aliases.contains(o)) {
-            reloads.push(
-                open.host
-                    .alias(&alias.module, None)
-                    .map_err(preview_error)?,
-            );
-        }
-        for alias in aliases.iter().filter(|n| !old.contains(n)) {
-            reloads.push(
-                open.host
-                    .alias(&alias.module, Some(&alias.dir))
-                    .map_err(preview_error)?,
-            );
-        }
-        open.mocked = aliases.clone();
-        open.state = state;
-        open.target = target;
+        let changed = change(open, size, target, state, &aliases, &mut reloads);
         for reload in reloads {
             previews.record(reload, started_at);
         }
+        changed.map_err(preview_error)?;
     } else {
         // One preview at a time: the last one ends before the next starts.
         if let Some(mut last) = previews.open.take() {
