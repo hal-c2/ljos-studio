@@ -338,6 +338,30 @@ install_rust_parts() {
   rustup target add $targets
 }
 
+# Dies naming setup when the toolchain in use lacks one of
+# rust-toolchain.toml's `$1` (components or targets). Without rustup there
+# is nothing to ask, and cargo says what is missing.
+need_rust_parts() {
+  command -v rustup >/dev/null || return 0
+  local installed part
+  if [ "$1" = components ]; then
+    installed="$(rustup component list --installed 2>/dev/null)"
+  else
+    installed="$(rustup target list --installed 2>/dev/null)"
+  fi
+  for part in $(toolchain_list "$1"); do
+    case "
+$installed
+" in
+      *"
+$part
+"* | *"
+$part-"*) ;;
+      *) die "no $part for this Rust: run mise run setup (it runs rustup $([ "$1" = components ] && echo component || echo target) add $part)" ;;
+    esac
+  done
+}
+
 # The shell as an ljos-web page, assembled in the target (nothing is written
 # into ljos-web): `web/shell`'s files, or `$2`'s over them, with
 # `node_modules` linked to the checkout's. Sets `app`.

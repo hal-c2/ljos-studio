@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 #MISE description="Studio's session, tools and web crate build for wasm32 with nothing native in them; clippy, warnings denied"
 set -euo pipefail
+. "$(dirname "$0")/../_lib/env.sh"
+need_rust_parts components
+need_rust_parts targets
 # `--no-default-features` leaves out the directory store, the timer thread
 # and stdio: what is left must stand on its own in a browser.
 cargo clippy --target wasm32-unknown-unknown -p studio_core -p studio_mcp -p studio_web \

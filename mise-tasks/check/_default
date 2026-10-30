@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 #MISE description="Format check and clippy, warnings denied"
 set -euo pipefail
+. "$(dirname "$0")/../_lib/env.sh"
+need_rust_parts components
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings

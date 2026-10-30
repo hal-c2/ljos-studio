@@ -207,6 +207,14 @@ stub rustup 'echo "ran rustup $*"'
 call 'install_rust_parts'
 says "setup adds rust-toolchain.toml's components" "ran rustup component add rustfmt clippy"
 says "and its targets" "ran rustup target add wasm32-unknown-unknown"
+stub rustup 'case "$1 $2" in "component list") printf "cargo-x86_64-unknown-linux-gnu\\nclippy-x86_64-unknown-linux-gnu\\n" ;; "target list") printf "x86_64-unknown-linux-gnu\\n" ;; esac'
+call 'need_rust_parts components'
+refuses "a missing component names setup" "no rustfmt for this Rust: run mise run setup (it runs rustup component add rustfmt)"
+call 'need_rust_parts targets'
+refuses "a missing target names setup" "no wasm32-unknown-unknown for this Rust: run mise run setup (it runs rustup target add wasm32-unknown-unknown)"
+stub rustup 'case "$1 $2" in "component list") printf "clippy-x86_64-unknown-linux-gnu\\nrustfmt-x86_64-unknown-linux-gnu\\n" ;; "target list") printf "wasm32-unknown-unknown\\n" ;; esac'
+call 'need_rust_parts components; need_rust_parts targets; echo fine'
+says "with them all there, nothing is said" "fine"
 unstub rustup
 
 # --- Paths from where the person asked ---------------------------------------
