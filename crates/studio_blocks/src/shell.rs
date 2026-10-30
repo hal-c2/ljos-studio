@@ -26,6 +26,10 @@ pub const BUILTIN: &[(&str, &str)] = &[
         include_str!("../../../shell/Builtin/DocumentsPanel.qml"),
     ),
     (
+        "FlowPanel.qml",
+        include_str!("../../../shell/Builtin/FlowPanel.qml"),
+    ),
+    (
         "InspectorPanel.qml",
         include_str!("../../../shell/Builtin/InspectorPanel.qml"),
     ),

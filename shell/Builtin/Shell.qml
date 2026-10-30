@@ -54,6 +54,10 @@ Item {
                     workspace: workspace
                     SplitView.fillHeight: true
                 }
+                FlowPanel {
+                    workspace: workspace
+                    SplitView.preferredHeight: 220
+                }
             }
 
             SplitView {

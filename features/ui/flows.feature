@@ -1,0 +1,151 @@
+# Sources:
+#   docs/DESIGN.md (S6: prototyping flows; CMS-like content is models)
+#   features/edit/flows.feature, features/edit/models.feature (the same
+#   edits over MCP; the file text is the oracle for both)
+#   features/preview/flows.feature (the preview plays the flow)
+
+@ui
+Feature: A person wires and plays a prototype's flow in Studio's window
+  The flow panel draws the open document's flow as a graph: the root's
+  states are its nodes, the base state first, and its transitions and
+  interactions are its edges. A person wires the selected object to go to
+  a state when tapped, and takes a wire out again, each the `state_edit`
+  call an agent makes. In play mode a click in a frame is a click on the
+  running app (`preview_state` with `click_at`), and the panel says which
+  state the app is in. The inspector lists the roles of the data the
+  selected object sees, and binds one to a property as `model.<role>`.
+
+  Background:
+    Given the file "Contacts.qml":
+      """qml
+      import QtQuick
+
+      ListModel {
+          ListElement {
+              name: "Ada"
+              email: "ada@example.com"
+          }
+      }
+      """
+    And the file "Main.qml":
+      """qml
+      import QtQuick
+
+      Rectangle {
+          id: root
+          states: [
+              State {
+                  name: "details"
+                  PropertyChanges {
+                      target: title
+                      text: "Details"
+                  }
+              }
+          ]
+
+          Text {
+              id: title
+              text: "Overview"
+          }
+
+          Rectangle {
+              id: card
+              y: 100
+              width: 200
+              height: 100
+          }
+
+          Repeater {
+              id: people
+              model: Contacts {}
+              Text {
+                  id: row
+              }
+          }
+      }
+      """
+    And Studio's window shows the project
+    And the person has opened "Main.qml" in the documents list
+
+  Scenario: The flow panel draws the states and the flows between them
+    Given an agent has called the tool "state_edit" with:
+      """json
+      {"doc": "Main.qml", "action": "interaction", "trigger": {"id": "card"}, "state": "details"}
+      """
+    And an agent has called the tool "state_edit" with:
+      """json
+      {"doc": "Main.qml", "action": "add_transition", "from": "*", "to": "details", "animations": "NumberAnimation { duration: 200 }"}
+      """
+    Then the flow panel lists the states "Base, details"
+    And the flow panel lists the flows "* to details, tapped card to details"
+
+  Scenario: The selection is wired to go to a state
+    Given the person has selected "Rectangle card" in the layers panel
+    When the person clicks the button "Tap selection to go to details"
+    Then the flow panel lists the flows "tapped card to details"
+    And the history lists "tapped card to details"
+    And the file "Main.qml" is:
+      """qml
+      import QtQuick
+
+      Rectangle {
+          id: root
+          states: [
+              State {
+                  name: "details"
+                  PropertyChanges {
+                      target: title
+                      text: "Details"
+                  }
+              }
+          ]
+
+          Text {
+              id: title
+              text: "Overview"
+          }
+
+          Rectangle {
+              id: card
+              y: 100
+              width: 200
+              height: 100
+              TapHandler {
+                  onTapped: root.state = "details"
+              }
+          }
+
+          Repeater {
+              id: people
+              model: Contacts {}
+              Text {
+                  id: row
+              }
+          }
+      }
+      """
+
+  Scenario: A wire is taken out
+    Given the person has selected "Rectangle card" in the layers panel
+    And the person has clicked the button "Tap selection to go to details"
+    When the person clicks the button "Remove flow tapped card to details"
+    Then the flow panel lists the flows ""
+    And the history lists "remove tapped interaction"
+
+  @preview
+  Scenario: In play mode a click in the frame plays the flow
+    Given the person has selected "Rectangle card" in the layers panel
+    And the person has clicked the button "Tap selection to go to details"
+    And the person has clicked the button "Play"
+    When the person clicks the frame "Desktop" at 50, 150
+    Then the flow panel says the app is in the state "details"
+
+  Scenario: The inspector lists the roles a delegate sees
+    When the person selects "Text row" in the layers panel
+    Then the inspector lists the roles "name, email"
+
+  Scenario: A role is bound to a property
+    Given the person has selected "Text row" in the layers panel
+    When the person binds the role "name" to "text" in the inspector
+    Then the inspector shows "text" as "model.name"
+    And the history lists "set text"

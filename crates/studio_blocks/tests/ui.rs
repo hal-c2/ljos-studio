@@ -813,6 +813,80 @@ fn shown_states(window: &Window) -> Result<Vec<String>, String> {
     Ok(shown)
 }
 
+/// The names in the panel `within` that start with `prefix`, without it,
+/// in order.
+fn shown_with(window: &Window, within: &str, prefix: &str) -> Result<Vec<String>, String> {
+    let tree = window.tree();
+    let panel = find(&tree, &|n| n.name == within && n.role != "label")
+        .ok_or_else(|| format!("no {within:?} in the window"))?;
+    let mut shown = Vec::new();
+    collect(panel, &mut |n| {
+        if let Some(name) = n.name.strip_prefix(prefix) {
+            shown.push(name.to_owned());
+        }
+    });
+    Ok(shown)
+}
+
+fn listed(names: &str) -> Vec<String> {
+    if names.is_empty() {
+        Vec::new()
+    } else {
+        list(names)
+    }
+}
+
+#[then(regex = r#"^the flow panel lists the states "([^"]*)"$"#)]
+fn flow_lists_states(w: &mut UiWorld, names: String) -> StepResult {
+    let shown = shown_with(w.window()?, "Flow", "Flow state ")?;
+    (shown == listed(&names))
+        .then_some(())
+        .ok_or_else(|| format!("the flow panel lists the states {shown:?}"))
+}
+
+#[then(regex = r#"^the flow panel lists the flows "([^"]*)"$"#)]
+fn flow_lists_flows(w: &mut UiWorld, names: String) -> StepResult {
+    let window = w.window()?;
+    let shown = shown_with(window, "Flow", "Flow edge ")?;
+    (shown == listed(&names)).then_some(()).ok_or_else(|| {
+        format!(
+            "the flow panel lists the flows {shown:?}; the last refusal {:?}",
+            window.read("error").to_js_string()
+        )
+    })
+}
+
+#[then(regex = r#"^the flow panel says the app is in the state "([^"]+)"$"#)]
+fn flow_plays(w: &mut UiWorld, state: String) -> StepResult {
+    let window = w.window()?;
+    let shown = shown_with(window, "Flow", "Playing ")?;
+    (shown == [state]).then_some(()).ok_or_else(|| {
+        format!(
+            "the flow panel says {shown:?}; the last refusal {:?}",
+            window.read("error").to_js_string()
+        )
+    })
+}
+
+#[then(regex = r#"^the inspector lists the roles "([^"]*)"$"#)]
+fn lists_roles(w: &mut UiWorld, names: String) -> StepResult {
+    let shown = shown_with(w.window()?, "Inspector", "Role ")?;
+    (shown == listed(&names))
+        .then_some(())
+        .ok_or_else(|| format!("the inspector lists the roles {shown:?}"))
+}
+
+#[when(regex = r#"^the person binds the role "([^"]+)" to "([^"]+)" in the inspector$"#)]
+fn binds_role(w: &mut UiWorld, role: String, name: String) -> StepResult {
+    let window = w.window()?;
+    let field = window.node(
+        "Inspector",
+        Some("textinput"),
+        &format!("Bind role {role} to"),
+    )?;
+    window.enter(&field, &name)
+}
+
 #[then(regex = r#"^the frame "([^"]+)" shows the state "([^"]+)"$"#)]
 fn frame_shows_state(w: &mut UiWorld, target: String, state: String) -> StepResult {
     frame_state_is(w.window()?, &target, &format!("State {state}"))

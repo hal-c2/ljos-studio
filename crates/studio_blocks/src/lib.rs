@@ -120,6 +120,16 @@ pub struct Workspace {
     /// `target`, `name`, `value` as written.
     #[qml(readonly, notify)]
     pub states: Json,
+    /// The roles of the data the selected object sees, which a delegate's
+    /// bindings read as `model.<role>`.
+    #[qml(readonly, notify)]
+    pub roles: Json,
+    /// The open document's flow: `states`, the root's, the base state
+    /// (`""`) first, and `edges`, each `kind` (`transition` or
+    /// `interaction`), `from` (`*` for any), `to`, `label`, and an
+    /// interaction's `trigger` and `signal` (empty for a `TapHandler`'s).
+    #[qml(readonly, notify)]
+    pub flow: Json,
     /// The project's blocks: `module`, `name`, `summary`, `category`,
     /// `slots`.
     #[qml(readonly, notify)]
@@ -175,6 +185,8 @@ impl Default for Workspace {
             selection: json!({"start": 0, "end": 0}),
             inspector: none(),
             states: none(),
+            roles: none(),
+            flow: json!({"states": [], "edges": []}),
             palette: none(),
             done: none(),
             undone: none(),
@@ -577,6 +589,8 @@ fn publish(engine: &Engine, ws: ObjectId, view: View, seen: u64) {
     let _ = cx.set(Workspace::SELECTION, to_json(&view.selection));
     let _ = cx.set(Workspace::INSPECTOR, to_json(&view.inspector));
     let _ = cx.set(Workspace::STATES, to_json(&view.states));
+    let _ = cx.set(Workspace::ROLES, to_json(&view.roles));
+    let _ = cx.set(Workspace::FLOW, to_json(&view.flow));
     let _ = cx.set(Workspace::PALETTE, to_json(&view.palette));
     let _ = cx.set(Workspace::DONE, to_json(&view.done));
     let _ = cx.set(Workspace::UNDONE, to_json(&view.undone));

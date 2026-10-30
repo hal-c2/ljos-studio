@@ -13,6 +13,7 @@ use studio_core::{
     Address, StateInfo,
     preview::{PreviewEvent, Target},
 };
+use studio_core::{Interaction, flows::handler_name};
 
 use crate::{Studio, blocks, preview};
 
@@ -95,6 +96,32 @@ pub struct Previewed {
     pub variant: String,
 }
 
+/// The open document's flow, a graph whose nodes are its root's states.
+#[derive(Clone, Debug, Default, PartialEq, Serialize)]
+pub struct Flow {
+    /// The states, the base state (`""`) first.
+    pub states: Vec<String>,
+    pub edges: Vec<Edge>,
+}
+
+/// A way from one of the root's states to another, or to a document.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct Edge {
+    /// `transition` or `interaction`.
+    pub kind: String,
+    /// A state's name, or `*` for any: an interaction goes from wherever
+    /// the app is.
+    pub from: String,
+    /// A state's name, or the document an interaction opens.
+    pub to: String,
+    /// How the flow panel names it: `tapped card to details`.
+    pub label: String,
+    /// An interaction's trigger, by handle, and the signal to name when
+    /// taking it out: empty for a `TapHandler`'s, which needs none.
+    pub trigger: String,
+    pub signal: String,
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Serialize)]
 pub struct View {
     pub documents: Vec<String>,
@@ -110,6 +137,10 @@ pub struct View {
     pub inspector: Vec<Shown>,
     /// The selected object's states.
     pub states: Vec<StateInfo>,
+    /// The roles of the data the selected object sees, as a delegate's
+    /// bindings read them (`model.name`).
+    pub roles: Vec<String>,
+    pub flow: Flow,
     pub palette: Vec<Offered>,
     pub done: Vec<String>,
     pub undone: Vec<String>,
@@ -206,6 +237,7 @@ impl Studio {
             }
             Err(e) => view.problem = e.to_string(),
         }
+        view.flow = self.flow(doc).unwrap_or_default();
         let selected = self
             .session
             .selection()
@@ -230,9 +262,71 @@ impl Studio {
             if let Ok(variants) = self.session.variants(doc, &Address::Node(handle.clone())) {
                 view.states = variants.states;
             }
+            if let Ok(Some(model)) = self.session.model(doc, &Address::Node(handle.clone())) {
+                view.roles = model.roles;
+            }
             view.selected = handle;
         }
         view
+    }
+
+    /// `doc`'s root's states and the ways between them. Only interactions
+    /// that set the root's state, or open a document, are its flow; one
+    /// that sets another object's state is that object's.
+    fn flow(&mut self, doc: &str) -> Option<Flow> {
+        let root = Address::Path("root".to_owned());
+        let (_, node) = self.session.resolve(doc, &root).ok()?;
+        let variants = self.session.variants(doc, &root).ok()?;
+        let interactions = self.session.interactions(doc, &root).ok()?;
+        let (tree, _) = self.session.tree(doc).ok()?;
+        let mut flow = Flow {
+            states: std::iter::once(String::new())
+                .chain(variants.states.into_iter().map(|s| s.name))
+                .collect(),
+            edges: Vec::new(),
+        };
+        for t in variants.transitions {
+            flow.edges.push(Edge {
+                kind: "transition".to_owned(),
+                label: format!("{} to {}", t.from, t.to),
+                from: t.from,
+                to: t.to,
+                trigger: String::new(),
+                signal: String::new(),
+            });
+        }
+        for i in interactions {
+            let Interaction {
+                trigger,
+                trigger_id,
+                signal,
+                owner,
+                state,
+                open,
+                ..
+            } = i;
+            let to = match (state, open) {
+                (Some(state), _) if owner.is_some() && owner == node.id => state,
+                (_, Some(open)) => open,
+                _ => continue,
+            };
+            // A handler of the trigger's own is named by its signal; a
+            // `TapHandler`'s is not.
+            let own = tree.iter().any(|(h, n)| {
+                *h == trigger && n.bindings.iter().any(|b| b.name == handler_name(&signal))
+            });
+            let name = trigger_id.unwrap_or_else(|| trigger.clone());
+            let shown = if to.is_empty() { "base state" } else { &to };
+            flow.edges.push(Edge {
+                kind: "interaction".to_owned(),
+                label: format!("{signal} {name} to {shown}"),
+                from: "*".to_owned(),
+                to,
+                trigger,
+                signal: if own { signal } else { String::new() },
+            });
+        }
+        Some(flow)
     }
 
     /// The state of `doc`'s root that a window `width` wide turns on by

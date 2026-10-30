@@ -1,6 +1,8 @@
 // The document running on its target: a frame of the preview's size with
 // the preview's latest picture in it, and the state its breakpoint shows. Ctrl+wheel zooms; a click selects
 // the object drawn there, as `node_select` with a point does for an agent.
+// In play mode a click is the app's own: `preview_state` clicks the
+// running app there and reads the root's state, which the flow panel shows.
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
@@ -13,6 +15,7 @@ Panel {
     title: "Canvas"
 
     property real zoom: 1
+    property bool playing: false
     readonly property var preview: workspace.preview
 
     function zoomBy(notches) {
@@ -79,13 +82,16 @@ Panel {
                             workspace: panel.workspace
                         }
                         TapHandler {
-                            onTapped: (point) => panel.workspace.dispatch("node_select", {
-                                doc: panel.workspace.doc,
-                                at: {
+                            onTapped: (point) => {
+                                const at = {
                                     x: Math.floor(point.position.x / panel.zoom),
                                     y: Math.floor(point.position.y / panel.zoom)
                                 }
-                            })
+                                if (panel.playing)
+                                    panel.workspace.dispatch("preview_state", {node: {path: "root"}, click_at: at})
+                                else
+                                    panel.workspace.dispatch("node_select", {doc: panel.workspace.doc, at: at})
+                            }
                         }
                     }
                 }
@@ -99,5 +105,17 @@ Panel {
             text: panel.workspace.previews ? "Open a document to preview it" : "Previews are off"
             color: Colors.text
         }
+    }
+
+    // Over the canvas, not in it, so it stays put as the frames scroll.
+    Button {
+        x: flick.width - width - Spacing.xs
+        y: Spacing.xs
+        visible: panel.preview !== null
+        text: "Play"
+        checkable: true
+        checked: panel.playing
+        Accessible.name: text
+        onClicked: panel.playing = checked
     }
 }

@@ -5,6 +5,9 @@
 // Below them, its states (`state_edit`): one is picked to edit the values
 // it changes and the condition that turns it on, or to give it a
 // breakpoint, a width bound of the window.
+//
+// Last, the roles of the data it sees, in a list's delegate: one is bound
+// to a property as `model.<role>`, the form a delegate reads it in.
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
@@ -314,6 +317,45 @@ Panel {
                     Accessible.name: "Set change"
                     enabled: changeTarget.text !== "" && changeName.text !== ""
                     onClicked: panel.change(changeTarget.text, changeName.text, changeValue.text)
+                }
+            }
+        }
+
+        Label {
+            visible: panel.workspace.roles.length > 0
+            text: "Roles"
+            color: Colors.text
+            font.weight: Typography.bodyStrongWeight
+            Accessible.role: Accessible.Heading
+            Accessible.name: text
+        }
+
+        Repeater {
+            model: panel.workspace.roles
+            delegate: RowLayout {
+                id: roleRow
+                required property string modelData
+                Layout.fillWidth: true
+                spacing: Spacing.xxs
+
+                Label {
+                    text: roleRow.modelData
+                    color: Colors.text
+                    Layout.preferredWidth: 96
+                    elide: Text.ElideRight
+                    Accessible.role: Accessible.StaticText
+                    Accessible.name: "Role " + roleRow.modelData
+                }
+                TextField {
+                    placeholderText: "property"
+                    Accessible.name: "Bind role " + roleRow.modelData + " to"
+                    Layout.fillWidth: true
+                    onAccepted: {
+                        if (text === "")
+                            return
+                        panel.bind(text, "model." + roleRow.modelData)
+                        text = ""
+                    }
                 }
             }
         }
