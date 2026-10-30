@@ -107,6 +107,43 @@ impl Review {
         review
     }
 
+    /// This session's review with `now`, the sidecar as read again.
+    ///
+    /// What the file says of a comment is kept, and which comments there
+    /// are. The session adds what only it knows, for a comment it is
+    /// following: the handle, and the place and state edits gave it, which
+    /// the file cannot have seen. A comment under the same id that began
+    /// elsewhere is another comment: ids restart with a deleted sidecar.
+    pub fn merged(self, mut now: Self) -> Self {
+        if now.unreadable.is_some() {
+            // Refused until it is mended, and nothing to merge with until
+            // then: the session holds on to what it follows.
+            return Self {
+                comments: self.comments,
+                bound: self.bound,
+                looked_up: self.looked_up,
+                ..now
+            };
+        }
+        for comment in &mut now.comments {
+            let Some(handle) = self.bound.get(&comment.id) else {
+                continue;
+            };
+            let same = self.comments.iter().find(|held| {
+                held.id == comment.id
+                    && held.doc == comment.doc
+                    && held.thread.first().map(|n| &n.text)
+                        == comment.thread.first().map(|n| &n.text)
+            });
+            if let Some(held) = same {
+                now.bound.insert(comment.id.clone(), *handle);
+                comment.anchor = held.anchor.clone();
+                comment.orphaned = held.orphaned;
+            }
+        }
+        now
+    }
+
     /// A sidecar that is there but could not be read at all.
     pub fn unreadable(why: String) -> Self {
         Self {

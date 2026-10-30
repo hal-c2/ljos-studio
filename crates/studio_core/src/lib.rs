@@ -1470,7 +1470,7 @@ impl Session {
         }
         review.looked_up.retain(|d| d != doc);
         self.look_up(doc);
-        let _ = self.save_review();
+        self.save_derived();
     }
 
     fn review(&mut self) -> &mut review::Review {
@@ -1493,16 +1493,34 @@ impl Session {
 
     /// Reads the sidecar again where somebody else changed it since this
     /// session last read or wrote it, or where it did not read then (it
-    /// may be mended now). What the session knew of the old one (which
-    /// object each comment follows) goes: the comments are found by key
-    /// again, as in a new session.
+    /// may be mended now). Comments the session follows stay on their
+    /// objects, and where that differs from the file it is written down;
+    /// the rest are found by key, as in a new session.
     fn refresh_review(&mut self) {
         let Some(held) = &self.review else {
             return;
         };
         let now = self.read_review();
-        if held.unreadable.is_some() || now.unreadable.is_some() || now.seen != held.seen {
-            self.review = Some(now);
+        if held.unreadable.is_none() && now.unreadable.is_none() && now.seen == held.seen {
+            return;
+        }
+        let on_disk = now.comments.clone();
+        let held = self.review.take().expect("just looked at");
+        let merged = held.merged(now);
+        let differs = merged.unreadable.is_none() && merged.comments != on_disk;
+        self.review = Some(merged);
+        if differs {
+            self.save_derived();
+        }
+    }
+
+    /// Writes down what follows from the design rather than what somebody
+    /// asked for, so a sidecar changed meanwhile is no one's to be told of:
+    /// the two are merged and it goes again. Whatever is still not written
+    /// is in the session, for the next write.
+    fn save_derived(&mut self) {
+        if matches!(self.save_review(), Err(Error::ReviewChanged)) {
+            let _ = self.save_review();
         }
     }
 
@@ -1551,7 +1569,7 @@ impl Session {
             }
         }
         if changed {
-            let _ = self.save_review();
+            self.save_derived();
         }
     }
 
@@ -1608,7 +1626,7 @@ impl Session {
             }
         }
         if changed {
-            let _ = self.save_review();
+            self.save_derived();
         }
     }
 
@@ -1616,7 +1634,7 @@ impl Session {
     /// that shows the design is told.
     ///
     /// A sidecar somebody else changed since it was read is never written
-    /// over: it is read again instead, and the caller told.
+    /// over: it is read again and merged instead, and the caller told.
     fn save_review(&mut self) -> Result<(), Error> {
         let now = self.read_review();
         let review = self.review();
@@ -1624,7 +1642,8 @@ impl Session {
             return Err(Error::ReviewUnreadable(why.clone()));
         }
         if now.seen != review.seen {
-            self.review = Some(now);
+            let held = self.review.take().expect("just looked at");
+            self.review = Some(held.merged(now));
             return Err(Error::ReviewChanged);
         }
         let text = review.to_text();

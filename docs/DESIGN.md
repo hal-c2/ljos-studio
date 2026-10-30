@@ -748,7 +748,10 @@ their arguments, answers and refusals.
   mended or deleted. A sidecar changed by somebody else between Studio's
   read and its write is not overwritten: the call is refused with
   `review_changed` and the new file is what Studio holds from then on. A
-  comment the sidecar did not take is not made.
+  comment the sidecar did not take is not made. Re-reading merges: what
+  the file says is kept, and a comment this session follows keeps its
+  object, place and orphaned state, so an edit or an undo around the
+  change still lands; that is then written down.
 - **The window.** A layer with open comments says how many ("1 comment on
   Text title"). The inspector's *Comments* section lists the selected
   object's comments and the document's orphaned ones ("Open comment: Too

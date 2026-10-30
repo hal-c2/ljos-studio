@@ -339,6 +339,79 @@ Feature: Design review comments sit on objects, in the sidecar
       And the answer's "/comments/0/thread/0/text" is "Pulled in"
       And the answer's "/comments/1/thread/0/text" is "Mine"
 
+    Scenario: A sidecar changed before an edit does not cost the comment its object
+      Given the agent has called the tool "review" with:
+        """json
+        {"action": "add", "doc": "Main.qml", "node": {"id": "title"}, "text": "Too small"}
+        """
+      When somebody writes the file ".studio/review.json":
+        """json
+        {"version": 1, "comments": [{"id": "c1", "doc": "Main.qml", "anchor": {"key": [{"Id": "title"}], "path": "root/0", "line": 5, "type": "Text", "id": "title"}, "thread": [{"text": "Too small", "at": 1}, {"text": "Agreed", "at": 2}]}]}
+        """
+      And the agent calls the tool "node_remove" with:
+        """json
+        {"doc": "Main.qml", "node": {"id": "title"}}
+        """
+      And the agent calls the tool "history" with:
+        """json
+        {"action": "undo"}
+        """
+      When the agent calls the tool "review" with:
+        """json
+        {"action": "list", "doc": "Main.qml"}
+        """
+      Then the answer's "/comments/0/orphaned" is false
+      And the answer's "/comments/0/thread/1/text" is "Agreed"
+
+    Scenario: A sidecar changed and read between an edit and its undo
+      Given the agent has called the tool "review" with:
+        """json
+        {"action": "add", "doc": "Main.qml", "node": {"id": "title"}, "text": "Too small"}
+        """
+      And the agent has called the tool "node_remove" with:
+        """json
+        {"doc": "Main.qml", "node": {"id": "title"}}
+        """
+      When somebody writes the file ".studio/review.json":
+        """json
+        {"version": 1, "comments": [{"id": "c1", "doc": "Main.qml", "anchor": {"key": [{"Id": "title"}], "path": "root/0", "line": 5, "type": "Text", "id": "title"}, "thread": [{"text": "Too small", "at": 1}, {"text": "Agreed", "at": 2}]}]}
+        """
+      And the agent calls the tool "review" with:
+        """json
+        {"action": "list", "doc": "Main.qml"}
+        """
+      And the agent calls the tool "history" with:
+        """json
+        {"action": "undo"}
+        """
+      When the agent calls the tool "review" with:
+        """json
+        {"action": "list", "doc": "Main.qml"}
+        """
+      Then the answer's "/comments/0/orphaned" is false
+      And the answer's "/comments/0/thread/1/text" is "Agreed"
+
+    Scenario: A sidecar changed before a rename keeps the comment on the renamed object
+      Given the agent has called the tool "review" with:
+        """json
+        {"action": "add", "doc": "Main.qml", "node": {"id": "title"}, "text": "Too small"}
+        """
+      When somebody writes the file ".studio/review.json":
+        """json
+        {"version": 1, "comments": [{"id": "c1", "doc": "Main.qml", "anchor": {"key": [{"Id": "title"}], "path": "root/0", "line": 5, "type": "Text", "id": "title"}, "thread": [{"text": "Too small", "at": 1}, {"text": "Agreed", "at": 2}]}]}
+        """
+      And the agent calls the tool "binding_set" with:
+        """json
+        {"doc": "Main.qml", "node": {"id": "title"}, "name": "id", "value": "heading"}
+        """
+      When the agent calls the tool "review" with:
+        """json
+        {"action": "list", "doc": "Main.qml"}
+        """
+      Then the answer's "/comments/0/orphaned" is false
+      And the answer's "/comments/0/anchor/id" is "heading"
+      And the answer's "/comments/0/thread/1/text" is "Agreed"
+
     Scenario: A sidecar somebody deleted does not come back with the next comment
       Given the agent has called the tool "review" with:
         """json
