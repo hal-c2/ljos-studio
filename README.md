@@ -4,12 +4,68 @@ A visual designer for Ljós applications and ljos-web sites, where the
 design is the application's own QML. People and agents drive it alike:
 every capability is an MCP tool.
 
+## Run it
+
+| | Command | Needs |
+|---|---|---|
+| Native window | `mise run studio [DIR]` | Rust only (mise installs the pinned one) |
+| In a browser | `mise run web:serve`, then open the URL it prints | ljos-web beside this checkout, with its packages; Qt 6 for Controls; Node (mise installs it) |
+
+`mise run studio` opens `DIR`, or with none a copy of `samples/hello` in the
+target directory, so your edits leave the sample alone. It builds release:
+opening a shell and following a selection are several times faster than in a
+debug build, and the first build is the only cost.
+
+`mise run web:serve` serves on `localhost` only (`PORT`, default 5199).
+Projects live in your browser's storage; *New* starts one and *Import* reads a
+folder of text files. Your edits compile on that local server, which draws the
+preview, because ljos-web has no QML compiler that runs in a page.
+
+For the browser, once:
+
+```sh
+git clone https://github.com/hal-c2/ljos-web ../ljos-web
+git -C ../ljos-web checkout "$(cat web/ljos-web.rev)"
+(cd ../ljos-web && mise trust && mise install && pnpm install --frozen-lockfile)
+```
+
+and Qt 6's QML, which the page reads Controls from. It is found with
+`qtpaths6`, then `qtpaths`, then Homebrew's `qt` and `~/Qt/6.x/`; if yours is
+elsewhere, set `QT_INSTALL_QML`. qmlc is built in ljos-web's own target the
+first time it is wanted. A task that lacks something says the exact command.
+
+Everything found has an override: `LJOS_WEB`, `PLAYWRIGHT`, `QMLC`,
+`QT_INSTALL_QML`, `LJOS_UI`, `LJOS`, `WASM_BINDGEN`. None is needed in this
+layout.
+
+`mise run features` needs the `ljos` program: `LJOS`, else one built in a
+`../ljos-ui` beside this checkout, else it prints and runs
+`cargo install --git https://github.com/hal-c2/ljos-ui --rev <rev> ljos_cli`
+into `target/tools`. `mise run web:browser`, `web:shell` and `web:serve:check`
+drive headless Chromium, which also needs
+`(cd ../ljos-web && pnpm --filter ljos-web-example-web exec playwright install chromium)`.
+
+## Status
+
+[docs/DESIGN.md](docs/DESIGN.md) has what each milestone built.
+
+- **S0–S4 built.** The lossless edit seam; headless Studio over MCP; previews
+  in a child Ljós process; the canvas, layers, inspector, palette and code
+  view; variants, breakpoints, slots, tokens, user shells and the self-reskin.
+- **S5 half built.** The session, its tools and the shell run in a browser,
+  with projects in browser storage and previews drawn by ljos-web in the page's
+  own pane. Studio's Canvas panel in a browser still says previews are off, and
+  the S1–S4 scenarios do not run there yet: both wait on requests to ljos-web
+  (DESIGN.md, S5).
+- **S6 built, but for multiplayer.** Prototyping flows, list data, export
+  bundles and review comments. Multiplayer research has not started.
+
+The lossless edit engine (`qml_edit`) and the block model live in Ljós itself,
+as general pieces any tool can use.
+
 - [docs/DESIGN.md](docs/DESIGN.md): goals, modules and seams, data flow,
   testing, performance budget and milestones.
 - [docs/MCP.md](docs/MCP.md): the MCP tool surface.
-
-Status: design (milestone S0). The lossless edit engine (`qml_edit`) and
-the block model live in Ljós itself, as general pieces any tool can use.
 
 ## Building
 

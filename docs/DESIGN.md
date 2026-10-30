@@ -782,6 +782,17 @@ Measured in a release build on the reference desktop:
 |---|---|---|
 | `export` of a project whose bundle holds 200 files (415 677 bytes), 20 exports (`studio_mcp` example `export_perf`, release) | 9.41 ms | 9.95 ms |
 
+#### As built: running it
+
+`mise run studio` is the window; `mise run web:serve` is the same shell in a
+browser, for a person. ljos-web compiles QML only outside a page, so
+`web/serve.mjs` compiles and serves the preview, bound to the loopback
+interface and refusing another origin: a page elsewhere must not be able to
+reach it. The project stays in browser storage (OPFS, with the names in
+`localStorage`). The preview pane speaks the same protocol as `web/page.js`.
+What each task finds and what it says when something is missing is pinned by
+`mise run check:tasks`; the pin of ljos-web is `web/ljos-web.rev`.
+
 ## 8. Risks
 
 - **Addressing across edits.** Child-index paths shift. Studio gives an
