@@ -531,7 +531,26 @@ the ljos-web requests below.
   UTF-16 units, as JavaScript counts). `web/features.mjs` runs the
   `features/` scenarios that need no preview and no window against it in
   node (`mise run features:web`); `@web` scenarios
-  (`features/web/storage.feature`) run only there.
+  (`features/web/storage.feature`) run only there. It reads Scenario
+  Outlines and data tables as cucumber does (one scenario per Examples
+  row, `<name>`s written into step text, doc strings and tables) and
+  refuses any Gherkin it does not read. Its steps match by kind (`Given`,
+  `When`, `Then`) as cucumber's do, and it reads the native runner's
+  `#[given]`/`#[when]`/`#[then]` patterns from
+  `crates/studio_mcp/tests/features.rs`: a step one library has and the
+  other lacks fails the run unless it is listed as the other's own (the
+  preview's two steps native, browser storage's two web).
+  A file a scenario gives after the tools connected reaches the session
+  through `Studio.stored(path, text)` (`WebStore::stored`): storage got it
+  from elsewhere, as another tab's write would be, and reads see it as
+  `FsStore`'s see a file written into the directory.
+- **The web preview's rate**: `WebPreviewHost` says it answers 150 calls a
+  second (`studio_web::host::CALLS_PER_SECOND`), so a burst reloads a page
+  60 times a second, once a display frame at 60 Hz. The bridge has no
+  limiter to stay under; the number is Studio's own pace. It is above
+  Ljós's inspector default (20, 8 reloads a second) and below the native
+  preview's 200 because a page's preview draws on the shell's own thread,
+  where a reload no frame shows costs the shell a frame.
 - **The shell on ljos-web** (item 5, below): `Studio.Workspace` has a
   hand-written face (`web/Workspace.js`) that publishes
   `studio_mcp::view`, the projection the native block publishes, read

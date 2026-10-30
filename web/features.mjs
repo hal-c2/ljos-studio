@@ -5,15 +5,12 @@
 //   node web/features.mjs [feature file or directory…]
 //
 // With no arguments it runs every scenario that needs no preview: a
-// preview is a page of its own (`@preview`), a window is native (`@ui`).
+// preview is a page of its own (`@preview`), a window is native (`@ui`),
+// and a link is the file system's, which storage has not (`@disk`).
 //
 // DECISION: node, not Playwright. These scenarios touch no DOM and no
 // browser storage, and node runs the very module a page loads; the OPFS
 // backend and the preview bridge run in a browser in `web/browser.mjs`.
-//
-// The parser reads the Gherkin these files use (Feature, Rule, Background,
-// Scenario, tags, doc strings) and refuses anything else, so a scenario is
-// never half read.
 
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
@@ -24,10 +21,38 @@ import { memoryBackend } from "./store.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = join(here, "..");
-const SKIPPED_TAGS = ["preview", "ui"];
+const SKIPPED_TAGS = ["preview", "ui", "disk"];
 const DEFAULT = ["features/tools.feature", "features/edit", "features/project", "features/web"];
 
 // --- Gherkin --------------------------------------------------------------
+
+// The Gherkin these files use: Feature, Rule, Background, Scenario (and
+// Scenario Outline with Examples), tags, doc strings and data tables. It
+// refuses anything else, so a scenario is never half read. An outline
+// becomes one scenario per Examples row, its `<name>`s written in from the
+// row in step text, doc strings and tables, as cucumber expands them.
+
+const SCENARIO = /^(Scenario|Example|Scenario Outline|Scenario Template):\s*(.*)$/;
+const EXAMPLES = /^(Examples|Scenarios):\s*(.*)$/;
+
+// A table row's cells: `|` separates them, `\|`, `\\` and `\n` are a bar,
+// a backslash and a line break, and each cell is trimmed.
+function cells(t, fail) {
+  if (!t.endsWith("|")) fail("a table row that does not end in `|`");
+  const out = [];
+  let cell = "";
+  for (let i = 1; i < t.length; i++) {
+    const c = t[i];
+    if (c === "\\" && i + 1 < t.length) {
+      const next = t[++i];
+      cell += next === "n" ? "\n" : next === "|" || next === "\\" ? next : `\\${next}`;
+    } else if (c === "|") {
+      out.push(cell.trim());
+      cell = "";
+    } else cell += c;
+  }
+  return out;
+}
 
 export function parse(text, file) {
   const lines = text.split("\n");
@@ -35,32 +60,59 @@ export function parse(text, file) {
   let tags = [];
   let rule = null; // { name, tags, background, scenarios }
   let steps = null; // where steps go now
-  let last = null; // the last step, for its doc string
+  let last = null; // the last step, for its doc string or table
+  let scenario = null; // the scenario steps go to, for its Examples
+  let examples = null; // the Examples block whose rows come now
   const fail = (n, why) => {
     throw new Error(`${file}:${n + 1}: ${why}`);
   };
+  const table = (n, t) => {
+    const row = cells(t, (why) => fail(n, why));
+    let rows;
+    if (examples) rows = examples.rows;
+    else if (last && last.docstring === undefined) rows = last.table ??= [];
+    else fail(n, "a table that follows no step and is no Examples");
+    if (rows.length > 0 && row.length !== rows[0].cells.length) {
+      fail(n, `a row of ${row.length} cells in a table of ${rows[0].cells.length}`);
+    }
+    rows.push({ cells: row, line: n + 1 });
+  };
+  const ended = (n) => {
+    // An outline is read whole: every Examples has its header.
+    if (scenario?.examples?.some((e) => e.rows.length === 0)) fail(n, "Examples with no table");
+    if (scenario?.outline && scenario.examples.length === 0) fail(scenario.line - 1, "an outline with no Examples");
+  };
   for (let n = 0; n < lines.length; n++) {
-    const line = lines[n];
-    const t = line.trim();
+    const t = lines[n].trim();
     if (t === "" || t.startsWith("#")) continue;
     if (t.startsWith("@")) {
       tags.push(...t.split(/\s+/).map((tag) => tag.replace(/^@/, "")));
       continue;
     }
-    const keyword = /^(Feature|Rule|Background|Scenario|Example):\s*(.*)$/.exec(t);
-    if (keyword) {
-      const [, kind, name] = keyword;
+    if (t.startsWith("|")) {
+      table(n, t);
+      continue;
+    }
+    const keyword = /^(Feature|Rule|Background):\s*(.*)$/.exec(t);
+    const titled = keyword ?? SCENARIO.exec(t);
+    if (titled) {
+      ended(n);
+      const [, kind, name] = titled;
+      examples = null;
       if (kind === "Feature") {
         Object.assign(feature, { name, tags });
         steps = null;
+        scenario = null;
       } else if (kind === "Rule") {
         rule = { name, tags, background: [], scenarios: [] };
         feature.rules.push(rule);
         steps = null;
+        scenario = null;
       } else if (kind === "Background") {
         steps = rule ? rule.background : feature.background;
+        scenario = null;
       } else {
-        const scenario = { name, tags, line: n + 1, steps: [], rule };
+        scenario = { name, tags, line: n + 1, steps: [], rule, examples: [], outline: kind !== "Scenario" && kind !== "Example" };
         (rule ? rule.scenarios : feature.scenarios).push(scenario);
         steps = scenario.steps;
       }
@@ -68,19 +120,28 @@ export function parse(text, file) {
       last = null;
       continue;
     }
-    if (/^(Scenario Outline|Scenario Template|Examples|Scenarios):/.test(t) || t.startsWith("|")) {
-      fail(n, "tables and outlines are not read by this runner");
+    const block = EXAMPLES.exec(t);
+    if (block) {
+      if (!scenario) fail(n, "Examples under no scenario");
+      if (examples?.rows.length === 0) fail(n, "Examples with no table");
+      examples = { name: block[2], tags, rows: [] };
+      scenario.examples.push(examples);
+      tags = [];
+      steps = null;
+      last = null;
+      continue;
     }
+    if (tags.length > 0) fail(n, "tags that tag no Feature, Rule, Scenario or Examples");
     const step = /^(Given|When|Then|And|But|\*) (.*)$/.exec(t);
     if (step) {
-      if (!steps) fail(n, "a step outside a scenario or background");
+      if (!steps) fail(n, examples ? "a step among Examples" : "a step outside a scenario or background");
       last = { keyword: step[1], text: step[2], line: n + 1 };
       steps.push(last);
       continue;
     }
     const fence = /^("""|```)(.*)$/.exec(t);
     if (fence) {
-      if (!last || last.docstring !== undefined) fail(n, "a doc string that follows no step");
+      if (!last || last.docstring !== undefined || last.table) fail(n, "a doc string that follows no step");
       const body = [];
       // The content type (`"""qml`) is the doc string's first line, as the
       // native runner is given it.
@@ -90,23 +151,49 @@ export function parse(text, file) {
       last.docstring = body.join("\n");
       continue;
     }
-    // A description: free text under a Feature, Rule or Scenario title.
-    if (steps && steps.length > 0) fail(n, `not a step: ${t}`);
+    // A description: free text under a title, before its steps or rows.
+    if ((steps && steps.length > 0) || (examples && examples.rows.length > 0)) fail(n, `not a step: ${t}`);
   }
+  ended(lines.length);
   return feature;
 }
 
-// Every scenario of a feature with its background steps and tags.
-export function* scenarios(feature) {
-  for (const s of feature.scenarios) yield { ...s, tags: [...feature.tags, ...s.tags], steps: [...feature.background, ...s.steps] };
-  for (const rule of feature.rules) {
-    for (const s of rule.scenarios) {
-      yield {
-        ...s,
-        tags: [...feature.tags, ...rule.tags, ...s.tags],
-        steps: [...feature.background, ...rule.background, ...s.steps],
-      };
+// `<name>`s in `text` from an Examples row; a name the row lacks stays.
+const fill = (text, values) => text.replace(/<([^<>]+)>/g, (whole, name) => (Object.hasOwn(values, name) ? values[name] : whole));
+
+function expand(s, tags, background) {
+  const base = { ...s, tags: [...tags, ...s.tags], steps: [...background, ...s.steps] };
+  if (s.examples.length === 0) return [base];
+  const out = [];
+  for (const examples of s.examples) {
+    const [header, ...rows] = examples.rows;
+    for (const row of rows) {
+      const values = Object.fromEntries(header.cells.map((name, i) => [name, row.cells[i]]));
+      const filled = (step) => ({
+        ...step,
+        text: fill(step.text, values),
+        ...(step.docstring !== undefined && { docstring: fill(step.docstring, values) }),
+        ...(step.table && { table: step.table.map((r) => ({ ...r, cells: r.cells.map((c) => fill(c, values)) })) }),
+      });
+      out.push({
+        ...base,
+        name: fill(s.name, values),
+        line: row.line,
+        tags: [...base.tags, ...examples.tags],
+        // The background is not the outline's: its `<name>`s stay.
+        steps: [...background, ...s.steps.map(filled)],
+      });
     }
+  }
+  return out;
+}
+
+// Every scenario of a feature with its background steps and tags, an
+// outline once for each of its Examples rows.
+export function* scenarios(feature) {
+  for (const s of feature.scenarios) yield* expand(s, feature.tags, feature.background);
+  for (const rule of feature.rules) {
+    for (const s of rule.scenarios) yield* expand(s, [...feature.tags, ...rule.tags], [...feature.background, ...rule.background]);
   }
 }
 
@@ -220,144 +307,179 @@ const list = (names) =>
     .map((n) => n.trim())
     .filter((n) => n !== "");
 
+// Each step has the kinds a keyword gives it (`Given`, `When`, `Then`; an
+// `And` or `But` takes the one before), as cucumber matches a step to the
+// functions of its kind only.
+const step = (kinds, pattern, action) => ({ kinds: kinds.split(" "), pattern, action });
+
+const calls = (w, s, tool) => w.call(tool, {});
+async function callsWith(w, s, tool) {
+  await w.call(tool, w.substitute(json(docstring(s))));
+  // A `Given` sets the scene: a refusal there is the scenario's mistake.
+  if (s.kind === "Given") w.ok();
+}
+const keeps = (w, s, pointer, name) => void w.kept.set(name, must(w.ok(), pointer));
+
 const STEPS = [
-  [/^an empty project$/, () => {}],
-  [
-    /^the file "([^"]+)":$/,
-    (w, step, name) => {
-      // The native store reads the directory as it is; this one is loaded
-      // when the tools connect, so a file given later would not be seen.
-      if (w.studio) throw new Error("a file given after the tools connected");
-      w.backend.files.set(name, fileText(step));
-    },
-  ],
-  [/^the studio tools are connected$/, async (w) => void (await w.server())],
-  [
-    /^the studio tools are connected with the capabilities "([^"]*)"$/,
-    async (w, step, caps) => {
-      w.caps = caps;
-      await w.server();
-    },
-  ],
-  [/^the agent (?:has called|calls) the tool "([^"]+)"$/, (w, step, tool) => w.call(tool, {})],
-  [
-    /^the agent (?:has called|calls) the tool "([^"]+)" with:$/,
-    async (w, step, tool) => {
-      await w.call(tool, w.substitute(json(docstring(step))));
-      // A `Given` sets the scene: a refusal there is the scenario's mistake.
-      if (step.kind === "Given") w.ok();
-    },
-  ],
-  [
-    /^a person types in the code view of "([^"]+)", replacing "(.*)" with "(.*)"$/,
-    async (w, step, doc, old, now) => {
-      const studio = await w.server();
-      const { text, generation } = studio.text(doc);
-      const start = text.indexOf(unquote(old));
-      if (start < 0) throw new Error(`\`${unquote(old)}\` is not in ${doc}`);
-      await studio.replaceText(doc, generation, start, start + unquote(old).length, unquote(now));
-    },
-  ],
-  [/^the agent keeps the answer's "(\/[^"]*)" as "([^"]+)"$/, (w, step, pointer, name) => void w.kept.set(name, must(w.ok(), pointer))],
-  [
-    // The value is JSON, which never starts with the `a` of "absent".
-    /^the answer's "(\/[^"]*)" is ([^a].*)$/,
-    (w, step, pointer, want) => {
-      const wanted = w.substitute(json(want));
-      const got = must(w.ok(), pointer);
-      if (!equal(got, wanted)) throw new Error(`\`${pointer}\` is ${JSON.stringify(got)}, not ${JSON.stringify(wanted)}`);
-    },
-  ],
-  [
-    /^the answer's "(\/[^"]*)" is:$/,
-    (w, step, pointer) => {
-      const want = fileText(step);
-      const got = must(w.ok(), pointer);
-      if (got !== want) throw new Error(`\`${pointer}\` is:\n${got}\nnot:\n${want}`);
-    },
-  ],
-  [
-    /^the answer's "(\/[^"]*)" has (\d+) entr(?:y|ies)$/,
-    (w, step, pointer, count) => {
-      const got = must(w.ok(), pointer);
-      if (!Array.isArray(got)) throw new Error(`\`${pointer}\` is not a list: ${JSON.stringify(got)}`);
-      if (got.length !== Number(count)) throw new Error(`\`${pointer}\` has ${got.length} entries: ${JSON.stringify(got)}`);
-    },
-  ],
-  [
-    /^the answer's "(\/[^"]*)" is absent$/,
-    (w, step, pointer) => {
-      const got = at(w.ok(), pointer);
-      if (got !== undefined) throw new Error(`\`${pointer}\` is ${JSON.stringify(got)}`);
-    },
-  ],
-  [
-    /^the answer's "(\/[^"]*)" lists "([^"]*)"$/,
-    (w, step, pointer, names) => {
-      const got = must(w.ok(), pointer);
-      if (!equal(got, list(names))) throw new Error(`\`${pointer}\` is ${JSON.stringify(got)}`);
-    },
-  ],
-  [
-    /^the agent is refused with "([a-z_]+)"$/,
-    (w, step, code) => {
-      const error = w.refusal();
-      if (error.code !== code) throw new Error(`refused with ${JSON.stringify(error)}`);
-    },
-  ],
-  [
-    /^the refusal's "(\/[^"]*)" is (.+)$/,
-    (w, step, pointer, want) => {
-      const wanted = json(want);
-      const got = must(w.refusal(), pointer);
-      if (!equal(got, wanted)) throw new Error(`\`${pointer}\` is ${JSON.stringify(got)}, not ${JSON.stringify(wanted)}`);
-    },
-  ],
-  [
-    // What storage holds: a call resolves only once it has the files.
-    /^the file "([^"]+)" is:$/,
-    (w, step, name) => {
-      const want = fileText(step);
-      const got = w.backend.files.get(name);
-      if (got === undefined) throw new Error(`\`${name}\` does not exist`);
-      if (got !== want) throw new Error(`\`${name}\` is:\n${got}\nnot:\n${want}`);
-    },
-  ],
-  [
-    /^the file "([^"]+)" does not exist$/,
-    (w, step, name) => {
-      if (w.backend.files.has(name)) throw new Error(`\`${name}\` exists`);
-    },
-  ],
-  [
-    /^storage refuses to keep "([^"]+)"$/,
-    (w, step, name) => {
-      const write = w.backend.write;
-      w.backend.write = async (path, text) => {
-        if (path === name) throw new Error("the quota is used up");
-        return write(path, text);
-      };
-      w.restore = () => {
-        w.backend.write = write;
-      };
-    },
-  ],
-  [/^storage keeps files again$/, (w) => w.restore()],
-  [
-    /^the agent is offered the tools "([^"]*)"$/,
-    async (w, step, names) => {
-      const got = (await w.server()).tools().map((t) => t.name);
-      if (!equal(got, list(names))) throw new Error(`offered ${JSON.stringify(got)}`);
-    },
-  ],
+  step("given", /^an empty project$/, () => {}),
+  step("given", /^the file "([^"]+)":$/, (w, s, name) => {
+    // The native store reads the directory as it is; this one holds what
+    // it loaded when the tools connected, so a file given later is in
+    // storage and told to the tools, as another tab's would be.
+    w.backend.files.set(name, fileText(s));
+    w.studio?.stored(name, fileText(s));
+  }),
+  step("given", /^the studio tools are connected$/, async (w) => void (await w.server())),
+  step("given", /^the studio tools are connected with the capabilities "([^"]*)"$/, async (w, s, caps) => {
+    w.caps = caps;
+    await w.server();
+  }),
+  step("given", /^the agent has called the tool "([^"]+)"$/, calls),
+  step("when", /^the agent calls the tool "([^"]+)"$/, calls),
+  step("given", /^the agent has called the tool "([^"]+)" with:$/, callsWith),
+  step("when", /^the agent calls the tool "([^"]+)" with:$/, callsWith),
+  step("when", /^a person types in the code view of "([^"]+)", replacing "(.*)" with "(.*)"$/, async (w, s, doc, old, now) => {
+    const studio = await w.server();
+    const { text, generation } = studio.text(doc);
+    const start = text.indexOf(unquote(old));
+    if (start < 0) throw new Error(`\`${unquote(old)}\` is not in ${doc}`);
+    await studio.replaceText(doc, generation, start, start + unquote(old).length, unquote(now));
+  }),
+  step("given when then", /^the agent keeps the answer's "(\/[^"]*)" as "([^"]+)"$/, keeps),
+  // The value is JSON, which never starts with the `a` of "absent".
+  step("then", /^the answer's "(\/[^"]*)" is ([^a].*)$/, (w, s, pointer, want) => {
+    const wanted = w.substitute(json(want));
+    const got = must(w.ok(), pointer);
+    if (!equal(got, wanted)) throw new Error(`\`${pointer}\` is ${JSON.stringify(got)}, not ${JSON.stringify(wanted)}`);
+  }),
+  step("then", /^the answer's "(\/[^"]*)" is:$/, (w, s, pointer) => {
+    const want = fileText(s);
+    const got = must(w.ok(), pointer);
+    // A string is compared as text; anything else as the JSON the doc
+    // string holds, so a list of records reads as one.
+    if (typeof got === "string" ? got === want : equal(got, json(want))) return;
+    const shown = typeof got === "string" ? got : JSON.stringify(got);
+    throw new Error(`\`${pointer}\` is:\n${shown}\nnot:\n${want}`);
+  }),
+  step("then", /^the answer's "(\/[^"]*)" has (\d+) entr(?:y|ies)$/, (w, s, pointer, count) => {
+    const got = must(w.ok(), pointer);
+    if (!Array.isArray(got)) throw new Error(`\`${pointer}\` is not a list: ${JSON.stringify(got)}`);
+    if (got.length !== Number(count)) throw new Error(`\`${pointer}\` has ${got.length} entries: ${JSON.stringify(got)}`);
+  }),
+  step("then", /^the answer's "(\/[^"]*)" is absent$/, (w, s, pointer) => {
+    const got = at(w.ok(), pointer);
+    if (got !== undefined) throw new Error(`\`${pointer}\` is ${JSON.stringify(got)}`);
+  }),
+  step("then", /^the answer's "(\/[^"]*)" lists "([^"]*)"$/, (w, s, pointer, names) => {
+    const got = must(w.ok(), pointer);
+    if (!equal(got, list(names))) throw new Error(`\`${pointer}\` is ${JSON.stringify(got)}`);
+  }),
+  step("then", /^the agent is refused with "([a-z_]+)"$/, (w, s, code) => {
+    const error = w.refusal();
+    if (error.code !== code) throw new Error(`refused with ${JSON.stringify(error)}`);
+  }),
+  step("then", /^the refusal's "(\/[^"]*)" is (.+)$/, (w, s, pointer, want) => {
+    const wanted = json(want);
+    const got = must(w.refusal(), pointer);
+    if (!equal(got, wanted)) throw new Error(`\`${pointer}\` is ${JSON.stringify(got)}, not ${JSON.stringify(wanted)}`);
+  }),
+  // What storage holds: a call resolves only once it has the files.
+  step("then", /^the file "([^"]+)" is:$/, (w, s, name) => {
+    const want = fileText(s);
+    const got = w.backend.files.get(name);
+    if (got === undefined) throw new Error(`\`${name}\` does not exist`);
+    if (got !== want) throw new Error(`\`${name}\` is:\n${got}\nnot:\n${want}`);
+  }),
+  step("then", /^the file "([^"]+)" does not exist$/, (w, s, name) => {
+    if (w.backend.files.has(name)) throw new Error(`\`${name}\` exists`);
+  }),
+  // Another program's change: here another tab's, told to the tools as
+  // "the file" is.
+  step("when", /^the file "([^"]+)" is rewritten outside Studio:$/, (w, s, name) => {
+    w.backend.files.set(name, fileText(s));
+    w.studio?.stored(name, fileText(s));
+  }),
+  step("when", /^the file "([^"]+)" is deleted outside Studio$/, (w, s, name) => {
+    if (!w.backend.files.delete(name)) throw new Error(`\`${name}\` does not exist`);
+    w.studio?.stored(name, null);
+  }),
+  step("then", /^the agent is offered the tools "([^"]*)"$/, async (w, s, names) => {
+    const got = (await w.server()).tools().map((t) => t.name);
+    if (!equal(got, list(names))) throw new Error(`offered ${JSON.stringify(got)}`);
+  }),
+  // Browser storage's own (`@web`): the native store is a directory.
+  step("given", /^storage refuses to keep "([^"]+)"$/, (w, s, name) => {
+    const write = w.backend.write;
+    w.backend.write = async (path, text) => {
+      if (path === name) throw new Error("the quota is used up");
+      return write(path, text);
+    };
+    w.restore = () => {
+      w.backend.write = write;
+    };
+  }),
+  step("when", /^storage keeps files again$/, (w) => w.restore()),
 ];
 
-async function run(step, world) {
-  for (const [pattern, action] of STEPS) {
-    const m = pattern.exec(step.text);
-    if (m) return action(world, step, ...m.slice(1));
+// The native runner's steps this one leaves out, and why; and its own that
+// the native runner has not. `stepsDrift` holds both lists to the native
+// runner's source, so a step added there is a failure here until it is
+// written here or listed.
+const NATIVE_ONLY = new Map([
+  ['then ^the preview shows "([^"]*)"$', "a preview is a page of its own (@preview)"],
+  ["then ^the answer has a PNG picture at most (\\d+) pixels on its longest side$", "a picture is a preview's (@preview)"],
+  ['given ^the link "([^"]+)" leads to "([^"]+)"$', "storage holds no links (@disk)"],
+  ['given ^the link "([^"]+)" leads to a directory outside the project holding "([^"]+)"$', "storage holds no links (@disk)"],
+  ['given ^the link "([^"]+)" leads to the file "([^"]+)" outside the project$', "storage holds no links (@disk)"],
+  ["then ^nothing was written outside the project$", "storage has no outside (@disk)"],
+  ['given ^Studio serves agents with the capabilities "([^"]*)"$', "the endpoint is a native window's (endpoint.feature)"],
+  ['when ^a client calls the tool "([^"]+)" on the endpoint( with the token| with another token)?(?: and the (Origin|Host) "([^"]+)")?$', "the endpoint is a native window's (endpoint.feature)"],
+  ["then ^the endpoint answers it$", "the endpoint is a native window's (endpoint.feature)"],
+  ['then ^the endpoint refuses it with (\\d+) "([a-z_]+)"$', "the endpoint is a native window's (endpoint.feature)"],
+  ['then ^the endpoint\'s tool refuses it with "([a-z_]+)"$', "the endpoint is a native window's (endpoint.feature)"],
+  ["then ^the endpoint listens on loopback only$", "the endpoint is a native window's (endpoint.feature)"],
+  ["then ^the token file can be read by its owner alone$", "the endpoint is a native window's (endpoint.feature)"],
+]);
+const WEB_ONLY = new Set(['given ^storage refuses to keep "([^"]+)"$', "when ^storage keeps files again$"]);
+
+const NATIVE = "crates/studio_mcp/tests/features.rs";
+
+// The steps `crates/studio_mcp/tests/features.rs` declares, as `kind
+// pattern`: from its `#[given(…)]`, `#[when(…)]` and `#[then(…)]`,
+// which rustfmt breaks over lines when the pattern is long.
+export function nativeSteps(source) {
+  const out = [];
+  for (const m of source.matchAll(/#\[(given|when|then)\(\s*(regex\s*=\s*)?r?(#*)"(.*?)"\3\s*\)\]/g)) {
+    const [, kind, regex, , text] = m;
+    // A plain string is a cucumber expression; one without parameters
+    // matches its text whole.
+    if (!regex && /[{}()/\\]/.test(text)) throw new Error(`${NATIVE}: \`${text}\` is an expression this check does not read`);
+    out.push(`${kind} ${regex ? text : `^${text.replace(/[.*+?^$|[\]]/g, "\\$&")}$`}`);
   }
-  throw new Error("no step matches this");
+  return out;
+}
+
+// What differs between the two step libraries, as lines to show.
+export function stepsDrift(native) {
+  const here = new Set(STEPS.flatMap((s) => s.kinds.map((k) => `${k} ${s.pattern.source.replaceAll("\\/", "/")}`)));
+  const there = new Set(native);
+  const drift = [];
+  if (there.size === 0) drift.push(`no steps were read from ${NATIVE}`);
+  for (const s of there) if (!here.has(s) && !NATIVE_ONLY.has(s)) drift.push(`${NATIVE} has \`${s}\`; web/features.mjs has not`);
+  for (const s of here) if (!there.has(s) && !WEB_ONLY.has(s)) drift.push(`web/features.mjs has \`${s}\`; ${NATIVE} has not`);
+  for (const s of NATIVE_ONLY.keys()) if (!there.has(s)) drift.push(`\`${s}\` is listed as native only, and ${NATIVE} has not got it`);
+  for (const s of WEB_ONLY) if (!here.has(s)) drift.push(`\`${s}\` is listed as web only, and web/features.mjs has not got it`);
+  return drift;
+}
+
+async function run(s, world) {
+  if (s.table) throw new Error("this runner's steps take no table");
+  for (const { kinds, pattern, action } of STEPS) {
+    if (!kinds.includes(s.kind.toLowerCase())) continue;
+    const m = pattern.exec(s.text);
+    if (m) return action(world, s, ...m.slice(1));
+  }
+  throw new Error(`no ${s.kind} step matches this`);
 }
 
 // --- Running --------------------------------------------------------------
@@ -376,7 +498,8 @@ function featureFiles(paths) {
 async function main(args) {
   const wasm = readFileSync(join(here, "pkg/studio_web_bg.wasm"));
   const counts = { passed: 0, failed: 0, skipped: 0, steps: 0 };
-  const failures = [];
+  const failures = stepsDrift(nativeSteps(readFileSync(join(root, NATIVE), "utf8")));
+  for (const drift of failures) console.log(`✘ steps: ${drift}`);
   for (const file of featureFiles(args.length ? args : DEFAULT)) {
     const name = relative(root, file);
     const feature = parse(readFileSync(file, "utf8"), name);
