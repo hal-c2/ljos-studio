@@ -13,6 +13,7 @@ use qml_edit::{Edit, NodePath};
 use qml_syntax::{
     Allocator, GetSpan,
     ast::{QmlBindingValue, QmlMember, QmlObject},
+    js,
 };
 use serde::Serialize;
 
@@ -495,7 +496,14 @@ fn add(
             Ok(splice(source, at, at, &put))
         }
         (Form::Array { open, close }, None) => {
-            let put = format!("[{nl}{inner}{}{nl}{outer}]", indented(&inner));
+            // What is between the brackets can only be comments, which stay.
+            let comments = source[*open + 1..*close - 1].trim();
+            let comments = if comments.is_empty() {
+                String::new()
+            } else {
+                format!("{inner}{comments}{nl}")
+            };
+            let put = format!("[{nl}{comments}{inner}{}{nl}{outer}]", indented(&inner));
             Ok(splice(source, *open, *close, &put))
         }
         (Form::Single, Some(only)) => {
@@ -508,6 +516,9 @@ fn add(
             Ok(splice(source, only.start, only.end, &put))
         }
         (Form::Single, None) => unreachable!("a single form has its object"),
+        (Form::Expression, _) => Err(Error::Invalid(format!(
+            "`{name}` is an expression; edit it as text"
+        ))),
     }
 }
 
@@ -622,6 +633,8 @@ enum Form {
     Single,
     /// `states: [ ... ]`, with the byte range of the brackets.
     Array { open: usize, close: usize },
+    /// `states: someList`: what it holds is known only when it runs.
+    Expression,
 }
 
 /// A `State` or a `Transition`.
@@ -727,22 +740,27 @@ impl Read {
                 }
                 QmlBindingValue::Expression(e) => {
                     let span = e.span();
-                    let text = qml_syntax::text(source, span);
-                    if text.trim_start_matches('[').trim_end_matches(']').trim() != ""
-                        || !text.starts_with('[')
-                    {
-                        continue;
-                    }
+                    let form = match e {
+                        // Comments and all: an array of nothing is a list.
+                        js::Expression::ArrayExpression(a) if a.elements.is_empty() => {
+                            Form::Array {
+                                open: span.start as usize,
+                                close: span.end as usize,
+                            }
+                        }
+                        _ => Form::Expression,
+                    };
                     List {
                         binding_start: start,
-                        form: Form::Array {
-                            open: span.start as usize,
-                            close: span.end as usize,
-                        },
+                        form,
                         elements: Vec::new(),
                     }
                 }
-                QmlBindingValue::Statement(_) => continue,
+                QmlBindingValue::Statement(_) => List {
+                    binding_start: start,
+                    form: Form::Expression,
+                    elements: Vec::new(),
+                },
             };
             *slot = Some(list);
         }

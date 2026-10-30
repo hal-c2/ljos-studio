@@ -90,6 +90,74 @@ Feature: An agent edits a component's states and transitions
         }
         """
 
+    Scenario: A state is not added over a list that is an expression
+      Given the file "Bound.qml":
+        """qml
+        import QtQuick
+
+        Item {
+            states: someList
+        }
+        """
+      When the agent calls the tool "state_edit" with:
+        """json
+        {"doc": "Bound.qml", "action": "add", "state": "compact"}
+        """
+      Then the agent is refused with "invalid_argument"
+      And the refusal's message matches "`states` is an expression; edit it as text"
+      And the file "Bound.qml" is:
+        """qml
+        import QtQuick
+
+        Item {
+            states: someList
+        }
+        """
+
+    Scenario: A transition is not added over a list that is an expression
+      Given the file "Bound.qml":
+        """qml
+        import QtQuick
+
+        Item {
+            states: State { name: "compact" }
+            transitions: [someTransition]
+        }
+        """
+      When the agent calls the tool "state_edit" with:
+        """json
+        {"doc": "Bound.qml", "action": "add_transition", "to": "compact", "animations": "NumberAnimation { duration: 100 }"}
+        """
+      Then the agent is refused with "invalid_argument"
+      And the refusal's message matches "`transitions` is an expression; edit it as text"
+
+    Scenario: A list with only a comment in it takes a state and keeps the comment
+      Given the file "Empty.qml":
+        """qml
+        import QtQuick
+
+        Item {
+            states: [ /* none yet */ ]
+        }
+        """
+      When the agent calls the tool "state_edit" with:
+        """json
+        {"doc": "Empty.qml", "action": "add", "state": "compact"}
+        """
+      Then the file "Empty.qml" is:
+        """qml
+        import QtQuick
+
+        Item {
+            states: [
+                /* none yet */
+                State {
+                    name: "compact"
+                }
+            ]
+        }
+        """
+
     Scenario: Two states of one name are refused
       Given the agent has called the tool "state_edit" with:
         """json
