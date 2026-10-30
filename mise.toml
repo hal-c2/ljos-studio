@@ -1,11 +1,11 @@
-# Tooling for Ljós Studio; tasks live in mise-tasks/. No `[env]` or hooks:
-# those make mise refuse every shim here (cargo is one) until someone runs
-# `mise trust`, which stops a fresh checkout from building. Tool options are
-# fine.
+# Tooling for Ljós Studio; tasks live in mise-tasks/. Only plain versions:
+# `[env]`, hooks and tool options (a `rust` with `components` or `targets`)
+# make mise refuse this file, shims included, until someone runs
+# `mise trust`, and a fresh checkout must build without that.
 [tools]
-# Rust's components and targets are named here, as ljos-ui does: mise
-# exports RUSTUP_TOOLCHAIN, which overrides rust-toolchain.toml, so the
-# file's lists are never installed by mise.
-rust = { version = "1.98.1", components = "rustfmt,clippy", targets = "wasm32-unknown-unknown" }
+# mise exports RUSTUP_TOOLCHAIN, which overrides rust-toolchain.toml, so
+# rustup never installs that file's components and target here:
+# `mise run setup` adds them with rustup (CI runs it before the gates).
+rust = "1.98.1"
 # Runs the wasm build's scenarios and numbers (web/).
 node = "24.21.0"

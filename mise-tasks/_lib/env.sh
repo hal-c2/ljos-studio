@@ -319,6 +319,25 @@ install_bindgen() {
   cargo install wasm-bindgen-cli --version "=$want" --locked --root "$(own_target)/tools"
 }
 
+# One of rust-toolchain.toml's lists (`components`, `targets`), spaced.
+toolchain_list() {
+  sed -n "s/^$1 *= *\\[\\(.*\\)\\]/\\1/p" "$studio_root/rust-toolchain.toml" | tr -d '"' | tr ',' ' '
+}
+
+# rust-toolchain.toml's components and targets for the toolchain in use:
+# under mise, RUSTUP_TOOLCHAIN overrides that file, so rustup installs none
+# of them. rustup skips what is there.
+install_rust_parts() {
+  command -v rustup >/dev/null || die "no rustup: Studio's Rust (rust-toolchain.toml) is installed through rustup"
+  local components targets
+  components="$(toolchain_list components)"
+  targets="$(toolchain_list targets)"
+  echo "rustup component add" $components
+  rustup component add $components
+  echo "rustup target add" $targets
+  rustup target add $targets
+}
+
 # The shell as an ljos-web page, assembled in the target (nothing is written
 # into ljos-web): `web/shell`'s files, or `$2`'s over them, with
 # `node_modules` linked to the checkout's. Sets `app`.

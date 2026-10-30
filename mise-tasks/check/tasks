@@ -201,6 +201,14 @@ stub cargo 'echo "cargo $*"'
 call 'install_bindgen'
 says "setup prints and runs the install" "cargo install wasm-bindgen-cli --version =9.9.9 --locked --root $co/target/tools"
 
+# --- Rust's parts ----------------------------------------------------------
+printf '[toolchain]\nchannel = "1.0.0"\ncomponents = ["rustfmt", "clippy"]\ntargets = ["wasm32-unknown-unknown"]\n' >"$co/rust-toolchain.toml"
+stub rustup 'echo "ran rustup $*"'
+call 'install_rust_parts'
+says "setup adds rust-toolchain.toml's components" "ran rustup component add rustfmt clippy"
+says "and its targets" "ran rustup target add wasm32-unknown-unknown"
+unstub rustup
+
 # --- Paths from where the person asked ---------------------------------------
 mkdir -p "$scratch/asked/project"
 touch "$scratch/asked/file.feature"

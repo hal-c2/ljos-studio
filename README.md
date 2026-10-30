@@ -84,9 +84,9 @@ as general pieces any tool can use.
 A checkout builds on its own: `cargo test --workspace`. Ljós comes from
 [ljos-ui](https://github.com/hal-c2/ljos-ui) as a git dependency pinned to
 one commit of its main branch (`rev` in `Cargo.toml`); cargo fetches it with
-the git command line (`.cargo/config.toml`). `mise.toml` names tool versions
-and Rust's components and targets, with no `[env]` or hooks, so mise runs
-here without `mise trust`; `mise run check`,
+the git command line (`.cargo/config.toml`). `mise.toml` only names tool
+versions, so mise runs here without `mise trust`; `mise run setup` adds
+Rust's components and the wasm target with rustup; `mise run check`,
 `mise run test` and `mise run features` are the gates.
 
 ### Building against a local ljos-ui

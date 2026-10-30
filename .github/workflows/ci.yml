@@ -18,8 +18,8 @@ jobs:
       LJOS_QT_TYPES: none
     steps:
       - uses: actions/checkout@v5
-      # The Rust version, its components and the wasm target come from mise.toml
-      # (mise exports RUSTUP_TOOLCHAIN, so rust-toolchain.toml is not read).
+      # The Rust version comes from mise.toml; mise exports RUSTUP_TOOLCHAIN, so
+      # rust-toolchain.toml's components and target come from `mise run setup`.
       - uses: jdx/mise-action@v3
       - uses: Swatinem/rust-cache@v2
       # After rust-cache: steps' saves run in reverse, and rust-cache's trims
@@ -31,13 +31,14 @@ jobs:
       # The render tests need a wgpu adapter (lavapipe is a software Vulkan);
       # Ljós links fontconfig and ALSA on Linux.
       - run: sudo apt-get update && sudo apt-get install -y mesa-vulkan-drivers libfontconfig1-dev libasound2-dev pkg-config
+      # rustup's components and target for the gates, then ljos at the rev
+      # Cargo.toml pins and the pinned wasm-bindgen, unless the cache above has
+      # them: the only step that installs anything.
+      - run: mise run setup
       - run: mise run check
       - run: mise run check:tasks
       - run: mise run check:wasm
       - run: mise run test
-      # ljos at the rev Cargo.toml pins and the pinned wasm-bindgen, unless the
-      # cache above has them: the only step that installs anything.
-      - run: mise run setup
       - run: mise run features
       - run: mise run features:web
 
@@ -91,6 +92,7 @@ jobs:
         working-directory: ljos-web
       - run: pnpm --filter ljos-web-example-web exec playwright install --with-deps chromium
         working-directory: ljos-web
+      # rustup's wasm target, ljos and wasm-bindgen, as in `gates`.
       - run: mise run setup
       - run: mise run web:browser
       - run: mise run web:shell
