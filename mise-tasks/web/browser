@@ -2,7 +2,8 @@
 #MISE description="Studio for the web in headless Chromium: the project in OPFS across a reload, a preview over the worker-frame bridge, and their numbers"
 #MISE depends=["web:build"]
 set -euo pipefail
-# Playwright and its Chromium as a checkout of ljos-web installs them
-# (`pnpm install --frozen-lockfile`); this task downloads nothing.
-: "${PLAYWRIGHT:?name the playwright package to use, e.g. node_modules/playwright/index.mjs in an ljos-web checkout}"
-node web/browser.mjs
+# Playwright and its Chromium as a checkout of ljos-web installs them, found
+# beside this one (`LJOS_WEB`, `PLAYWRIGHT`); this task downloads nothing.
+. "$(dirname "$0")/../_lib/env.sh"
+find_playwright
+node "$studio_root/web/browser.mjs"
