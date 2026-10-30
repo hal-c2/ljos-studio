@@ -42,6 +42,53 @@ impl Target {
     }
 }
 
+impl Target {
+    pub const ALL: [Target; 3] = [Target::Phone, Target::Tablet, Target::Desktop];
+
+    /// The widths a layout for this target is for: from the first
+    /// (inclusive) up to the second. The bounds sit between the targets'
+    /// own widths where common devices split: phones held upright are
+    /// narrower than 600, tablets upright and small laptops narrower than
+    /// 1024.
+    pub fn widths(self) -> (Option<u32>, Option<u32>) {
+        match self {
+            Target::Phone => (None, Some(600)),
+            Target::Tablet => (Some(600), Some(1024)),
+            Target::Desktop => (Some(1024), None),
+        }
+    }
+
+    /// The target whose widths hold `width`.
+    pub fn of_width(width: u32) -> Target {
+        Target::ALL
+            .into_iter()
+            .find(|t| {
+                let (from, to) = t.widths();
+                from.is_none_or(|f| width >= f) && to.is_none_or(|t| width < t)
+            })
+            .expect("the targets' widths cover every width")
+    }
+
+    /// The `when` of a state for this target: `root`'s width within
+    /// [`widths`](Self::widths), where `root` is the root object's `id`.
+    pub fn condition(self, root: &str) -> String {
+        match self.widths() {
+            (None, Some(to)) => format!("{root}.width < {to}"),
+            (Some(from), Some(to)) => format!("{root}.width >= {from} && {root}.width < {to}"),
+            (Some(from), None) => format!("{root}.width >= {from}"),
+            (None, None) => "true".to_owned(),
+        }
+    }
+
+    /// The target whose [`condition`](Self::condition) `when` is, as
+    /// Studio writes it.
+    pub fn of_condition(when: &str, root: &str) -> Option<Target> {
+        Target::ALL
+            .into_iter()
+            .find(|t| t.condition(root) == when.trim())
+    }
+}
+
 /// Logical pixels, 1 to 8192 on each side.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct Size {

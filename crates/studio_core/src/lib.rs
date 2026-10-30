@@ -15,6 +15,8 @@ mod address;
 mod history;
 pub mod outline;
 pub mod preview;
+pub mod slots;
+pub mod states;
 mod store;
 
 use std::collections::BTreeMap;
@@ -23,6 +25,8 @@ pub use address::{Address, PathChange, parse_path};
 pub use history::{Entry, EntrySummary};
 pub use outline::{Binding, Node};
 pub use qml_edit::{Change, Error as EditError, NodePath};
+pub use slots::Mode;
+pub use states::{ChangeInfo, StateEdit, StateInfo, TransitionInfo, Variants};
 pub use store::{FsStore, MemStore, Store, StoreError};
 
 use address::{Tracked, find_by_key};
@@ -52,6 +56,18 @@ pub enum Error {
     Invalid(String),
     #[error("nothing to {0}")]
     NothingTo(&'static str),
+    #[error("no state `{0}`")]
+    NoState(String),
+    #[error("no transition from `{from}` to `{to}`")]
+    NoTransition { from: String, to: String },
+    #[error("the state `{state}` does not change `{name}`")]
+    NoChange { state: String, name: String },
+    /// A state names objects by `id`: one without cannot be changed by it
+    /// nor, for the root, compared with a breakpoint.
+    #[error("{0} has no `id`; give it one first")]
+    NoId(String),
+    #[error("{0} is not a `Contribution`")]
+    NotAContribution(String),
 }
 
 /// A literal a property can be set to.
@@ -122,6 +138,23 @@ pub enum Op {
         node: Address,
         name: String,
     },
+    /// A change to `node`'s states or transitions.
+    State {
+        node: Address,
+        edit: StateEdit,
+    },
+    /// Put a `Contribution` to `slot`, written in `text`, into `parent`
+    /// last, with an `id`, importing each of `imports`.
+    Contribute {
+        parent: Address,
+        slot: String,
+        text: String,
+        imports: Vec<String>,
+    },
+    /// Take out a `Contribution`; refused for any other object.
+    RemoveContribution {
+        node: Address,
+    },
 }
 
 impl Op {
@@ -147,6 +180,9 @@ impl Op {
             Op::Remove { .. } => "remove".to_owned(),
             Op::SetBinding { name, .. } => format!("set {name}"),
             Op::RemoveBinding { name, .. } => format!("remove {name}"),
+            Op::State { edit, .. } => edit.label(),
+            Op::Contribute { slot, .. } => format!("contribute to {slot}"),
+            Op::RemoveContribution { .. } => "remove contribution".to_owned(),
         }
     }
 }
@@ -168,6 +204,9 @@ pub struct Outcome {
     /// entry made.
     pub unchanged: bool,
 }
+
+/// The type a slot's elements have (`ljos_blocks::CONTRIBUTION`).
+const CONTRIBUTION: &str = "Contribution";
 
 /// One open document.
 #[derive(Debug)]
@@ -493,6 +532,19 @@ impl Session {
         }
     }
 
+    /// The states and transitions of the object `address` names.
+    ///
+    /// # Errors
+    /// An address that names nothing, or a document that does not parse.
+    pub fn variants(&mut self, path: &str, address: &Address) -> Result<Variants, Error> {
+        let (_, node) = self.resolve(path, address)?;
+        let text = &self.doc(path)?.text;
+        states::variants(text, node.start).ok_or_else(|| Error::NotFound {
+            doc: path.to_owned(),
+            address: node.path.to_string(),
+        })
+    }
+
     /// The object whose type name starts at `line`, `column` (one-based,
     /// in characters, as [`qml_syntax::position`] counts) of `path`: the
     /// one declared there, never one enclosing it. A `column` of 0 means
@@ -761,6 +813,47 @@ impl Session {
                 )?
                 .text;
                 Ok((out, PathChange::Same, None))
+            }
+            Op::State { node, edit } => {
+                let (_, owner) = self.resolve(path, node)?;
+                let out = states::apply(before, owner.start, &owner.path, edit)?;
+                // States and transitions written in a list are no objects of
+                // the outline; one written alone (`states: State {}`) is, and
+                // its handle is kept by its key.
+                Ok((out, PathChange::Same, None))
+            }
+            Op::Contribute {
+                parent,
+                text,
+                imports,
+                ..
+            } => {
+                let (text, change, focus) = self.plan(
+                    path,
+                    before,
+                    &Op::Insert {
+                        parent: parent.clone(),
+                        index: None,
+                        text: text.clone(),
+                        add_id: true,
+                        import: None,
+                    },
+                )?;
+                let mut out = text;
+                for module in imports {
+                    out = with_import(&out, module)?;
+                }
+                Ok((out, change, focus))
+            }
+            Op::RemoveContribution { node } => {
+                let (handle, removed) = self.resolve(path, node)?;
+                if removed.ty.rsplit('.').next() != Some(CONTRIBUTION) {
+                    return Err(Error::NotAContribution(format!(
+                        "{handle} (`{}`)",
+                        removed.ty
+                    )));
+                }
+                self.plan(path, before, &Op::Remove { node: node.clone() })
             }
         }
     }

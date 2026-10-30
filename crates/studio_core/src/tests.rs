@@ -21,6 +21,13 @@ fn session() -> Session {
     )])))
 }
 
+fn session_of(text: &str) -> Session {
+    Session::open(Box::new(MemStore::new([(
+        "Main.qml".to_owned(),
+        text.to_owned(),
+    )])))
+}
+
 fn insert(text: &str, index: Option<usize>) -> Op {
     Op::Insert {
         parent: Address::Id("root".into()),
@@ -678,4 +685,62 @@ fn a_place_names_the_object_declared_there_not_its_parent() {
     // Without a column the line must say which.
     assert_eq!(ty(&mut s, 3, 0).unwrap(), "root");
     assert!(matches!(ty(&mut s, 4, 0), Err(Error::Invalid(_))));
+}
+
+#[test]
+fn each_target_is_inside_its_own_breakpoint() {
+    use crate::preview::Target;
+    for target in Target::ALL {
+        assert_eq!(Target::of_width(target.size().width), target);
+        assert_eq!(
+            Target::of_condition(&target.condition("root"), "root"),
+            Some(target)
+        );
+    }
+    assert_eq!(Target::of_width(599), Target::Phone);
+    assert_eq!(Target::of_width(600), Target::Tablet);
+    assert_eq!(Target::of_width(1024), Target::Desktop);
+}
+
+#[test]
+fn a_state_in_a_list_is_edited_inside_its_own_text() {
+    let mut s = session_of(
+        "Item {\n    id: root\n    states: [\n        State { name: \"a\" },\n        State {\n            name: \"b\"\n        }\n    ]\n}\n",
+    );
+    let when = |w: &str| Op::State {
+        node: Address::Id("root".into()),
+        edit: crate::StateEdit::When {
+            name: "b".into(),
+            when: Some(w.into()),
+        },
+    };
+    s.edit("Main.qml", None, &when("root.width < 600"), false)
+        .unwrap();
+    assert_eq!(
+        s.text("Main.qml").unwrap().0,
+        "Item {\n    id: root\n    states: [\n        State { name: \"a\" },\n        State {\n            name: \"b\"\n            when: root.width < 600\n        }\n    ]\n}\n"
+    );
+    let v = s.variants("Main.qml", &Address::Id("root".into())).unwrap();
+    assert_eq!(v.states[1].when.as_deref(), Some("root.width < 600"));
+    assert!(matches!(
+        s.edit("Main.qml", None, &when("root.width <"), false),
+        Err(Error::Edit(qml_edit::Error::WouldBreak(_)))
+    ));
+}
+
+#[test]
+fn a_single_state_becomes_a_list_of_two() {
+    let mut s = session_of("Item {\n    id: root\n    states: State { name: \"a\" }\n}\n");
+    let add = Op::State {
+        node: Address::Id("root".into()),
+        edit: crate::StateEdit::Add {
+            name: "b".into(),
+            when: None,
+        },
+    };
+    s.edit("Main.qml", None, &add, false).unwrap();
+    assert_eq!(
+        s.text("Main.qml").unwrap().0,
+        "Item {\n    id: root\n    states: [\n        State { name: \"a\" },\n        State {\n            name: \"b\"\n        }\n    ]\n}\n"
+    );
 }
