@@ -1907,8 +1907,10 @@ dependencies = [
  "anyhow",
  "clap",
  "ljos_mcp_core",
+ "serde_json",
  "studio_mcp",
  "studio_preview",
+ "tempfile",
  "tokio",
 ]
 
@@ -1952,6 +1954,7 @@ dependencies = [
  "ljos_mcp_core",
  "serde_json",
  "studio_core",
+ "tempfile",
 ]
 
 [[package]]

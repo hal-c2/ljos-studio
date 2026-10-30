@@ -16,5 +16,9 @@ anyhow.workspace = true
 clap.workspace = true
 tokio.workspace = true
 
+[dev-dependencies]
+serde_json.workspace = true
+tempfile.workspace = true
+
 [lints]
 workspace = true

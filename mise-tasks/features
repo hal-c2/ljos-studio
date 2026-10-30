@@ -12,6 +12,8 @@ fi
 export LJOS
 if [ $# -eq 0 ]; then
   STUDIO_FEATURES="$root/features" cargo test -p studio_mcp --test features
+  # The server through its stdio front door, with a real preview.
+  cargo test -p studio --test stdio -- --ignored
 else
   for path in "$@"; do
     STUDIO_FEATURES="$(realpath "$path")" cargo test -p studio_mcp --test features
