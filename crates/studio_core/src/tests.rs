@@ -617,3 +617,19 @@ fn an_undone_code_view_insert_leaves_its_handle_gone_until_redo() {
     let (_, node) = s.resolve("Main.qml", &Address::Node(old)).unwrap();
     assert_eq!(node.path.to_string(), "root/1");
 }
+
+#[test]
+fn a_document_made_again_does_not_start_its_generations_over() {
+    // The reviewer's probe: a generation read from the first life of a
+    // path must not pass for one read from the second.
+    let mut s = one_file("Item {}\n");
+    let first = s.create("N.qml", "Item {\n}\n", false).unwrap().generation;
+    s.undo().unwrap();
+    let again = s.create("N.qml", "Item {\n}\n", false).unwrap().generation;
+    assert!(again > first, "{again} after {first}");
+    let err = s
+        .replace_text("N.qml", Some(first), Some(0..4), "Rectangle", false)
+        .unwrap_err();
+    assert!(matches!(err, Error::Stale { .. }), "{err:?}");
+    assert_eq!(s.text("N.qml").unwrap().0, "Item {\n}\n");
+}
