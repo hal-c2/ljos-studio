@@ -135,9 +135,11 @@ agent's edit, a person's typing, undo) Studio asks the child to reload at
 once (`app_reload`), so the edit's tool call answers after the preview
 shows it; the watcher's quiet time is not on that path.
 
-- DECISION: Studio asks for at most 8 reloads a second (the inspector
-  answers at most 20 calls a second, and a refused call waits a second to
-  retry). A write past the budget is left to the child's watcher; the
+- DECISION: Studio launches the child with `--mcp-rate 200`: Studio is
+  its only client, and Ljós's default of 20 calls a second made a brisk
+  person wait on its one-second `Retry-After`. Studio asks for at most two
+  fifths of the host's rate in reloads a second (80 for a native preview,
+  8 for a host that states no rate). A write past the budget is left to the child's watcher; the
   reload it missed is asked for when the budget next allows (one timer per
   burst, which tells a window as any change does) or before the next look
   at the preview (`preview_state`, `preview_screenshot`, `preview_events`),

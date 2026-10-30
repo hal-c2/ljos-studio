@@ -8,7 +8,7 @@
 //! A preview's inspector answers a bounded number of calls a second (Ljós
 //! ARCHITECTURE.md 19.7), and one that asks too often waits a second for its
 //! answer. So a burst of writes (typing in the code view) reloads at most
-//! [`RELOADS_PER_SECOND`] times a second, whoever asks; the writes in between
+//! [`reloads_per_second`] times a second, whoever asks; the writes in between
 //! are shown by the preview's own file watcher a moment later, and the reload
 //! they missed is asked for once the budget allows ([`Previews::catch_up`]).
 //! A reader that must see the last write waits for that ([`caught_up`]).
@@ -26,9 +26,11 @@ use studio_core::{
     },
 };
 
-/// Reloads asked for after writes in any second: well within the 20 calls
-/// a second an inspector answers, leaving the rest to pictures and reads.
-pub(crate) const RELOADS_PER_SECOND: usize = 8;
+/// Reloads asked for after writes in any second: two fifths of the calls
+/// the preview answers, leaving the rest to pictures and reads.
+pub(crate) fn reloads_per_second(calls_per_second: u32) -> usize {
+    (calls_per_second as usize * 2 / 5).max(1)
+}
 
 /// Makes a host for the project in a directory.
 pub type HostFactory = Arc<dyn Fn(&std::path::Path) -> Box<dyn PreviewHost> + Send + Sync>;
@@ -77,7 +79,7 @@ impl Open {
         {
             self.reloads.pop_front();
         }
-        if self.reloads.len() < RELOADS_PER_SECOND {
+        if self.reloads.len() < reloads_per_second(self.host.calls_per_second()) {
             return None;
         }
         self.reloads.front().map(|at| *at + Duration::from_secs(1))
@@ -324,7 +326,10 @@ mod tests {
     fn a_catch_up_with_the_budget_spent_stays_behind_and_says_until_when() {
         // In the future, so no pause of this test can let them expire.
         let at = Instant::now() + Duration::from_secs(60);
-        let (mut p, count) = previews(vec![at; RELOADS_PER_SECOND].into(), true);
+        let (mut p, count) = previews(
+            vec![at; reloads_per_second(Counting(Default::default()).calls_per_second())].into(),
+            true,
+        );
         assert_eq!(p.catch_up(), Some(at + Duration::from_secs(1)));
         assert_eq!(*count.lock().unwrap(), 0);
         assert!(p.open.as_ref().unwrap().behind);

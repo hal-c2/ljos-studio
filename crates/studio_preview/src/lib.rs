@@ -34,6 +34,11 @@ const START_LIMIT: Duration = Duration::from_secs(30);
 /// The capabilities the child grants Studio: reading, resizing (`input`),
 /// assigning mocked state and reloading (`mutate`). Never `eval`.
 const CAPS: &str = "inspect,input,mutate";
+/// The calls a second the child's inspector grants Studio, its only client:
+/// a person's gestures and an agent's edits through Studio each ask for a
+/// reload and a picture, and Ljós's default of 20 kept them waiting on its
+/// one-second `Retry-After` at a brisk pace.
+const CALLS_PER_SECOND: u32 = 200;
 
 /// A preview as a child process.
 pub struct NativeHost {
@@ -145,6 +150,8 @@ impl NativeHost {
             .arg("--headless")
             .arg("--watch")
             .arg(format!("--mcp={CAPS}"))
+            .arg("--mcp-rate")
+            .arg(CALLS_PER_SECOND.to_string())
             .arg("--size")
             .arg(format!("{}x{}", spec.size.width, spec.size.height));
         for alias in &spec.aliases {
@@ -190,6 +197,10 @@ impl Drop for NativeHost {
 }
 
 impl PreviewHost for NativeHost {
+    fn calls_per_second(&self) -> u32 {
+        CALLS_PER_SECOND
+    }
+
     fn open(&mut self, spec: &PreviewSpec) -> Result<(), PreviewError> {
         self.close();
         let running = self.start(spec)?;

@@ -34,10 +34,8 @@ use studio_preview::NativeHost;
 const WIDTH: f64 = 1440.0;
 const HEIGHT: f64 = 900.0;
 const FILES: usize = 200;
-/// A brisk person's pace through the inspector. Back to back, the edits ask
-/// the preview's inspector more than the 20 calls a second it answers, and
-/// a call it turns away is asked again after its one-second `Retry-After`:
-/// that wait is the client's, not a reload's.
+/// A brisk person's pace through the inspector; the back-to-back round
+/// shows what the preview's call rate leaves of a faster one.
 const PACE: Duration = Duration::from_millis(250);
 /// Longer than the preview's reload budget takes to allow another reload.
 const CATCH_UP: Duration = Duration::from_millis(1500);

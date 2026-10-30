@@ -210,7 +210,17 @@ pub enum PreviewError {
 /// Objects are named by their `id` in the entry document, which the
 /// session's block inserts always give; a host maps that to its own way of
 /// finding an object.
+/// The calls a second a Ljós inspector answers unless its launcher grants
+/// more (Ljós ARCHITECTURE.md 19.7).
+pub const DEFAULT_CALLS_PER_SECOND: u32 = 20;
+
 pub trait PreviewHost: Send {
+    /// The calls a second the preview answers before it asks a caller to
+    /// wait: what bounds how often Studio may ask it to reload.
+    fn calls_per_second(&self) -> u32 {
+        DEFAULT_CALLS_PER_SECOND
+    }
+
     /// Starts the preview of `spec`, ending one that runs.
     fn open(&mut self, spec: &PreviewSpec) -> Result<(), PreviewError>;
 
