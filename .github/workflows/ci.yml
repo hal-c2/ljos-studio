@@ -18,7 +18,8 @@ jobs:
       LJOS_QT_TYPES: none
     steps:
       - uses: actions/checkout@v5
-      # The Rust version and its components come from mise.toml and rust-toolchain.toml.
+      # The Rust version, its components and the wasm target come from mise.toml
+      # (mise exports RUSTUP_TOOLCHAIN, so rust-toolchain.toml is not read).
       - uses: jdx/mise-action@v3
       - uses: Swatinem/rust-cache@v2
       # After rust-cache: steps' saves run in reverse, and rust-cache's trims
