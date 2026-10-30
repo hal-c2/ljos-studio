@@ -470,7 +470,10 @@ mod json {
 
     impl Reader<'_> {
         fn fail(&self, what: &str) -> String {
-            let line = self.text[..self.at].matches('\n').count() + 1;
+            // In bytes: a truncated escape leaves `at` at the end at most, and
+            // an escaped multi-byte character inside it.
+            let read = &self.text.as_bytes()[..self.at.min(self.text.len())];
+            let line = read.iter().filter(|b| **b == b'\n').count() + 1;
             format!("line {line}: {what}")
         }
 
@@ -583,7 +586,8 @@ mod json {
                         self.at += 1;
                         break;
                     }
-                    Some(b'\\') => self.at += 2,
+                    // The escaped byte may be missing: the text ends here.
+                    Some(b'\\') => self.at = (self.at + 2).min(self.text.len()),
                     Some(_) => self.at += 1,
                     None => return Err(self.fail("the string does not end")),
                 }
@@ -611,6 +615,14 @@ mod tests {
 
     fn set_ok(text: &str, token: &str, variant: Option<&str>, value: Option<Json>) -> String {
         set(text, token, variant, value.as_ref()).unwrap()
+    }
+
+    #[test]
+    fn a_string_cut_off_in_an_escape_is_an_error_not_a_panic() {
+        for text in [r#"{"a": "\"#, "{\n\"a\": \"\\é"] {
+            let error = set(text, "Colors.accent", None, Some(&json!("#fff"))).unwrap_err();
+            assert!(error.to_string().contains("does not end"), "{error}");
+        }
     }
 
     #[test]
