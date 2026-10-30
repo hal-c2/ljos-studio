@@ -1,0 +1,202 @@
+//! Previews: a document of the project running as the shipped app runs it.
+//!
+//! A preview runs user code, so it lives out of Studio's process (a child
+//! Ljós application natively, a sandboxed frame on the web) behind
+//! [`PreviewHost`]; a hang or crash there must not take Studio down
+//! (DESIGN.md, section 2). The session does not own one: whoever shows the
+//! preview (the MCP server, the canvas) holds the host and tells it after
+//! each write, which is what keeps the edit-to-preview path free of the
+//! hot-reload watcher's quiet time.
+
+use std::time::Duration;
+
+use serde::{Deserialize, Serialize};
+
+/// The shape of screen a preview is laid out for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum Target {
+    Desktop,
+    Tablet,
+    Phone,
+}
+
+impl Target {
+    /// Logical pixels, portrait for the hand-held ones: sizes common enough
+    /// that a design checked at them holds on most devices of the kind.
+    pub fn size(self) -> Size {
+        match self {
+            Target::Desktop => Size {
+                width: 1280,
+                height: 800,
+            },
+            Target::Tablet => Size {
+                width: 820,
+                height: 1180,
+            },
+            Target::Phone => Size {
+                width: 390,
+                height: 844,
+            },
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct Size {
+    pub width: u32,
+    pub height: u32,
+}
+
+/// One module standing in for another: `module` is imported from `dir`
+/// (relative to the project) instead of where it would be found.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct Alias {
+    pub module: String,
+    pub dir: String,
+}
+
+/// What to run.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PreviewSpec {
+    /// The document, as the store names it (`Shell.qml`).
+    pub entry: String,
+    pub size: Size,
+    pub aliases: Vec<Alias>,
+}
+
+/// What a reload did.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case", tag = "outcome")]
+pub enum Reload {
+    /// The preview shows the files now; `generation` counts reloads.
+    Applied { generation: u64 },
+    /// The files did not compile; the preview goes on showing the last
+    /// good generation.
+    Failed { message: String },
+    /// Nothing the preview runs had changed.
+    Unchanged,
+}
+
+/// A line the previewed app logged.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct LogLine {
+    pub level: String,
+    pub message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub file: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub line: Option<u32>,
+}
+
+/// A PNG of the preview.
+#[derive(Clone, PartialEq, Eq)]
+pub struct Picture {
+    pub png: Vec<u8>,
+    pub width: u32,
+    pub height: u32,
+}
+
+impl std::fmt::Debug for Picture {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Picture")
+            .field("bytes", &self.png.len())
+            .field("width", &self.width)
+            .field("height", &self.height)
+            .finish()
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum PreviewError {
+    #[error("no preview is open")]
+    NotOpen,
+    /// The preview could not be started (no runtime, the entry does not
+    /// compile, the process ended before it answered).
+    #[error("the preview did not start: {0}")]
+    Start(String),
+    /// The preview's process ended; `preview_open` starts another.
+    #[error("the preview has ended: {0}")]
+    Ended(String),
+    /// The preview has no object of that name.
+    #[error("the preview has no object `{0}`")]
+    NoObject(String),
+    /// The preview refused, with its own error code (`invalid_argument`,
+    /// `app_faulted`…) and message.
+    #[error("the preview refused ({code}): {message}")]
+    Refused { code: String, message: String },
+    #[error("the preview did not answer: {0}")]
+    Transport(String),
+}
+
+/// A running preview.
+///
+/// Objects are named by their `id` in the entry document, which the
+/// session's block inserts always give; a host maps that to its own way of
+/// finding an object.
+pub trait PreviewHost: Send {
+    /// Starts the preview of `spec`, ending one that runs.
+    fn open(&mut self, spec: &PreviewSpec) -> Result<(), PreviewError>;
+
+    /// Shows the files as they are now, at once: called after each write.
+    fn reload(&mut self) -> Result<Reload, PreviewError>;
+
+    /// Imports `module` from `dir` (or, with `None`, from where it would be
+    /// found again) and reloads, keeping state.
+    fn alias(&mut self, module: &str, dir: Option<&str>) -> Result<Reload, PreviewError>;
+
+    fn resize(&mut self, size: Size) -> Result<(), PreviewError>;
+
+    /// A picture whose longest side is at most `max_side`.
+    fn screenshot(&mut self, max_side: u32) -> Result<Picture, PreviewError>;
+
+    /// What the preview shows as text, one line per item, for reading
+    /// rather than looking.
+    fn outline(&mut self) -> Result<String, PreviewError>;
+
+    /// The values of `names` on the object with `id`.
+    fn read(
+        &mut self,
+        id: &str,
+        names: &[String],
+    ) -> Result<serde_json::Map<String, serde_json::Value>, PreviewError>;
+
+    /// Assigns `value` to `name` on the object with `id`, as a script would.
+    fn write(&mut self, id: &str, name: &str, value: serde_json::Value)
+    -> Result<(), PreviewError>;
+
+    /// Log lines after the mark `since` (0: all kept), and the mark to pass
+    /// next.
+    fn logs(&mut self, since: u64) -> Result<(Vec<LogLine>, u64), PreviewError>;
+
+    /// Ends the preview.
+    fn close(&mut self);
+}
+
+/// Something that happened to a preview, in the order it happened.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case", tag = "kind")]
+pub enum PreviewEvent {
+    Opened {
+        entry: String,
+        size: Size,
+        mocked: Vec<String>,
+        ms: f64,
+    },
+    Reloaded {
+        generation: u64,
+        ms: f64,
+    },
+    ReloadFailed {
+        message: String,
+    },
+    Log(LogLine),
+    Ended {
+        message: String,
+    },
+}
+
+/// Milliseconds, as events and answers carry them.
+pub fn ms(d: Duration) -> f64 {
+    (d.as_secs_f64() * 1e4).round() / 10.0
+}
