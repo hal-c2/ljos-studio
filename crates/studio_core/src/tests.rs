@@ -409,3 +409,57 @@ fn a_failed_undo_of_a_created_document_keeps_it() {
     s.undo().unwrap();
     assert!(!s.store().exists("New.qml"));
 }
+
+/// DESIGN.md §8: Studio names what it inserts and never touches an author's
+/// objects, which may have no `id` on purpose.
+#[test]
+fn only_an_object_studio_inserts_is_given_an_id() {
+    let ids = |s: &mut Session| s.text("Main.qml").unwrap().0.matches("id:").count();
+    let mut s = session();
+    let (rect, text) = (
+        Address::Path("root/0".into()),
+        Address::Path("root/1".into()),
+    );
+    let root = Address::Id("root".into());
+    assert_eq!(ids(&mut s), 1);
+
+    let set = Op::SetBinding {
+        node: rect.clone(),
+        name: "width".into(),
+        value: "10".into(),
+    };
+    s.edit("Main.qml", None, &set, false).unwrap();
+    assert_eq!(ids(&mut s), 1, "a binding set");
+    let unset = Op::RemoveBinding {
+        node: rect.clone(),
+        name: "width".into(),
+    };
+    s.edit("Main.qml", None, &unset, false).unwrap();
+    assert_eq!(ids(&mut s), 1, "a binding removed");
+    let moved = Op::Move {
+        node: text,
+        parent: root,
+        index: Some(0),
+    };
+    s.edit("Main.qml", None, &moved, false).unwrap();
+    assert_eq!(ids(&mut s), 1, "a move");
+    s.replace_text("Main.qml", None, Some(0..0), "// A note.\n", false)
+        .unwrap();
+    assert_eq!(ids(&mut s), 1, "a text edit");
+    s.edit("Main.qml", None, &Op::Remove { node: rect }, false)
+        .unwrap();
+    assert_eq!(ids(&mut s), 1, "a removal");
+
+    let nested = insert("Item { Text {} }", None);
+    s.edit("Main.qml", None, &nested, false).unwrap();
+    assert_eq!(ids(&mut s), 2, "the inserted object, not what it holds");
+    let plain = Op::Insert {
+        parent: Address::Id("root".into()),
+        index: None,
+        text: "Item {}".into(),
+        add_id: false,
+        import: None,
+    };
+    s.edit("Main.qml", None, &plain, false).unwrap();
+    assert_eq!(ids(&mut s), 2, "asked not to");
+}
