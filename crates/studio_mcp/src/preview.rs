@@ -141,9 +141,12 @@ impl Previews {
         let Some(open) = &mut self.open else {
             return;
         };
-        open.behind = false;
         let started = Instant::now();
         let reload = open.host.reload();
+        // Only now: a host that panics has not shown the write, and the lock
+        // outlives the panic for the next reader to catch up.
+        open.behind = false;
+
         // Stamped once answered: however long the call took, the reload the
         // budget allows a second after this reaches the inspector more than
         // a second after this one did.
@@ -332,6 +335,22 @@ mod tests {
         );
         assert_eq!(p.catch_up(), Some(at + Duration::from_secs(1)));
         assert_eq!(*count.lock().unwrap(), 0);
+        assert!(p.open.as_ref().unwrap().behind);
+    }
+
+    #[test]
+    fn a_host_that_panics_leaves_the_preview_behind() {
+        let (mut p, count) = previews(VecDeque::new(), true);
+        // A poisoned count makes the stub host's next reload panic.
+        let held = Arc::clone(&count);
+        std::thread::spawn(move || {
+            let _held = held.lock().unwrap();
+            panic!("poisoning the count");
+        })
+        .join()
+        .unwrap_err();
+        let reload = std::panic::AssertUnwindSafe(|| p.catch_up());
+        assert!(std::panic::catch_unwind(reload).is_err());
         assert!(p.open.as_ref().unwrap().behind);
     }
 
