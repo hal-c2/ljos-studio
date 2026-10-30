@@ -881,10 +881,10 @@ their arguments, answers and refusals.
   says what it holds, what was left out and why, and how to start it. The
   scenario copies the bundle out of the project and runs it headless: its
   outline is the live preview's.
-- **What cannot be exported is refused, saying why.** A web site (ljos-web
-  builds none on its own), types written in Rust (only the app's program
-  registers them), a document that does not parse, and a module that only
-  a mock provides each have their own refusal; nothing is written.
+- **What cannot be exported is refused, saying why.** Types written in
+  Rust (only the app's program registers them), a document that does not
+  parse, and a module that only a mock provides each have their own
+  refusal; nothing is written. A site for the web is the next section.
 - **Comments sit on objects, in the sidecar.** `review` adds, answers,
   resolves and reopens comments, and lists them by document or object. A
   comment follows its object through anybody's edits as a handle does,
@@ -966,6 +966,124 @@ Measured in a release build on the reference desktop:
 | Path | p50 | p95 |
 |---|---|---|
 | `export` of a project whose bundle holds 200 files (415 677 bytes), 20 exports (`studio_mcp` example `export_perf`, release) | 9.41 ms | 9.95 ms |
+| the same since a document is parsed only, not outlined, to know it parses (M3) | 6.04 ms | 6.74 ms |
+
+#### As built: a site for the web
+
+`export` with `"target": "web"` writes `build/web`: the same walk of the
+project, the same refusals, `left_out` and link rules, and a manifest for a
+site builder instead of for `ljos run` (`features/project/export-web.feature`).
+ljos-web compiles, bundles and runs; Studio chooses the files and refuses
+what has no face on the web. `mise run export:web:build <bundle> [out]` builds
+the site with an ljos-web checkout until ljos-web has a builder of its own,
+and `mise run export:web:check` holds the result to
+`features/web/site.feature` in headless Chromium.
+
+**What ljos-web bf49026 can do** (evidence, M3): `qmlc --root DIR` compiles
+QML to Solid components and finds a project's modules by their qmldirs below
+`DIR` (without `--root` the root is the compiled file's directory, so a page
+must pass it); its Vite plugin (`ljos-web/vite`) runs `qmlc` per import and
+takes `args` and `standins`; a page imports `ljos-web/runtime.css` and calls
+`mount(Entry, element)` from `ljos-web/object`. The runtime package's exports
+(`packages/runtime/package.json`) are the modules a page can import.
+`QtQuick.Controls` is compiled from an installed Qt's own QML; `Ljos.Design`
+is plain QML and compiles from `ljos_design_qml/qml` as a stand-in. Built
+from the fixture (`web/site/project`), the site is three files, Vite inlines
+a small SVG into the script, the text takes Ljos.Design's colour, and the
+mock never reaches the page. What it cannot do: build a site from a
+directory on its own (request 30), apply `theme.json` (Studio's native
+preview applies it through `ljos_design_qml::theme::apply`, which is Rust:
+request 31), and run `Ljos.Blocks`, `Ljos.Models` or `Ljos.Observer`, which
+are Rust types (requests 32, 33).
+
+**The site contract.** `ljos-site.json`, at the bundle's root:
+
+| Field | Promise |
+|---|---|
+| `format`, `version`, `target` | `"ljos-site"`, `1`, `"web"`; a builder refuses anything else |
+| `entry` | the document the site mounts, a listed `.qml` |
+| `theme` | the `theme.json` beside the entry, when there is one (carried, not yet applied) |
+| `files` | every file of the bundle with its size, and nothing else is in it; plain paths below the bundle, never `mocks/`, `.studio/` or `ljostypes.json` |
+| `modules` | each of the project's modules (`module`) and its `qmldir`, both listed; every component a qmldir names is listed |
+| `imports` | every module a document imports that is not the project's, sorted: each one ljos-web at `ljos_web` provides |
+| `blocks`, `left_out` | as in the native manifest, for a person reading it |
+| `ljos_web` | the ljos-web commit the imports were checked against (`web/ljos-web.rev`) |
+
+A builder that holds to it needs nothing but the bundle and ljos-web: no
+Studio, no project around it. `crates/studio_mcp/tests/site/mod.rs` is such a
+builder for tests: it reads the manifest by these words (unknown fields
+refused), and `tests/site_contract.rs` tampers with an exported bundle every
+way the contract rules out (an unlisted file, a missing one, other bytes, a
+path out of the bundle, an import nobody provides or the manifest does not
+say, a module without its qmldir, another version or target, Studio's files,
+types in Rust, a commit that is not one, a link) and sees each refused.
+
+**Refused for the web**, in this order after the native ones (entry,
+`syntax`, `native_types`, `mocked_only`): `unsupported` with
+`no_web_face`, its `modules` and the `docs` that import them, for a module
+that is neither the project's own nor one ljos-web provides. That covers
+`Ljos.Blocks` shells, `Ljos.Models`, a module only an installed plugin
+gives, and a typo.
+
+DECISION: the web export reuses the native one's walk and checks, and adds
+to its manifest rather than forking it; `run` is native's alone, and
+`modules`, `imports` and `ljos_web` are the web's alone. DECISION: the
+manifest has its own name (`ljos-site.json`, format `ljos-site`), so a
+native bundle and a site bundle sit side by side under `build/` and neither
+is taken for the other; either may be replaced by the next export.
+DECISION: what ljos-web provides is a list in Studio
+(`export::WEB_MODULES`), its runtime package's exports at the pin plus
+`QtQuick.Controls` and `Ljos.Design`; a test compares it with the package
+when `LJOS_WEB` names a checkout, and the build task compares the manifest's
+imports with the checkout it builds with. Request 34 would let Studio read
+it instead. DECISION: a path import (`import "parts"`) is not checked: its
+files are the project's and in the bundle, or outside it and missing from
+the native bundle alike. DECISION: Studio's window has no export UI, so the
+web target has none either. DECISION: Studio's interim builder is a task
+(`export:web:build`) over ljos-web's own compiler and plugin, not code in a
+crate, so it is gone when request 30 lands; it copies only the listed files,
+asks for Qt only when the site imports the controls, and replaces only a
+site it built (a `.ljos-site-build` stamp). DECISION: the pin moves to
+bf49026, against which the module list and the site were checked; `mise run
+web:shell` passes on it. DECISION: a document is parsed, not outlined, to
+know it parses, which also gives its imports: one parse per document for
+both targets.
+
+Measured in a release build on the reference desktop:
+
+| Path | p50 | p95 |
+|---|---|---|
+| `export` `web` of the same 200-file project (415 677 bytes of files, a 15 250-byte manifest), 20 exports | 5.90 ms | 6.01 ms |
+| `export` `native` of it (a 14 941-byte manifest), same run | 6.04 ms | 6.74 ms |
+
+The fixture's site (`mise run export:web:check`): 3 files, 443 160 bytes
+(157 020 gzipped), almost all ljos-web's runtime and Solid; first
+contentful paint 60–72 ms in headless Chromium, the entry's text shown by
+70–87 ms, served from memory by Playwright.
+
+**Requests to ljos-web** (M2's start at 17; these at 30):
+
+30. A site builder: `ljos-web build-site <dir>` (or an API) that takes a
+    directory with `ljos-site.json` and writes a static site, so Studio's
+    interim task goes.
+31. `theme.json` applied to `Ljos.Design` in a page, as Ljós's native
+    `ljos_design_qml::theme::apply` does; today a site has the default
+    palette.
+32. `Ljos.Blocks` on the web (request 16), so a shell over `ShellLoader`
+    can be exported rather than refused.
+33. Web faces for Ljós's Rust modules (`Ljos.Models`, `Ljos.Observer`) and
+    for a project's `ljostypes.json` (requests 11, 12).
+34. A machine-readable list of the modules a commit provides, including
+    those it compiles from Qt or Ljós, so Studio need not keep one.
+35. A `root` option on the Vite plugin, rather than `--root` through
+    `args`, and a project root that does not depend on which file was
+    compiled first.
+36. Controls without an installed Qt (request 13): a site importing
+    `QtQuick.Controls` cannot be built where Qt is not.
+
+**Request to ljos-ui:** a way for `Ljos.Design` to take a `theme.json`
+without Rust (its palette's seed and overrides as QML can be given them),
+so a page and a native window read one theme the same way.
 
 #### Phase 3 / M1: as built
 
