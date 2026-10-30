@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+#MISE description="Studio's Gherkin scenarios, or only the given feature files or directories"
+set -euo pipefail
+root="$(cd "$(dirname "$0")/.." && pwd)"
+if [ $# -eq 0 ]; then
+  STUDIO_FEATURES="$root/features" cargo test -p studio_mcp --test features
+else
+  for path in "$@"; do
+    STUDIO_FEATURES="$(realpath "$path")" cargo test -p studio_mcp --test features
+  done
+fi
