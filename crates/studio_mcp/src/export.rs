@@ -371,7 +371,10 @@ fn plan(
 /// removal of the last one somewhere else.
 fn out_dir(root: &Path, out: Option<&str>, target: Target) -> Result<String, SurfaceError> {
     let out = out.map_or_else(|| format!("{BUILD}/{}", target.word()), str::to_owned);
-    let path = Path::new(&out);
+    // By its components, for the checks and the write alike: the system
+    // resolves a last `.` through a link that `build/native/.` as written
+    // would not show as one, and removing it empties what the link is to.
+    let path: PathBuf = Path::new(&out).components().collect();
     let plain = path.components().all(|c| matches!(c, Component::Normal(_)));
     let mut parts = path.components();
     let below_build =
@@ -382,7 +385,7 @@ fn out_dir(root: &Path, out: Option<&str>, target: Target) -> Result<String, Sur
             format!("`{out}` is not below the project's `{BUILD}/`, where bundles are written"),
         ));
     }
-    let full = root.join(&out);
+    let full = root.join(&path);
     if leads_elsewhere(root, &full) {
         return Err(SurfaceError::new(
             ErrorCode::PathDenied,
@@ -391,7 +394,7 @@ fn out_dir(root: &Path, out: Option<&str>, target: Target) -> Result<String, Sur
             ),
         ));
     }
-    Ok(out.trim_end_matches('/').to_owned())
+    Ok(path.to_string_lossy().into_owned())
 }
 
 /// Whether a part of `full` below `root` that exists is a link. One out of

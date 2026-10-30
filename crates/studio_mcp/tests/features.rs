@@ -268,8 +268,12 @@ fn link_inside(w: &mut StudioWorld, name: String, to: String) -> StepResult {
 fn link_outside(w: &mut StudioWorld, name: String, file: String) -> StepResult {
     let outside = tempfile::tempdir().map_err(|e| e.to_string())?;
     std::fs::write(outside.path().join(file), "Item {}\n").map_err(|e| e.to_string())?;
-    std::os::unix::fs::symlink(outside.path(), w.dir.path().join(name))
-        .map_err(|e| e.to_string())?;
+    // The link may be below directories the project does not have yet.
+    let at = w.dir.path().join(name);
+    if let Some(parent) = at.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    std::os::unix::fs::symlink(outside.path(), at).map_err(|e| e.to_string())?;
     w.outside.push(outside);
     Ok(())
 }

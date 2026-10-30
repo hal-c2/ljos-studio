@@ -294,6 +294,27 @@ Feature: A project is exported as a bundle that runs without Studio
       Then the agent is refused with "path_denied"
       And the directory outside the project holds only "ljos-bundle.json"
 
+    Scenario: A place that is a link is refused however it is written
+      Given "build/native" links to a directory outside the project that holds the file "ljos-bundle.json"
+      When the agent calls the tool "export" with:
+        """json
+        {"entry": "Shell.qml", "out": "build/native"}
+        """
+      Then the agent is refused with "path_denied"
+      And the directory outside the project holds only "ljos-bundle.json"
+      When the agent calls the tool "export" with:
+        """json
+        {"entry": "Shell.qml", "out": "build/native/."}
+        """
+      Then the agent is refused with "path_denied"
+      And the directory outside the project holds only "ljos-bundle.json"
+      When the agent calls the tool "export" with:
+        """json
+        {"entry": "Shell.qml", "out": "build/native/"}
+        """
+      Then the agent is refused with "path_denied"
+      And the directory outside the project holds only "ljos-bundle.json"
+
     Scenario: A directory that holds something else is not overwritten
       Given the file "build/notes/todo.txt":
         """
