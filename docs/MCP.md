@@ -22,7 +22,9 @@ Budgets follow ARCHITECTURE.md section 19.6: tools listed in a fixed order,
 descriptions ≤ 300 characters, responses ≤ 40 KB with cursors, ≤ 25 tools
 on one server. Studio's list is 24. Capabilities as in section 19.7:
 `inspect` (read), `mutate` (edit documents), `fs` (write files outside
-documents: export), `run` (start previews).
+documents: export), `run` (start previews). They are granted at launch with
+`--caps`: by default `inspect` on a running window's endpoint and
+`inspect,mutate` for the client that started `studio --mcp` on stdio.
 
 ## Studio server (`studio --mcp`)
 

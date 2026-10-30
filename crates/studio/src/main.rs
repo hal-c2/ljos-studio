@@ -20,9 +20,10 @@ struct Args {
     #[arg(long)]
     mcp: bool,
     /// What an agent may do: a comma-separated list of `inspect`,
-    /// `mutate`, `fs` and `run`.
-    #[arg(long, default_value = "inspect,mutate")]
-    caps: String,
+    /// `mutate`, `fs` and `run`. By default an agent on the window's endpoint
+    /// may read, and the client that started `--mcp` may also edit.
+    #[arg(long)]
+    caps: Option<String>,
     /// The `ljos` program previews run (default: `LJOS`, else `ljos` on
     /// the `PATH`).
     #[arg(long)]
@@ -41,9 +42,7 @@ struct Args {
 
 fn main() -> anyhow::Result<()> {
     let args = Args::parse();
-    let caps = CapSet::parse_list(&args.caps)?;
-    // Reading is what every other tool builds on.
-    let caps = caps.with(Cap::Inspect);
+    let caps = granted(&args)?;
     let dir = match args.dir {
         Some(dir) => dir,
         None => std::env::current_dir().context("the current directory")?,
@@ -82,6 +81,20 @@ fn main() -> anyhow::Result<()> {
     window(server, args.shell)
 }
 
+/// What a client may do. The endpoint can be reached by whatever else runs on
+/// this machine and finds the token, so more than reading is the person's to
+/// grant (DESIGN.md); a client on stdio was started for the purpose.
+fn granted(args: &Args) -> anyhow::Result<CapSet> {
+    let default = if args.mcp {
+        "inspect,mutate"
+    } else {
+        "inspect"
+    };
+    let caps = CapSet::parse_list(args.caps.as_deref().unwrap_or(default))?;
+    // Reading is what every other tool builds on.
+    Ok(caps.with(Cap::Inspect))
+}
+
 /// Opens the window and runs until it is closed.
 fn window(server: Arc<StudioServer>, shell: Option<PathBuf>) -> anyhow::Result<()> {
     let app = ljos::App::new("Ljós Studio")
@@ -115,4 +128,30 @@ fn window(server: Arc<StudioServer>, shell: Option<PathBuf>) -> anyhow::Result<(
 fn state_dir() -> PathBuf {
     let base = std::env::var_os("XDG_RUNTIME_DIR").map_or_else(std::env::temp_dir, PathBuf::from);
     base.join(format!("ljos-studio-{}", std::process::id()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn granted_by(argv: &[&str]) -> CapSet {
+        granted(&Args::parse_from(std::iter::once(&"studio").chain(argv))).unwrap()
+    }
+
+    #[test]
+    fn the_windows_endpoint_may_read_unless_the_person_grants_more() {
+        assert_eq!(granted_by(&[]), CapSet::of([Cap::Inspect]));
+        assert_eq!(
+            granted_by(&["--caps", "mutate"]),
+            CapSet::of([Cap::Inspect, Cap::Mutate])
+        );
+    }
+
+    #[test]
+    fn a_client_on_stdio_may_edit_as_it_always_could() {
+        assert_eq!(
+            granted_by(&["--mcp"]),
+            CapSet::of([Cap::Inspect, Cap::Mutate])
+        );
+    }
 }
