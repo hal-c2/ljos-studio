@@ -330,14 +330,14 @@ impl StudioServer {
     }
 }
 
-/// A poisoned lock means a tool panicked while it held the session; a window
-/// stuck for it would lose the person's work, and the session is still whole:
-/// an edit changes it only after all that can panic (`Session::commit`).
 /// A [`Timer`] reading on the session's clock.
 pub(crate) fn millis(at: std::time::Duration) -> u64 {
     u64::try_from(at.as_millis()).unwrap_or(u64::MAX)
 }
 
+/// A poisoned lock means a tool panicked while it held the session; a window
+/// stuck for it would lose the person's work, and the session is still whole:
+/// an edit changes it only after all that can panic (`Session::commit`).
 pub(crate) fn lock(studio: &Mutex<Studio>) -> MutexGuard<'_, Studio> {
     let mut studio = studio
         .lock()
