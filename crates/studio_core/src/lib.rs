@@ -169,9 +169,12 @@ impl Op {
         match self {
             Op::Insert { parent, .. } => vec![parent],
             Op::Move { node, parent, .. } => vec![node, parent],
-            Op::Remove { node } | Op::SetBinding { node, .. } | Op::RemoveBinding { node, .. } => {
-                vec![node]
-            }
+            Op::Remove { node }
+            | Op::SetBinding { node, .. }
+            | Op::RemoveBinding { node, .. }
+            | Op::State { node, .. }
+            | Op::RemoveContribution { node } => vec![node],
+            Op::Contribute { parent, .. } => vec![parent],
         }
     }
 
@@ -1095,6 +1098,7 @@ impl Session {
                 history: None,
                 node: None,
                 text: Some(after),
+                unchanged: false,
             });
         }
         let entry = if exists {
@@ -1116,6 +1120,7 @@ impl Session {
                 created: true,
                 handles_before: Vec::new(),
                 handles_after: Vec::new(),
+                change: None,
             });
             self.wrote(file);
             entry
@@ -1127,6 +1132,7 @@ impl Session {
             history: Some(entry),
             node: None,
             text: None,
+            unchanged: false,
         })
     }
 
