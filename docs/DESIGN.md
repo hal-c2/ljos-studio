@@ -797,9 +797,15 @@ one the bundle holds or to one it leaves out. The first goes into the
 bundle as a relative link (the manifest's `links`), so an app that
 imports a directory through the link's name (`import "alias"`) runs
 from the bundle as from the project. Where the system makes no links (a
-Windows user without the privilege), that directory is copied once under
-the link's name, with the links inside it; links that lead into each
-other copy each directory once along the way. The second stays out with
+Windows user without the privilege), that directory is copied under the
+link's name, with the links inside it copied the same way: each
+`(path, to)` once, and a link back into a directory being copied around it
+not followed again. A copy cannot share what a diamond of links shares, so
+it doubles with every level; the links are made before any file is copied,
+and where they cannot be, what their copies would write is counted first and
+past 10,000 files the export is refused (`unsupported`, `links_multiply`)
+with nothing written. The answer's `files` and `bytes` count the copies.
+The second stays out with
 its reason, as does a link to a directory it is in, which would make the
 bundle hold itself. A file's check right before it is copied applies the walk's
 exclusions again to where it now leads, so a file swapped for a link into

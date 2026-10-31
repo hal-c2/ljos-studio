@@ -219,7 +219,7 @@ expression: value
         "type": "integer"
       },
       "files": {
-        "description": "How many files the bundle holds and their size, which stay true when\na long manifest is cut short in this answer (the one written is whole).",
+        "description": "How many files the bundle holds and their size, which stay true when\na long manifest is cut short in this answer (the one written is whole),\ncopies of links it could not hold as links included.",
         "format": "uint",
         "minimum": 0,
         "type": "integer"

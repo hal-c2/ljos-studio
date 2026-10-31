@@ -10,7 +10,7 @@
 //! own, which it does not yet; that target is refused, saying so.
 
 use std::{
-    collections::HashMap,
+    collections::{BTreeSet, HashMap},
     fs,
     path::{Component, Path, PathBuf},
     sync::{Arc, Mutex},
@@ -34,6 +34,11 @@ const VERSION: u32 = 1;
 const BUILD: &str = "build";
 /// The project's mock modules (`preview_open`'s `mocked` state).
 const MOCKS: &str = "mocks";
+
+/// How many files a bundle may hold through links it cannot keep as links.
+/// Links that fan out and meet again copy a directory once per way down,
+/// which doubles with every level.
+const LINKED_FILES: usize = 10_000;
 
 #[derive(Clone, Copy, Default, Debug, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
@@ -127,7 +132,8 @@ struct ExportOut {
     /// The bundle's directory, relative to the project.
     out: String,
     /// How many files the bundle holds and their size, which stay true when
-    /// a long manifest is cut short in this answer (the one written is whole).
+    /// a long manifest is cut short in this answer (the one written is whole),
+    /// copies of links it could not hold as links included.
     files: usize,
     bytes: u64,
     manifest: Manifest,
@@ -542,9 +548,17 @@ fn may_replace(root: &Path, out: &Path) -> Result<(), SurfaceError> {
     Ok(())
 }
 
+/// The files and bytes a bundle holds besides its manifest's files: what
+/// copies of links put under the links' names.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct Copied {
+    files: usize,
+    bytes: u64,
+}
+
 /// Copies the files into a place beside `out` and swaps it in, so a
 /// bundle is never half one export and half another.
-fn write(root: &Path, out: &Path, manifest: &Manifest) -> Result<(), SurfaceError> {
+fn write(root: &Path, out: &Path, manifest: &Manifest) -> Result<Copied, SurfaceError> {
     write_with(root, out, manifest, link_dir, || {})
 }
 
@@ -575,7 +589,7 @@ fn write_with(
     manifest: &Manifest,
     link: impl Fn(&Path, &Path) -> std::io::Result<()>,
     copied: impl FnOnce(),
-) -> Result<(), SurfaceError> {
+) -> Result<Copied, SurfaceError> {
     may_replace(root, out)?;
     let parent = out.parent().expect("below build/");
     let name = out.file_name().expect("a name").to_string_lossy();
@@ -585,19 +599,27 @@ fn write_with(
         fs::remove_dir_all(&staging).map_err(|e| io(&staging, &e))?;
     }
     fs::create_dir_all(&staging).map_err(|e| io(&staging, &e))?;
+    // The links first: where the system makes none, what their copies
+    // would write is counted before any file is, so a copy too large is
+    // refused with nothing written.
+    let mut unmade = Vec::new();
+    for entry in &manifest.links {
+        if !place_link(&staging, &entry.path, &entry.to, &link)? {
+            unmade.push(entry);
+        }
+    }
+    let through = match through_links(&manifest.files, &manifest.links, &unmade) {
+        Ok(through) => through,
+        Err(refusal) => {
+            fs::remove_dir_all(&staging).map_err(|e| io(&staging, &e))?;
+            return Err(refusal);
+        }
+    };
     for path in manifest.files.iter().map(|f| &f.path) {
         copy_file(root, path, &staging.join(path))?;
     }
-    for entry in &manifest.links {
-        place_link(
-            root,
-            &staging,
-            manifest,
-            &entry.path,
-            &entry.to,
-            &link,
-            &mut Vec::new(),
-        )?;
+    for (path, file) in &through {
+        copy_file(root, &file.path, &staging.join(path))?;
     }
     let mut text = serde_json::to_string_pretty(manifest).expect("a manifest is JSON");
     text.push('\n');
@@ -617,7 +639,11 @@ fn write_with(
     if fs::symlink_metadata(out).is_ok() {
         fs::remove_dir_all(out).map_err(|e| io(out, &e))?;
     }
-    fs::rename(&staging, out).map_err(|e| io(out, &e))
+    fs::rename(&staging, out).map_err(|e| io(out, &e))?;
+    Ok(Copied {
+        files: through.len(),
+        bytes: through.iter().map(|(_, f)| f.bytes).sum(),
+    })
 }
 
 /// Copies the project's `path` to `to`, as the walk found it: a file
@@ -643,20 +669,14 @@ fn copy_file(root: &Path, path: &str, to: &Path) -> Result<(), SurfaceError> {
     Ok(())
 }
 
-/// Puts the link at `path` to the bundle's directory `to` in `staging`:
-/// a link where `link` makes one, else a copy of `to`'s files and links
-/// under `path`. `copying` holds the directories being copied around it,
-/// so links that lead into each other copy each directory once along the
-/// way rather than for ever.
+/// Puts the link at `path` to the bundle's directory `to` in `staging`;
+/// false where `link` makes none, and the directory is to be copied there.
 fn place_link(
-    root: &Path,
     staging: &Path,
-    manifest: &Manifest,
     path: &str,
     to: &str,
     link: &impl Fn(&Path, &Path) -> std::io::Result<()>,
-    copying: &mut Vec<String>,
-) -> Result<(), SurfaceError> {
+) -> Result<bool, SurfaceError> {
     let at = staging.join(path);
     if let Some(dir) = at.parent() {
         fs::create_dir_all(dir).map_err(|e| io(dir, &e))?;
@@ -668,22 +688,71 @@ fn place_link(
         .collect::<PathBuf>()
         .join(to);
     if link(&relative, &at).is_ok() {
-        return Ok(());
+        return Ok(true);
     }
-    copying.push(to.to_owned());
     fs::create_dir_all(&at).map_err(|e| io(&at, &e))?;
-    let below = format!("{to}/");
-    for file in manifest.files.iter().filter(|f| f.path.starts_with(&below)) {
-        copy_file(root, &file.path, &at.join(&file.path[below.len()..]))?;
+    Ok(false)
+}
+
+/// Where a copy of each of `copied` puts the files of the directory it
+/// leads to, under its name, with the links in that directory copied the
+/// same way, and which of `files` each one is. Each `(path, to)` is copied
+/// once, and a link back into a directory being copied around it is not
+/// followed again. Past [`LINKED_FILES`] it is refused before anything is
+/// copied.
+fn through_links<'a>(
+    files: &'a [FileEntry],
+    links: &[LinkEntry],
+    copied: &[&LinkEntry],
+) -> Result<Vec<(String, &'a FileEntry)>, SurfaceError> {
+    struct Copy<'a, 'l> {
+        files: &'a [FileEntry],
+        links: &'l [LinkEntry],
+        copying: Vec<&'l str>,
+        done: BTreeSet<(String, &'l str)>,
+        out: Vec<(String, &'a FileEntry)>,
     }
-    for inner in manifest.links.iter().filter(|l| l.path.starts_with(&below)) {
-        if !copying.contains(&inner.to) {
-            let path = format!("{path}/{}", &inner.path[below.len()..]);
-            place_link(root, staging, manifest, &path, &inner.to, link, copying)?;
+    impl<'l> Copy<'_, 'l> {
+        fn link(&mut self, path: String, to: &'l str) -> Result<(), SurfaceError> {
+            if self.copying.contains(&to) || !self.done.insert((path.clone(), to)) {
+                return Ok(());
+            }
+            self.copying.push(to);
+            let below = format!("{to}/");
+            for file in self.files.iter().filter(|f| f.path.starts_with(&below)) {
+                if self.out.len() == LINKED_FILES {
+                    return Err(refused(
+                        ErrorCode::Unsupported,
+                        "links_multiply",
+                        format!(
+                            "the project's links lead into the same directories along so many \
+                             ways that copying them, where the bundle cannot hold them as links, \
+                             would write more than {LINKED_FILES} files; link each directory once"
+                        ),
+                    ));
+                }
+                self.out
+                    .push((format!("{path}/{}", &file.path[below.len()..]), file));
+            }
+            let links = self.links;
+            for inner in links.iter().filter(|l| l.path.starts_with(&below)) {
+                self.link(format!("{path}/{}", &inner.path[below.len()..]), &inner.to)?;
+            }
+            self.copying.pop();
+            Ok(())
         }
     }
-    copying.pop();
-    Ok(())
+    let mut copy = Copy {
+        files,
+        links,
+        copying: Vec::new(),
+        done: BTreeSet::new(),
+        out: Vec::new(),
+    };
+    for link in copied {
+        copy.link(link.path.clone(), &link.to)?;
+    }
+    Ok(copy.out)
 }
 
 fn export(studio: &Mutex<Studio>, a: ExportArgs) -> Result<ExportOut, SurfaceError> {
@@ -699,13 +768,15 @@ fn export(studio: &Mutex<Studio>, a: ExportArgs) -> Result<ExportOut, SurfaceErr
     let root = root.canonicalize().map_err(|e| io(&root, &e))?;
     let manifest = plan(&root, &studio, &a.entry, a.target)?;
     let out = out_dir(&root, a.out.as_deref(), a.target)?;
-    if !a.dry_run {
-        write(&root, &root.join(&out), &manifest)?;
-    }
+    let copied = if a.dry_run {
+        Copied::default()
+    } else {
+        write(&root, &root.join(&out), &manifest)?
+    };
     Ok(ExportOut {
         out,
-        files: manifest.files.len(),
-        bytes: manifest.files.iter().map(|f| f.bytes).sum(),
+        files: manifest.files.len() + copied.files,
+        bytes: manifest.files.iter().map(|f| f.bytes).sum::<u64>() + copied.bytes,
         manifest,
         written: !a.dry_run,
         ms: studio_core::preview::ms(studio.timer.now().saturating_sub(started)),
@@ -910,5 +981,64 @@ mod tests {
         assert!(!out.join("top/a/b/a").exists());
         assert!(out.join("zone/b/a/Part.qml").is_file());
         assert!(!out.join("zone/b/a/b").exists());
+    }
+
+    /// `levels` directories under `levels/`, each with a `level.txt` and,
+    /// but the last, links `left` and `right` to the next.
+    fn diamond(root: &Path, levels: usize) {
+        for level in 0..levels {
+            let dir = root.join("levels").join(level.to_string());
+            fs::create_dir_all(&dir).unwrap();
+            fs::write(dir.join("level.txt"), format!("{level}\n")).unwrap();
+            if level + 1 < levels {
+                for side in ["left", "right"] {
+                    let next = root.join("levels").join((level + 1).to_string());
+                    symlink(next, dir.join(side)).unwrap();
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_diamond_of_links_too_large_to_copy_is_refused_before_anything_is_written() {
+        let project = tempfile::tempdir().unwrap();
+        let root = project.path().canonicalize().unwrap();
+        diamond(&root, 24);
+        let out = root.join(BUILD).join("native");
+        let started = std::time::Instant::now();
+        let refusal = write_with(&root, &out, &walked(&root), refuse, || {}).unwrap_err();
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(2),
+            "{:?}",
+            started.elapsed()
+        );
+        assert_eq!(refusal.details.as_ref().unwrap()["kind"], "links_multiply");
+        assert!(!out.exists());
+        assert!(!root.join(BUILD).join(".native.partial").exists());
+    }
+
+    #[test]
+    fn a_small_diamond_of_links_is_copied_once_per_way_down_and_counted() {
+        let project = tempfile::tempdir().unwrap();
+        let root = project.path().canonicalize().unwrap();
+        diamond(&root, 3);
+        let out = root.join(BUILD).join("native");
+        let copied = write_with(&root, &out, &walked(&root), refuse, || {}).unwrap();
+        // Level 1 by two ways, each holding level 2 by two more; level 2 by
+        // two ways from level 1 itself: 2 × 3 + 2 files, of two bytes each.
+        assert_eq!(
+            copied,
+            Copied {
+                files: 8,
+                bytes: 16
+            }
+        );
+        for path in [
+            "levels/0/left/level.txt",
+            "levels/0/right/right/level.txt",
+            "levels/1/left/level.txt",
+        ] {
+            assert!(out.join(path).is_file(), "{path}");
+        }
     }
 }
