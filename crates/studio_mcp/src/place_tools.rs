@@ -566,16 +566,28 @@ fn paste(studio: &mut Studio, a: &PasteArgs) -> Result<ManyOut, SurfaceError> {
 }
 
 /// Every object of `a` gone in one step. Handles first: taking one out moves
-/// the paths of those after it.
+/// the paths of those after it. An object inside another of them goes with
+/// it, and has no edit of its own: by then it would not be there to take out.
 fn remove(studio: &mut Studio, a: &NodesArgs) -> Result<ManyOut, SurfaceError> {
+    let mut found: Vec<(String, std::ops::Range<usize>)> = Vec::new();
+    for address in &a.nodes {
+        let (handle, node) = studio.session.resolve(&a.doc, address).map_err(error)?;
+        found.push((handle, node.start..node.end));
+    }
     let mut ops = Vec::new();
     let mut nodes = Vec::new();
-    for address in &a.nodes {
-        let (handle, _) = studio.session.resolve(&a.doc, address).map_err(error)?;
+    for (i, (handle, span)) in found.iter().enumerate() {
+        let inside = found.iter().enumerate().any(|(j, (_, other))| {
+            let same = other == span;
+            other.start <= span.start && span.end <= other.end && (!same || j < i)
+        });
+        if inside {
+            continue;
+        }
         ops.push(Op::Remove {
             node: Address::Node(handle.clone()),
         });
-        nodes.push(handle);
+        nodes.push(handle.clone());
     }
     let (outcome, _) = studio
         .session

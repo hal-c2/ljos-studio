@@ -98,6 +98,14 @@ Feature: Objects are moved and resized on the canvas
     Then the file "Main.qml" says "id: a;"
     And the file "Main.qml" says "id: b;"
 
+  Scenario: Keys do not edit the document while the canvas plays
+    Given the person has clicked the frame "Desktop" at 40, 40
+    And the person has clicked the button "Play"
+    When the person clicks the frame "Desktop" at 40, 40
+    And the person presses "Delete"
+    Then the file "Main.qml" says "id: a;"
+    And the history lists nothing
+
   Scenario: Align buttons line up a multiple selection
     Given an agent has called the tool "node_select" with:
       """json

@@ -519,7 +519,28 @@ fn renamed(text: &str, renames: &[(String, String)]) -> String {
     while i < bytes.len() {
         let c = bytes[i];
         match c {
-            b'"' | b'\'' | b'`' => {
+            // Its text is text, but what is in `${}` is code.
+            b'`' => {
+                out.push('`');
+                i += 1;
+                let mut from = i;
+                while i < bytes.len() && bytes[i] != b'`' {
+                    if bytes[i] == b'\\' {
+                        i += 2;
+                    } else if bytes[i] == b'$' && bytes.get(i + 1) == Some(&b'{') {
+                        let end = expression_end(bytes, i + 2);
+                        out.push_str(&text[from..i + 2]);
+                        out.push_str(&renamed(&text[i + 2..end], renames));
+                        i = end;
+                        from = i;
+                    } else {
+                        i += 1;
+                    }
+                }
+                i = (i + 1).min(bytes.len());
+                out.push_str(&text[from..i]);
+            }
+            b'"' | b'\'' => {
                 let start = i;
                 i += 1;
                 while i < bytes.len() && bytes[i] != c {
@@ -566,9 +587,56 @@ fn renamed(text: &str, renames: &[(String, String)]) -> String {
     out
 }
 
+/// Where the `}` is that closes the expression starting at `i`, past what
+/// strings and templates in it hold.
+fn expression_end(bytes: &[u8], mut i: usize) -> usize {
+    let mut depth = 0;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'}' if depth == 0 => return i,
+            b'{' => depth += 1,
+            b'}' => depth -= 1,
+            quote @ (b'"' | b'\'') => {
+                i += 1;
+                while i < bytes.len() && bytes[i] != quote {
+                    i += if bytes[i] == b'\\' { 2 } else { 1 };
+                }
+            }
+            b'`' => {
+                i += 1;
+                while i < bytes.len() && bytes[i] != b'`' {
+                    if bytes[i] == b'\\' {
+                        i += 2;
+                    } else if bytes[i] == b'$' && bytes.get(i + 1) == Some(&b'{') {
+                        i = expression_end(bytes, i + 2) + 1;
+                    } else {
+                        i += 1;
+                    }
+                }
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    bytes.len()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_rename_reaches_into_a_template_but_not_its_text() {
+        let renames = [("card".to_owned(), "card1".to_owned())];
+        assert_eq!(
+            renamed(
+                "`card ${card.x} ${`é ${card.y}` + \"card\" + {a: card}.a}`",
+                &renames
+            ),
+            "`card ${card1.x} ${`é ${card1.y}` + \"card\" + {a: card1}.a}`"
+        );
+        assert_eq!(renamed("`${card", &renames), "`${card1");
+    }
 
     fn r(x: f64, y: f64, width: f64, height: f64) -> Rect {
         Rect {
