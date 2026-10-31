@@ -334,8 +334,9 @@ struct InsertArgs {
     parent: Address,
     /// Child position; the end when left out.
     index: Option<usize>,
-    /// One object in QML (`Rectangle { color: "red" }`). With `block`, it may
-    /// be left out for the bare block, or set its inputs.
+    /// One object in QML (`Rectangle { color: "red" }`), or one member:
+    /// `function f() {}`, `signal s()`, `property int n`, `onClicked: f()`.
+    /// With `block`, it may be left out for the bare block, or set its inputs.
     text: Option<String>,
     /// A functional block from `blocks_list`, `Module.Name`: its module is
     /// imported and `text` must be of its type.
@@ -1709,8 +1710,8 @@ fn edits(studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
             ToolDef::new::<InsertArgs>(
                 "node_insert",
                 "Insert one object written in QML, or a `block` from `blocks_list`, as a child at an \
-                 index. It gets an id unless it has one; `import` (a block's module) is added once. \
-                 Returns the new object's handle.",
+                 index, or one member (function, signal, property, handler) of `parent`. An object \
+                 gets an id unless it has one; `import` is added once. Returns the handle.",
             )
             .answers::<EditOut>()
             .requires(Cap::Mutate)
