@@ -47,6 +47,9 @@ pub(crate) struct Logged {
     /// A change found in the file: its ranges are a diff's reading of a
     /// whole new text, so nothing is rebased across it.
     pub outside: bool,
+    /// The generation whose edit this gave back exactly: an undo or redo
+    /// made on the very text that edit left.
+    pub reverts: Option<u64>,
 }
 
 #[derive(Debug, Default)]
@@ -77,7 +80,7 @@ impl Log {
         // document read anew) would leave a gap no transform can cross.
         let whole = since.iter().zip(base + 1..).all(|(e, g)| e.generation == g)
             && since.last().map(|e| e.generation) == Some(current);
-        whole.then_some(since)
+        whole.then(|| net(since))
     }
 
     /// Bytes the log holds, for DESIGN.md's measure of an entry.
@@ -111,6 +114,22 @@ impl Log {
     pub fn len(&self) -> usize {
         self.entries.len()
     }
+}
+
+/// The entries without an edit and the undo that came straight after it:
+/// together they are no change, and moving past both would refuse what
+/// overlaps the edit that is no longer there. An edit with others between it
+/// and its undo stays, as their ranges are of the text that has it.
+fn net(since: Vec<&Logged>) -> Vec<&Logged> {
+    let mut out: Vec<&Logged> = Vec::with_capacity(since.len());
+    for entry in since {
+        if entry.reverts.is_some() && out.last().map(|e| e.generation) == entry.reverts {
+            out.pop();
+        } else {
+            out.push(entry);
+        }
+    }
+    out
 }
 
 /// How long a lease lasts after the holder's last call. Long enough for an

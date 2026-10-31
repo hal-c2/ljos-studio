@@ -140,11 +140,16 @@ pub enum Error {
 #[error(
     "{author} changed {what} in `{doc}` at generation {generation} ({label}) after the \
      generation this edit was made at: read it again and decide",
-    what = match name { Some(n) => format!("`{n}` of {handle}"), None => handle.clone() }
+    what = match (name, handle) {
+        (Some(n), Some(h)) => format!("`{n}` of {h}"),
+        (_, Some(h)) => h.clone(),
+        (_, None) => "the same text".to_owned(),
+    }
 )]
 pub struct Conflict {
     pub doc: String,
-    pub handle: String,
+    /// `None` for a change of the text that is no one object's.
+    pub handle: Option<String>,
     pub name: Option<String>,
     pub author: String,
     pub label: String,
@@ -843,7 +848,7 @@ impl Session {
                     });
                     return Err(Error::Conflict(Box::new(Conflict {
                         doc: path.to_owned(),
-                        handle: format!("n{h}"),
+                        handle: Some(format!("n{h}")),
                         name: name.clone(),
                         author: entry.author.clone(),
                         label: entry.label.clone(),
@@ -1730,6 +1735,7 @@ impl Session {
                 changes: entry.forward.clone(),
                 touched,
                 outside: entry.outside,
+                reverts: None,
             });
     }
 
@@ -1934,13 +1940,14 @@ impl Session {
         };
         if side(&current) == entry.side {
             self.check_leased_ranges(&path, changes)?;
+            let reverts = Some(entry.generation);
             if entry.exact {
                 let touched =
                     self.text_touches(&path, &diff(&current, &qml_edit::splice(&current, changes)));
-                return self.replay_exact(entry, forward, label, touched);
+                return self.replay_exact(entry, forward, label, touched, reverts);
             }
             let changes = changes.clone();
-            return self.replay_text(&path, &current, &changes, label, forward, false);
+            return self.replay_text(&path, &current, &changes, label, forward, false, reverts);
         }
         // Others wrote since: the entry's changes are moved past theirs.
         let since: Vec<Logged> = self
@@ -1965,11 +1972,12 @@ impl Session {
                 .map_err(|_| conflict(&path, e, None))?;
         }
         self.check_leased_ranges(&path, &moved)?;
-        self.replay_text(&path, &current, &moved, label, forward, true)
+        self.replay_text(&path, &current, &moved, label, forward, true, None)
     }
 
     /// Applies an entry's changes, made on `current` or moved onto it, as a
     /// change of the text: handles are found again by bytes and key.
+    #[allow(clippy::too_many_arguments)]
     fn replay_text(
         &mut self,
         path: &str,
@@ -1978,6 +1986,7 @@ impl Session {
         label: String,
         forward: bool,
         rebased: bool,
+        reverts: Option<u64>,
     ) -> Result<(u64, u64, Option<Replayed>), Error> {
         let text = qml_edit::splice(current, changes);
         if rebased && self.doc(path)?.nodes.is_some() && outline::outline(&text).is_none() {
@@ -2002,7 +2011,7 @@ impl Session {
         self.store.write(path, &text)?;
         *self.doc(path)? = next;
         self.reanchor(path);
-        self.log_replay(path, generation, label, made.clone(), touched);
+        self.log_replay(path, generation, label, made.clone(), touched, reverts);
         let replayed = if forward {
             Replayed {
                 forward: made,
@@ -2024,6 +2033,7 @@ impl Session {
         label: String,
         changes: Vec<Change>,
         touched: Option<Vec<Touch>>,
+        reverts: Option<u64>,
     ) {
         let author = self.author.clone();
         self.logs.entry(path.to_owned()).or_default().push(Logged {
@@ -2033,6 +2043,7 @@ impl Session {
             changes,
             touched,
             outside: false,
+            reverts,
         });
     }
 
@@ -2044,6 +2055,7 @@ impl Session {
         forward: bool,
         label: String,
         touched: Option<Vec<Touch>>,
+        reverts: Option<u64>,
     ) -> Result<(u64, u64, Option<Replayed>), Error> {
         let path = entry.doc.clone();
         let doc = self.doc(&path)?;
@@ -2101,7 +2113,7 @@ impl Session {
         self.store.write(&path, &text)?;
         *self.doc(&path)? = next;
         self.reanchor(&path);
-        self.log_replay(&path, generation, label, made, touched);
+        self.log_replay(&path, generation, label, made, touched, reverts);
         Ok((generation, side(&text), None))
     }
 
@@ -2593,8 +2605,8 @@ impl Session {
 /// The refusal of an edit `entry` of the log stands in the way of.
 fn conflict(doc: &str, entry: &Logged, now: Option<String>) -> Error {
     let (handle, name) = match entry.touched.as_deref() {
-        Some([(h, name)]) => (format!("n{h}"), name.clone()),
-        _ => (String::new(), None),
+        Some([(h, name)]) => (Some(format!("n{h}")), name.clone()),
+        _ => (None, None),
     };
     Error::Conflict(Box::new(Conflict {
         doc: doc.to_owned(),

@@ -324,6 +324,57 @@ Feature: An edit made against an older generation is rebased by its handles
       }
       """
 
+  # The second undo's bytes were changed by the edit the first undo took
+  # back, which is no change any more.
+  Scenario: Undo takes back a writer's edits of one binding in turn, past another writer's
+    Given the agent has called the tool "property_set" with:
+      """json
+      {"doc": "Main.qml", "node": {"id": "card"}, "name": "color", "value": "blue"}
+      """
+    And a second agent named "Ada" has called the tool "property_set" with:
+      """json
+      {"doc": "Main.qml", "node": {"id": "label"}, "name": "text", "value": "bye"}
+      """
+    And the agent has called the tool "property_set" with:
+      """json
+      {"doc": "Main.qml", "node": {"id": "card"}, "name": "color", "value": "green"}
+      """
+    And the agent has called the tool "history" with:
+      """json
+      {"action": "undo"}
+      """
+    When the agent calls the tool "history" with:
+      """json
+      {"action": "undo"}
+      """
+    Then the file "Main.qml" is:
+      """qml
+      import QtQuick
+
+      Item {
+          id: root
+          width: 200
+
+          Rectangle { id: card; color: "red" }
+          Text { id: label; text: "bye" }
+      }
+      """
+
+  Scenario: A conflict with a change of a text that is no one object's names no object
+    Given a second agent named "Ada" has called the tool "document_edit" with:
+      """json
+      {"doc": "Main.qml", "generation": "$read", "start": 85, "end": 128, "text": "\"blue\" }\n    Text { id: label; text: \"bye\""}
+      """
+    When the agent calls the tool "document_edit" with:
+      """json
+      {"doc": "Main.qml", "generation": "$read", "start": 85, "end": 90, "text": "\"pink\""}
+      """
+    Then the agent is refused with "stale_ref"
+    And the refusal's "/details/kind" is "conflict"
+    And the refusal's "/details/handle" is null
+    And the refusal's "/details/author" is "Ada"
+    And the refusal's message matches "Ada changed the same text in"
+
   Scenario: Undo of an edit another writer has written over is a conflict
     Given the agent has called the tool "property_set" with:
       """json

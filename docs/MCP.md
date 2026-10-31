@@ -546,7 +546,8 @@ current text rather than refused, and its answer says `rebased_from`
   its generation when none of them, by another writer, touched the same
   binding of the same object, or touched the object or an object holding
   it as a whole (a remove, a move, a replace). Otherwise it is refused
-  `stale_ref`, kind `conflict`, with `doc`, `handle`, `name`, the other
+  `stale_ref`, kind `conflict`, with `doc`, `handle` (`null` for a change of
+  the text that is no one object's), `name`, the other
   writer (`author`), its edit's `label` and `generation`, and the value
   `now` (or `null`);
 - an edit by `path` is never rebased: a path is true of one text, so an

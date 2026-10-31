@@ -1503,12 +1503,12 @@ fn edits(studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
                         selection.push(found(&doc, handle, &node));
                     }
                     let doc = studio.session.canonical(&a.doc).map_err(error)?;
-                    if a.hold {
+                    if selection.is_empty() {
+                        studio.session.release();
+                    } else if a.hold {
                         let handles: Vec<String> =
                             selection.iter().map(|f| f.node.clone()).collect();
                         studio.session.hold(&doc, &handles).map_err(error)?;
-                    } else if selection.is_empty() {
-                        studio.session.release();
                     }
                     let held = studio.session.held(&doc);
                     Ok(Selection { selection, held })

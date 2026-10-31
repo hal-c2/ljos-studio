@@ -116,6 +116,17 @@ Feature: A writer can hold the objects it is working on for a few seconds
       """
     Then the answer's "/generation" is 2
 
+  Scenario: Selecting nothing with hold lets go too
+    Given the agent has called the tool "node_select" with:
+      """json
+      {"doc": "Main.qml", "nodes": [{"id": "row"}], "hold": true}
+      """
+    When the agent calls the tool "node_select" with:
+      """json
+      {"doc": "Main.qml", "nodes": [], "hold": true}
+      """
+    Then the answer's "/held" has 0 entries
+
   Scenario: Holding needs the mutate capability
     Given the studio tools are connected with the capabilities "inspect"
     When the agent calls the tool "node_select" with:
