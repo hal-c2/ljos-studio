@@ -1,0 +1,63 @@
+---
+source: crates/studio_mcp/tests/golden_tools.rs
+expression: value
+---
+{
+  "annotations": {
+    "destructive": false,
+    "idempotent": true,
+    "open_world": false,
+    "read_only": true
+  },
+  "description": "List the project's functional blocks (`# block` qmldir comments, `#[qml(block)]` types in ljostypes.json) with their contracts: state, inputs, actions, events and slots. `node_insert` places one by `Module.Name`. Unreadable ones are in `errors`.",
+  "inputSchema": {
+    "additionalProperties": false,
+    "properties": {
+      "cursor": {
+        "description": "From a previous page's `next`.",
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "module": {
+        "description": "Only this module's blocks (`App.Media`).",
+        "type": [
+          "string",
+          "null"
+        ]
+      }
+    },
+    "title": "BlocksArgs",
+    "type": "object"
+  },
+  "max_result_bytes": 40960,
+  "name": "blocks_list",
+  "outputSchema": {
+    "properties": {
+      "blocks": {
+        "description": "By module, then name: `module`, `name`, `version`, `origin`,\n`category`?, `summary`?, and `state`, `inputs`, `actions`, `events`,\n`slots` as `ljos_blocks` writes them.",
+        "items": true,
+        "type": "array"
+      },
+      "errors": {
+        "description": "Declarations that could not be read: `file`, `line`?, `message`.",
+        "items": true,
+        "type": "array"
+      },
+      "next": {
+        "type": [
+          "string",
+          "null"
+        ]
+      }
+    },
+    "required": [
+      "blocks",
+      "errors"
+    ],
+    "title": "BlocksOut",
+    "type": "object"
+  },
+  "required_cap": "inspect"
+}

@@ -1,0 +1,19 @@
+[package]
+name = "studio"
+description = "Ljós Studio: design QML apps by editing their files losslessly. `studio --mcp` serves its tools on stdio."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+studio_mcp = { path = "../studio_mcp" }
+ljos_mcp_core.workspace = true
+anyhow.workspace = true
+clap.workspace = true
+tokio.workspace = true
+
+[lints]
+workspace = true

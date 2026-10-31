@@ -9,7 +9,7 @@ Studio composes three servers rather than duplicating them:
 - **`ljos mcp`** (Ljós's authoring server, `ljos_mcp_author`): checking,
   linting, formatting, types, docs, scenarios. Studio forwards to it and
   adds `qml_edit_apply` and `blocks_list` *to Ljós* (general tools).
-  Studio's own `blocks_list` (#15) is the same registry, built by the
+  Studio's own `blocks_list` is the same registry, built by the
   same `ljos_blocks` code, for the project Studio has open: an agent
   talking only to Studio should not need a second server to see the
   blocks it composes. The two answer alike; neither adds to the other.
@@ -32,37 +32,74 @@ documents: export), `run` (start previews).
 | 2 | `project_info` | Documents, modules, shells, themes, mock modules, preview targets | inspect |
 | 3 | `document_tree` | A document's object tree: path, `id`, type, bindings summary; paginated | inspect |
 | 4 | `document_text` | A document's text, or a range of it, with the current generation | inspect |
-| 5 | `node_find` | Find nodes by `id`, type, property value or text; returns addresses | inspect |
-| 6 | `node_select` | Set Studio's selection (shown on the canvas and in the inspector) | inspect |
-| 7 | `node_inspect` | A node's bindings and properties with source spans, its type's members, its states | inspect |
-| 8 | `node_insert` | Insert QML text or a block instance as a child at an index | mutate |
-| 9 | `node_move` | Move a node to a parent and index (reparent or reorder) | mutate |
-| 10 | `node_remove` | Remove a node with its comments | mutate |
-| 11 | `node_wrap` | Wrap nodes in a container (`Row`, `ColumnLayout`, `Item`…) | mutate |
-| 12 | `property_set` | Set or remove a property's value (a literal) | mutate |
-| 13 | `binding_set` | Set a binding expression or a handler, checked before it is written | mutate |
-| 14 | `state_edit` | Add, rename or remove a `State`; set a property change in it; add a transition | mutate |
-| 15 | `blocks_list` | Registered blocks with contracts: state, actions, events, slots, mocks | inspect |
-| 16 | `slot_contribute` | Add a `Contribution` to a block's slot | mutate |
-| 17 | `theme_tokens` | Read tokens (`Ljos.Design` roles and the theme file), light and dark | inspect |
-| 18 | `theme_set` | Set a token's value; preview reloads live | mutate |
-| 19 | `history` | List, undo or redo edits (each with its inverse changes) | mutate |
-| 20 | `preview_open` | Start a preview of a shell on a target (desktop, phone-sized, web) with live or mocked state | run |
-| 21 | `preview_state` | Read or set mocked block state in the preview | run |
-| 22 | `preview_screenshot` | Screenshot a preview or a frame (≤ 1280 px, ≤ 1 MB) | inspect |
-| 23 | `preview_events` | Since a cursor: reloads, errors, block events, logs from the preview | inspect |
-| 24 | `export` | Write a build bundle or a site for a target | fs |
+| 5 | `document_new` | Create a QML document; undo removes it | mutate |
+| 6 | `document_edit` | Replace a byte range of a document's text, as the code view does | mutate |
+| 7 | `node_find` | Find nodes by `id`, type, property value or text; returns addresses | inspect |
+| 8 | `node_select` | Set Studio's selection (shown on the canvas and in the inspector) | inspect |
+| 9 | `node_inspect` | A node's bindings and properties with source spans, its type's members, its states | inspect |
+| 10 | `node_insert` | Insert QML text or a block instance as a child at an index | mutate |
+| 11 | `node_move` | Move a node to a parent and index (reparent or reorder) | mutate |
+| 12 | `node_remove` | Remove a node with its comments | mutate |
+| 13 | `node_wrap` | Wrap nodes in a container (`Row`, `ColumnLayout`, `Item`…) | mutate |
+| 14 | `property_set` | Set or remove a property's value (a literal) | mutate |
+| 15 | `binding_set` | Set a binding expression or a handler, checked before it is written | mutate |
+| 16 | `state_edit` | Add, rename or remove a `State`; set a property change in it; add a transition | mutate |
+| 17 | `blocks_list` | Registered blocks with contracts: state, actions, events, slots, mocks | inspect |
+| 18 | `slot_contribute` | Add a `Contribution` to a block's slot | mutate |
+| 19 | `theme_tokens` | Read tokens (`Ljos.Design` roles and the theme file), light and dark | inspect |
+| 20 | `theme_set` | Set a token's value; preview reloads live | mutate |
+| 21 | `history` | List, undo or redo edits (each with its inverse changes) | inspect to list; mutate to undo or redo |
+| 22 | `preview_open` | Start a preview of a shell on a target (desktop, phone-sized, web) with live or mocked state | run |
+| 23 | `preview_state` | Read or set mocked block state in the preview | run |
+| 24 | `preview_screenshot` | Screenshot a preview or a frame (≤ 1280 px, ≤ 1 MB) | inspect |
+| 25 | `preview_events` | Since a cursor: reloads, errors, block events, logs from the preview | inspect |
+| 26 | `export` | Write a build bundle or a site for a target | fs |
+
+A document is a `.qml` file of the project outside the directories a walk
+leaves out, judged where its links lead; anything else is `path_denied`.
+A file reached by two names is one document: answers name it by where it
+really is, and it has one generation and one history whichever name an
+edit uses.
 
 Every `mutate` tool:
 
 - takes the document's `generation` and refuses a stale one, so two
-  writers do not silently overwrite each other;
+  writers do not silently overwrite each other. A file changed by another
+  program takes a new generation and an entry in the history when it is next
+  read or edited. An edit that names an object by `path` must give the
+  generation (`invalid_argument` otherwise): a path is true of one text and
+  would name another object without notice. A handle or an `id` follows
+  its object, so the generation stays optional with them;
 - takes `dry_run` and then returns the changed ranges without writing;
-- returns the changed ranges, the new generation and a `history` id;
+- returns the changed ranges, the new generation and a `history` id; an
+  edit that would write the bytes already there writes nothing, keeps the
+  generation, makes no entry and says `unchanged: true`. `unchanged` is in
+  every answer (`false` on a write), as the output schema says;
 - refuses an edit that would not parse (`would_break`) and changes nothing.
 
-Node addresses are `{"id": "header"}` or `{"path": "root/0/2"}` with an
-optional `{"value": "background"}` step; paths are re-resolved each call.
+`property_set` and `binding_set` remove a binding only when `value` is
+`null`; a call that leaves `value` out is refused (`invalid_argument`), so
+an argument forgotten by mistake removes nothing.
+
+Node addresses are `{"node": "n12"}` (a handle from an earlier answer, which
+follows its object through edits), `{"id": "header"}` or
+`{"path": "root/0/2"}` with an optional `{"value": "background"}` step; paths
+are re-resolved each call.
+
+## Changes in review
+
+The contract changes s1's review made, for a client written against the
+first version:
+
+- An edit that names an object by `path` must give `generation`
+  (`invalid_argument`, kind `invalid`).
+- `value` is required for `property_set` and `binding_set`; only `null`
+  removes the binding.
+- A no-op edit answers `unchanged: true`; `unchanged` is now always
+  present, `false` on a write.
+- A file reached through a link is one document, named by its resolved
+  path.
+- `history` `list` needs only `inspect`.
 
 ## Added to Ljós's servers (general)
 

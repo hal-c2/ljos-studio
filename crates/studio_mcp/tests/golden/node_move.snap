@@ -1,0 +1,185 @@
+---
+source: crates/studio_mcp/tests/golden_tools.rs
+expression: value
+---
+{
+  "annotations": {
+    "destructive": false,
+    "idempotent": false,
+    "open_world": false,
+    "read_only": false
+  },
+  "description": "Move an object to a parent and child index, with its comments: reorder or reparent.",
+  "inputSchema": {
+    "$defs": {
+      "Address": {
+        "description": "How a caller names an object.",
+        "oneOf": [
+          {
+            "additionalProperties": false,
+            "description": "A handle the session gave out (`n7`); stable for the session.",
+            "properties": {
+              "node": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "node"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "description": "The object's `id` in the document.",
+            "properties": {
+              "id": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "description": "A path as `document_tree` prints it (`root/0/contentItem:`), true of\nthe current text only.",
+            "properties": {
+              "path": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "path"
+            ],
+            "type": "object"
+          }
+        ]
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "doc": {
+        "type": "string"
+      },
+      "dry_run": {
+        "default": false,
+        "type": "boolean"
+      },
+      "generation": {
+        "description": "The generation read; refused if the document moved on. Needed when\nan address is a `path`, which is true of one generation only.",
+        "format": "uint64",
+        "minimum": 0,
+        "type": [
+          "integer",
+          "null"
+        ]
+      },
+      "index": {
+        "description": "Child position in the new parent, counted without the moved object;\nthe end when left out.",
+        "format": "uint",
+        "minimum": 0,
+        "type": [
+          "integer",
+          "null"
+        ]
+      },
+      "node": {
+        "$ref": "#/$defs/Address"
+      },
+      "parent": {
+        "$ref": "#/$defs/Address"
+      }
+    },
+    "required": [
+      "doc",
+      "node",
+      "parent"
+    ],
+    "title": "MoveArgs",
+    "type": "object"
+  },
+  "max_result_bytes": 40960,
+  "name": "node_move",
+  "outputSchema": {
+    "$defs": {
+      "ChangeOut": {
+        "properties": {
+          "end": {
+            "format": "uint",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "start": {
+            "description": "Byte range of the text before the edit.",
+            "format": "uint",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "text": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "start",
+          "end",
+          "text"
+        ],
+        "type": "object"
+      }
+    },
+    "properties": {
+      "changes": {
+        "items": {
+          "$ref": "#/$defs/ChangeOut"
+        },
+        "type": "array"
+      },
+      "doc": {
+        "type": "string"
+      },
+      "generation": {
+        "description": "The document's generation now; pass it with the next edit.",
+        "format": "uint64",
+        "minimum": 0,
+        "type": "integer"
+      },
+      "history": {
+        "description": "The history entry; absent for a dry run or an unchanged document.",
+        "format": "uint64",
+        "minimum": 0,
+        "type": [
+          "integer",
+          "null"
+        ]
+      },
+      "node": {
+        "description": "The handle of the object put or moved.",
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "text": {
+        "description": "The text the edit would give, for a dry run.",
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "unchanged": {
+        "description": "The document already said this: nothing was written and no history\nentry made.",
+        "type": "boolean"
+      }
+    },
+    "required": [
+      "doc",
+      "generation",
+      "changes",
+      "unchanged"
+    ],
+    "title": "EditOut",
+    "type": "object"
+  },
+  "required_cap": "mutate"
+}

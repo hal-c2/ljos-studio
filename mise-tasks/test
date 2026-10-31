@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+#MISE description="Unit, golden and Gherkin tests"
+set -euo pipefail
+cargo test --workspace

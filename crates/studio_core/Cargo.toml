@@ -1,0 +1,23 @@
+[package]
+name = "studio_core"
+description = "Ljós Studio's session: a project's documents, addresses that survive edits, selection and history. No UI."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+qml_syntax.workspace = true
+qml_edit.workspace = true
+ljos_ir.workspace = true
+schemars.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true

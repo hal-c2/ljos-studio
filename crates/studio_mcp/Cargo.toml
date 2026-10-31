@@ -1,0 +1,31 @@
+[package]
+name = "studio_mcp"
+description = "Ljós Studio's MCP server: every Studio action as a tool over the same session the canvas uses."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+studio_core = { path = "../studio_core" }
+ljos_mcp_core.workspace = true
+ljos_blocks.workspace = true
+schemars.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+cucumber.workspace = true
+insta.workspace = true
+tempfile.workspace = true
+tokio.workspace = true
+
+[[test]]
+name = "features"
+harness = false
+
+[lints]
+workspace = true
