@@ -719,11 +719,9 @@ What the page answers:
 frame that `serve.mjs` compiles, the same steps as `web/features.mjs`
 plus the native runner's two preview steps (`the preview shows`, the PNG
 step), which features.mjs lists as run there; a step of this runner the
-native one lacks is a failure. 21 of 39 pass. The other 18 are in
-`WAITING` with the request they wait on and the failure that says so
-(a `not_supported` refusal naming it; for request 20 the drawn text; for
-21 and 22 ljos-web's compile error for the type, or a frame that draws
-nothing when that error comes after the open);
+native one lacks is a failure. 42 of 43 pass. The other is in `WAITING`
+with the request it waits on and the failure that says so (a
+`not_supported` refusal naming it);
 one that passes, or fails another way, fails the run:
 
 - request 25: waiting on the preview (`preview_events` with `wait_ms`): the
