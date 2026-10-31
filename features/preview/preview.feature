@@ -118,6 +118,17 @@ Feature: A shell under edit runs in a preview
       Then the answer's "/events/0/kind" is "reloaded"
       And the answer's "/events/0/generation" is 1
 
+    # A wait holds up nobody and asks the app nothing, so a window or an agent
+    # can stay on it for as long as it wants the picture to be current.
+    Scenario: Waiting on the preview says when its app wakes next
+      When the agent calls the tool "preview_events" with:
+        """json
+        {"wait_ms": 1000}
+        """
+      Then the answer's "/open" is true
+      And the answer's "/events" has 0 entries
+      And the agent keeps the answer's "/rests" as "rests"
+
     Scenario: Undo shows in the preview
       Given the agent has called the tool "binding_set" with:
         """json

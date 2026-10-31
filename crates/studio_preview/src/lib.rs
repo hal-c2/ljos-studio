@@ -22,7 +22,8 @@ use ljos_child::Reaped;
 use serde_json::{Map, Value, json};
 use studio_core::place::Rect;
 use studio_core::preview::{
-    Click, Declared, LogLine, Picture, Placed, PreviewError, PreviewHost, PreviewSpec, Reload, Size,
+    Click, Declared, LogLine, Picture, Placed, PreviewError, PreviewHost, PreviewSpec, Reload,
+    Rest, RestWatch, Size,
 };
 
 use inspector::{Answer, Fault, Inspector};
@@ -260,9 +261,42 @@ impl Drop for NativeHost {
     }
 }
 
+/// `app_watch` on the inspector's own thread: the app's UI thread is not woken
+/// by it, so a preview at rest costs one sleeping call. Not `paints`, which a
+/// preview without a window never counts, nor `frames`, which a screenshot
+/// moves: what the app says when it sleeps is true of both and moved by neither.
+struct Rests(Inspector);
+
+impl RestWatch for Rests {
+    fn wait(&self, since: Option<u64>, wait_ms: u64) -> Result<Rest, PreviewError> {
+        let mut args = json!({ "topics": ["rests"], "wait_ms": wait_ms });
+        if let Some(since) = since {
+            args["since"] = json!({ "rests": since });
+        }
+        match self.0.call("app_watch", args) {
+            Ok(answer) => {
+                let told = &answer.structured;
+                Ok(Rest {
+                    rests: told["counts"]["rests"].as_u64().ok_or_else(|| {
+                        PreviewError::Transport("app_watch gave no rests".to_owned())
+                    })?,
+                    wake_in_ms: told["rest"]["wake_in_ms"].as_u64(),
+                })
+            }
+            Err(Fault::Refused { code, message }) => Err(PreviewError::Refused { code, message }),
+            Err(Fault::Transport(message)) => Err(PreviewError::Transport(message)),
+        }
+    }
+}
+
 impl PreviewHost for NativeHost {
     fn calls_per_second(&self) -> u32 {
         CALLS_PER_SECOND
+    }
+
+    fn rest_watch(&self) -> Option<Box<dyn RestWatch>> {
+        let running = self.running.as_ref()?;
+        Some(Box::new(Rests(running.inspector.clone())))
     }
 
     fn open(&mut self, spec: &PreviewSpec) -> Result<(), PreviewError> {

@@ -102,6 +102,9 @@ pub struct Workspace {
     /// calls `lookAgain` every so often until this is false.
     #[qml(readonly, notify)]
     pub settling: bool,
+    /// How many pictures of the preview have been asked for.
+    #[qml(readonly, notify)]
+    pub looks: i32,
     /// The project's directory has nothing in it yet.
     #[qml(readonly, notify)]
     pub blank: bool,
@@ -218,6 +221,7 @@ impl Default for Workspace {
         Self {
             documents: none(),
             settling: false,
+            looks: 0,
             blank: false,
             doc: String::new(),
             generation: 0.0,
@@ -311,6 +315,22 @@ impl Workspace {
         Ok(())
     }
 
+    /// While on, the picture follows what the preview draws: an app that
+    /// animates for ever stays current, and one at rest is asked nothing.
+    #[qml(invokable, name = "followPicture")]
+    fn follow_picture(cx: &Cx, on: bool) -> Result<(), EngineError> {
+        let Some(queue) = queue_of(cx.engine, cx.this) else {
+            return Ok(());
+        };
+        queue.borrow_mut().follow_wanted = on;
+        if on {
+            follow(cx.engine, cx.this);
+        } else if let Some(stop) = queue.borrow_mut().following.take() {
+            stop.store(true, Ordering::SeqCst);
+        }
+        Ok(())
+    }
+
     #[qml(on_complete)]
     fn completed(cx: &Cx) -> Result<(), EngineError> {
         let context = cx.engine.extension::<Context>();
@@ -352,14 +372,20 @@ struct Queue {
     /// The preview's clicks already looked at.
     clicks: u64,
     settling: Option<Settling>,
+    /// Pictures asked for.
+    looks: i32,
+    /// Play mode wants the picture to follow the preview.
+    follow_wanted: bool,
+    /// What stops the thread waiting on the preview, while there is one.
+    following: Option<Arc<AtomicBool>>,
     /// The lists last set, by the property's name.
     given: HashMap<&'static str, Json>,
 }
 
 /// Looking again after a click. Nothing tells Studio when the app has come to
-/// rest (Ljós request 3), so the picture is fetched until it stops changing,
-/// a bounded number of times: a click on an app that animates for ever must
-/// not cost a screenshot for ever.
+/// rest outside play mode, where nothing follows it, so the picture is fetched
+/// until it stops changing, a bounded number of times: a click on an app that
+/// animates for ever must not cost a screenshot for ever.
 struct Settling {
     looks_left: u32,
     same: u32,
@@ -701,6 +727,12 @@ fn finish(engine: &Engine, ws: ObjectId, done: Done) {
                     let _ = cx.set(Workspace::ERROR, format!("no picture of the preview: {e}"));
                 }
             }
+            let looks = {
+                let mut q = queue.borrow_mut();
+                q.looks += 1;
+                q.looks
+            };
+            let _ = cx.set(Workspace::LOOKS, looks);
             let mut q = queue.borrow_mut();
             if let Some(settling) = &mut q.settling {
                 settling.same = if changed { 0 } else { settling.same + 1 };
@@ -712,6 +744,96 @@ fn finish(engine: &Engine, ws: ObjectId, done: Done) {
                 }
             }
         }
+    }
+}
+
+/// How long one wait on the preview lasts. The thread sees that it should stop
+/// only when a wait ends, and a person who left play mode leaves it behind for
+/// no longer than this; it costs the app nothing meanwhile.
+const FOLLOW_WAIT_MS: u64 = 30_000;
+const LOOK_AT_MOST_EVERY_MS: u64 = 100;
+
+/// Starts waiting on the preview, if wanted and not already waiting. Nothing
+/// polls: the wait answers when the app has drawn.
+fn follow(engine: &Engine, ws: ObjectId) {
+    let Some(queue) = queue_of(engine, ws) else {
+        return;
+    };
+    let context = engine.extension::<Context>();
+    let Some(server) = context.server.borrow().clone() else {
+        return;
+    };
+    let stop = Arc::new(AtomicBool::new(false));
+    {
+        let mut q = queue.borrow_mut();
+        if !q.follow_wanted || q.following.is_some() {
+            return;
+        }
+        q.following = Some(Arc::clone(&stop));
+    }
+    let post = Platform::of(engine).poster();
+    let mine = Arc::clone(&stop);
+    let spawned = std::thread::Builder::new()
+        .name("studio-picture-watch".to_owned())
+        .spawn(move || {
+            let mut since = None;
+            while !stop.load(Ordering::SeqCst) {
+                let mut args = json!({"wait_ms": FOLLOW_WAIT_MS});
+                if let Some(since) = since {
+                    args["rests"] = json!(since);
+                }
+                let Ok(reply) = server.call("preview_events", &person(), args) else {
+                    break;
+                };
+                since = reply.structured["rests"].as_u64();
+                // An app that will not wake by itself shows what it shows.
+                // One that will is looked at when it has, and the look makes
+                // it rest again with its next wake: this asks only as often
+                // as the app itself moves, and no more than a person can see.
+                let Some(wake) = reply.structured["wake_in_ms"].as_u64() else {
+                    continue;
+                };
+                std::thread::sleep(Duration::from_millis(
+                    wake.clamp(LOOK_AT_MOST_EVERY_MS, FOLLOW_WAIT_MS),
+                ));
+                if !stop.load(Ordering::SeqCst) {
+                    post.send(move |engine| look(engine, ws));
+                }
+            }
+            // No preview to wait on: the next one's refresh starts this again.
+            post.send(move |engine| {
+                if let Some(queue) = queue_of(engine, ws) {
+                    let mut q = queue.borrow_mut();
+                    if q.following.as_ref().is_some_and(|s| Arc::ptr_eq(s, &stop)) {
+                        q.following = None;
+                    }
+                }
+            });
+        });
+    if spawned.is_err() {
+        // No thread to wait on: the next refresh tries again.
+        let mut q = queue.borrow_mut();
+        if q.following.as_ref().is_some_and(|s| Arc::ptr_eq(s, &mine)) {
+            q.following = None;
+        }
+    }
+}
+
+/// Asks for the picture again, unless an ask is already waiting.
+fn look(engine: &Engine, ws: ObjectId) {
+    if !engine.is_alive(ws) {
+        return;
+    }
+    let Some(queue) = queue_of(engine, ws) else {
+        return;
+    };
+    let generation = {
+        let q = queue.borrow();
+        let waiting = q.jobs.iter().any(|j| matches!(j, Job::Picture { .. }));
+        (!waiting).then_some(q.fetched)
+    };
+    if let Some(generation) = generation {
+        enqueue(engine, ws, Job::Picture { generation });
     }
 }
 
@@ -925,6 +1047,7 @@ fn publish(engine: &Engine, ws: ObjectId, view: View, seen: u64) {
     if clicked {
         let _ = cx.set(Workspace::SETTLING, true);
     }
+    follow(engine, ws);
     // A picture is fetched once for each generation the preview applies.
     if let Some(generation) = wanted {
         let queued = queue

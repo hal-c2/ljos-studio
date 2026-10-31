@@ -13,6 +13,7 @@ use serde_json::Value;
 /// once, and its error should not wait out the whole start limit.
 const LOOK: Duration = Duration::from_millis(250);
 
+#[derive(Clone)]
 pub(crate) struct Inspector(BlockingClient);
 
 pub(crate) struct Answer {

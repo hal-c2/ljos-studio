@@ -27,6 +27,10 @@ Panel {
     readonly property real frameLabels: 2 * (Typography.captionSize * 1.5 + Spacing.xxs)
     readonly property real zoom: fitted ? Math.max(0.125, fit) : chosenZoom
     property bool playing: false
+    onPlayingChanged: workspace.followPicture(playing)
+    // The state the inspector is recording into; null for none. What the
+    // canvas sets goes there, as what the inspector sets does.
+    property var recording: null
     property bool dragging: false
     property string says: ""
     readonly property var preview: workspace.preview
@@ -134,6 +138,7 @@ Panel {
                             workspace: panel.workspace
                             zoom: panel.zoom
                             playing: panel.playing
+                            recording: panel.recording
                             onDraggingChanged: panel.dragging = dragging
                             onSaysChanged: panel.says = says
                             Component.onCompleted: refetch()
@@ -205,12 +210,17 @@ Panel {
                 text: modelData.label
                 Accessible.name: "Align " + modelData.label
                 visible: panel.workspace.chosen.length >= (modelData.least || 1)
-                onClicked: panel.workspace.dispatch("node_arrange", {
-                    action: "align",
-                    doc: panel.workspace.doc,
-                    nodes: panel.workspace.chosen.map(h => ({node: h})),
-                    align: modelData.align
-                })
+                onClicked: {
+                    const args = {
+                        action: "align",
+                        doc: panel.workspace.doc,
+                        nodes: panel.workspace.chosen.map(h => ({node: h})),
+                        align: modelData.align
+                    }
+                    if (panel.recording !== null)
+                        args.record = panel.recording
+                    panel.workspace.dispatch("node_arrange", args)
+                }
             }
         }
     }
