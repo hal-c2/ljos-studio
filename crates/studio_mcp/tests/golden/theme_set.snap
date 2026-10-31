@@ -9,7 +9,7 @@ expression: value
     "open_world": false,
     "read_only": false
   },
-  "description": "Read the tokens of Ljos.Design, the module's value beside the theme file's; or set one (`null` gives it back) in the `theme.json` beside the entry, made when missing, the rest kept byte for byte. A theme Ljós would refuse is refused with its message.",
+  "description": "Read the tokens of Ljos.Design, the module's value beside the theme file's; or set one (`null` gives it back) in the theme file Ljós reads, the project's made when none, the rest kept byte for byte. A theme Ljós would refuse is refused with its message.",
   "inputSchema": {
     "$defs": {
       "Variant": {
@@ -25,7 +25,7 @@ expression: value
     "additionalProperties": false,
     "properties": {
       "doc": {
-        "description": "A document whose theme it is: the `theme.json` beside it. The open\npreview's when left out, else the project's own.",
+        "description": "A document whose theme it is: the nearest `theme.json` up from it.\nThe open preview's when left out, else the project's own.",
         "type": [
           "string",
           "null"

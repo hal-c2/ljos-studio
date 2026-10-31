@@ -154,7 +154,8 @@ pub struct Manifest {
     /// The command that starts it, run in the bundle's directory (native).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub run: Option<Vec<String>>,
-    /// The theme file the app reads, beside its entry.
+    /// The theme file the app reads: the nearest `theme.json` from its
+    /// entry's directory up to the project's.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub theme: Option<String>,
     /// The project's own blocks, as `Module.Name`, and their files.
@@ -567,12 +568,7 @@ fn plan(
         None => None,
     };
 
-    let beside = entry.rsplit_once('/').map_or("", |(dir, _)| dir);
-    let theme_path = if beside.is_empty() {
-        "theme.json".to_owned()
-    } else {
-        format!("{beside}/theme.json")
-    };
+    let theme_path = crate::tools::theme_file(store, entry);
     let theme = files
         .iter()
         .any(|f| f.path == theme_path)

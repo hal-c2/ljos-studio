@@ -259,9 +259,11 @@ object that parses, and (`not_a_contribution`) for removing anything else.
 ## Tokens (S4)
 
 `theme_set {doc?, token?, value?, variant?, generation?, dry_run?}` works
-on the theme file of `doc`: the `theme.json` beside it, the document
-itself when it is a `theme.json`, the open preview's when `doc` is left
-out, else the project's own. It is listed with the edit tools, after
+on the theme file of `doc`: the one Ljós reads for it, the nearest
+`theme.json` from its directory up to the project's, the document itself
+when it is a `theme.json`, the open preview's when `doc` is left out. When
+there is none it is the project's own, the file Ljós watches then, so a new
+theme is made there. It is listed with the edit tools, after
 `history`, so the tools a reader or an editor is offered come before the
 preview tools, as they did.
 
@@ -414,7 +416,7 @@ of the project except `.studio/`, the top-level `mocks/`, hidden files,
 | `format`, `version` | `ljos-bundle`, 1 |
 | `target`, `entry` | `native`; the document the app starts with |
 | `run` | `["ljos", "run", <entry>, "--project", "."]`, run in the bundle |
-| `theme` | `theme.json` beside the entry, when there is one |
+| `theme` | the nearest `theme.json` from the entry up to the project, when there is one |
 | `blocks` | The project's own blocks (`App.Media.Player`) and their files |
 | `files` | Every file, `path` and `bytes`, sorted |
 | `left_out` | What of the project is not in it, `path` and `why` |

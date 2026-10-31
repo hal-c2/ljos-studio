@@ -9,8 +9,9 @@ Feature: Tokens are read and set in the project's theme file
   with the module's own value and the theme file's, light and dark and
   high contrast. With a token and a value it writes the theme file Ljós
   reads for the entry, the nearest `theme.json` from the entry's directory
-  up to the project's, creating one beside the entry when there is none, and leaves the rest of the
-  file as it was, byte for byte. Ljós's own theme reader and contrast
+  up to the project's, creating the project's own when there is none (the
+  one Ljós watches then), and leaves the rest of the file as it was, byte
+  for byte. Ljós's own theme reader and contrast
   checker judge the result, and a theme Ljós would refuse is refused with
   Ljós's message, so a theme Studio writes always loads. A write is an
   edit like any other: it has a generation, a dry run, a history entry
@@ -35,7 +36,7 @@ Feature: Tokens are read and set in the project's theme file
         """json
         {"doc": "app/Main.qml", "token": "Spacing.md"}
         """
-      Then the answer's "/file" is "app/theme.json"
+      Then the answer's "/file" is "theme.json"
       And the answer's "/exists" is false
       And the answer's "/tokens" has 1 entries
       And the answer's "/tokens/0/token" is "Spacing.md"
@@ -111,15 +112,16 @@ Feature: Tokens are read and set in the project's theme file
 
   Rule: A token and a value write the theme file
 
-    Scenario: The theme file is created beside the entry
+    Scenario: With no theme file the project's own is created, the one Ljós watches
       When the agent calls the tool "theme_set" with:
         """json
         {"doc": "app/Main.qml", "token": "Colors.accent", "value": "#9c4dc4"}
         """
-      Then the answer's "/doc" is "app/theme.json"
+      Then the answer's "/doc" is "theme.json"
       And the answer's "/generation" is 1
       And the answer's "/unchanged" is false
-      And the file "app/theme.json" is:
+      And the file "app/theme.json" does not exist
+      And the file "theme.json" is:
         """json
         {
           "Colors": {
@@ -266,7 +268,7 @@ Feature: Tokens are read and set in the project's theme file
           }
         }
         """
-      And the file "app/theme.json" does not exist
+      And the file "theme.json" does not exist
 
     Scenario: A write against an old generation is refused
       Given the file "app/theme.json":
@@ -292,7 +294,7 @@ Feature: Tokens are read and set in the project's theme file
         """json
         {"action": "undo"}
         """
-      Then the file "app/theme.json" does not exist
+      Then the file "theme.json" does not exist
 
     Scenario: Undo gives the theme file back byte for byte
       Given the file "app/theme.json":

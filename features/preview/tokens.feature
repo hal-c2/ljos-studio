@@ -33,7 +33,7 @@ Feature: A token set shows in the open preview
       """json
       {"token": "Spacing.md", "value": 20}
       """
-    Then the answer's "/doc" is "app/theme.json"
+    Then the answer's "/doc" is "theme.json"
     And Studio has reported the preview reloaded since it was read
     And the preview shows "gap 20"
     When the agent calls the tool "preview_events" with:
