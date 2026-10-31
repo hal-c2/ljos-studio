@@ -153,6 +153,40 @@ Feature: A project is exported as a bundle that runs without Studio
         ]
         """
 
+    Scenario: Links that fan out and meet again are walked once, not once per way down
+      Given a diamond of directory links 24 levels deep in "levels"
+      When the agent calls the tool "export" with:
+        """json
+        {"entry": "Shell.qml", "dry_run": true}
+        """
+      Then it answered within 5 seconds
+      And the answer's "/manifest/files" has 29 entries
+      And the answer's "/manifest/left_out" has 48 entries
+      And the answer's "/manifest/left_out/1" is {"path": "levels/0/left", "why": "a link to `levels/1`, which the bundle holds already"}
+      And the answer's "/manifest/left_out/46" is {"path": "levels/9/right", "why": "a link to `levels/10`, which the bundle holds already"}
+
+    Scenario: A directory a link leads to is in the bundle under its own name
+      Given the file "zone/Part.qml":
+        """qml
+        import QtQuick
+        Item {}
+        """
+      And "alias" links to "zone" in the project
+      When the agent calls the tool "export" with:
+        """json
+        {"entry": "Shell.qml", "dry_run": true}
+        """
+      Then the answer's "/manifest/files" has 6 entries
+      And the answer's "/manifest/files/5/path" is "zone/Part.qml"
+      And the answer's "/manifest/left_out" is:
+        """json
+        [
+          {"path": ".studio", "why": "Studio's sidecar"},
+          {"path": "alias", "why": "a link to `zone`, which the bundle holds already"},
+          {"path": "mocks", "why": "mock modules stand in for blocks in previews only"}
+        ]
+        """
+
     Scenario: A dry run says what the bundle would hold and writes nothing
       When the agent calls the tool "export" with:
         """json

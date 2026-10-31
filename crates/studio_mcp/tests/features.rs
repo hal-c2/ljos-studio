@@ -49,6 +49,8 @@ struct StudioWorld {
     reply: Option<(u16, String)>,
     /// How many reloads Studio had reported when the preview was last read.
     reloads_read: usize,
+    /// How long the last tool call took to answer.
+    took: std::time::Duration,
 }
 
 impl std::fmt::Debug for StudioWorld {
@@ -76,6 +78,7 @@ impl StudioWorld {
             endpoint: None,
             reply: None,
             reloads_read: 0,
+            took: std::time::Duration::ZERO,
         }
     }
 
@@ -106,7 +109,9 @@ impl StudioWorld {
     fn call(&mut self, tool: &str, args: Value) -> StepResult {
         let caps = self.caps;
         let server = self.server()?;
+        let started = std::time::Instant::now();
         let out = server.call(tool, &CallCtx::new(caps), args);
+        let took = started.elapsed();
         let (out, images) = match out {
             Ok(reply) => (Ok(reply.structured), reply.images),
             Err(e) => (Err(e), Vec::new()),
@@ -126,6 +131,7 @@ impl StudioWorld {
         }
         self.answer = Some(out);
         self.images = images;
+        self.took = took;
         Ok(())
     }
 
@@ -377,6 +383,39 @@ fn links_in(w: &mut StudioWorld, link: String, target: String) -> StepResult {
         .map_err(|e| e.to_string());
     #[cfg(not(unix))]
     return Err(format!("`{link}`: links are made on unix only"));
+}
+
+/// `levels` directories below `under`, `0` to `levels - 1`, each holding one
+/// file and, but the last, two links `left` and `right` to the next: a
+/// diamond at every level, so every way down through the links is another
+/// copy of all below.
+#[given(regex = r#"^a diamond of directory links (\d+) levels deep in "([^"]+)"$"#)]
+fn diamond(w: &mut StudioWorld, levels: usize, under: String) -> StepResult {
+    let under = w.dir.path().join(under);
+    for level in 0..levels {
+        let dir = under.join(level.to_string());
+        std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+        std::fs::write(dir.join("level.txt"), format!("{level}\n")).map_err(|e| e.to_string())?;
+        if level + 1 == levels {
+            continue;
+        }
+        #[cfg(unix)]
+        for side in ["left", "right"] {
+            std::os::unix::fs::symlink(under.join((level + 1).to_string()), dir.join(side))
+                .map_err(|e| e.to_string())?;
+        }
+        #[cfg(not(unix))]
+        return Err("links are made on unix only".to_owned());
+    }
+    Ok(())
+}
+
+#[then(regex = r#"^it answered within (\d+) seconds?$"#)]
+fn answered_within(w: &mut StudioWorld, seconds: u64) -> StepResult {
+    let limit = std::time::Duration::from_secs(seconds);
+    (w.took <= limit)
+        .then_some(())
+        .ok_or_else(|| format!("it took {:?}", w.took))
 }
 
 #[then(regex = r#"^the directory outside the project holds only "([^"]*)"$"#)]

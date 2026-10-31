@@ -476,6 +476,8 @@ const NATIVE_ONLY = new Map([
   ["then ^the token file can be read by its owner alone$", "the endpoint is a native window's (endpoint.feature)"],
   ['given ^"([^"]+)" links to a directory outside the project that holds the file "([^"]+)"$', "storage holds no links (@disk)"],
   ['given ^"([^"]+)" links to "([^"]+)" in the project$', "storage holds no links (@disk)"],
+  ['given ^a diamond of directory links (\\d+) levels deep in "([^"]+)"$', "storage holds no links (@disk)"],
+  ["then ^it answered within (\\d+) seconds?$", "a call's time is measured on the native side, where the disk is"],
   ['then ^the bundle "([^"]+)", copied out of the project, runs headless and shows what the preview shows$', "a bundle runs as a native process (@preview)"],
   ['then ^the directory outside the project holds only "([^"]*)"$', "storage holds no links (@disk)"],
 ]);
