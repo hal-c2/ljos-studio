@@ -297,6 +297,91 @@ Feature: An agent binds a list to its data
       And the refusal's "/details/kind" is "not_a_list"
       And the file "People.qml" does not exist
 
+  Rule: A relative source is read from the file Ljós reads it from
+
+    A url written as a plain string on a document's root object is read
+    from the file that uses the document, as Qt reads it; on any other
+    object, and written as `Qt.resolvedUrl`, from its own file.
+
+    Background:
+      Given the file "data/contacts.json":
+        """json
+        [{"name": "Ada", "team": "Navy"}]
+        """
+      And the file "App/Data/data/contacts.json":
+        """json
+        [{"title": "Draft"}, {"title": "Sent"}]
+        """
+      And the file "App/Data/qmldir":
+        """
+        module App.Data
+        People 1.0 People.qml
+        """
+      And the file "Board.qml":
+        """qml
+        import QtQuick
+        import App.Data
+
+        Column {
+            Repeater {
+                model: People {}
+                Text {
+                    id: person
+                }
+            }
+        }
+        """
+
+    Scenario: A plain source on a model document's root is read from the file that uses it
+      Given the file "App/Data/People.qml":
+        """qml
+        import Ljos.Models
+
+        JsonListModel {
+            source: "data/contacts.json"
+        }
+        """
+      When the agent calls the tool "node_inspect" with:
+        """json
+        {"doc": "Board.qml", "node": {"id": "person"}}
+        """
+      Then the answer's "/model/roles" lists "name, team"
+      And the answer's "/model/rows" is 1
+      And the answer's "/model/doc" is "App/Data/People.qml"
+      And the answer's "/model/source" is "data/contacts.json"
+
+    Scenario: A plain source on a model document's root names no file of its own
+      Given the file "App/Data/People.qml":
+        """qml
+        import Ljos.Models
+
+        JsonListModel {
+            source: "data/contacts.json"
+        }
+        """
+      When the agent calls the tool "node_inspect" with:
+        """json
+        {"doc": "App/Data/People.qml", "node": {"path": "root"}}
+        """
+      Then the answer's "/model" is absent
+
+    Scenario: A resolved source is read from its own file whoever uses it
+      Given the file "App/Data/People.qml":
+        """qml
+        import Ljos.Models
+
+        JsonListModel {
+            source: Qt.resolvedUrl("data/contacts.json")
+        }
+        """
+      When the agent calls the tool "node_inspect" with:
+        """json
+        {"doc": "Board.qml", "node": {"id": "person"}}
+        """
+      Then the answer's "/model/roles" lists "title"
+      And the answer's "/model/rows" is 2
+      And the answer's "/model/source" is "App/Data/data/contacts.json"
+
   Rule: A JSON file copied into QML is a ListModel document
 
 
