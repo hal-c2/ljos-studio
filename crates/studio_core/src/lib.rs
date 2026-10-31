@@ -830,18 +830,25 @@ impl Session {
             return Err(stale());
         }
         let intent = self.intent(path, op)?;
-        let doc = self.doc(path)?;
         // A child index counts the children of the generation it was read
-        // at; an append has none to count.
-        let counted = matches!(
-            op,
-            Op::Insert { index: Some(_), .. }
-                | Op::Move { index: Some(_), .. }
-                // A tap flow is the trigger's one `TapHandler`, which a child
-                // of the same parent may be.
-                | Op::Interaction { signal: None, .. }
-                | Op::RemoveInteraction { signal: None, .. }
-        );
+        // at; an append has none to count. A tap flow's new `TapHandler` is
+        // such an append, unless one is already there to answer for; a
+        // removal's handler that is no longer there left through the same
+        // list of children, and no other trace of it is left to meet.
+        let counted = match op {
+            Op::Insert { index, .. } | Op::Move { index, .. } => index.is_some(),
+            Op::Interaction {
+                signal: None,
+                trigger,
+                ..
+            } => self.tapped(path, trigger)?,
+            Op::RemoveInteraction {
+                signal: None,
+                trigger,
+            } => !self.tapped(path, trigger)?,
+            _ => false,
+        };
+        let doc = self.doc(path)?;
         // The newest change names what is there now.
         for entry in others.iter().rev() {
             for (h, name) in &intent {
@@ -916,12 +923,36 @@ impl Session {
                 trigger, signal, ..
             }
             | Op::RemoveInteraction { trigger, signal } => {
-                let member = signal
-                    .as_deref()
-                    .map_or(CHILDREN.to_owned(), flows::handler_name);
-                vec![(handle(self, trigger)?, Some(member))]
+                let h = handle(self, trigger)?;
+                let Some(signal) = signal else {
+                    // Taking a tap flow out changes its `TapHandler`, however
+                    // little else that holds; adding one meets only the
+                    // `onTapped` it would write.
+                    let removes = matches!(op, Op::RemoveInteraction { .. });
+                    let member = (!removes).then(|| "onTapped".to_owned());
+                    let mut touched = vec![(h, Some(CHILDREN.to_owned()))];
+                    touched.extend(
+                        self.taps_of(path, h)?
+                            .into_iter()
+                            .map(|(tap, _)| (tap, member.clone())),
+                    );
+                    return Ok(touched);
+                };
+                vec![(h, Some(flows::handler_name(signal)))]
             }
         })
+    }
+
+    /// Whether the object `trigger` names has a `TapHandler` writing
+    /// `onTapped` now: the one tap flow it can have.
+    fn tapped(&mut self, path: &str, trigger: &Address) -> Result<bool, Error> {
+        let Ok((handle, _)) = self.resolve(path, trigger) else {
+            return Ok(false);
+        };
+        Ok(self
+            .taps_of(path, number(&handle))?
+            .iter()
+            .any(|(_, tapped)| *tapped))
     }
 
     /// The edit a flow is written as, the handler or `TapHandler` that

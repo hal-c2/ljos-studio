@@ -589,3 +589,69 @@ Feature: An edit made against an older generation is rebased by its handles
     Then the agent is refused with "stale_ref"
     And the refusal's "/details/kind" is "conflict"
     And the refusal's "/details/author" is "Ada"
+
+  Scenario: Taking out a tap flow whose handler another writer changed is a conflict
+    Given the agent has called the tool "node_insert" with:
+      """json
+      {"doc": "Main.qml", "parent": {"id": "card"}, "text": "TapHandler { id: tap; enabled: true; onTapped: root.state = \"\" }"}
+      """
+    And the agent keeps the answer's "/generation" as "tapped"
+    And a second agent named "Ada" has called the tool "binding_set" with:
+      """json
+      {"doc": "Main.qml", "generation": "$tapped", "node": {"id": "tap"}, "name": "onTapped", "value": "card.state = \"\""}
+      """
+    When the agent calls the tool "state_edit" with:
+      """json
+      {"doc": "Main.qml", "generation": "$tapped", "action": "remove_interaction", "trigger": {"node": "$card"}}
+      """
+    Then the agent is refused with "stale_ref"
+    And the refusal's "/details/kind" is "conflict"
+    And the refusal's "/details/author" is "Ada"
+
+  Scenario: Taking out a tap flow another writer already took out of its handler is a conflict
+    Given the agent has called the tool "node_insert" with:
+      """json
+      {"doc": "Main.qml", "parent": {"id": "card"}, "text": "TapHandler { id: tap; enabled: true; onTapped: root.state = \"\" }"}
+      """
+    And the agent keeps the answer's "/generation" as "tapped"
+    And a second agent named "Ada" has called the tool "state_edit" with:
+      """json
+      {"doc": "Main.qml", "generation": "$tapped", "action": "remove_interaction", "trigger": {"id": "card"}}
+      """
+    When the agent calls the tool "state_edit" with:
+      """json
+      {"doc": "Main.qml", "generation": "$tapped", "action": "remove_interaction", "trigger": {"node": "$card"}}
+      """
+    Then the agent is refused with "stale_ref"
+    And the refusal's "/details/kind" is "conflict"
+    And the refusal's "/details/author" is "Ada"
+
+  Scenario: A tap flow lands past a child another writer added to the object
+    Given a second agent named "Ada" has called the tool "node_insert" with:
+      """json
+      {"doc": "Main.qml", "generation": "$read", "parent": {"id": "card"}, "text": "Item { id: ada }"}
+      """
+    When the agent calls the tool "state_edit" with:
+      """json
+      {"doc": "Main.qml", "generation": "$read", "action": "interaction", "trigger": {"node": "$card"}, "state": ""}
+      """
+    Then the answer's "/rebased_from" is 1
+    And the file "Main.qml" is:
+      """qml
+      import QtQuick
+
+      Item {
+          id: root
+          width: 200
+
+          Rectangle {
+              id: card
+              color: "red"
+              Item { id: ada }
+              TapHandler {
+                  onTapped: root.state = ""
+              }
+          }
+          Text { id: label; text: "hello" }
+      }
+      """

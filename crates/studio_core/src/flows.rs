@@ -376,6 +376,23 @@ impl Session {
         }
     }
 
+    /// The `TapHandler`s `handle` holds now, each with whether it writes
+    /// `onTapped`: what a tap flow on it meets. None when `handle` is gone.
+    pub(crate) fn taps_of(&mut self, path: &str, handle: u64) -> Result<Vec<(u64, bool)>, Error> {
+        let (tree, _) = self.tree(path)?;
+        let Some((_, trigger)) = tree.iter().find(|(h, _)| *h == format!("n{handle}")) else {
+            return Ok(Vec::new());
+        };
+        Ok(tree
+            .iter()
+            .filter(|(_, n)| is_child_of(n, &trigger.path) && short(&n.ty) == TAP_HANDLER)
+            .map(|(tap, n)| {
+                let tapped = n.bindings.iter().any(|b| b.name == "onTapped");
+                (super::number(tap), tapped)
+            })
+            .collect())
+    }
+
     /// The edit that takes a flow out: its handler, and the `TapHandler`
     /// that holds only it.
     pub(crate) fn plan_remove_interaction(
