@@ -14,7 +14,17 @@
 //!   as `studio --shell` runs it: the window opened on a shell that
 //!   throws until the built-in one is shown; a save of Studio's own theme
 //!   file until the window is drawn in it; and what the watched window
-//!   costs while nobody touches it, in CPU time.
+//!   costs while nobody touches it, in CPU time;
+//! - a drag across the canvas's frame, each pointer move timed until the
+//!   window is at rest (its frame's work, before the GPU draws it). The
+//!   canvas has no gesture that drags a node, so this is the frame cost of
+//!   what a drag over the frame does today: it pans the canvas.
+//!
+//! `budgets sample DIR DOC LAYER FIELD [ROUNDS]` measures a project of
+//! your own instead of the made-up one: cold start on DIR (which has a
+//! `Main.qml`), DOC opened, the layer labelled LAYER selected, ROUNDS
+//! inspector edits of its numeric FIELD to a new picture, one per 250 ms,
+//! and the drag.
 //!
 //! The window's clock is a test clock, so a frame costs only its work; the
 //! tool calls, the preview's reload and the picture's fetch and decode run
@@ -67,6 +77,17 @@ const IDLE: Duration = Duration::from_secs(5);
 const STATE_FIELD: &str = "card7.width";
 
 fn main() -> anyhow::Result<()> {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    if args.first().map(String::as_str) == Some("sample") {
+        let [_, dir, doc, layer, field, rest @ ..] = args.as_slice() else {
+            bail!("usage: budgets sample DIR DOC LAYER FIELD [ROUNDS]");
+        };
+        let rounds = match rest.first() {
+            Some(n) => n.parse().context("ROUNDS is a number")?,
+            None => 20,
+        };
+        return sample(Path::new(dir), doc, layer, field, rounds);
+    }
     let rounds: usize = match std::env::args().nth(1) {
         Some(n) => n.parse().context("ROUNDS is a number")?,
         None => 20,
@@ -146,6 +167,60 @@ fn main() -> anyhow::Result<()> {
             PACE.as_millis()
         ),
         &mut edits,
+    );
+
+    std::thread::sleep(Duration::from_secs(1));
+    let mut moves = window.drag_frames(DRAG_MOVES)?;
+    report(
+        "drag across the canvas's frame, per pointer move",
+        &mut moves,
+    );
+    Ok(())
+}
+
+/// Pointer moves in one drag: four seconds of a hand at 60 Hz.
+const DRAG_MOVES: usize = 240;
+
+/// `budgets sample`: the numbers on a project of the person's own.
+fn sample(dir: &Path, doc: &str, layer: &str, field: &str, rounds: usize) -> anyhow::Result<()> {
+    if std::env::var_os("LJOS").is_none() {
+        bail!("budgets sample needs LJOS, the `ljos` program the preview runs");
+    }
+    let work = tempfile::tempdir()?;
+    let state = work.path().join("state");
+    let mut starts = Vec::new();
+    for _ in 0..5 {
+        let started = Instant::now();
+        let window = Window::open(dir, &state)?;
+        starts.push(started.elapsed());
+        drop(window);
+    }
+    report(&format!("cold start, {}", dir.display()), &mut starts);
+
+    let mut window = Window::open(dir, &state)?;
+    window.document = dir.join(doc);
+    window.open_document(doc)?;
+    window.wait_for_picture(1)?;
+    let row = window.layer(layer)?;
+    window.click(&row)?;
+    let first = window
+        .inspector_value(field)?
+        .parse::<f64>()
+        .with_context(|| format!("{field} is not a number in the inspector"))?;
+    // Back and forth around the value written, so the design stays as it was.
+    let edits = window.edits_between(field, rounds, first, Some(PACE))?;
+    report_edits(
+        &format!(
+            "{doc}: inspector edit of {field} -> new picture, one per {} ms",
+            PACE.as_millis()
+        ),
+        edits,
+    );
+    std::thread::sleep(Duration::from_secs(1));
+    let mut moves = window.drag_frames(DRAG_MOVES)?;
+    report(
+        &format!("{doc}: drag across the canvas's frame, per pointer move"),
+        &mut moves,
     );
     Ok(())
 }
@@ -729,6 +804,62 @@ impl Window {
         Ok(edits)
     }
 
+    /// The value the inspector's `field` shows.
+    fn inspector_value(&self, field: &str) -> anyhow::Result<String> {
+        let node = self.inspector_field(field)?;
+        Ok(node.value.clone())
+    }
+
+    /// A drag of `moves` pointer moves over the canvas's Desktop frame,
+    /// each timed from the event until the window is at rest.
+    fn drag_frames(&mut self, moves: usize) -> anyhow::Result<Vec<Duration>> {
+        let frame = self.node_with("Canvas", "Desktop", |n| n.role != "label")?;
+        let key = frame.key.ok_or(anyhow!("the frame has no key"))?;
+        let mut driver = self.stage.drive();
+        let start = driver
+            .aim_at_node(key)
+            .map_err(|why| anyhow!("the frame is not pressed: {why:?}"))?;
+        driver.press(start, MouseButtons::LEFT)?;
+        let mut samples = Vec::with_capacity(moves);
+        let mut at = start;
+        for i in 0..moves {
+            // Out and back along a diagonal, 4 px a move, as a hand drags.
+            let leg = (i / 50) % 2;
+            let by = if leg == 0 { -4.0 } else { 4.0 };
+            at.x += by;
+            at.y += by / 2.0;
+            let started = Instant::now();
+            driver.move_to(at)?;
+            // The move only queues the pointer; its frame's work is done at rest.
+            driver.settle()?;
+            samples.push(started.elapsed());
+        }
+        driver.release(at, MouseButtons::LEFT)?;
+        driver.settle()?;
+        // A drag that moved nothing would time an idle window.
+        let end = driver
+            .aim_at_node(key)
+            .map_err(|why| anyhow!("the frame is gone after the drag: {why:?}"))?;
+        if end == start {
+            bail!("the drag did not pan the canvas's frame");
+        }
+        Ok(samples)
+    }
+
+    /// [`Window::edits`] of `field` that alternate a step either side of
+    /// `around`.
+    fn edits_between(
+        &mut self,
+        field: &str,
+        rounds: usize,
+        around: f64,
+        pace: Option<Duration>,
+    ) -> anyhow::Result<Vec<Edit>> {
+        self.edits_with(field, rounds, pace, |round| {
+            format!("{}", around + if round % 2 == 0 { 1.0 } else { 0.0 })
+        })
+    }
+
     fn open_document(&mut self, doc: &str) -> anyhow::Result<()> {
         let row = self.node("Documents", doc)?;
         self.click(&row)?;
@@ -753,6 +884,16 @@ impl Window {
         first: usize,
         pace: Option<Duration>,
     ) -> anyhow::Result<Vec<Edit>> {
+        self.edits_with(field, rounds, pace, |round| format!("{}", first + round))
+    }
+
+    fn edits_with(
+        &mut self,
+        field: &str,
+        rounds: usize,
+        pace: Option<Duration>,
+        value: impl Fn(usize) -> String,
+    ) -> anyhow::Result<Vec<Edit>> {
         let mut edits = Vec::new();
         let mut last: Option<Instant> = None;
         for round in 0..rounds {
@@ -769,7 +910,7 @@ impl Window {
             let wall = std::time::SystemTime::now();
             let started = Instant::now();
             last = Some(started);
-            self.enter(&field, &format!("{}", first + round))?;
+            self.enter(&field, &value(round))?;
             let rested = started.elapsed();
             let looks = self.wait_for_picture(shown + 1)?;
             let took = started.elapsed();
