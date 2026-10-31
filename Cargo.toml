@@ -21,6 +21,7 @@ qml_edit = { git = "https://github.com/hal-c2/ljos-ui", rev = "63ec3fa4ad17dbc7e
 ljos_ir = { git = "https://github.com/hal-c2/ljos-ui", rev = "63ec3fa4ad17dbc7ed126be86796703201e30403" }
 ljos_mcp_core = { git = "https://github.com/hal-c2/ljos-ui", rev = "63ec3fa4ad17dbc7ed126be86796703201e30403" }
 ljos_blocks = { git = "https://github.com/hal-c2/ljos-ui", rev = "63ec3fa4ad17dbc7ed126be86796703201e30403", features = ["source"] }
+ljos_child = { git = "https://github.com/hal-c2/ljos-ui", rev = "63ec3fa4ad17dbc7ed126be86796703201e30403" }
 
 # Pins match ljos-ui's, so the two lock files agree.
 anyhow = "1.0"

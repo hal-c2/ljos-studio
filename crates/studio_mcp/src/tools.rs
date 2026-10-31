@@ -534,6 +534,11 @@ fn edit(
 }
 
 pub(crate) fn registry(studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
+    crate::preview_tools::add(edits(studio), studio)
+}
+
+/// The project and edit tools, in wire order.
+fn edits(studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
     let s = || studio.clone();
     ToolRegistry::new()
         .with(

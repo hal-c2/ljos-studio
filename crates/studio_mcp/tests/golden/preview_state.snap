@@ -1,0 +1,117 @@
+---
+source: crates/studio_mcp/tests/golden_tools.rs
+expression: value
+---
+{
+  "annotations": {
+    "destructive": false,
+    "idempotent": true,
+    "open_world": false,
+    "read_only": false
+  },
+  "description": "Read a block's published state in the preview, or `set` it when the block is mocked. The block's object needs an `id`.",
+  "inputSchema": {
+    "$defs": {
+      "Address": {
+        "description": "How a caller names an object.",
+        "oneOf": [
+          {
+            "additionalProperties": false,
+            "description": "A handle the session gave out (`n7`); stable for the session.",
+            "properties": {
+              "node": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "node"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "description": "The object's `id` in the document.",
+            "properties": {
+              "id": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "description": "A path as `document_tree` prints it (`root/0/contentItem:`), true of\nthe current text only.",
+            "properties": {
+              "path": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "path"
+            ],
+            "type": "object"
+          }
+        ]
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "doc": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "node": {
+        "$ref": "#/$defs/Address",
+        "description": "The block's object; it needs an `id`. In the previewed document\nunless `doc` names another."
+      },
+      "set": {
+        "additionalProperties": true,
+        "description": "Values to assign to the block's state (mocked previews only).",
+        "type": [
+          "object",
+          "null"
+        ]
+      }
+    },
+    "required": [
+      "node"
+    ],
+    "title": "StateArgs",
+    "type": "object"
+  },
+  "max_result_bytes": 40960,
+  "name": "preview_state",
+  "outputSchema": {
+    "properties": {
+      "block": {
+        "description": "`Module.Name`.",
+        "type": "string"
+      },
+      "id": {
+        "type": "string"
+      },
+      "mocked": {
+        "type": "boolean"
+      },
+      "state": {
+        "additionalProperties": true,
+        "description": "The block's published state as the preview has it now.",
+        "type": "object"
+      }
+    },
+    "required": [
+      "block",
+      "id",
+      "state",
+      "mocked"
+    ],
+    "title": "StateOut",
+    "type": "object"
+  },
+  "required_cap": "run"
+}

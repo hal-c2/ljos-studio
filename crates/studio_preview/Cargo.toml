@@ -1,0 +1,21 @@
+[package]
+name = "studio_preview"
+description = "Ljós Studio's native preview host: the shell under edit as a child Ljós application, driven through its inspector."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+studio_core = { path = "../studio_core" }
+ljos_child.workspace = true
+ljos_mcp_core = { workspace = true, features = ["remote"] }
+serde_json.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true

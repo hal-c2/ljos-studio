@@ -18,6 +18,7 @@ serde_json.workspace = true
 thiserror.workspace = true
 
 [dev-dependencies]
+studio_preview = { path = "../studio_preview" }
 cucumber.workspace = true
 insta.workspace = true
 tempfile.workspace = true

@@ -10,12 +10,13 @@
 //! Every answer is also held to the `outputSchema` the tool advertises: a
 //! client SDK that validates rejects an answer that breaks it.
 
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Arc};
 
 use cucumber::{World, gherkin::Step, given, then, when};
-use ljos_mcp_core::{CallCtx, Cap, CapSet, McpSurface, SurfaceError};
-use serde_json::Value;
+use ljos_mcp_core::{CallCtx, Cap, CapSet, McpSurface, SurfaceError, ToolImage};
+use serde_json::{Value, json};
 use studio_mcp::{Studio, StudioServer};
+use studio_preview::NativeHost;
 
 #[path = "support/schema.rs"]
 mod schema;
@@ -26,9 +27,14 @@ struct StudioWorld {
     dir: tempfile::TempDir,
     /// Directories links lead out of the project to.
     outside: Vec<tempfile::TempDir>,
+    /// Where previews keep their token files and logs: apart from the
+    /// project, which the preview watches.
+    state: tempfile::TempDir,
     server: Option<StudioServer>,
     caps: CapSet,
     answer: Option<Result<Value, SurfaceError>>,
+    /// The pictures of the last answer.
+    images: Vec<ToolImage>,
     /// Values kept from answers, written `$name` in later arguments.
     kept: HashMap<String, Value>,
 }
@@ -49,16 +55,27 @@ impl StudioWorld {
         Self {
             dir: tempfile::tempdir().expect("a temporary directory"),
             outside: Vec::new(),
+            state: tempfile::tempdir().expect("a temporary directory"),
             server: None,
             caps: CapSet::of([Cap::Inspect, Cap::Mutate]),
             answer: None,
+            images: Vec::new(),
             kept: HashMap::new(),
         }
     }
 
     fn server(&mut self) -> Result<&StudioServer, String> {
         if self.server.is_none() {
-            let studio = Studio::open(self.dir.path()).map_err(|e| e.to_string())?;
+            // Previews run the `ljos` that `LJOS` names (`mise run features`
+            // builds it from the Ljós checkout beside this one).
+            // A directory for the host to make, as the program names one: a
+            // temporary directory itself is as open as the umask leaves it.
+            let state = self.state.path().join("preview");
+            let studio = Studio::open(self.dir.path())
+                .map_err(|e| e.to_string())?
+                .with_previews(Arc::new(move |dir| {
+                    Box::new(NativeHost::new(dir, NativeHost::default_program(), &state))
+                }));
             self.server = Some(StudioServer::new(studio));
         }
         Ok(self.server.as_ref().expect("just made"))
@@ -67,9 +84,15 @@ impl StudioWorld {
     fn call(&mut self, tool: &str, args: Value) -> StepResult {
         let caps = self.caps;
         let server = self.server()?;
-        let (out, def) = server.tools().call(tool, &CallCtx::new(caps), args);
+        let out = server.call(tool, &CallCtx::new(caps), args);
+        let (out, images) = match out {
+            Ok(reply) => (Ok(reply.structured), reply.images),
+            Err(e) => (Err(e), Vec::new()),
+        };
         // A refusal is an error result, which the output schema does not cover.
-        if let (Ok(answer), Some(output)) = (&out, def.and_then(|d| d.output_schema.as_deref())) {
+        let output = server.tools().all().find(|d| d.name == tool);
+        if let (Ok(answer), Some(output)) = (&out, output.and_then(|d| d.output_schema.as_deref()))
+        {
             let broken = schema::validate(&Value::Object(output.clone()), answer);
             if !broken.is_empty() {
                 let broken: Vec<String> = broken.iter().map(ToString::to_string).collect();
@@ -80,7 +103,25 @@ impl StudioWorld {
             }
         }
         self.answer = Some(out);
+        self.images = images;
         Ok(())
+    }
+
+    /// What the open preview shows, as text; leaves the last answer be.
+    fn preview_outline(&mut self) -> Result<String, String> {
+        let caps = self.caps;
+        let reply = self
+            .server()?
+            .call(
+                "preview_screenshot",
+                &CallCtx::new(caps),
+                json!({ "format": "outline" }),
+            )
+            .map_err(|e| format!("the preview's outline was refused: {}", e.to_value()))?;
+        reply.structured["outline"]
+            .as_str()
+            .map(str::to_owned)
+            .ok_or_else(|| format!("no outline in {}", reply.structured))
     }
 
     fn answer(&self) -> Result<&Value, String> {
@@ -385,11 +426,47 @@ fn offered(w: &mut StudioWorld, names: String) -> StepResult {
         .ok_or_else(|| format!("offered {got:?}"))
 }
 
+#[then(regex = r#"^the preview shows "([^"]*)"$"#)]
+fn preview_shows(w: &mut StudioWorld, text: String) -> StepResult {
+    let outline = w.preview_outline()?;
+    outline
+        .contains(&format!("\"{text}\""))
+        .then_some(())
+        .ok_or_else(|| format!("the preview shows:\n{outline}"))
+}
+
+#[then(regex = r#"^the answer has a PNG picture at most (\d+) pixels on its longest side$"#)]
+fn png_picture(w: &mut StudioWorld, side: u32) -> StepResult {
+    w.answer()?;
+    let [image] = w.images.as_slice() else {
+        return Err(format!("{} pictures", w.images.len()));
+    };
+    if image.mime != "image/png" {
+        return Err(format!("a picture of type {}", image.mime));
+    }
+    let (width, height) = png_size(&image.data).ok_or("the picture is not a PNG")?;
+    (width.max(height) <= side && width > 0 && height > 0)
+        .then_some(())
+        .ok_or_else(|| format!("the picture is {width}x{height}"))
+}
+
+/// Width and height from a PNG's header chunk, which comes first.
+fn png_size(data: &[u8]) -> Option<(u32, u32)> {
+    const SIGNATURE: &[u8] = b"\x89PNG\r\n\x1a\n";
+    if !data.starts_with(SIGNATURE) || data.get(12..16)? != b"IHDR" {
+        return None;
+    }
+    let word = |at: usize| Some(u32::from_be_bytes(data.get(at..at + 4)?.try_into().ok()?));
+    Some((word(16)?, word(20)?))
+}
+
 #[tokio::main]
 async fn main() {
     let features = concat!(env!("CARGO_MANIFEST_DIR"), "/../../features");
     let input = std::env::var("STUDIO_FEATURES").unwrap_or_else(|_| features.to_owned());
     StudioWorld::cucumber()
+        // A preview is a whole application in a process of its own.
+        .max_concurrent_scenarios(8)
         .fail_on_skipped()
         .run_and_exit(input)
         .await;

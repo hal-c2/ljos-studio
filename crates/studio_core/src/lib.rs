@@ -14,6 +14,7 @@
 mod address;
 mod history;
 pub mod outline;
+pub mod preview;
 mod store;
 
 use std::collections::BTreeMap;
@@ -222,7 +223,14 @@ pub struct Session {
     next_handle: u64,
     /// The last generation of documents no longer held.
     retired: BTreeMap<String, u64>,
+    /// Told the path of every file the session wrote or removed, after it
+    /// did: what shows the project (a preview) follows edits through it
+    /// rather than by watching the files.
+    on_write: Vec<OnWrite>,
 }
+
+/// What [`Session::on_write`] is given.
+type OnWrite = Box<dyn FnMut(&str) + Send>;
 
 impl std::fmt::Debug for Session {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -254,6 +262,25 @@ impl Session {
             selection: Vec::new(),
             next_handle: 1,
             retired: BTreeMap::new(),
+            on_write: Vec::new(),
+        }
+    }
+
+    /// Calls `f` with the path of each file the session writes or removes
+    /// from now on, after the store has it.
+    pub fn on_write(&mut self, f: impl FnMut(&str) + Send + 'static) {
+        self.on_write.push(Box::new(f));
+    }
+
+    fn put(&mut self, path: &str, text: &str) -> Result<(), StoreError> {
+        self.store.write(path, text)?;
+        self.wrote(path);
+        Ok(())
+    }
+
+    fn wrote(&mut self, path: &str) {
+        for f in &mut self.on_write {
+            f(path);
         }
     }
 
@@ -790,7 +817,7 @@ impl Session {
                 unchanged: false,
             });
         }
-        self.store.write(path, text)?;
+        self.put(path, text)?;
         let past = self.retired.get(path).copied().unwrap_or(0);
         self.docs
             .insert(path.to_owned(), Document::new(text.to_owned(), past));
@@ -849,7 +876,7 @@ impl Session {
         change: Option<PathChange>,
         label: String,
     ) -> Result<u64, Error> {
-        self.store.write(path, &after)?;
+        self.put(path, &after)?;
         self.record(path, before, after, change, label)
     }
 
@@ -952,12 +979,13 @@ impl Session {
         let path = entry.doc.clone();
         if entry.created && !forward {
             self.store.remove(&path)?;
+            self.wrote(&path);
             self.retire(&path);
             return Ok(());
         }
         if entry.created && forward {
             let text = qml_edit::splice("", &entry.forward);
-            self.store.write(&path, &text)?;
+            self.put(&path, &text)?;
             let past = self.retired.get(&path).copied().unwrap_or(0);
             let mut doc = Document::new(text, past);
             doc.tracked = entry.handles_after.clone();
@@ -971,7 +999,7 @@ impl Session {
             &entry.inverse
         };
         let text = qml_edit::splice(&doc.text, changes);
-        self.store.write(&path, &text)?;
+        self.put(&path, &text)?;
         let doc = self.doc(&path)?;
         let shifts = diff(&doc.text, &text);
         for change in &shifts {
