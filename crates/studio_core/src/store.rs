@@ -101,7 +101,7 @@ impl FsStore {
 /// Whether `path` can be a document: a `.qml` file or a theme file, in
 /// normal form so one file is not two documents by spelling, outside the
 /// directories a walk leaves out.
-pub(crate) fn document_path(path: &str) -> bool {
+pub fn document_path(path: &str) -> bool {
     let mut parts = path.split('/').rev();
     let file = parts.next().unwrap_or_default();
     (file.ends_with(".qml") || file == crate::theme::FILE)

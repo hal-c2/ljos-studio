@@ -13,6 +13,8 @@ pub mod export;
 mod place_tools;
 pub mod preview;
 mod preview_tools;
+#[cfg(feature = "native")]
+mod project_watch;
 mod review;
 pub mod schema;
 pub mod signals;
@@ -58,6 +60,9 @@ pub struct Studio {
     /// What `node_arrange` `copy` holds. Studio's own, not the system's: an agent has no
     /// system clipboard, and a tool must mean the same to both.
     clipboard: Vec<place_tools::Copied>,
+    /// Hears of the files other programs change in the open project.
+    #[cfg(feature = "native")]
+    project_watch: Option<project_watch::ProjectWatch>,
 }
 
 /// Told that what a window shows may have changed. Called with the
@@ -112,11 +117,13 @@ impl Studio {
     pub fn open(workspace: impl Into<PathBuf>) -> Result<Self, StoreError> {
         let store = FsStore::new(workspace.into())?;
         let workspace = store.root().to_owned();
-        Ok(Self::new(
-            workspace,
+        let mut studio = Self::new(
+            workspace.clone(),
             Box::new(store),
             Arc::new(timer::ThreadTimer::default()),
-        ))
+        );
+        studio.watch_project(workspace);
+        Ok(studio)
     }
 
     /// [`Studio::open`] with the time leases are kept by taken from
@@ -128,7 +135,9 @@ impl Studio {
     ) -> Result<Self, StoreError> {
         let store = FsStore::new(workspace.into())?;
         let workspace = store.root().to_owned();
-        Ok(Self::new(workspace, Box::new(store), timer))
+        let mut studio = Self::new(workspace.clone(), Box::new(store), timer);
+        studio.watch_project(workspace);
+        Ok(studio)
     }
 
     fn new(workspace: PathBuf, store: Box<dyn Store>, timer: Arc<dyn Timer>) -> Self {
@@ -141,6 +150,8 @@ impl Studio {
             watchers: Watchers::default(),
             timer,
             clipboard: Vec::new(),
+            #[cfg(feature = "native")]
+            project_watch: None,
         };
         studio.follow();
         studio
@@ -303,12 +314,30 @@ impl Studio {
         if !store.root().starts_with(&self.workspace) {
             return Err(self.outside(asked));
         }
+        let root = store.root().to_owned();
         self.project = relative.to_owned();
         self.session = Session::open(Box::new(store));
         // A preview shows a project; another one needs its own.
         preview::lock(&self.previews).open = None;
         self.follow();
+        self.watch_project(root);
         Ok(())
+    }
+
+    /// Follows the directory the session now holds. The session's own
+    /// writes are noted first, so the event each makes tells nobody twice.
+    #[cfg(feature = "native")]
+    fn watch_project(&mut self, root: PathBuf) {
+        let (previews, watchers, timer) = self.written();
+        let watch = project_watch::ProjectWatch::start(
+            root,
+            Box::new(move || told_of_write(&previews, &watchers, &timer)),
+        );
+        if let Some(watch) = &watch {
+            let own = watch.own_writes();
+            self.session.on_write(move |path| own(path));
+        }
+        self.project_watch = watch;
     }
 }
 

@@ -13,7 +13,7 @@ default = ["native"]
 # Projects in directories, the catch-up timer on a thread, and serving on
 # stdio (rmcp and tokio, through `ljos_mcp_core/server`). Off on the web
 # (studio_web gives a store and a timer of its own).
-native = ["studio_core/fs", "ljos_mcp_core/server"]
+native = ["studio_core/fs", "ljos_mcp_core/server", "dep:notify"]
 # The loopback endpoint a running Studio serves agents on: a native window's.
 http = ["ljos_mcp_core/http"]
 
@@ -21,6 +21,8 @@ http = ["ljos_mcp_core/http"]
 studio_core = { path = "../studio_core", default-features = false }
 ljos_mcp_core.workspace = true
 ljos_blocks.workspace = true
+# File events from the kernel: nothing polls.
+notify = { workspace = true, optional = true }
 # Paths a window reads layers by.
 qml_edit.workspace = true
 qt_signals.workspace = true
