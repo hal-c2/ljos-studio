@@ -103,6 +103,34 @@ Feature: Tokens are read and set in the project's theme file
         """
       And the file "app/theme.json" does not exist
 
+    Scenario: The nearest theme file wins over the project's own
+      Given the file "theme.json":
+        """json
+        { "Spacing": { "md": 20 } }
+        """
+      And the file "app/theme.json":
+        """json
+        { "Spacing": { "md": 12 } }
+        """
+      When the agent calls the tool "theme_set" with:
+        """json
+        {"doc": "app/Main.qml", "token": "Spacing.md"}
+        """
+      Then the answer's "/file" is "app/theme.json"
+      And the answer's "/tokens/0/theme" is 12
+      When the agent calls the tool "theme_set" with:
+        """json
+        {"doc": "app/Main.qml", "token": "Spacing.md", "value": 24}
+        """
+      Then the file "app/theme.json" is:
+        """json
+        { "Spacing": { "md": 24 } }
+        """
+      And the file "theme.json" is:
+        """json
+        { "Spacing": { "md": 20 } }
+        """
+
     Scenario: A token the module does not have is refused
       When the agent calls the tool "theme_set" with:
         """json

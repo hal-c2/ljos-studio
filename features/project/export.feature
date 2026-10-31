@@ -109,6 +109,20 @@ Feature: A project is exported as a bundle that runs without Studio
       And the file "build/native/mocks/App/Media/Player.qml" does not exist
       And the file "build/native/.studio/review.json" does not exist
 
+    Scenario: An entry below the project's root names the theme Ljós reads for it
+      Given the file "app/Main.qml":
+        """qml
+        import QtQuick
+
+        Item {}
+        """
+      When the agent calls the tool "export" with:
+        """json
+        {"entry": "app/Main.qml"}
+        """
+      Then the answer's "/manifest/entry" is "app/Main.qml"
+      And the answer's "/manifest/theme" is "theme.json"
+
     Scenario: The manifest says what was left out and why
       When the agent calls the tool "export" with:
         """json
