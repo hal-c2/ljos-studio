@@ -19,6 +19,11 @@ console.log(`served at ${url}`);
 
 const browser = await chromium.launch({ headless: true });
 const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+// The resizes the preview's frame is asked for, counted where they arrive.
+await context.addInitScript(() => {
+  window.resizes = [];
+  addEventListener("message", (e) => e.data?.request?.call === "resize" && window.resizes.push(e.data.request.size));
+});
 const page = await context.newPage();
 const failures = [];
 const said = [];
@@ -124,6 +129,30 @@ const escape = await fetch(`${url}compile`, { method: "POST", body: JSON.stringi
 check("the server refuses a path out of the project", escape.status === 400, escape.status);
 
 check("the page logged no errors", said.length === 0, said);
+// A style change that moves nothing asks for no resize, however many there
+// are; a real change asks, and ends at the size the frame has.
+{
+  const inFrame = page.frames().find((f) => f !== page.mainFrame());
+  const asked = () => inFrame.evaluate(() => window.resizes);
+  const before = (await asked()).length;
+  await page.evaluate(async () => {
+    const app = document.getElementById("app");
+    for (let i = 0; i < 30; i++) {
+      app.style.setProperty("--tick", String(i));
+      await new Promise(requestAnimationFrame);
+    }
+  });
+  check("thirty style changes that move nothing ask for no resize", (await asked()).length === before, (await asked()).slice(before));
+  await page.setViewportSize({ width: 1200, height: 800 });
+  // Once the shell has laid out again and the frame has been told.
+  await page.waitForTimeout(500);
+  const want = await page.evaluate(() => {
+    const box = document.getElementById("frame").getBoundingClientRect();
+    return { width: Math.round(box.width), height: Math.round(box.height) };
+  });
+  const after = (await asked()).slice(before);
+  check("a new size is asked for, and the last is the frame's", JSON.stringify(after.at(-1)) === JSON.stringify(want), { after, want });
+}
 await browser.close();
 await stop();
 
