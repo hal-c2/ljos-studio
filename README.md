@@ -67,10 +67,11 @@ and every web task after it). A task that needs one and lacks it says to run
 - **S5 built, as far as ljos-web goes.** The session, its tools and the
   shell run in a browser, with projects in browser storage. The document
   under edit is compiled by ljos-web's `qmlc` and mounted in a frame laid
-  over the Canvas panel. 15 of the 24 `@preview` scenarios run in Chromium
-  (`mise run features:browser`). The other 9 wait on numbered ljos-web
-  requests (screenshots, reading by id, themes), and the preview refuses
-  those calls as `not_supported` (DESIGN.md, S5).
+  over the Canvas panel. 21 of the 39 `@preview` scenarios run in Chromium
+  (`mise run features:browser`). The other 18 wait on numbered ljos-web
+  requests (screenshots, reading by id, themes, `Ljos.Models`, type
+  dumps); the preview refuses the calls it cannot answer as
+  `not_supported` (DESIGN.md, S5).
 - **S6 built, but for multiplayer.** Prototyping flows, list data, export
   bundles and review comments. Multiplayer research has not started.
 

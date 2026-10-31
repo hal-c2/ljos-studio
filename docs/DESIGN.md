@@ -716,18 +716,25 @@ What the page answers:
 frame that `serve.mjs` compiles, the same steps as `web/features.mjs`
 plus the native runner's two preview steps (`the preview shows`, the PNG
 step), which features.mjs lists as run there; a step of this runner the
-native one lacks is a failure. 15 of 24 pass. The other 9 are in
+native one lacks is a failure. 21 of 39 pass. The other 18 are in
 `WAITING` with the request they wait on and the failure that says so
-(a `not_supported` refusal naming it, or for request 20 the drawn text);
+(a `not_supported` refusal naming it; for request 20 the drawn text; for
+21 and 22 ljos-web's compile error for the type, or a frame that draws
+nothing when that error comes after the open);
 one that passes, or fails another way, fails the run:
 
-- request 4: the five flow scenarios that read or click (`preview_state`),
-  a mocked block's state set from outside, a live block's state read;
+- request 4: the six flow scenarios that read or click (`preview_state`),
+  one of them a click at a point, a mocked block's state set from
+  outside, a live block's state read;
 - request 2: a picture of the preview;
 - request 20: a token set shows in the preview, and its undo shows the
   module's value again. The undo's last step reads what a preview that
   never drew the token shows too, so its entry has a probe: once the
   token is set the preview must show it, and its absence is the wait.
+- request 21: the three scenarios of a JSON list in the preview
+  (`Ljos.Models`);
+- request 22: four of the five scenarios of a project's type dumps
+  (stand-ins from `ljostypes.json`; the mocked state's passes).
 
 CI's `browser` job runs it after `web:serve:check`.
 
@@ -785,7 +792,8 @@ does 7 and 8 itself:
    document; request it general, or say which documents it takes.
 2. Open. A screenshot of a mounted root.
 3. Open. An outline (object tree) of a mounted root.
-4. Open. Read and write a property by `id`, and a click by object.
+4. Open. Read and write a property by `id`, and a click by object or at
+   a point (`app_click`'s `at`, folded in from phase 3 / M1).
 5. Open. Source locations on objects (`pick`).
 6. Open. File and line on logged messages.
 7. Done on Studio's side (aliases are the Compiler's); not needed.
@@ -807,6 +815,9 @@ does 7 and 8 itself:
     declarations (ADR 0003), or say Ljós's qmldir is not ljos-web's.
 20. New. A theme file beside the entry (`theme.json`) applied to
     `Ljos.Design`'s tokens at mount and on change, as Ljós does.
+
+21 (`Ljos.Models` in the web runtime) and 22 (stand-ins from a project's
+type dumps) are phase 3 / M1's, under S6.
 
 ### S6: polish and later
 

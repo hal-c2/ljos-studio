@@ -36,10 +36,28 @@ const ANSWER_MS = 120000;
 // A scenario that could pass without what it waits on has a `probe`: a
 // step run after the step `after`, whose failure is the wait.
 const refused = (request) => ({ request, cause: new RegExp(`"kind":"not_supported","ljos_web_request":${request}\\b`) });
+// A type ljos-web cannot compile yet is not refused up front: its compile
+// error stops the open, or, when it comes after the open, the frame draws
+// nothing.
+const uncompiled = (request, type) => ({
+  request,
+  cause: new RegExp(`\`${type}\` is not a type of anything the file imports|^the preview shows: \\[\\]$`),
+});
 export const WAITING = new Map([
   ["The preview starts in the base state", refused(4)],
   ["A click on the trigger goes to the state", refused(4)],
   ["A click at a point goes to the state", refused(4)],
+  ["A click lands at its point, whatever is drawn there", refused(4)],
+  // `Ljos.Models` is not in ljos-web's runtime (request 21).
+  ["features/preview/json-models.feature: The preview shows a row for each record", uncompiled(21, "JsonListModel")],
+  ["A save of the JSON shows without a reload", uncompiled(21, "JsonListModel")],
+  ["The mocked state reads the fixture", uncompiled(21, "JsonListModel")],
+  // The web preview makes no stand-ins from a project's type dumps
+  // (request 22).
+  ["A type the project's dump describes stands in", uncompiled(22, "Player")],
+  ["An edit to what is given the stand-in shows at once", uncompiled(22, "Player")],
+  ["The dumps of a project run as one", uncompiled(22, "Player")],
+  ["A dump that does not read stops the preview with the reason", uncompiled(22, "Player")],
   ["A click where no trigger is changes nothing", refused(4)],
   ["A click alone plays the flow and reads nothing", refused(4)],
   ["A picture of the preview", refused(2)],
@@ -281,7 +299,9 @@ async function main([app, ...paths]) {
       let kind = "Given";
       let failed = null;
       const began = performance.now();
-      const probe = WAITING.get(scenario.name)?.probe;
+      // A name two features share is keyed with its file.
+      const key = WAITING.has(`${name}: ${scenario.name}`) ? `${name}: ${scenario.name}` : scenario.name;
+      const probe = WAITING.get(key)?.probe;
       for (const s of scenario.steps) {
         if (!["And", "But", "*"].includes(s.keyword)) kind = s.keyword;
         try {
@@ -301,8 +321,8 @@ async function main([app, ...paths]) {
       }
       times.push({ scenario: scenario.name, ms: Math.round(performance.now() - began) });
       await page.close();
-      const waits = WAITING.get(scenario.name);
-      if (waits !== undefined) seen.add(scenario.name);
+      const waits = WAITING.get(key);
+      if (waits !== undefined) seen.add(key);
       let verdict;
       if (waits === undefined) verdict = failed ? `${failed.at}\n      ${failed.message.replaceAll("\n", "\n      ")}` : null;
       else if (!failed) verdict = `passes: ljos-web request ${waits.request} is answered; take it out of WAITING`;
