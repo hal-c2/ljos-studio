@@ -157,15 +157,17 @@ Feature: A project is exported as a bundle that runs without Studio
       Given a diamond of directory links 24 levels deep in "levels"
       When the agent calls the tool "export" with:
         """json
-        {"entry": "Shell.qml", "dry_run": true}
+        {"entry": "Shell.qml"}
         """
       Then it answered within 5 seconds
       And the answer's "/manifest/files" has 29 entries
-      And the answer's "/manifest/left_out" has 48 entries
-      And the answer's "/manifest/left_out/1" is {"path": "levels/0/left", "why": "a link to `levels/1`, which the bundle holds already"}
-      And the answer's "/manifest/left_out/46" is {"path": "levels/9/right", "why": "a link to `levels/10`, which the bundle holds already"}
+      And the answer's "/manifest/links" has 46 entries
+      And the answer's "/manifest/links/0" is {"path": "levels/0/left", "to": "levels/1"}
+      And the answer's "/manifest/links/45" is {"path": "levels/9/right", "to": "levels/10"}
+      And the answer's "/manifest/left_out" has 2 entries
+      And the file "build/native/levels/0/left/level.txt" exists
 
-    Scenario: A directory a link leads to is in the bundle under its own name
+    Scenario: A directory a link leads to is in the bundle under its own name, and the link goes in as a link
       Given the file "zone/Part.qml":
         """qml
         import QtQuick
@@ -182,10 +184,24 @@ Feature: A project is exported as a bundle that runs without Studio
         """json
         [
           {"path": ".studio", "why": "Studio's sidecar"},
-          {"path": "alias", "why": "a link to `zone`, which the bundle holds already"},
           {"path": "mocks", "why": "mock modules stand in for blocks in previews only"}
         ]
         """
+      And the answer's "/manifest/links" is [{"path": "alias", "to": "zone"}]
+
+    Scenario: A link to a directory it is in stays out of the bundle
+      Given the file "zone/Part.qml":
+        """qml
+        import QtQuick
+        Item {}
+        """
+      And "zone/up" links to "zone" in the project
+      When the agent calls the tool "export" with:
+        """json
+        {"entry": "Shell.qml", "dry_run": true}
+        """
+      Then the answer's "/manifest/links" is absent
+      And the answer's "/manifest/left_out/2" is {"path": "zone/up", "why": "a link to `zone`, which it is in and the bundle holds already"}
 
     Scenario: A dry run says what the bundle would hold and writes nothing
       When the agent calls the tool "export" with:
@@ -234,6 +250,36 @@ Feature: A project is exported as a bundle that runs without Studio
         {"entry": "Shell.qml"}
         """
       Then the bundle "build/native", copied out of the project, runs headless and shows what the preview shows
+
+    @preview
+    Scenario: A bundle whose app imports a directory through a link runs
+      Given the file "zone/Badge.qml":
+        """qml
+        import QtQuick
+        Text { objectName: "badge"; Accessible.role: Accessible.StaticText; text: "From zone" }
+        """
+      And "alias" links to "zone" in the project
+      And the file "Linked.qml":
+        """qml
+        import QtQuick
+        import "alias"
+
+        Column {
+            Badge {}
+        }
+        """
+      And the studio tools are connected with the capabilities "inspect, mutate, run, fs"
+      And the agent has called the tool "preview_open" with:
+        """json
+        {"doc": "Linked.qml", "state": "live"}
+        """
+      When the agent calls the tool "export" with:
+        """json
+        {"entry": "Linked.qml"}
+        """
+      Then the answer's "/manifest/links" is [{"path": "alias", "to": "zone"}]
+      And the bundle "build/native", copied out of the project, runs headless and shows what the preview shows
+      And the preview shows "From zone"
 
     Scenario: Deleting the sidecar changes nothing in the bundle
       Given the agent has called the tool "export" with:

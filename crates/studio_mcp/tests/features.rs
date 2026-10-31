@@ -676,7 +676,15 @@ fn copy_dir(from: &std::path::Path, to: &std::path::Path) -> StepResult {
     for entry in std::fs::read_dir(from).map_err(|e| format!("{}: {e}", from.display()))? {
         let entry = entry.map_err(|e| e.to_string())?;
         let target = to.join(entry.file_name());
-        if entry.file_type().map_err(|e| e.to_string())?.is_dir() {
+        let kind = entry.file_type().map_err(|e| e.to_string())?;
+        // A bundle's links are relative to it, so they hold in the copy.
+        if kind.is_symlink() {
+            let link = std::fs::read_link(entry.path()).map_err(|e| e.to_string())?;
+            #[cfg(unix)]
+            std::os::unix::fs::symlink(link, &target).map_err(|e| e.to_string())?;
+            #[cfg(not(unix))]
+            return Err(format!("{}: links are copied on unix only", link.display()));
+        } else if kind.is_dir() {
             std::fs::create_dir_all(&target).map_err(|e| e.to_string())?;
             copy_dir(&entry.path(), &target)?;
         } else {
