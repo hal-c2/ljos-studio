@@ -36,13 +36,19 @@ jobs:
           cache-on-failure: true
       # Only restored here: rust-cache's own save trims target/, which holds
       # the ljos and wasm-bindgen setup installs, so they are saved after setup.
-      # Cargo.toml holds ljos-ui's rev and wasm-bindgen's version, all the
-      # tools depend on.
+      # Keyed by the two pins the tools are built from, ljos-ui's rev and
+      # wasm-bindgen's version, and not all of Cargo.toml: ljos takes ~30 min to
+      # build, and another dependency changes nothing in it.
+      - id: pins
+        run: echo "key=$(grep -oE 'hal-c2/ljos-ui", rev = "[0-9a-f]+"|^wasm-bindgen = .*' Cargo.toml | sort -u | sha256sum | cut -c1-16)" >> "$GITHUB_OUTPUT"
       - id: tools
         uses: actions/cache/restore@v4
         with:
           path: target/tools
-          key: tools-${{ runner.os }}-${{ hashFiles('Cargo.toml') }}
+          key: tools-${{ runner.os }}-${{ steps.pins.outputs.key }}
+          # An older set still has what didn't change; setup checks each
+          # tool's version and builds only the one whose pin moved.
+          restore-keys: tools-${{ runner.os }}-
       # The render tests need a wgpu adapter (lavapipe is a software Vulkan);
       # Ljós links fontconfig and ALSA on Linux.
       - run: sudo apt-get update && sudo apt-get install -y mesa-vulkan-drivers libfontconfig1-dev libasound2-dev pkg-config
@@ -59,8 +65,10 @@ jobs:
       - run: mise run check
       - run: mise run check:tasks
       - run: mise run check:wasm
+      # The whole ledger with the unit tests, and the stdio server's test: the
+      # Gherkin runners are cargo tests, so `mise run features` would run them
+      # again.
       - run: mise run test
-      - run: mise run features
       - run: mise run features:web
       - if: always()
         run: df -h /
@@ -106,11 +114,17 @@ jobs:
           workspaces: |
             studio
             ljos-web
+      # As in `gates`.
+      - id: pins
+        run: echo "key=$(grep -oE 'hal-c2/ljos-ui", rev = "[0-9a-f]+"|^wasm-bindgen = .*' Cargo.toml | sort -u | sha256sum | cut -c1-16)" >> "$GITHUB_OUTPUT"
       - id: tools
         uses: actions/cache/restore@v4
         with:
           path: studio/target/tools
-          key: tools-${{ runner.os }}-${{ hashFiles('studio/Cargo.toml') }}
+          key: tools-${{ runner.os }}-${{ steps.pins.outputs.key }}
+          # An older set still has what didn't change; setup checks each
+          # tool's version and builds only the one whose pin moved.
+          restore-keys: tools-${{ runner.os }}-
       # Qt 6.11's QML, as Ljós's own CI uses: the shell's Controls are read from
       # it, and Ubuntu's Qt is older and split across packages. Only QML is
       # wanted, so no archives beyond the base.

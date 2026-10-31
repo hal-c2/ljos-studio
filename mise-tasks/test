@@ -1,4 +1,13 @@
 #!/usr/bin/env bash
-#MISE description="Unit, golden and Gherkin tests"
+#MISE description="Unit, golden and Gherkin tests, the whole ledger with the stdio server's"
 set -euo pipefail
-cargo test --workspace
+. "$(dirname "$0")/_lib/env.sh"
+# The Gherkin runners are tests too, and their previews run `ljos`: found as
+# `mise run features` finds it, so a missing one is named here, not read as
+# 'the preview did not start' in every scenario that opens one.
+find_ljos
+failed=0
+cargo test --workspace --no-fail-fast || failed=1
+# The server through its stdio front door, with a real preview.
+cargo test -p studio --test stdio -- --ignored || failed=1
+exit $failed

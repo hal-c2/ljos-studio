@@ -86,8 +86,10 @@ A checkout builds on its own: `cargo test --workspace`. Ljós comes from
 one commit of its main branch (`rev` in `Cargo.toml`); cargo fetches it with
 the git command line (`.cargo/config.toml`). `mise.toml` only names tool
 versions, so mise runs here without `mise trust`; `mise run setup` adds
-Rust's components and the wasm target with rustup; `mise run check`,
-`mise run test` and `mise run features` are the gates.
+Rust's components and the wasm target with rustup; `mise run check` and
+`mise run test` (the unit tests and the whole Gherkin ledger, whose previews
+run `ljos`) are the gates, and `mise run features` runs the feature files it
+is given.
 
 ### Building against a local ljos-ui
 
