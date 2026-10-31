@@ -110,8 +110,10 @@ Panel {
         Accessible.name: "Documents"
         ScrollBar.vertical: ScrollBar {
             Accessible.name: "Scroll the documents"
-            // Always there when there is more: nothing else says so.
-            policy: documentList.contentHeight > documentList.height ? ScrollBar.AlwaysOn : ScrollBar.AlwaysOff
+            // Always there when there is more: nothing else says so. Hidden,
+            // not only off, when there is not: an unused bar still fades.
+            policy: ScrollBar.AlwaysOn
+            visible: documentList.contentHeight > documentList.height
         }
 
         delegate: ItemDelegate {

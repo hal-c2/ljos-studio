@@ -46,3 +46,9 @@ Feature: The panels say what they hold and start clean
   Scenario: A short list of documents has none
     Given Studio's window shows the project
     Then the documents panel shows no scroll bar
+
+  Scenario: A long list of documents at rest does no work
+    Given 40 more documents
+    And Studio's window shows the project
+    When nobody touches the window for 2 seconds
+    Then Studio's window ran no frames

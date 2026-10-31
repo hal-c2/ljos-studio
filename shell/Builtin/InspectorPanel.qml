@@ -246,6 +246,7 @@ Panel {
             }
         }
 
+        // Two lines: on one, the panel's width left the value a few pixels.
         RowLayout {
             Layout.fillWidth: true
             spacing: Spacing.xxs
@@ -262,6 +263,14 @@ Panel {
                 Accessible.name: "New value"
                 Layout.fillWidth: true
                 onAccepted: add.clicked()
+            }
+        }
+        RowLayout {
+            Layout.fillWidth: true
+            spacing: Spacing.xxs
+
+            Item {
+                Layout.fillWidth: true
             }
             Button {
                 id: add
