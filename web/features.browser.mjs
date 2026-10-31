@@ -33,6 +33,8 @@ const ANSWER_MS = 120000;
 
 // Scenario → the ljos-web request (DESIGN.md S5) it waits on, and how its
 // failure says so: by default a `not_supported` refusal naming the request.
+// A scenario that could pass without what it waits on has a `probe`: a
+// step run after the step `after`, whose failure is the wait.
 const refused = (request) => ({ request, cause: new RegExp(`"kind":"not_supported","ljos_web_request":${request}\\b`) });
 export const WAITING = new Map([
   ["The preview starts in the base state", refused(4)],
@@ -47,6 +49,18 @@ export const WAITING = new Map([
   // beside the entry, so a token set is not drawn (request 20). Nothing
   // refuses it: the page cannot tell, so the failure is the drawn text.
   ["A token set shows in the preview and is reported as a reload", { request: 20, cause: /^the preview shows: \["gap 16"\]$/ }],
+  // Its last step expects the module's value, which a preview that never
+  // drew the token shows too: it would pass having shown nothing. So the
+  // token is looked for once it is set (`probe`), as the scenario above
+  // does, and its absence is the wait.
+  [
+    "Undo of a token shows the module's value again",
+    {
+      request: 20,
+      cause: /^the preview shows: \["gap 16"\]$/,
+      probe: { after: 'the agent has called the tool "theme_set" with:', then: 'the preview shows "gap 20"' },
+    },
+  ],
 ]);
 
 // The steps this runner has and `web/features.mjs` has not: the native
@@ -267,6 +281,7 @@ async function main([app, ...paths]) {
       let kind = "Given";
       let failed = null;
       const began = performance.now();
+      const probe = WAITING.get(scenario.name)?.probe;
       for (const s of scenario.steps) {
         if (!["And", "But", "*"].includes(s.keyword)) kind = s.keyword;
         try {
@@ -274,6 +289,13 @@ async function main([app, ...paths]) {
           counts.steps += 1;
         } catch (e) {
           failed = { at: `${name}:${s.line}: ${s.keyword} ${s.text}`, message: String(e.message) };
+          break;
+        }
+        if (probe?.after !== s.text) continue;
+        try {
+          await step({ keyword: "Then", kind: "Then", text: probe.then, line: s.line }, world);
+        } catch (e) {
+          failed = { at: `${name}:${s.line}: (WAITING's probe) Then ${probe.then}`, message: String(e.message) };
           break;
         }
       }

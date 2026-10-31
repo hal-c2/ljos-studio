@@ -724,7 +724,10 @@ one that passes, or fails another way, fails the run:
 - request 4: the five flow scenarios that read or click (`preview_state`),
   a mocked block's state set from outside, a live block's state read;
 - request 2: a picture of the preview;
-- request 20: a token set shows in the preview.
+- request 20: a token set shows in the preview, and its undo shows the
+  module's value again. The undo's last step reads what a preview that
+  never drew the token shows too, so its entry has a probe: once the
+  token is set the preview must show it, and its absence is the wait.
 
 CI's `browser` job runs it after `web:serve:check`.
 
