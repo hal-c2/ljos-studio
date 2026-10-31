@@ -50,8 +50,8 @@ fn main() {
     let caps = CapSet::default().with(Cap::Inspect).with(Cap::Mutate);
     let agent = CallCtx::new(caps);
     let other = CallCtx {
-        caps,
         client: Some("other".to_owned()),
+        ..CallCtx::new(caps)
     };
     let call = |ctx: &CallCtx, tool: &str, args: Value| -> Value {
         match server.call(tool, ctx, args) {

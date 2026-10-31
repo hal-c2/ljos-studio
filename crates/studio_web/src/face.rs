@@ -71,8 +71,8 @@ impl Face {
     /// gave no name). A page's window calls as [`studio_mcp::PERSON`].
     pub fn call_as(&self, tool: &str, args: Value, client: Option<String>) -> Value {
         let ctx = CallCtx {
-            caps: self.caps,
             client,
+            ..CallCtx::new(self.caps)
         };
         match self.server.call(tool, &ctx, args) {
             Ok(reply) => json!({
