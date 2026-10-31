@@ -100,7 +100,7 @@ view itself loses work.
   only after an edit. Owner: Studio, the preview client in `studio_core`;
   Ljós may need to say when it is at rest after input, not only after a
   reload (request 3).
-- **Fixed** (d553611): Cause: nothing asked for a new picture after a click, since a click makes no new generation. A click now looks again every 100 ms, up to 30 looks, stopping after 3 unchanged. Remains: a continuous animation goes stale after the bound, until Ljós request 3 says when the preview is at rest.
+- **Fixed** (d553611): Cause: nothing asked for a new picture after a click, since a click makes no new generation. A click now looks again every 100 ms, up to 30 looks, stopping after 3 unchanged. A continuous animation then went stale after the bound; in Play the picture now follows what the app says when it sleeps (`app_watch` `rests`, `wake_in_ms`): looked at when it has woken, at most ten times a second, and an app that will not wake by itself is asked nothing. Not `paints`, which a preview without a window never counts, nor `frames`, which a screenshot moves. `features/ui/play_follow.feature`.
 
 ### Major
 
@@ -144,7 +144,7 @@ view itself loses work.
 - **Fix:** a state row that, when entered, records inspector edits as
   `PropertyChanges`, and a "when" field with the breakpoint presets the MCP
   tool already has. Owner: Studio, States block over `state_edit`.
-- **Fixed** (5569e87): `when` and presets already existed; the gap was recording and seeing a state. Pick a state and edits go into it, and `preview_state.show` shows it. Remains: a canvas drag while recording writes the base value, and the state's override then hides it.
+- **Fixed** (5569e87): `when` and presets already existed; the gap was recording and seeing a state. Pick a state and edits go into it, and `preview_state.show` shows it. A canvas drag, an arrow press and an align while recording wrote the base value, and the state's override then hid it; they now go into the picked state (`node_arrange` `record`), and a move that would reorder a layout says a state cannot.
 
 #### D8. `tools/list` answers 62 KB
 

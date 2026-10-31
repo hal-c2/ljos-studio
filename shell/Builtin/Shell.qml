@@ -77,6 +77,7 @@ Item {
 
                 CanvasPanel {
                     workspace: workspace
+                    recording: inspector.recording
                     SplitView.fillHeight: true
                 }
                 CodePanel {
@@ -91,6 +92,7 @@ Item {
                 SplitView.minimumWidth: 200
 
                 InspectorPanel {
+                    id: inspector
                     workspace: workspace
                     SplitView.fillHeight: true
                 }

@@ -14,6 +14,9 @@ MouseArea {
     required property Workspace workspace
     required property real zoom
     required property bool playing
+    required property var recording
+    // Why the last drop wrote nothing; said until the next press.
+    property string told: ""
 
     // `node_arrange` `geometry`'s answer for the selection.
     property var nodes: []
@@ -53,6 +56,8 @@ MouseArea {
             return ""
         if (nodes.length > 0 && nodes.every(n => n.window === undefined))
             return "The preview does not show this object"
+        if (told !== "")
+            return told
         return nodes.length === 1 ? nodes[0].drag.says : ""
     }
 
@@ -239,14 +244,26 @@ MouseArea {
             places.push(place)
         }
         if (places.length > 0) {
-            workspace.dispatch("node_arrange", {action: "place", doc: workspace.doc, places: places})
+            overlay.place(places)
             return true
         }
         return selectedOne !== null && selectedOne.drag.move === "reorder" && dropReorder()
     }
 
+    // Every gesture that sets a value, so all of them follow `recording`.
+    function place(places) {
+        const args = {action: "place", doc: workspace.doc, places: places}
+        if (recording !== null)
+            args.record = recording
+        workspace.dispatch("node_arrange", args)
+    }
+
     // A layout places the object: the drop picks its place among the others.
     function dropReorder() {
+        if (recording !== null) {
+            told = "A state cannot change the order of a layout"
+            return false
+        }
         // The hand let go before the press's read answered: the drop is decided
         // when it does.
         if (siblings.length === 0 && reads > 0) {
@@ -306,7 +323,7 @@ MouseArea {
             place.height = height
         if (Object.keys(place).length === 1)
             return false
-        workspace.dispatch("node_arrange", {action: "place", doc: workspace.doc, places: [place]})
+        overlay.place([place])
         return true
     }
 
@@ -366,7 +383,7 @@ MouseArea {
         nodes = moved
         writing = true
         settled.restart()
-        workspace.dispatch("node_arrange", {action: "place", doc: workspace.doc, places: places})
+        overlay.place(places)
     }
 
     function selectedHandles() {
@@ -386,6 +403,7 @@ MouseArea {
         endDrop(true)
         if (playing)
             return
+        told = ""
         pressedAt = Qt.point(mouse.x, mouse.y)
         const shift = (mouse.modifiers & Qt.ShiftModifier) !== 0
         handle = shift ? -1 : handleAt(mouse.x, mouse.y)
@@ -570,6 +588,8 @@ MouseArea {
                 // back to what the preview says.
                 overlay.writing = false
                 overlay.endDrop(false)
+                if (error.code === "invalid_argument" && overlay.recording !== null)
+                    overlay.told = error.message
                 // Read again once only: when the read is what is refused
                 // (a preview gone, or one that cannot say), asking on would
                 // keep an idle window busy for ever.

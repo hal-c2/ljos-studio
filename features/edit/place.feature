@@ -511,3 +511,38 @@ Feature: Objects are placed by the tools a canvas drag drops through
       """
     Then the file "Main.qml" contains "`card ${card.width}`"
     And the file "Main.qml" contains "`card ${card1.width}`"
+
+  Scenario: A place can be recorded into a state rather than the object
+    Given the studio tools are connected
+    And the agent has called the tool "state_edit" with:
+      """json
+      {"action": "add", "doc": "Main.qml", "node": {"id": "root"}, "state": "compact"}
+      """
+    When the agent calls the tool "node_arrange" with:
+      """json
+      {"action": "place", "doc": "Main.qml", "places": [{"node": {"id": "a"}, "x": 33}],
+       "record": {"state": "compact", "on": {"id": "root"}}}
+      """
+    Then the file "Main.qml" contains "id: a; x: 10; y: 10;"
+    And the file "Main.qml" contains "target: a"
+    And the file "Main.qml" contains "x: 33"
+
+  Scenario: An object without an id cannot be placed into a state
+    Given the studio tools are connected
+    And the file "Plain.qml":
+      """qml
+      import QtQuick
+
+      Item {
+          id: root
+          states: [State { name: "compact" }]
+          Rectangle { x: 1; width: 4; height: 4 }
+      }
+      """
+    When the agent calls the tool "node_arrange" with:
+      """json
+      {"action": "place", "doc": "Plain.qml", "places": [{"node": {"path": "root/0"}, "x": 9}],
+       "generation": 1, "record": {"state": "compact", "on": {"id": "root"}}}
+      """
+    Then the agent is refused with "invalid_argument"
+    And the file "Plain.qml" contains "Rectangle { x: 1;"

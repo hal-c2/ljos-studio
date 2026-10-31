@@ -93,6 +93,8 @@ Panel {
     // selected when it was picked, and stays picked as the selection moves.
     property string picked: ""
     property string pickedOn: ""
+    // For what else sets values: the canvas records into the same state.
+    readonly property var recording: picked === "" ? null : {state: picked, on: {node: pickedOn}}
     readonly property var current: {
         const all = workspace.selected === pickedOn ? workspace.states : workspace.rootStates
         for (let i = 0; i < all.length; i++) {
