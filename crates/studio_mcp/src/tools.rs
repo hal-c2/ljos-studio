@@ -654,20 +654,34 @@ struct ThemeOut {
     unchanged: Option<bool>,
 }
 
-/// The theme file of `doc`: `theme.json` beside it, `doc` itself when it
-/// is one, or the project's own when no document is named.
-pub(crate) fn theme_file(doc: &str) -> String {
-    if doc.is_empty() {
-        return studio_core::theme::FILE.to_owned();
-    }
+/// The theme file of `doc`: `doc` itself when it is one; else the one Ljós
+/// reads for an entry there (`ljos_design::theme::find`), the nearest
+/// `theme.json` from its directory up to the project's; else where a new
+/// one is made, beside it. The project's own when no document is named.
+pub(crate) fn theme_file(store: &dyn studio_core::Store, doc: &str) -> String {
     let file = studio_core::theme::FILE;
+    if doc.is_empty() {
+        return file.to_owned();
+    }
     if doc == file || doc.ends_with(&format!("/{file}")) {
         return doc.to_owned();
     }
-    match doc.rsplit_once('/') {
-        Some((dir, _)) => format!("{dir}/{file}"),
-        None => file.to_owned(),
+    let beside = |dir: &str| match dir {
+        "" => file.to_owned(),
+        dir => format!("{dir}/{file}"),
+    };
+    let mut dir = doc.rsplit_once('/').map_or("", |(dir, _)| dir);
+    loop {
+        if store.exists(&beside(dir)) {
+            return beside(dir);
+        }
+        match dir.rsplit_once('/') {
+            Some((up, _)) => dir = up,
+            None if !dir.is_empty() => dir = "",
+            None => break,
+        }
     }
+    beside(doc.rsplit_once('/').map_or("", |(dir, _)| dir))
 }
 
 fn theme_set(studio: &Mutex<Studio>, a: ThemeArgs) -> Result<ThemeOut, SurfaceError> {
@@ -678,9 +692,7 @@ fn theme_set(studio: &Mutex<Studio>, a: ThemeArgs) -> Result<ThemeOut, SurfaceEr
             .as_ref()
             .map(|o| o.doc.clone())
     });
-    let file = doc
-        .as_deref()
-        .map_or_else(|| studio_core::theme::FILE.to_owned(), theme_file);
+    let file = theme_file(studio.session.store(), doc.as_deref().unwrap_or(""));
     let Some(value) = a.value else {
         let read = studio
             .session

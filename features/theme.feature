@@ -7,8 +7,9 @@
 Feature: Tokens are read and set in the project's theme file
   `theme_set` with no value reads the tokens: every role of `Ljos.Design`
   with the module's own value and the theme file's, light and dark and
-  high contrast. With a token and a value it writes the theme file beside
-  the entry, creating it when it is missing, and leaves the rest of the
+  high contrast. With a token and a value it writes the theme file Ljós
+  reads for the entry, the nearest `theme.json` from the entry's directory
+  up to the project's, creating one beside the entry when there is none, and leaves the rest of the
   file as it was, byte for byte. Ljós's own theme reader and contrast
   checker judge the result, and a theme Ljós would refuse is refused with
   Ljós's message, so a theme Studio writes always loads. A write is an
@@ -79,6 +80,27 @@ Feature: Tokens are read and set in the project's theme file
         """
       Then the answer's "/tokens/0/theme" is 20
       And the answer's "/tokens/0/module" is 16
+
+    Scenario: A theme file nearer the project's root is the one Ljós reads
+      Given the file "theme.json":
+        """json
+        { "Spacing": { "md": 20 } }
+        """
+      When the agent calls the tool "theme_set" with:
+        """json
+        {"doc": "app/Main.qml", "token": "Spacing.md"}
+        """
+      Then the answer's "/file" is "theme.json"
+      And the answer's "/tokens/0/theme" is 20
+      When the agent calls the tool "theme_set" with:
+        """json
+        {"doc": "app/Main.qml", "token": "Spacing.md", "value": 24}
+        """
+      Then the file "theme.json" is:
+        """json
+        { "Spacing": { "md": 24 } }
+        """
+      And the file "app/theme.json" does not exist
 
     Scenario: A token the module does not have is refused
       When the agent calls the tool "theme_set" with:
