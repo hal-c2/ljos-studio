@@ -700,6 +700,10 @@ pub(crate) fn theme_file(store: &dyn studio_core::Store, doc: &str) -> String {
 /// export keeps the path as written ([`theme_file`]): a bundle lists a linked
 /// file as a real one under the link's name.
 pub(crate) fn running_theme_file(store: &dyn studio_core::Store, doc: &str) -> String {
+    // A theme file is itself under its own name, wherever a link takes it.
+    if doc.rsplit('/').next() == Some(studio_core::theme::FILE) {
+        return theme_file(store, doc);
+    }
     match store.resolved(doc) {
         Ok(real) => theme_file(store, &real),
         Err(_) => theme_file(store, doc),
