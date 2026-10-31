@@ -60,6 +60,9 @@ pub struct Studio {
     /// What `node_arrange` `copy` holds. Studio's own, not the system's: an agent has no
     /// system clipboard, and a tool must mean the same to both.
     clipboard: Vec<place_tools::Copied>,
+    /// The objects `node_arrange` `lock` locked, by handle. Studio's own, for
+    /// the session: nothing of it reaches the file.
+    locked: std::collections::HashSet<String>,
     /// Hears of the files other programs change in the open project.
     #[cfg(feature = "native")]
     project_watch: Option<project_watch::ProjectWatch>,
@@ -150,6 +153,7 @@ impl Studio {
             watchers: Watchers::default(),
             timer,
             clipboard: Vec::new(),
+            locked: std::collections::HashSet::new(),
             #[cfg(feature = "native")]
             project_watch: None,
         };
@@ -318,7 +322,12 @@ impl Studio {
         self.project = relative.to_owned();
         self.session = Session::open(Box::new(store));
         // A preview shows a project; another one needs its own.
-        preview::lock(&self.previews).open = None;
+        {
+            let mut previews = preview::lock(&self.previews);
+            previews.open = None;
+            previews.hidden.clear();
+        }
+        self.locked.clear();
         self.follow();
         self.watch_project(root);
         Ok(())

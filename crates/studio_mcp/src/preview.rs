@@ -14,7 +14,7 @@
 //! A reader that must see the last write waits for that ([`caught_up`]).
 
 use std::{
-    collections::VecDeque,
+    collections::{BTreeSet, VecDeque},
     sync::{Arc, Mutex, MutexGuard},
     time::Duration,
 };
@@ -95,6 +95,9 @@ pub(crate) struct Open {
 }
 
 pub(crate) struct Previews {
+    /// The ids of the objects `node_arrange` `hide` hides, which outlast a
+    /// reload and a preview. Written to the running app, never to the file.
+    pub(crate) hidden: BTreeSet<String>,
     pub open: Option<Open>,
     pub events: Vec<PreviewEvent>,
     /// The host's log mark already read into `events`.
@@ -161,7 +164,45 @@ impl Previews {
             events: Vec::new(),
             log_mark: 0,
             timer,
+            hidden: BTreeSet::new(),
         }
+    }
+
+    /// Whether the object with `id` is hidden.
+    pub(crate) fn is_hidden(&self, id: &str) -> bool {
+        self.hidden.contains(id)
+    }
+
+    /// Hides an object in the preview, now and after each reload.
+    pub(crate) fn hide(&mut self, id: String) {
+        self.hidden.insert(id);
+        self.write_hidden();
+    }
+
+    /// Shows it again with `visible`, what its file says. The file has not
+    /// changed, so a reload would change nothing: a `visible` the file binds
+    /// to an expression holds this value until the next reload.
+    pub(crate) fn show(&mut self, id: &str, visible: bool) {
+        if !self.hidden.remove(id) {
+            return;
+        }
+        if let Some(open) = &mut self.open {
+            // An object the text no longer has has nothing to show.
+            let _ = open.host.write(id, "visible", visible.into());
+            open.clicks += 1;
+        }
+    }
+
+    /// What `node_arrange` `hide` holds, on what a reload or a new app put back.
+    pub(crate) fn write_hidden(&mut self) {
+        let Some(open) = &mut self.open else {
+            return;
+        };
+        for id in &self.hidden {
+            // An object the text no longer has has nothing to hide.
+            let _ = open.host.write(id, "visible", false.into());
+        }
+        open.clicks += 1;
     }
 
     /// After a file was written: the open preview shows it now, or, in a
@@ -214,6 +255,11 @@ impl Previews {
             }
             // Drawn after the reload's picture was asked for, as a click is.
             open.clicks += 1;
+        }
+        if matches!(reload, Ok(Reload::Applied { .. })) {
+            for id in &self.hidden {
+                let _ = open.host.write(id, "visible", false.into());
+            }
         }
 
         // Stamped once answered: however long the call took, the reload the
@@ -396,6 +442,7 @@ mod tests {
     fn previews(reloads: VecDeque<Duration>, behind: bool) -> (Previews, Arc<Mutex<usize>>) {
         let count = Arc::new(Mutex::new(0));
         let previews = Previews {
+            hidden: BTreeSet::new(),
             open: Some(Open {
                 host: Box::new(Counting(count.clone())),
                 doc: "Main.qml".to_owned(),

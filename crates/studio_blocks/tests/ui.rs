@@ -713,7 +713,15 @@ impl Window {
             .ok_or("no layers list in the window")?;
         let mut rows = Vec::new();
         collect(list, &mut |n| {
-            if n.key.is_some() && n.name != "Layers" && n.role != "label" && n.role != "statictext"
+            // The row's eye and lock and its name field are not rows.
+            let control = ["Hide ", "Show ", "Lock ", "Unlock ", "Name of "]
+                .iter()
+                .any(|p| n.name.starts_with(p));
+            if n.key.is_some()
+                && !control
+                && n.name != "Layers"
+                && n.role != "label"
+                && n.role != "statictext"
             {
                 rows.push(n.clone());
             }
@@ -2023,6 +2031,93 @@ fn tokens_say(w: &mut UiWorld, pattern: String) -> StepResult {
         })
 }
 
+#[when(regex = r#"^the person drags the layer "([^"]+)" onto "([^"]+)"$"#)]
+fn drags_layer(w: &mut UiWorld, from: String, onto: String) -> StepResult {
+    let window = w.window()?;
+    let row = |window: &mut Window, name: &str| -> Result<Point, String> {
+        let node = window
+            .shown_layers()?
+            .into_iter()
+            .find(|n| n.name == name)
+            .ok_or_else(|| format!("no layer {name:?}"))?;
+        let key = node.key.ok_or("the row has no key")?;
+        window
+            .stage
+            .drive()
+            .aim_at_node(key)
+            .map_err(|why| format!("{why:?}"))
+    };
+    let start = row(window, &from)?;
+    let end = row(window, &onto)?;
+    let mut driver = window.stage.drive();
+    driver
+        .press(start, MouseButtons::LEFT)
+        .map_err(drive_error)?;
+    // Past the threshold wherever the row lies, so a drag back to its own row
+    // is still a drag.
+    let aside = Point::new(start.x + 12.0, start.y + 12.0);
+    driver.move_to(aside).map_err(drive_error)?;
+    driver.move_to(end).map_err(drive_error)?;
+    driver
+        .release(end, MouseButtons::LEFT)
+        .map_err(drive_error)?;
+    window.rest()
+}
+
+#[when(regex = r#"^the person double-clicks the layer "([^"]+)"$"#)]
+fn double_clicks_layer(w: &mut UiWorld, name: String) -> StepResult {
+    let window = w.window()?;
+    let node = window
+        .shown_layers()?
+        .into_iter()
+        .find(|n| n.name == name)
+        .ok_or_else(|| format!("no layer {name:?}"))?;
+    let key = node.key.ok_or("the row has no key")?;
+    let mut driver = window.stage.drive();
+    let at = driver.aim_at_node(key).map_err(|why| format!("{why:?}"))?;
+    driver
+        .click(at, MouseButtons::LEFT, 2)
+        .map_err(drive_error)?;
+    window.rest()
+}
+
+#[when(regex = r#"^the person enters "([^"]+)" as the layer's name$"#)]
+fn enters_layer_name(w: &mut UiWorld, name: String) -> StepResult {
+    let window = w.window()?;
+    let tree = window.tree();
+    let field = find(&tree, &|n| {
+        n.name.starts_with("Name of ") && n.key.is_some()
+    })
+    .cloned()
+    .ok_or_else(|| format!("no name field; the window holds {}", names(&tree)))?;
+    window.enter(&field, &name)
+}
+
+#[then(regex = r#"^the layers panel has the button "([^"]+)"$"#)]
+fn layers_has_button(w: &mut UiWorld, name: String) -> StepResult {
+    let tree = w.window()?.tree();
+    find(&tree, &|n| n.name == name && n.role == "button")
+        .map(|_| ())
+        .ok_or_else(|| format!("no button {name:?}; the window holds {}", names(&tree)))
+}
+
+#[then(regex = r#"^the history does not list "([^"]+)"$"#)]
+fn history_lists_not(w: &mut UiWorld, label: String) -> StepResult {
+    let done = w.window()?.read_json("done");
+    (!done.to_string().contains(&label))
+        .then_some(())
+        .ok_or_else(|| format!("the history lists {done}"))
+}
+
+#[then(regex = r#"^the file "([^"]+)" says:$"#)]
+fn file_says_all(w: &mut UiWorld, name: String, step: &Step) -> StepResult {
+    let got = std::fs::read_to_string(w.dir.path().join(&name)).map_err(|e| e.to_string())?;
+    let want = file_text(step)?;
+    (got == want)
+        .then_some(())
+        .ok_or_else(|| format!("`{name}` says:\n{got}"))
+}
+
 #[then(regex = r#"^the layers panel lists "([^"]*)"$"#)]
 fn layers_list(w: &mut UiWorld, want: String) -> StepResult {
     let window = w.window()?;
@@ -2252,12 +2347,7 @@ fn written_outside(w: &mut UiWorld, name: String, step: &Step) -> StepResult {
 
 /// Lets the window run until `shown` holds for its documents panel. The
 /// report comes from another thread on the real clock.
-fn documents_until(
-    w: &mut UiWorld,
-    seconds: u64,
-    name: &str,
-    shown: bool,
-) -> StepResult {
+fn documents_until(w: &mut UiWorld, seconds: u64, name: &str, shown: bool) -> StepResult {
     let window = w.window()?;
     for _ in 0..seconds * 20 {
         if window.node("Documents", None, name).is_ok() == shown {
