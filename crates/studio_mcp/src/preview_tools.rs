@@ -129,7 +129,7 @@ struct EventsOut {
     open: bool,
 }
 
-fn preview_error(e: PreviewError) -> SurfaceError {
+pub(crate) fn preview_error(e: PreviewError) -> SurfaceError {
     let message = e.to_string();
     let kind = |code: ErrorCode, kind: &str| {
         SurfaceError::new(code, message.clone()).with_details(json!({ "kind": kind }))
@@ -296,8 +296,7 @@ fn open(studio: &Mutex<Studio>, a: OpenArgs) -> Result<OpenOut, SurfaceError> {
 fn state(studio: &Mutex<Studio>, a: StateArgs) -> Result<StateOut, SurfaceError> {
     let mut studio = lock(studio);
     let previews = studio.previews.clone();
-    let mut previews = preview::lock(&previews);
-    previews.catch_up();
+    let mut previews = preview::caught_up(&previews);
     let open = previews
         .open
         .as_mut()
@@ -359,8 +358,23 @@ fn state(studio: &Mutex<Studio>, a: StateArgs) -> Result<StateOut, SurfaceError>
     })
 }
 
+/// How a picture treats writes a burst has not shown yet.
+#[derive(Clone, Copy)]
+pub(crate) enum Picturing {
+    /// An agent's look: it sees every write, waiting for the budget if a
+    /// burst spent it.
+    Latest,
+    /// A window's: it must not hold up the person typing, and fetches again
+    /// when the catch-up gives a new generation.
+    AsShown,
+}
+
 /// The picture as an MCP image, with its size as the structured answer.
-pub(crate) fn screenshot(studio: &Mutex<Studio>, args: Value) -> Result<ToolReply, SurfaceError> {
+pub(crate) fn screenshot(
+    studio: &Mutex<Studio>,
+    args: Value,
+    picturing: Picturing,
+) -> Result<ToolReply, SurfaceError> {
     let a: ScreenshotArgs = serde_json::from_value(if args.is_null() { json!({}) } else { args })
         .map_err(|e| SurfaceError::invalid_argument(e.to_string()))?;
     let side = a
@@ -368,8 +382,14 @@ pub(crate) fn screenshot(studio: &Mutex<Studio>, args: Value) -> Result<ToolRepl
         .unwrap_or(PICTURE_SIDE)
         .clamp(16, MAX_PICTURE_SIDE);
     let studio = lock(studio);
-    let mut previews = preview::lock(&studio.previews);
-    previews.catch_up();
+    let mut previews = match picturing {
+        Picturing::Latest => preview::caught_up(&studio.previews),
+        Picturing::AsShown => {
+            let mut previews = preview::lock(&studio.previews);
+            previews.catch_up();
+            previews
+        }
+    };
     let open = previews
         .open
         .as_mut()
@@ -402,12 +422,70 @@ pub(crate) fn screenshot(studio: &Mutex<Studio>, args: Value) -> Result<ToolRepl
     Ok(ToolReply::from(structured).with_image("image/png", picture.png))
 }
 
+/// The document object the open preview of `doc` shows at `x`, `y`: as
+/// (document, handle), `None` when nothing is there.
+pub(crate) fn pick(
+    studio: &mut Studio,
+    doc: &str,
+    x: f64,
+    y: f64,
+) -> Result<Option<(String, String)>, SurfaceError> {
+    let previews = studio.previews.clone();
+    // Before anything else: the line the preview answers is looked up in
+    // the session's text, and a newly failed reload is caught below.
+    let mut previews = preview::caught_up(&previews);
+    let not_shown = || {
+        SurfaceError::new(
+            ErrorCode::NotActionable,
+            format!("no preview of `{doc}` is open; `preview_open` starts one"),
+        )
+        .with_details(json!({ "kind": "no_preview" }))
+    };
+    if previews.open.as_ref().is_none_or(|o| o.doc != doc) {
+        return Err(not_shown());
+    }
+    // A preview whose last reload failed runs older text than the
+    // session's: its lines would name other objects.
+    let behind = previews.events.iter().rev().find_map(|e| match e {
+        PreviewEvent::Opened { .. } | PreviewEvent::Reloaded { .. } => Some(false),
+        PreviewEvent::ReloadFailed { .. } => Some(true),
+        _ => None,
+    });
+    if behind == Some(true) {
+        return Err(SurfaceError::new(
+            ErrorCode::NotActionable,
+            format!("the preview shows an older `{doc}`: its last reload failed"),
+        )
+        .with_details(json!({ "kind": "preview_behind" })));
+    }
+    let open = previews.open.as_mut().ok_or_else(not_shown)?;
+    let Some(declared) = open.host.pick(x, y).map_err(preview_error)? else {
+        return Ok(None);
+    };
+    drop(previews);
+    if !studio.session.store().exists(&declared.file) {
+        return Err(SurfaceError::not_found(format!(
+            "the object at {x},{y} is declared in `{}`, which is not a document of the project",
+            declared.file
+        ))
+        .with_details(json!({ "kind": "not_a_document" })));
+    }
+    let (handle, _) = studio
+        .session
+        .declared_at(
+            &declared.file,
+            declared.line as usize,
+            declared.column as usize,
+        )
+        .map_err(error)?;
+    Ok(Some((declared.file, handle)))
+}
+
 fn events(studio: &Mutex<Studio>, a: EventsArgs) -> EventsOut {
     let studio = lock(studio);
-    let mut previews = preview::lock(&studio.previews);
     // What a burst of writes left out is reloaded first, so its outcome
     // is among the events.
-    previews.catch_up();
+    let mut previews = preview::caught_up(&studio.previews);
     previews.pull_logs();
     let since = a.since.unwrap_or(0).min(previews.events.len());
     let end = (since + EVENTS_PAGE).min(previews.events.len());
@@ -461,7 +539,7 @@ pub(crate) fn add(registry: ToolRegistry, studio: &Arc<Mutex<Studio>>) -> ToolRe
             .annotated(ToolAnnotations::READ_ONLY),
             typed({
                 let studio = s();
-                move |_, a: Value| screenshot(&studio, a).map(|r| r.structured)
+                move |_, a: Value| screenshot(&studio, a, Picturing::Latest).map(|r| r.structured)
             }),
         )
         .with(

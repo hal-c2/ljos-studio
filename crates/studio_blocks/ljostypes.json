@@ -1,0 +1,282 @@
+{
+  "format": 2,
+  "modules": [
+    {
+      "uri": "Studio",
+      "versions": [
+        "1.0"
+      ],
+      "types": [
+        {
+          "name": "Workspace",
+          "since": "1.0",
+          "base": "QtObject",
+          "baseModule": "QtQml",
+          "singleton": false,
+          "enums": [],
+          "creatable": true,
+          "defaultProperty": null,
+          "attached": null,
+          "properties": [
+            {
+              "name": "documents",
+              "type": "var",
+              "kind": "value",
+              "list": false,
+              "readonly": true,
+              "final": true,
+              "required": false,
+              "constant": false,
+              "group": false,
+              "notify": "documentsChanged"
+            },
+            {
+              "name": "doc",
+              "type": "string",
+              "kind": "value",
+              "list": false,
+              "readonly": false,
+              "final": true,
+              "required": false,
+              "constant": false,
+              "group": false,
+              "notify": "docChanged"
+            },
+            {
+              "name": "generation",
+              "type": "real",
+              "kind": "value",
+              "list": false,
+              "readonly": true,
+              "final": true,
+              "required": false,
+              "constant": false,
+              "group": false,
+              "notify": "generationChanged"
+            },
+            {
+              "name": "text",
+              "type": "string",
+              "kind": "value",
+              "list": false,
+              "readonly": true,
+              "final": true,
+              "required": false,
+              "constant": false,
+              "group": false,
+              "notify": "textChanged"
+            },
+            {
+              "name": "layers",
+              "type": "var",
+              "kind": "value",
+              "list": false,
+              "readonly": true,
+              "final": true,
+              "required": false,
+              "constant": false,
+              "group": false,
+              "notify": "layersChanged"
+            },
+            {
+              "name": "selected",
+              "type": "string",
+              "kind": "value",
+              "list": false,
+              "readonly": true,
+              "final": true,
+              "required": false,
+              "constant": false,
+              "group": false,
+              "notify": "selectedChanged"
+            },
+            {
+              "name": "selection",
+              "type": "var",
+              "kind": "value",
+              "list": false,
+              "readonly": true,
+              "final": true,
+              "required": false,
+              "constant": false,
+              "group": false,
+              "notify": "selectionChanged"
+            },
+            {
+              "name": "inspector",
+              "type": "var",
+              "kind": "value",
+              "list": false,
+              "readonly": true,
+              "final": true,
+              "required": false,
+              "constant": false,
+              "group": false,
+              "notify": "inspectorChanged"
+            },
+            {
+              "name": "palette",
+              "type": "var",
+              "kind": "value",
+              "list": false,
+              "readonly": true,
+              "final": true,
+              "required": false,
+              "constant": false,
+              "group": false,
+              "notify": "paletteChanged"
+            },
+            {
+              "name": "done",
+              "type": "var",
+              "kind": "value",
+              "list": false,
+              "readonly": true,
+              "final": true,
+              "required": false,
+              "constant": false,
+              "group": false,
+              "notify": "doneChanged"
+            },
+            {
+              "name": "undone",
+              "type": "var",
+              "kind": "value",
+              "list": false,
+              "readonly": true,
+              "final": true,
+              "required": false,
+              "constant": false,
+              "group": false,
+              "notify": "undoneChanged"
+            },
+            {
+              "name": "preview",
+              "type": "var",
+              "kind": "value",
+              "list": false,
+              "readonly": true,
+              "final": true,
+              "required": false,
+              "constant": false,
+              "group": false,
+              "notify": "previewChanged"
+            },
+            {
+              "name": "error",
+              "type": "string",
+              "kind": "value",
+              "list": false,
+              "readonly": true,
+              "final": true,
+              "required": false,
+              "constant": false,
+              "group": false,
+              "notify": "errorChanged"
+            },
+            {
+              "name": "problem",
+              "type": "string",
+              "kind": "value",
+              "list": false,
+              "readonly": true,
+              "final": true,
+              "required": false,
+              "constant": false,
+              "group": false,
+              "notify": "problemChanged"
+            },
+            {
+              "name": "previews",
+              "type": "bool",
+              "kind": "value",
+              "list": false,
+              "readonly": true,
+              "final": true,
+              "required": false,
+              "constant": false,
+              "group": false,
+              "notify": "previewsChanged"
+            }
+          ],
+          "signals": [
+            {
+              "name": "answered",
+              "parameters": [
+                {
+                  "name": "tool",
+                  "type": "string"
+                },
+                {
+                  "name": "answer",
+                  "type": "var"
+                }
+              ]
+            },
+            {
+              "name": "refused",
+              "parameters": [
+                {
+                  "name": "tool",
+                  "type": "string"
+                },
+                {
+                  "name": "error",
+                  "type": "var"
+                }
+              ]
+            }
+          ],
+          "methods": [
+            {
+              "name": "dispatch",
+              "parameters": [
+                {
+                  "name": "tool",
+                  "type": "string"
+                },
+                {
+                  "name": "args",
+                  "type": "var"
+                }
+              ],
+              "returnType": "void"
+            }
+          ],
+          "block": {
+            "category": "Studio",
+            "summary": "A Studio session: documents, layers, inspector, palette, history and preview"
+          }
+        },
+        {
+          "name": "PreviewPicture",
+          "since": "1.0",
+          "base": "Item",
+          "baseModule": "QtQuick",
+          "singleton": false,
+          "enums": [],
+          "creatable": true,
+          "defaultProperty": null,
+          "attached": null,
+          "properties": [
+            {
+              "name": "workspace",
+              "type": "Workspace",
+              "kind": "object",
+              "list": false,
+              "readonly": false,
+              "final": true,
+              "required": false,
+              "constant": false,
+              "group": false,
+              "notify": "workspaceChanged"
+            }
+          ],
+          "signals": [],
+          "methods": []
+        }
+      ]
+    }
+  ],
+  "unnamed": []
+}

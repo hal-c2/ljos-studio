@@ -7,18 +7,22 @@ use std::sync::{Arc, Mutex};
 use ljos_mcp_core::{CallCtx, Cap, CapSet};
 use serde_json::{Map, Value, json};
 use studio_core::preview::{
-    LogLine, Picture, PreviewError, PreviewHost, PreviewSpec, Reload, Size,
+    Declared, LogLine, Picture, PreviewError, PreviewHost, PreviewSpec, Reload, Size,
 };
 use studio_mcp::{Studio, StudioServer};
 
 #[derive(Default)]
 struct Seen {
     calls: Vec<String>,
+    /// When each reload arrived, as the inspector would count it.
+    reloads: Vec<std::time::Instant>,
     generation: u64,
     fail_next: bool,
     /// Calls that answer with an error, by how the call's note starts; each
     /// answers once.
     errors: Vec<(String, PreviewError)>,
+    /// What `pick` answers.
+    declared: Option<Declared>,
 }
 
 struct Recorder(Arc<Mutex<Seen>>);
@@ -64,6 +68,7 @@ impl PreviewHost for Recorder {
     fn reload(&mut self) -> Result<Reload, PreviewError> {
         self.note("reload".to_owned())?;
         let mut seen = self.0.lock().unwrap();
+        seen.reloads.push(std::time::Instant::now());
         if std::mem::take(&mut seen.fail_next) {
             return Ok(Reload::Failed {
                 message: "Shell.qml:4: expected a property".to_owned(),
@@ -135,6 +140,11 @@ impl PreviewHost for Recorder {
         self.answer("alive")
     }
 
+    fn pick(&mut self, x: f64, y: f64) -> Result<Option<Declared>, PreviewError> {
+        self.note(format!("pick {x},{y}"))?;
+        Ok(self.0.lock().unwrap().declared.clone())
+    }
+
     fn close(&mut self) {
         let _ = self.note("close".to_owned());
     }
@@ -147,6 +157,8 @@ struct Fixture {
     server: StudioServer,
     seen: Arc<Mutex<Seen>>,
     opened: Arc<Mutex<usize>>,
+    /// Hears whenever a window would be told that what it shows changed.
+    told: std::sync::mpsc::Receiver<()>,
 }
 
 impl Fixture {
@@ -179,7 +191,7 @@ impl Fixture {
         }
         let seen = Arc::new(Mutex::new(Seen::default()));
         let opened = Arc::new(Mutex::new(0));
-        let studio = Studio::open(dir.path()).unwrap().with_previews(Arc::new({
+        let mut studio = Studio::open(dir.path()).unwrap().with_previews(Arc::new({
             let seen = seen.clone();
             let opened = opened.clone();
             move |_| {
@@ -187,11 +199,16 @@ impl Fixture {
                 Box::new(Recorder(seen.clone()))
             }
         }));
+        let (tell, told) = std::sync::mpsc::channel();
+        studio.watch(Arc::new(move || {
+            let _ = tell.send(());
+        }));
         Fixture {
             _dir: dir,
             server: StudioServer::new(studio),
             seen,
             opened,
+            told,
         }
     }
 
@@ -340,6 +357,88 @@ fn a_burst_of_writes_reloads_within_the_budget_and_a_reading_catches_up() {
     assert_eq!(f.calls(), ["reload", "screenshot 800"]);
     f.call("preview_screenshot", json!({})).unwrap();
     assert_eq!(f.calls(), ["screenshot 800"]);
+}
+
+/// No second holds more reloads than the budget allows: 8 (preview.rs).
+fn assert_within_the_budget(f: &Fixture) {
+    let seen = f.seen.lock().unwrap();
+    for (first, last) in seen.reloads.iter().zip(seen.reloads.iter().skip(8)) {
+        assert!(
+            last.duration_since(*first) >= std::time::Duration::from_secs(1),
+            "nine reloads in {:?}",
+            last.duration_since(*first)
+        );
+    }
+}
+
+/// The `i`th write after the preview opened, so of generation `i + 1`.
+fn set_text(f: &Fixture, i: usize) {
+    f.call(
+        "binding_set",
+        json!({ "doc": "Shell.qml", "generation": i + 1, "node": { "path": "root/1" }, "name": "text", "value": format!("\"{i}\"") }),
+    )
+    .unwrap();
+}
+
+#[test]
+fn a_burst_with_a_picture_after_every_write_stays_within_the_budget() {
+    let f = Fixture::new();
+    f.call("preview_open", json!({ "doc": "Shell.qml" }))
+        .unwrap();
+    for i in 0..20 {
+        set_text(&f, i);
+        f.call("preview_screenshot", json!({})).unwrap();
+    }
+    assert_within_the_budget(&f);
+    // Each look saw the write before it, budget or no budget.
+    assert_eq!(f.seen.lock().unwrap().reloads.len(), 20);
+}
+
+#[test]
+fn a_window_fetching_pictures_in_a_burst_stays_within_the_budget_and_ends_up_shown() {
+    let f = Fixture::new();
+    f.call("preview_open", json!({ "doc": "Shell.qml" }))
+        .unwrap();
+    let ctx = CallCtx::new(CapSet::of([Cap::Inspect, Cap::Mutate, Cap::Run]));
+    let mut last_write = std::time::Instant::now();
+    for i in 0..20 {
+        last_write = std::time::Instant::now();
+        set_text(&f, i);
+        f.server.shown_picture(&ctx, json!({})).unwrap();
+    }
+    assert_within_the_budget(&f);
+    // Whatever the timer has done by now, a reading shows the last write.
+    f.call("preview_events", json!({})).unwrap();
+    assert_within_the_budget(&f);
+    assert!(*f.seen.lock().unwrap().reloads.last().unwrap() >= last_write);
+}
+
+#[test]
+fn a_burst_shows_once_the_budget_allows_with_nobody_looking() {
+    let f = Fixture::new();
+    f.call("preview_open", json!({ "doc": "Shell.qml" }))
+        .unwrap();
+    for i in 0..20 {
+        f.call(
+            "binding_set",
+            json!({ "doc": "Shell.qml", "generation": i + 1, "node": { "path": "root/1" }, "name": "text", "value": format!("\"{i}\"") }),
+        )
+        .unwrap();
+    }
+    f.calls();
+    while f.told.try_recv().is_ok() {}
+    let began = std::time::Instant::now();
+    // A window hears of the catch-up as of any change, and the preview was
+    // asked for the burst's last state though nothing read it.
+    f.told
+        .recv_timeout(std::time::Duration::from_secs(5))
+        .expect("the window was told of the catch-up");
+    assert_eq!(f.calls(), ["reload"]);
+    assert!(
+        began.elapsed() <= std::time::Duration::from_millis(1100),
+        "caught up after {:?}",
+        began.elapsed()
+    );
 }
 
 #[test]
@@ -714,4 +813,144 @@ fn a_size_out_of_bounds_is_refused_before_start_or_resize() {
     assert!(f.calls().is_empty());
     open(8192, 8192).unwrap();
     assert_eq!(f.calls(), ["resize 8192x8192"]);
+}
+
+fn declared(file: &str, line: u32, column: u32) -> Option<Declared> {
+    Some(Declared {
+        file: file.to_owned(),
+        line,
+        column,
+    })
+}
+
+#[test]
+fn a_point_selects_the_object_declared_where_the_preview_says() {
+    let f = Fixture::new();
+    f.call("preview_open", json!({ "doc": "Shell.qml" }))
+        .unwrap();
+    f.calls();
+    // `    Text { text: "x" }` is line 6; its type name starts at column 5.
+    f.seen.lock().unwrap().declared = declared("Shell.qml", 6, 5);
+    let out = f
+        .call(
+            "node_select",
+            json!({ "doc": "Shell.qml", "at": { "x": 12.5, "y": 40 } }),
+        )
+        .unwrap();
+    assert_eq!(f.calls(), ["pick 12.5,40"]);
+    assert_eq!(out["selection"][0]["path"], "root/1");
+    assert_eq!(out["selection"][0]["type"], "Text");
+    // The enclosing `Column` starts on line 4, not where the Text does.
+    f.seen.lock().unwrap().declared = declared("Shell.qml", 4, 1);
+    let out = f
+        .call(
+            "node_select",
+            json!({ "doc": "Shell.qml", "at": { "x": 1, "y": 1 } }),
+        )
+        .unwrap();
+    assert_eq!(out["selection"][0]["path"], "root");
+}
+
+#[test]
+fn a_point_after_a_burst_is_read_from_the_last_edit() {
+    let f = Fixture::new();
+    f.call("preview_open", json!({ "doc": "Shell.qml" }))
+        .unwrap();
+    let mut last_write = std::time::Instant::now();
+    for i in 0..20 {
+        last_write = std::time::Instant::now();
+        set_text(&f, i);
+    }
+    f.seen.lock().unwrap().declared = declared("Shell.qml", 6, 5);
+    let out = f
+        .call(
+            "node_select",
+            json!({ "doc": "Shell.qml", "at": { "x": 1, "y": 1 } }),
+        )
+        .unwrap();
+    // The line the preview names is of the text the session holds: the
+    // reload of the last write came before the question.
+    let calls = f.calls();
+    assert_eq!(calls.last().unwrap(), "pick 1,1");
+    assert!(*f.seen.lock().unwrap().reloads.last().unwrap() >= last_write);
+    assert_eq!(out["selection"][0]["path"], "root/1");
+    assert_within_the_budget(&f);
+}
+
+#[test]
+fn a_point_with_nothing_there_clears_the_selection() {
+    let f = Fixture::new();
+    f.call("preview_open", json!({ "doc": "Shell.qml" }))
+        .unwrap();
+    f.call(
+        "node_select",
+        json!({ "doc": "Shell.qml", "nodes": [{ "path": "root/1" }] }),
+    )
+    .unwrap();
+    let out = f
+        .call(
+            "node_select",
+            json!({ "doc": "Shell.qml", "at": { "x": 5000, "y": 5000 } }),
+        )
+        .unwrap();
+    assert_eq!(out["selection"], json!([]));
+}
+
+#[test]
+fn a_point_in_a_file_of_a_block_selects_in_that_file() {
+    let f = Fixture::new();
+    f.call("preview_open", json!({ "doc": "Shell.qml" }))
+        .unwrap();
+    f.seen.lock().unwrap().declared = declared("App/Media/Player.qml", 3, 1);
+    let out = f
+        .call(
+            "node_select",
+            json!({ "doc": "Shell.qml", "at": { "x": 1, "y": 1 } }),
+        )
+        .unwrap();
+    assert_eq!(out["selection"][0]["doc"], "App/Media/Player.qml");
+    assert_eq!(out["selection"][0]["type"], "Item");
+    f.seen.lock().unwrap().declared = declared("/elsewhere/Thing.qml", 1, 1);
+    let refused = f
+        .call(
+            "node_select",
+            json!({ "doc": "Shell.qml", "at": { "x": 1, "y": 1 } }),
+        )
+        .unwrap_err();
+    assert_eq!(refused["details"]["kind"], "not_a_document");
+}
+
+#[test]
+fn a_point_needs_a_preview_that_shows_the_text() {
+    let f = Fixture::new();
+    let refused = f
+        .call(
+            "node_select",
+            json!({ "doc": "Shell.qml", "at": { "x": 1, "y": 1 } }),
+        )
+        .unwrap_err();
+    assert_eq!(refused["details"]["kind"], "no_preview");
+    f.call("preview_open", json!({ "doc": "Shell.qml" }))
+        .unwrap();
+    let refused = f
+        .call(
+            "node_select",
+            json!({ "doc": "Other.qml", "at": { "x": 1, "y": 1 } }),
+        )
+        .unwrap_err();
+    assert_eq!(refused["details"]["kind"], "no_preview");
+    f.seen.lock().unwrap().fail_next = true;
+    f.call(
+        "binding_set",
+        json!({ "doc": "Shell.qml", "generation": 1, "node": { "path": "root/1" }, "name": "text", "value": "\"y\"" }),
+    )
+    .unwrap();
+    f.seen.lock().unwrap().declared = declared("Shell.qml", 6, 5);
+    let refused = f
+        .call(
+            "node_select",
+            json!({ "doc": "Shell.qml", "at": { "x": 1, "y": 1 } }),
+        )
+        .unwrap_err();
+    assert_eq!(refused["details"]["kind"], "preview_behind");
 }

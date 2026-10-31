@@ -658,3 +658,24 @@ fn a_document_made_again_does_not_start_its_generations_over() {
     assert!(matches!(err, Error::Stale { .. }), "{err:?}");
     assert_eq!(s.text("N.qml").unwrap().0, "Item {\n}\n");
 }
+
+#[test]
+fn a_place_names_the_object_declared_there_not_its_parent() {
+    let mut s = Session::open(Box::new(MemStore::new([(
+        "Main.qml".to_owned(),
+        "import QtQuick\n\nItem {\n    Row { Text { text: \"é\" } Text {} }\n}\n".to_owned(),
+    )])));
+    let ty = |s: &mut Session, line, column| {
+        s.declared_at("Main.qml", line, column)
+            .map(|(_, n)| n.path.to_string())
+    };
+    assert_eq!(ty(&mut s, 3, 1).unwrap(), "root");
+    assert_eq!(ty(&mut s, 4, 5).unwrap(), "root/0");
+    assert_eq!(ty(&mut s, 4, 11).unwrap(), "root/0/0");
+    // Columns count characters: `é` is one.
+    assert_eq!(ty(&mut s, 4, 30).unwrap(), "root/0/1");
+    assert!(matches!(ty(&mut s, 4, 12), Err(Error::NotFound { .. })));
+    // Without a column the line must say which.
+    assert_eq!(ty(&mut s, 3, 0).unwrap(), "root");
+    assert!(matches!(ty(&mut s, 4, 0), Err(Error::Invalid(_))));
+}

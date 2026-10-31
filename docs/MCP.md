@@ -22,7 +22,9 @@ Budgets follow ARCHITECTURE.md section 19.6: tools listed in a fixed order,
 descriptions ≤ 300 characters, responses ≤ 40 KB with cursors, ≤ 25 tools
 on one server. Studio's list is 24. Capabilities as in section 19.7:
 `inspect` (read), `mutate` (edit documents), `fs` (write files outside
-documents: export), `run` (start previews).
+documents: export), `run` (start previews). They are granted at launch with
+`--caps`: by default `inspect` on a running window's endpoint and
+`inspect,mutate` for the client that started `studio --mcp` on stdio.
 
 ## Studio server (`studio --mcp`)
 
@@ -35,7 +37,7 @@ documents: export), `run` (start previews).
 | 5 | `document_new` | Create a QML document; undo removes it | mutate |
 | 6 | `document_edit` | Replace a byte range of a document's text, as the code view does | mutate |
 | 7 | `node_find` | Find nodes by `id`, type, property value or text; returns addresses | inspect |
-| 8 | `node_select` | Set Studio's selection (shown on the canvas and in the inspector) | inspect |
+| 8 | `node_select` | Set Studio's selection (shown on the canvas and in the inspector) by addresses or by a point `at` in the preview | inspect |
 | 9 | `node_inspect` | A node's bindings and properties with source spans, its type's members, its states | inspect |
 | 10 | `node_insert` | Insert QML text or a block instance as a child at an index | mutate |
 | 11 | `node_move` | Move a node to a parent and index (reparent or reorder) | mutate |
@@ -123,11 +125,12 @@ shows it; the watcher's quiet time is not on that path.
 
 - DECISION: Studio asks for at most 8 reloads a second (the inspector
   answers at most 20 calls a second, and a refused call waits a second to
-  retry). A write past the budget is left to the child's watcher, and the
-  next look at the preview (`preview_state`, `preview_screenshot`,
-  `preview_events`) asks for the reload first, so what an agent reads is
-  never older than what it wrote. A burst of edits costs no stalls; its
-  last state is what shows.
+  retry). A write past the budget is left to the child's watcher; the
+  reload it missed is asked for when the budget next allows (one timer per
+  burst, which tells a window as any change does) or before the next look
+  at the preview (`preview_state`, `preview_screenshot`, `preview_events`),
+  whichever comes first. What an agent reads is never older than what it
+  wrote, and a burst's last state is what shows.
 
 - DECISION: targets are a parameter of `preview_open`, not a tool:
   `desktop` 1280×800, `tablet` 820×1180, `phone` 390×844, or any `size`
@@ -150,6 +153,31 @@ shows it; the watcher's quiet time is not on that path.
 - DECISION: starting a preview needs `run` (it runs the project's code);
   looking at one that runs (`preview_screenshot`, `preview_events`) needs
   only `inspect`.
+
+## Selection from the canvas (S3)
+
+`node_select {doc, at: {x, y}}` selects by a point of the open preview of
+`doc`, in its logical pixels, instead of by `nodes`. Studio asks the
+preview which object is topmost there and where it is declared (the
+inspector's `app_inspect` with the target `at=X,Y`, whose answer has
+`source {file, line, column}`, the place of the object's type name, as
+the engine names an object's declaration in its warnings), then selects
+the object whose type name starts there: the object itself, not one
+enclosing it. An object of a block's own file answers that file; the root
+of a component file and an inline component's instance answer where they
+are used.
+
+- DECISION: no new tool. A point is another way to name what `node_select`
+  selects, and the list stays within 25.
+- DECISION: the selected object may be in another document (a block's own
+  file); the answer's `doc` says which. A place outside the project's
+  documents is refused (`not_found`, `details.kind: "not_a_document"`).
+- DECISION: refused (`not_actionable`) with no preview of `doc`
+  (`no_preview`) and while the preview's last reload failed
+  (`preview_behind`): it then runs older text, whose lines name other
+  objects. A point that names no object of a document (the window's own
+  content, under every stack) clears the selection.
+- Giving both `nodes` and `at` is `invalid_argument`.
 
 ## Prompts
 

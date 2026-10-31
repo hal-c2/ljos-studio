@@ -76,6 +76,21 @@ Feature: The document tools reach the project's documents and nothing else
       {"doc": "assets/New.qml"}
       """
     Then the agent is refused with "path_denied"
+    And nothing was written outside the project
+
+  Scenario: A link to a file outside the project is not followed
+    Given the link "Out.qml" leads to the file "Theirs.qml" outside the project
+    When the agent calls the tool "document_text" with:
+      """json
+      {"doc": "Out.qml"}
+      """
+    Then the agent is refused with "path_denied"
+    When the agent calls the tool "document_edit" with:
+      """json
+      {"doc": "Out.qml", "generation": 1, "text": "changed"}
+      """
+    Then the agent is refused with "path_denied"
+    And nothing was written outside the project
 
   Scenario: A link does not lead into a directory a plain path cannot go
     Given the file ".git/Hook.qml":

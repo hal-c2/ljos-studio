@@ -493,6 +493,42 @@ impl Session {
         }
     }
 
+    /// The object whose type name starts at `line`, `column` (one-based,
+    /// in characters, as [`qml_syntax::position`] counts) of `path`: the
+    /// one declared there, never one enclosing it. A `column` of 0 means
+    /// only the line is known, and then the line must hold one object.
+    pub fn declared_at(
+        &mut self,
+        path: &str,
+        line: usize,
+        column: usize,
+    ) -> Result<(String, Node), Error> {
+        let (tree, _) = self.tree(path)?;
+        let text = &self.doc(path)?.text;
+        let at = |node: &Node| {
+            let start = u32::try_from(node.start).unwrap_or(u32::MAX);
+            qml_syntax::position(text, start)
+        };
+        let mut found: Vec<(String, Node)> = tree
+            .into_iter()
+            .filter(|(_, node)| {
+                let (l, c) = at(node);
+                l == line && (column == 0 || c == column)
+            })
+            .collect();
+        match found.len() {
+            1 => Ok(found.remove(0)),
+            0 => Err(Error::NotFound {
+                doc: path.to_owned(),
+                address: format!("declared at {line}:{column}"),
+            }),
+            _ => Err(Error::Invalid(format!(
+                "line {line} of `{path}` declares {} objects; the column says which",
+                found.len()
+            ))),
+        }
+    }
+
     fn check_generation(&mut self, path: &str, given: Option<u64>) -> Result<(), Error> {
         self.sync(path)?;
         let current = self.doc(path)?.generation;

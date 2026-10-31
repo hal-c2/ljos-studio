@@ -7,9 +7,12 @@
 //! changes between versions without a golden-file diff (DESIGN.md, MCP.md).
 
 mod blocks;
+#[cfg(feature = "http")]
+pub mod endpoint;
 pub mod preview;
 mod preview_tools;
 mod tools;
+pub mod view;
 
 use std::{
     path::{Path, PathBuf},
@@ -33,6 +36,28 @@ pub struct Studio {
     pub session: Session,
     previews: preview::Shared,
     hosts: Option<preview::HostFactory>,
+    watchers: Watchers,
+}
+
+/// Told that what a window shows may have changed. Called with the
+/// session locked, on whatever thread changed it: a watcher only notes it
+/// and lets its own thread read the session later.
+pub type Watcher = Arc<dyn Fn() + Send + Sync>;
+
+#[derive(Clone, Default)]
+struct Watchers(Arc<Mutex<Vec<Watcher>>>);
+
+impl Watchers {
+    fn tell(&self) {
+        let watchers = self
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
+        for w in watchers {
+            w();
+        }
+    }
 }
 
 impl std::fmt::Debug for Studio {
@@ -59,6 +84,7 @@ impl Studio {
             session: Session::open(store),
             previews: preview::Shared::default(),
             hosts: None,
+            watchers: Watchers::default(),
         };
         studio.follow();
         studio
@@ -71,11 +97,37 @@ impl Studio {
         self
     }
 
-    /// The open preview follows every write of the session.
+    /// The open preview follows every write of the session, and then the
+    /// watchers hear of it. A write past the reload budget is caught up
+    /// when the budget allows, so a window shows the last state of a burst
+    /// without anybody having to look first.
     fn follow(&mut self) {
         let previews = self.previews.clone();
-        self.session
-            .on_write(move |_| preview::lock(&previews).wrote());
+        let watchers = self.watchers.clone();
+        self.session.on_write(move |_| {
+            let catch_up = preview::lock(&previews).wrote();
+            watchers.tell();
+            if let Some(at) = catch_up {
+                let (previews, watchers) = (previews.clone(), watchers.clone());
+                // One sleeper per burst, which ends: a timer, not a poll.
+                std::thread::spawn(move || {
+                    std::thread::sleep(at.saturating_duration_since(std::time::Instant::now()));
+                    preview::lock(&previews).catch_up();
+                    watchers.tell();
+                });
+            }
+        });
+    }
+
+    /// Calls `watcher` after every change a window shows: each write of the
+    /// session, whoever made it, a new selection, a preview started,
+    /// changed or reloaded, another project opened.
+    pub fn watch(&mut self, watcher: Watcher) {
+        self.watchers
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .push(watcher);
     }
 
     /// The project's directory, when it has one on disk.
@@ -135,6 +187,14 @@ impl Studio {
     }
 }
 
+/// The tools that change what a window shows without writing a file.
+const SHOWN_WITHOUT_WRITING: &[&str] = &[
+    "project_open",
+    "node_select",
+    "preview_open",
+    "preview_state",
+];
+
 /// What `studio --mcp` serves.
 pub struct StudioServer {
     studio: Arc<Mutex<Studio>>,
@@ -171,11 +231,39 @@ impl StudioServer {
         args: serde_json::Value,
     ) -> Result<ToolReply, SurfaceError> {
         if name == "preview_screenshot" {
-            let def = self.tools.check(name, ctx)?;
-            let per_copy = def.per_copy_bytes();
-            return preview_tools::screenshot(&self.studio, args).map(|r| r.capped(per_copy));
+            return self.picture(ctx, args, preview_tools::Picturing::Latest);
         }
-        self.tools.call(name, ctx, args).0.map(ToolReply::from)
+        let out = self.tools.call(name, ctx, args).0.map(ToolReply::from);
+        // Writes tell the watchers as they happen (`follow`); these change
+        // what a window shows without writing.
+        if out.is_ok() && SHOWN_WITHOUT_WRITING.contains(&name) {
+            lock(&self.studio).watchers.tell();
+        }
+        out
+    }
+}
+
+impl StudioServer {
+    /// `preview_screenshot` for a window: what the preview shows now, even
+    /// if a burst's last writes are still to come. Unlike an agent, a window
+    /// never waits for the reload budget: it fetches again after the catch-up.
+    pub fn shown_picture(
+        &self,
+        ctx: &CallCtx,
+        args: serde_json::Value,
+    ) -> Result<ToolReply, SurfaceError> {
+        self.picture(ctx, args, preview_tools::Picturing::AsShown)
+    }
+
+    fn picture(
+        &self,
+        ctx: &CallCtx,
+        args: serde_json::Value,
+        picturing: preview_tools::Picturing,
+    ) -> Result<ToolReply, SurfaceError> {
+        let def = self.tools.check("preview_screenshot", ctx)?;
+        let per_copy = def.per_copy_bytes();
+        preview_tools::screenshot(&self.studio, args, picturing).map(|r| r.capped(per_copy))
     }
 }
 

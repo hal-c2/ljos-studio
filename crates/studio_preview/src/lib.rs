@@ -21,7 +21,7 @@ use std::{
 use ljos_child::Reaped;
 use serde_json::{Map, Value, json};
 use studio_core::preview::{
-    LogLine, Picture, PreviewError, PreviewHost, PreviewSpec, Reload, Size,
+    Declared, LogLine, Picture, PreviewError, PreviewHost, PreviewSpec, Reload, Size,
 };
 
 use inspector::{Answer, Fault, Inspector};
@@ -51,6 +51,8 @@ struct Running {
     child: Reaped,
     inspector: Inspector,
     log: PathBuf,
+    /// The last generation a reload was reported applied at.
+    reported: u64,
 }
 
 impl std::fmt::Debug for NativeHost {
@@ -90,6 +92,11 @@ impl NativeHost {
     /// The `ljos` program: `LJOS` when set, else `ljos` on the `PATH`.
     pub fn default_program() -> PathBuf {
         std::env::var_os("LJOS").map_or_else(|| PathBuf::from("ljos"), PathBuf::from)
+    }
+
+    fn reported(&mut self, answer: &Value) -> Result<Reload, PreviewError> {
+        let running = self.running()?;
+        since(answer, &mut running.reported)
     }
 
     fn running(&mut self) -> Result<&mut Running, PreviewError> {
@@ -165,6 +172,7 @@ impl NativeHost {
             child,
             inspector,
             log,
+            reported: 0,
         })
     }
 }
@@ -193,13 +201,13 @@ impl PreviewHost for NativeHost {
 
     fn reload(&mut self) -> Result<Reload, PreviewError> {
         let answer = self.call("app_reload", json!({}))?;
-        reload(&answer.structured)
+        self.reported(&answer.structured)
     }
 
     fn alias(&mut self, module: &str, dir: Option<&str>) -> Result<Reload, PreviewError> {
         let dir = dir.map(|d| self.root.join(d).display().to_string());
         let answer = self.call("app_alias", json!({ "module": module, "dir": dir }))?;
-        reload(&answer.structured)
+        self.reported(&answer.structured)
     }
 
     fn resize(&mut self, size: Size) -> Result<(), PreviewError> {
@@ -282,11 +290,85 @@ impl PreviewHost for NativeHost {
         self.running().map(|_| ())
     }
 
+    fn pick(&mut self, x: f64, y: f64) -> Result<Option<Declared>, PreviewError> {
+        let answer = match self.call("app_inspect", json!({ "target": format!("at={x},{y}") })) {
+            Ok(answer) => answer,
+            Err(PreviewError::Refused { code, .. })
+                if code == "not_found" || code == "no_match" =>
+            {
+                return Ok(None);
+            }
+            Err(e) => return Err(e),
+        };
+        let source = &answer.structured["source"];
+        let Some(file) = source["file"].as_str() else {
+            return Ok(None);
+        };
+        let number = |name: &str| {
+            source[name]
+                .as_u64()
+                .and_then(|n| u32::try_from(n).ok())
+                .unwrap_or(0)
+        };
+        Ok(Some(Declared {
+            file: self.document(file),
+            line: number("line"),
+            column: number("column"),
+        }))
+    }
+
     fn close(&mut self) {
         if let Some(mut running) = self.running.take() {
             let _ = running.child.stop();
         }
     }
+}
+
+impl NativeHost {
+    /// A file the child names (a `file:` URL, as its engine does) as the
+    /// store names it: relative to the project when it is below it.
+    fn document(&self, file: &str) -> String {
+        let Some(path) = file.strip_prefix("file://") else {
+            return file.to_owned();
+        };
+        let path = PathBuf::from(percent_decoded(path));
+        let root = self
+            .root
+            .canonicalize()
+            .unwrap_or_else(|_| self.root.clone());
+        let path = path.canonicalize().unwrap_or(path);
+        match path.strip_prefix(&root) {
+            Ok(relative) => relative
+                .components()
+                .map(|c| c.as_os_str().to_string_lossy())
+                .collect::<Vec<_>>()
+                .join("/"),
+            Err(_) => file.to_owned(),
+        }
+    }
+}
+
+/// A URL path with its `%XX` escapes turned back into bytes.
+fn percent_decoded(path: &str) -> String {
+    let bytes = path.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        let hex = |b: u8| char::from(b).to_digit(16);
+        if bytes[i] == b'%'
+            && let (Some(hi), Some(lo)) = (
+                bytes.get(i + 1).copied().and_then(hex),
+                bytes.get(i + 2).copied().and_then(hex),
+            )
+        {
+            out.push(u8::try_from(hi * 16 + lo).unwrap_or(b'%'));
+            i += 3;
+            continue;
+        }
+        out.push(bytes[i]);
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
 }
 
 /// The inspector's locator for the object with the QML `id`.
@@ -318,6 +400,23 @@ fn value_of(row: &Value) -> Value {
     }
 }
 
+/// What a reload's answer says the preview did since the one `reported`
+/// last told of. The preview watches the files too, and its watcher may
+/// apply a save before the reload asked for it arrives; that reload then
+/// answers `unchanged` at a generation nobody was told of, which was
+/// applied all the same.
+fn since(answer: &Value, reported: &mut u64) -> Result<Reload, PreviewError> {
+    let generation = answer["generation"].as_u64().unwrap_or(0);
+    let outcome = match reload(answer)? {
+        Reload::Unchanged if generation > *reported => Reload::Applied { generation },
+        outcome => outcome,
+    };
+    if let Reload::Applied { generation } = outcome {
+        *reported = generation;
+    }
+    Ok(outcome)
+}
+
 fn reload(answer: &Value) -> Result<Reload, PreviewError> {
     let generation = answer["generation"].as_u64().unwrap_or(0);
     match answer["outcome"].as_str() {
@@ -340,4 +439,34 @@ fn tail(log: &Path) -> String {
         return "it wrote nothing".to_owned();
     }
     lines.into_iter().rev().collect::<Vec<_>>().join("\n")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_save_the_watcher_applied_first_is_reported_applied() {
+        let mut reported = 3;
+        let answer = json!({ "outcome": "unchanged", "generation": 4 });
+        assert_eq!(
+            since(&answer, &mut reported).unwrap(),
+            Reload::Applied { generation: 4 }
+        );
+        assert_eq!(reported, 4);
+        // Told of once: asked again, nothing changed.
+        assert_eq!(since(&answer, &mut reported).unwrap(), Reload::Unchanged);
+    }
+
+    #[test]
+    fn an_applied_reload_is_what_is_reported_next() {
+        let mut reported = 0;
+        let applied = json!({ "outcome": "applied", "generation": 1 });
+        assert_eq!(
+            since(&applied, &mut reported).unwrap(),
+            Reload::Applied { generation: 1 }
+        );
+        let unchanged = json!({ "outcome": "unchanged", "generation": 1 });
+        assert_eq!(since(&unchanged, &mut reported).unwrap(), Reload::Unchanged);
+    }
 }

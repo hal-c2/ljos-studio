@@ -10,12 +10,21 @@ if [ -z "${LJOS:-}" ]; then
   LJOS="${CARGO_TARGET_DIR:-$ljos_ui/target}/debug/ljos"
 fi
 export LJOS
+# Each runner takes the scenarios that are its own: studio_mcp's speak to
+# the tools, studio_blocks' (@ui) drive Studio's window. Both run, so one
+# that fails does not hide what the other says.
+failed=0
+run() {
+  STUDIO_FEATURES="$1" cargo test -p studio_mcp --test features || failed=1
+  STUDIO_FEATURES="$1" cargo test -p studio_blocks --test ui || failed=1
+}
 if [ $# -eq 0 ]; then
-  STUDIO_FEATURES="$root/features" cargo test -p studio_mcp --test features
+  run "$root/features"
   # The server through its stdio front door, with a real preview.
-  cargo test -p studio --test stdio -- --ignored
+  cargo test -p studio --test stdio -- --ignored || failed=1
 else
   for path in "$@"; do
-    STUDIO_FEATURES="$(realpath "$path")" cargo test -p studio_mcp --test features
+    run "$(realpath "$path")"
   done
 fi
+exit $failed
