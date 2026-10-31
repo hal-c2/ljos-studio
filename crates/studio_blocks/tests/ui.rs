@@ -641,6 +641,15 @@ fn the_file(w: &mut UiWorld, name: String, step: &Step) -> StepResult {
     std::fs::write(path, file_text(step)?).map_err(|e| e.to_string())
 }
 
+#[given(regex = r"^(\d+) more documents$")]
+fn more_documents(w: &mut UiWorld, count: usize) -> StepResult {
+    for n in 0..count {
+        let path = w.dir.path().join(format!("More{n}.qml"));
+        std::fs::write(path, "Item {}\n").map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
 #[given("Studio's window shows the project")]
 fn shows_the_project(w: &mut UiWorld) -> StepResult {
     w.open()
@@ -966,6 +975,27 @@ fn inspector_button_disabled(w: &mut UiWorld, name: String) -> StepResult {
         .any(|s| s == "disabled")
         .then_some(())
         .ok_or_else(|| format!("{name:?} is {:?}", button.states))
+}
+
+#[then(regex = r#"^the inspector's new property row holds "(.*)"$"#)]
+fn new_row_holds(w: &mut UiWorld, want: String) -> StepResult {
+    let field = w
+        .window()?
+        .node("Inspector", Some("textinput"), "New property")?;
+    (field.value == want)
+        .then_some(())
+        .ok_or_else(|| format!("the row holds {:?}", field.value))
+}
+
+#[then(regex = r#"^the documents panel shows (a|no) scroll bar$"#)]
+fn documents_scroll(w: &mut UiWorld, want: String) -> StepResult {
+    let shown = w
+        .window()?
+        .node("Documents", None, "Scroll the documents")
+        .is_ok();
+    (shown == (want == "a"))
+        .then_some(())
+        .ok_or_else(|| format!("a scroll bar shown: {shown}"))
 }
 
 #[then(regex = r#"^the inspector's comment box holds "(.*)"$"#)]

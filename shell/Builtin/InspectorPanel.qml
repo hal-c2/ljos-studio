@@ -38,6 +38,17 @@ Panel {
         return {ok: false}
     }
 
+    // The new-property row's edit: answered, the row is emptied for the next.
+    property bool rowEditing: false
+
+    function fromRow(edit) {
+        rowEditing = true
+        edit()
+        // Stopped before it was asked: there will be no answer.
+        if (refusal.text !== "")
+            rowEditing = false
+    }
+
     function set(name, text) {
         if (picked !== "") {
             record(name, text)
@@ -168,10 +179,16 @@ Panel {
                 panel.adding = false
                 newComment.text = ""
             }
+            if (panel.rowEditing && ["property_set", "binding_set", "state_edit"].includes(tool)) {
+                panel.rowEditing = false
+                newName.text = ""
+                newValue.text = ""
+            }
         }
         function onRefused(tool, error) {
             if (tool === "review")
                 panel.adding = false
+            panel.rowEditing = false
         }
     }
 
@@ -251,13 +268,13 @@ Panel {
                 text: "Set"
                 Accessible.name: "Set new property"
                 enabled: newName.text !== ""
-                onClicked: panel.set(newName.text, newValue.text)
+                onClicked: panel.fromRow(() => panel.set(newName.text, newValue.text))
             }
             Button {
                 text: "Bind"
                 Accessible.name: "Bind new property"
                 enabled: newName.text !== ""
-                onClicked: panel.bind(newName.text, newValue.text)
+                onClicked: panel.fromRow(() => panel.bind(newName.text, newValue.text))
             }
         }
 

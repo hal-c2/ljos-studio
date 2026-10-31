@@ -100,6 +100,7 @@ Panel {
     }
 
     ListView {
+        id: documentList
         objectName: "documents"
         anchors.fill: parent
         anchors.topMargin: maker.height + Spacing.xxs
@@ -107,6 +108,11 @@ Panel {
         model: panel.workspace.documents
         Accessible.role: Accessible.List
         Accessible.name: "Documents"
+        ScrollBar.vertical: ScrollBar {
+            Accessible.name: "Scroll the documents"
+            // Always there when there is more: nothing else says so.
+            policy: documentList.contentHeight > documentList.height ? ScrollBar.AlwaysOn : ScrollBar.AlwaysOff
+        }
 
         delegate: ItemDelegate {
             required property string modelData
