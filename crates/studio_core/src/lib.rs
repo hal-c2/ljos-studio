@@ -28,7 +28,9 @@ pub use outline::{Binding, Node};
 pub use qml_edit::{Change, Error as EditError, NodePath};
 pub use slots::Mode;
 pub use states::{ChangeInfo, StateEdit, StateInfo, TransitionInfo, Variants};
-pub use store::{FsStore, MemStore, Store, StoreError};
+#[cfg(feature = "fs")]
+pub use store::FsStore;
+pub use store::{MemStore, Store, StoreError, inside, listed};
 
 use address::{Tracked, find_by_key};
 use history::History;

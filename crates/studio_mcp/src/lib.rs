@@ -11,6 +11,7 @@ mod blocks;
 pub mod endpoint;
 pub mod preview;
 mod preview_tools;
+pub mod timer;
 mod tools;
 pub mod view;
 
@@ -20,12 +21,18 @@ use std::{
 };
 
 use ljos_mcp_core::{
-    CallCtx, CapSet, ErrorCode, McpSurface, ServerMeta, SurfaceError, ToolFuture, ToolRegistry,
-    ToolReply,
+    CallCtx, ErrorCode, McpSurface, ServerMeta, SurfaceError, ToolFuture, ToolRegistry, ToolReply,
+};
+#[cfg(feature = "native")]
+use ljos_mcp_core::{
+    CapSet,
     glue::{RmcpServer, ServeError},
 };
 use serde_json::json;
-use studio_core::{Error, FsStore, Session, Store, StoreError};
+#[cfg(feature = "native")]
+use studio_core::FsStore;
+use studio_core::{Error, Session, Store, StoreError};
+use timer::Timer;
 
 /// The project a server has open.
 pub struct Studio {
@@ -35,8 +42,9 @@ pub struct Studio {
     project: String,
     pub session: Session,
     previews: preview::Shared,
-    hosts: Option<preview::HostFactory>,
+    hosts: Option<preview::Hosts>,
     watchers: Watchers,
+    timer: Arc<dyn Timer>,
 }
 
 /// Told that what a window shows may have changed. Called with the
@@ -71,29 +79,42 @@ impl std::fmt::Debug for Studio {
 
 impl Studio {
     /// Opens `workspace` itself as the project.
+    #[cfg(feature = "native")]
     pub fn open(workspace: impl Into<PathBuf>) -> Result<Self, StoreError> {
         let store = FsStore::new(workspace.into())?;
         let workspace = store.root().to_owned();
-        Ok(Self::new(workspace, Box::new(store)))
+        Ok(Self::new(
+            workspace,
+            Box::new(store),
+            Arc::new(timer::ThreadTimer::default()),
+        ))
     }
 
-    fn new(workspace: PathBuf, store: Box<dyn Store>) -> Self {
+    fn new(workspace: PathBuf, store: Box<dyn Store>, timer: Arc<dyn Timer>) -> Self {
         let mut studio = Self {
             workspace,
             project: ".".to_owned(),
             session: Session::open(store),
-            previews: preview::Shared::default(),
+            previews: Arc::new(Mutex::new(preview::Previews::new(timer.clone()))),
             hosts: None,
             watchers: Watchers::default(),
+            timer,
         };
         studio.follow();
         studio
     }
 
-    /// Previews of this project run on hosts `hosts` makes; without, the
-    /// preview tools say there is none.
+    /// Previews of this project run on hosts `hosts` makes in its
+    /// directory; without, the preview tools say there is none.
     pub fn with_previews(mut self, hosts: preview::HostFactory) -> Self {
-        self.hosts = Some(hosts);
+        self.hosts = Some(preview::Hosts::InDir(hosts));
+        self
+    }
+
+    /// Previews run on hosts `hosts` makes, which need no directory: they
+    /// get the project's files themselves (a web preview from the store).
+    pub fn with_preview_hosts(mut self, hosts: preview::StoreHostFactory) -> Self {
+        self.hosts = Some(preview::Hosts::Anywhere(hosts));
         self
     }
 
@@ -104,17 +125,20 @@ impl Studio {
     fn follow(&mut self) {
         let previews = self.previews.clone();
         let watchers = self.watchers.clone();
+        let timer = self.timer.clone();
         self.session.on_write(move |_| {
             let catch_up = preview::lock(&previews).wrote();
             watchers.tell();
-            if let Some(at) = catch_up {
+            if let Some(delay) = catch_up {
                 let (previews, watchers) = (previews.clone(), watchers.clone());
-                // One sleeper per burst, which ends: a timer, not a poll.
-                std::thread::spawn(move || {
-                    std::thread::sleep(at.saturating_duration_since(std::time::Instant::now()));
-                    preview::lock(&previews).catch_up();
-                    watchers.tell();
-                });
+                // One wake-up per burst, which ends: a timer, not a poll.
+                timer.after(
+                    delay,
+                    Box::new(move || {
+                        preview::lock(&previews).catch_up();
+                        watchers.tell();
+                    }),
+                );
             }
         });
     }
@@ -136,9 +160,10 @@ impl Studio {
     }
 
     /// A project held by any store (memory in tests, browser storage on the
-    /// web); `project_open` then cannot switch projects.
-    pub fn with_store(store: Box<dyn Store>) -> Self {
-        Self::new(PathBuf::new(), store)
+    /// web), its time and wake-ups from `timer`; `project_open` then cannot
+    /// switch projects.
+    pub fn with_store(store: Box<dyn Store>, timer: Arc<dyn Timer>) -> Self {
+        Self::new(PathBuf::new(), store, timer)
     }
 
     pub fn workspace(&self) -> &Path {
@@ -152,12 +177,8 @@ impl Studio {
     /// Opens the project at `relative` below the workspace, with a new
     /// session: handles and history of the last one end with it.
     pub fn switch(&mut self, relative: &str) -> Result<(), SurfaceError> {
-        if self.workspace.as_os_str().is_empty() {
-            return Err(SurfaceError::new(
-                ErrorCode::NotActionable,
-                "this server holds one project and cannot open another",
-            ));
-        }
+        // A path that leaves is denied whatever holds the project: the answer
+        // says what is wrong with the path before what this server lacks.
         let path = Path::new(relative);
         if path.components().any(|c| {
             !matches!(
@@ -168,6 +189,25 @@ impl Studio {
             return Err(SurfaceError::new(
                 ErrorCode::PathDenied,
                 format!("`{relative}` is outside the workspace"),
+            ));
+        }
+        self.switch_in_dir(path, relative)
+    }
+
+    #[cfg(not(feature = "native"))]
+    fn switch_in_dir(&mut self, _: &Path, _: &str) -> Result<(), SurfaceError> {
+        Err(SurfaceError::new(
+            ErrorCode::NotActionable,
+            "this server holds one project and cannot open another",
+        ))
+    }
+
+    #[cfg(feature = "native")]
+    fn switch_in_dir(&mut self, path: &Path, relative: &str) -> Result<(), SurfaceError> {
+        if self.workspace.as_os_str().is_empty() {
+            return Err(SurfaceError::new(
+                ErrorCode::NotActionable,
+                "this server holds one project and cannot open another",
             ));
         }
         let store = FsStore::new(self.workspace.join(path)).map_err(store_error)?;
@@ -309,6 +349,7 @@ impl McpSurface for StudioServer {
 }
 
 /// Serves on stdio until the client disconnects.
+#[cfg(feature = "native")]
 pub async fn serve_stdio(server: StudioServer, caps: CapSet) -> Result<(), ServeError> {
     RmcpServer::new(Arc::new(server), caps).serve_stdio().await
 }

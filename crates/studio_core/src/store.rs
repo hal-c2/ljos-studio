@@ -5,7 +5,9 @@
 //! three.
 
 use std::collections::BTreeMap;
+#[cfg(feature = "fs")]
 use std::io::Write as _;
+#[cfg(feature = "fs")]
 use std::path::{Component, Path, PathBuf};
 use std::sync::Mutex;
 
@@ -39,11 +41,13 @@ pub trait Store: Send + Sync {
 }
 
 /// A project directory on disk.
+#[cfg(feature = "fs")]
 #[derive(Debug)]
 pub struct FsStore {
     root: PathBuf,
 }
 
+#[cfg(feature = "fs")]
 impl FsStore {
     pub fn new(root: impl Into<PathBuf>) -> Result<Self, StoreError> {
         let root: PathBuf = root.into();
@@ -110,6 +114,27 @@ fn skipped(name: &str) -> bool {
     name.starts_with('.') || matches!(name, "target" | "node_modules" | "build")
 }
 
+/// Whether a project's listing has the file at `path` (`/` between parts):
+/// none below a directory a walk of the project leaves out. A store that
+/// holds files by path (browser storage) lists what a directory would.
+pub fn listed(path: &str) -> bool {
+    let mut parts: Vec<&str> = path.split('/').collect();
+    parts.pop();
+    !parts.into_iter().any(skipped)
+}
+
+/// Whether `path` names a place inside the project: plain names between
+/// `/`, never `..`, `.`, a root or an empty part. A `\` or a `:` would be a
+/// separator or a drive on some platform, so a project that leaves through
+/// one there cannot be made anywhere.
+pub fn inside(path: &str) -> bool {
+    !path.is_empty()
+        && path.split('/').all(|p| {
+            !p.is_empty() && p != "." && p != ".." && !p.contains('\\') && !p.contains(':')
+        })
+}
+
+#[cfg(feature = "fs")]
 fn walk(dir: &Path, root: &Path, extension: &str, out: &mut Vec<String>) {
     let Ok(read) = std::fs::read_dir(dir) else {
         return;
@@ -136,6 +161,7 @@ fn walk(dir: &Path, root: &Path, extension: &str, out: &mut Vec<String>) {
     }
 }
 
+#[cfg(feature = "fs")]
 impl Store for FsStore {
     fn list(&self, extension: &str) -> Vec<String> {
         let mut out = Vec::new();
@@ -267,7 +293,7 @@ impl Store for MemStore {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "fs"))]
 mod tests {
     use super::*;
 

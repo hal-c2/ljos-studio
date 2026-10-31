@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+#MISE description="Studio's scenarios that need no preview, against the wasm build in node"
+#MISE depends=["web:build"]
+set -euo pipefail
+# What the scenarios cannot set up by hand: two Studios in one wasm
+# instance, a preview's late answer racing the next request, and OPFS's
+# refusals, which node's memory backend does not make; the worker's answer
+# when a replaced Studio's close is refused, and a module that failed to load.
+node web/cores.mjs
+node web/opfs.mjs
+node web/bridge.mjs
+node web/worker.mjs
+node web/retry.mjs
+node web/features.mjs "$@"

@@ -1340,8 +1340,11 @@ fn main() {
         UiWorld::cucumber()
             .max_concurrent_scenarios(1)
             .fail_on_skipped()
+            // `@web` windows are the shell compiled by ljos-web, driven in a
+            // browser (`mise run web:shell`), not this window.
             .filter_run_and_exit(input, |feature, _, scenario| {
-                feature.tags.iter().chain(&scenario.tags).any(|t| t == "ui")
+                let mut tags = feature.tags.iter().chain(&scenario.tags);
+                tags.clone().any(|t| t == "ui") && !tags.any(|t| t == "web")
             }),
     );
 }

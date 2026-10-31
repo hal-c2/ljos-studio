@@ -8,6 +8,12 @@ license.workspace = true
 repository.workspace = true
 publish.workspace = true
 
+[features]
+default = ["fs"]
+# Projects in a directory on disk (`FsStore`). Off on the web, where the
+# browser's storage holds them (studio_web).
+fs = []
+
 [dependencies]
 qml_syntax.workspace = true
 qml_edit.workspace = true

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #MISE description="Studio's Gherkin scenarios, or only the given feature files or directories"
 set -euo pipefail
-root="$(cd "$(dirname "$0")/.." && pwd)"
+root="$(cd "$(dirname "$0")/../.." && pwd)"
 # Previews run `ljos`; unless LJOS names one, build it from the Ljós
 # checkout beside this one, the same one the path dependencies use.
 if [ -z "${LJOS:-}" ]; then
@@ -11,8 +11,9 @@ if [ -z "${LJOS:-}" ]; then
 fi
 export LJOS
 # Each runner takes the scenarios that are its own: studio_mcp's speak to
-# the tools, studio_blocks' (@ui) drive Studio's window. Both run, so one
-# that fails does not hide what the other says.
+# the tools, studio_blocks' (@ui) drive Studio's window; the wasm build's
+# (@web, and the tools' again) are `mise run features:web`. The two here
+# both run, so one that fails does not hide what the other says.
 failed=0
 run() {
   STUDIO_FEATURES="$1" cargo test -p studio_mcp --test features || failed=1

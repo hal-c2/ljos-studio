@@ -64,6 +64,7 @@ Feature: The document tools reach the project's documents and nothing else
       | .git/Hook.qml    |
       | build/Gen.qml    |
 
+  @disk
   Scenario: A link to a directory outside the project is not followed
     Given the link "assets" leads to a directory outside the project holding "Theirs.qml"
     When the agent calls the tool "document_text" with:
@@ -78,6 +79,7 @@ Feature: The document tools reach the project's documents and nothing else
     Then the agent is refused with "path_denied"
     And nothing was written outside the project
 
+  @disk
   Scenario: A link to a file outside the project is not followed
     Given the link "Out.qml" leads to the file "Theirs.qml" outside the project
     When the agent calls the tool "document_text" with:
@@ -92,6 +94,7 @@ Feature: The document tools reach the project's documents and nothing else
     Then the agent is refused with "path_denied"
     And nothing was written outside the project
 
+  @disk
   Scenario: A link does not lead into a directory a plain path cannot go
     Given the file ".git/Hook.qml":
       """qml
@@ -104,6 +107,7 @@ Feature: The document tools reach the project's documents and nothing else
       """
     Then the agent is refused with "path_denied"
 
+  @disk
   Scenario: A link inside the project to a document reaches that document
     Given the file "parts/Card.qml":
       """qml
@@ -116,6 +120,7 @@ Feature: The document tools reach the project's documents and nothing else
       """
     Then the answer's "/generation" is 1
 
+  @disk
   Scenario: A link and the document it leads to are one document
     Given the file "parts/Card.qml":
       """qml

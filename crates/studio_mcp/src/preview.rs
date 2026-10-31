@@ -16,9 +16,10 @@
 use std::{
     collections::VecDeque,
     sync::{Arc, Mutex, MutexGuard},
-    time::{Duration, Instant},
+    time::Duration,
 };
 
+use crate::timer::Timer;
 use studio_core::{
     Store,
     preview::{
@@ -34,6 +35,33 @@ pub(crate) fn reloads_per_second(calls_per_second: u32) -> usize {
 
 /// Makes a host for the project in a directory.
 pub type HostFactory = Arc<dyn Fn(&std::path::Path) -> Box<dyn PreviewHost> + Send + Sync>;
+
+/// Makes a host for a project that is not in a directory (browser storage):
+/// the host gets the files from wherever the project's store is.
+pub type StoreHostFactory = Arc<dyn Fn() -> Box<dyn PreviewHost> + Send + Sync>;
+
+/// Where a server's previews come from.
+#[derive(Clone)]
+pub(crate) enum Hosts {
+    /// A host that runs the project from its directory (a child process).
+    InDir(HostFactory),
+    /// A host that needs no directory.
+    Anywhere(StoreHostFactory),
+}
+
+impl Hosts {
+    /// A host for the project at `dir`, when this kind of host can run it.
+    pub fn make(&self, dir: Option<&std::path::Path>) -> Option<Box<dyn PreviewHost>> {
+        match self {
+            Hosts::InDir(f) => dir.map(|d| f(d)),
+            Hosts::Anywhere(f) => Some(f()),
+        }
+    }
+
+    pub fn runs(&self, dir: Option<&std::path::Path>) -> bool {
+        matches!(self, Hosts::Anywhere(_)) || dir.is_some()
+    }
+}
 
 /// Whether the blocks are the app's own or its mock modules'.
 #[derive(
@@ -53,36 +81,38 @@ pub(crate) struct Open {
     pub state: State,
     /// The aliases in force: empty when live.
     pub mocked: Vec<Alias>,
-    /// When the last reloads were answered, oldest first, within the last
-    /// second.
-    pub reloads: VecDeque<Instant>,
+    /// When the last reloads were answered (the timer's time), oldest
+    /// first, within the last second.
+    pub reloads: VecDeque<Duration>,
     /// A write was not reloaded: the next reading asks for it.
     pub behind: bool,
 }
 
-#[derive(Default)]
 pub(crate) struct Previews {
     pub open: Option<Open>,
     pub events: Vec<PreviewEvent>,
     /// The host's log mark already read into `events`.
     pub log_mark: u64,
+    pub timer: Arc<dyn Timer>,
 }
 
 impl Open {
-    /// When the budget next allows a reload; `None` when it does now.
-    fn spent_until(&mut self) -> Option<Instant> {
-        let now = Instant::now();
+    /// How long from `now` (the timer's time) until the budget next allows
+    /// a reload; `None` when it does now.
+    fn spent_until(&mut self, now: Duration) -> Option<Duration> {
         while self
             .reloads
             .front()
-            .is_some_and(|at| now.duration_since(*at) >= Duration::from_secs(1))
+            .is_some_and(|at| now.saturating_sub(*at) >= Duration::from_secs(1))
         {
             self.reloads.pop_front();
         }
         if self.reloads.len() < reloads_per_second(self.host.calls_per_second()) {
             return None;
         }
-        self.reloads.front().map(|at| *at + Duration::from_secs(1))
+        self.reloads
+            .front()
+            .map(|at| (*at + Duration::from_secs(1)).saturating_sub(now))
     }
 }
 
@@ -95,26 +125,47 @@ pub(crate) fn lock(p: &Mutex<Previews>) -> MutexGuard<'_, Previews> {
 /// The previews with every write shown, for a reader that names what it
 /// reads by the session's text: waits for the budget if a burst spent it.
 /// Called with the session locked, so no later write can put it behind again.
+///
+/// A timer that cannot wait (a page's one thread) reloads past the budget
+/// instead: the budget is only Studio's pace there, and a reader that named
+/// the last write must not be shown the one before it.
 pub(crate) fn caught_up(p: &Mutex<Previews>) -> MutexGuard<'_, Previews> {
     loop {
         let mut previews = lock(p);
-        let Some(until) = previews.catch_up() else {
+        let Some(delay) = previews.catch_up() else {
             return previews;
         };
+        let timer = Arc::clone(&previews.timer);
         // Not holding the previews: the timer's catch-up may get there first.
         drop(previews);
-        std::thread::sleep(until.saturating_duration_since(Instant::now()));
+        if !timer.wait(delay) {
+            let mut previews = lock(p);
+            if previews.open.as_ref().is_some_and(|open| open.behind) {
+                previews.reload();
+            }
+            return previews;
+        }
     }
 }
 
 impl Previews {
+    pub fn new(timer: Arc<dyn Timer>) -> Self {
+        Self {
+            open: None,
+            events: Vec::new(),
+            log_mark: 0,
+            timer,
+        }
+    }
+
     /// After a file was written: the open preview shows it now, or, in a
     /// burst, once its watcher sees the file or somebody reads it. In a
     /// burst, the first write past the budget answers when the budget next
-    /// allows a reload, for the caller to catch up then.
-    pub fn wrote(&mut self) -> Option<Instant> {
+    /// allows a reload (how long from now), for the caller to catch up then.
+    pub fn wrote(&mut self) -> Option<Duration> {
+        let now = self.timer.now();
         let open = self.open.as_mut()?;
-        if let Some(until) = open.spent_until() {
+        if let Some(until) = open.spent_until(now) {
             let first = !std::mem::replace(&mut open.behind, true);
             return first.then_some(until);
         }
@@ -123,14 +174,15 @@ impl Previews {
     }
 
     /// The reload a burst of writes left out, if the budget allows it now.
-    /// If not, answers when it will; the preview stays behind and the timer
-    /// [`wrote`](Self::wrote) asked for is still to come.
-    pub fn catch_up(&mut self) -> Option<Instant> {
+    /// If not, answers how long from now it will; the preview stays behind
+    /// and the timer [`wrote`](Self::wrote) asked for is still to come.
+    pub fn catch_up(&mut self) -> Option<Duration> {
+        let now = self.timer.now();
         let open = self.open.as_mut()?;
         if !open.behind {
             return None;
         }
-        if let Some(until) = open.spent_until() {
+        if let Some(until) = open.spent_until(now) {
             return Some(until);
         }
         self.reload();
@@ -141,7 +193,7 @@ impl Previews {
         let Some(open) = &mut self.open else {
             return;
         };
-        let started = Instant::now();
+        let started = self.timer.now();
         let reload = open.host.reload();
         // Only now: a host that panics has not shown the write, and the lock
         // outlives the panic for the next reader to catch up.
@@ -150,11 +202,11 @@ impl Previews {
         // Stamped once answered: however long the call took, the reload the
         // budget allows a second after this reaches the inspector more than
         // a second after this one did.
-        open.reloads.push_back(Instant::now());
+        open.reloads.push_back(self.timer.now());
         let event = match reload {
             Ok(Reload::Applied { generation }) => PreviewEvent::Reloaded {
                 generation,
-                ms: ms(started.elapsed()),
+                ms: ms(self.timer.now().saturating_sub(started)),
             },
             Ok(Reload::Failed { message }) => PreviewEvent::ReloadFailed { message },
             Ok(Reload::Unchanged) => return,
@@ -176,11 +228,12 @@ impl Previews {
         self.events.push(event);
     }
 
-    pub fn record(&mut self, reload: Reload, started: Instant) {
+    /// What a reload asked for at `started` (the timer's time) did.
+    pub fn record(&mut self, reload: Reload, started: Duration) {
         match reload {
             Reload::Applied { generation } => self.events.push(PreviewEvent::Reloaded {
                 generation,
-                ms: ms(started.elapsed()),
+                ms: ms(self.timer.now().saturating_sub(started)),
             }),
             Reload::Failed { message } => {
                 self.events.push(PreviewEvent::ReloadFailed { message });
@@ -307,7 +360,17 @@ mod tests {
         fn close(&mut self) {}
     }
 
-    fn previews(reloads: VecDeque<Instant>, behind: bool) -> (Previews, Arc<Mutex<usize>>) {
+    /// Time that stands still at ten seconds, and never waits.
+    struct Still;
+
+    impl Timer for Still {
+        fn now(&self) -> Duration {
+            Duration::from_secs(10)
+        }
+        fn after(&self, _: Duration, _: Box<dyn FnOnce() + Send>) {}
+    }
+
+    fn previews(reloads: VecDeque<Duration>, behind: bool) -> (Previews, Arc<Mutex<usize>>) {
         let count = Arc::new(Mutex::new(0));
         let previews = Previews {
             open: Some(Open {
@@ -320,20 +383,21 @@ mod tests {
                 reloads,
                 behind,
             }),
-            ..Previews::default()
+            ..Previews::new(Arc::new(Still))
         };
         (previews, count)
     }
 
     #[test]
     fn a_catch_up_with_the_budget_spent_stays_behind_and_says_until_when() {
-        // In the future, so no pause of this test can let them expire.
-        let at = Instant::now() + Duration::from_secs(60);
+        // A quarter second ago by a timer that stands still, so no pause of
+        // this test can let them expire.
+        let at = Still.now() - Duration::from_millis(250);
         let (mut p, count) = previews(
             vec![at; reloads_per_second(Counting(Default::default()).calls_per_second())].into(),
             true,
         );
-        assert_eq!(p.catch_up(), Some(at + Duration::from_secs(1)));
+        assert_eq!(p.catch_up(), Some(Duration::from_millis(750)));
         assert_eq!(*count.lock().unwrap(), 0);
         assert!(p.open.as_ref().unwrap().behind);
     }

@@ -104,6 +104,7 @@ Feature: An agent opens a project and reads and makes its documents
     And the answer's "/broken" is []
     And the answer's "/unreadable" is []
 
+  @disk
   Scenario: A document that cannot be read is named and the others are searched
     Given the file "Latin1.qml" holds bytes that are not UTF-8
     When the agent calls the tool "node_find" with:
