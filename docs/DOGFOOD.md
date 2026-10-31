@@ -205,7 +205,7 @@ view itself loses work.
 - **Fix:** an outline that includes every visible item with its type, id
   and geometry, not only the accessible ones. Owner: Ljós (request 2),
   since the outline comes from the preview.
-- **Open**: Ljós request 2.
+- **Fixed**: `format: "outline"` lists every visible item of the project with its type, id, box, file and line, and a text's words, below the accessible snapshot. Scenario in `features/preview/preview.feature`.
 
 #### D13. The Layers panel cannot reorder, rename, hide or lock
 
@@ -228,7 +228,7 @@ view itself loses work.
   dark; each control needed its `palette` set by hand.
 - **Fix:** Ljós request 1: the Basic style reads its palette from
   `Ljos.Design` when the module is imported.
-- **Open**: Ljós request 1.
+- **Fixed** in Ljós e318dad7; the notes sample no longer sets `palette.buttonText` by hand. Checked off-screen in light and dark.
 
 ### Minor
 
@@ -287,7 +287,7 @@ view itself loses work.
   `ListModel`. A copy made synchronously in `onCountChanged` seemed to hang
   once under load; `Qt.callLater` did not.
 - **Fix:** Ljós request 5.
-- **Open**: Ljós request 5.
+- **Fixed** in Ljós e318dad7; the notes sample edits its `JsonListModel` directly, no `ListModel` copy. Checked off-screen by adding a note.
 
 #### D21. The window sometimes never paints
 

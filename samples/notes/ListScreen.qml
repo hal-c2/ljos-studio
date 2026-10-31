@@ -14,7 +14,6 @@ Rectangle {
         anchors { left: parent.left; right: parent.right; top: parent.top }
         title: "Field notes"
         ToolButton {
-            palette.buttonText: Colors.text
             text: "Settings"
             onClicked: screen.stack.push(Qt.resolvedUrl("SettingsScreen.qml"), { stack: screen.stack })
         }

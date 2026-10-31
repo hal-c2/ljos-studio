@@ -8,20 +8,7 @@ Rectangle {
     height: 760
     color: Colors.canvas
 
-    // JsonListModel is read-only and loads after the first frame: the file
-    // seeds a ListModel the screens edit once its rows are in.
-    function copySeed() {
-        notes.clear()
-        for (let i = 0; i < seed.count; ++i)
-            notes.append(seed.get(i))
-    }
-
     EntryModel {
-        id: seed
-        onCountChanged: Qt.callLater(root.copySeed)
-    }
-
-    ListModel {
         id: notes
     }
 
@@ -45,6 +32,4 @@ Rectangle {
             NumberAnimation { property: "x"; from: 0; to: nav.width; duration: Motion.exitScreen; easing.type: Easing.InCubic }
         }
     }
-
-    Component.onCompleted: if (seed.count > 0) copySeed()
 }
