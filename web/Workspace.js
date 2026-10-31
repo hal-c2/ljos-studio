@@ -32,7 +32,7 @@ export function serve(studio) {
 }
 
 // The view's parts, as the workspace's properties.
-const PARTS = ["documents", "generation", "text", "layers", "selected", "selection", "inspector", "states", "roles", "flow", "palette", "done", "undone", "problem", "previews", "theme", "tokens", "comments"];
+const PARTS = ["documents", "generation", "text", "layers", "selected", "selection", "inspector", "states", "roles", "flow", "palette", "done", "undone", "problem", "previews", "theme", "tokens", "comments", "leases"];
 
 export const Workspace = defineType("Workspace", QtObject, {
   properties: {
@@ -59,6 +59,8 @@ export const Workspace = defineType("Workspace", QtObject, {
     theme: typed(kinds.string, ""),
     tokens: [],
     comments: [],
+    // What other writers hold: `doc`, `node`, `holder`, `ends_in_ms`.
+    leases: [],
   },
   signals: ["answered", "refused"],
   methods: {
@@ -118,7 +120,8 @@ class Queue {
       let answer;
       if (job.tool) {
         try {
-          answer = await served.call(job.tool, job.args);
+          // The window is the person: its Undo takes the person's edits.
+          answer = await served.call(job.tool, job.args, "person");
         } catch (e) {
           // Storage refused what the call wrote (`studio.js`).
           answer = { error: e.refusal ?? { code: "internal", message: String(e?.message ?? e) } };
@@ -159,12 +162,30 @@ class Queue {
     }
   }
 
+  #wake = null;
+  #wakeAt = null;
+
   #publish(view, seen) {
     const self = this.#self;
     // The shell may have moved to another document while this was read.
     if (untrack(() => self.doc) !== view.doc) return;
     this.published = Math.max(this.published, seen);
     for (const part of PARTS) this.#give(part, view[part]);
+    // A lease ends with no write to tell of it: read the session again
+    // then, as the native block's `wake_after` does. One wake at a time,
+    // the earliest.
+    const ends = Math.min(...(view.leases ?? []).map((l) => l.ends_in_ms));
+    if (Number.isFinite(ends)) {
+      const at = Date.now() + ends;
+      if (this.#wakeAt === null || at < this.#wakeAt) {
+        clearTimeout(this.#wake);
+        this.#wakeAt = at;
+        this.#wake = setTimeout(() => {
+          this.#wakeAt = null;
+          this.enqueue({ refresh: true });
+        }, ends);
+      }
+    }
     const p = view.preview;
     // No picture on the web yet: a preview page cannot take one
     // (DESIGN.md S5, the ljos-web requests), so `picture` stays 0.

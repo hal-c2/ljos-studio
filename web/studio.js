@@ -60,9 +60,11 @@ export class Studio {
 
   // `{ok, text, images}` or `{error: {code, message, details}}`, the
   // tool's own refusal. Rejects only when storage refused what the call
-  // wrote; the error's `refusal` says which files.
-  async call(tool, args = {}) {
-    const answer = JSON.parse(this.#core.call(tool, JSON.stringify(args)));
+  // wrote; the error's `refusal` says which files. `client` is the name the
+  // caller gave itself, one writer to the session (a window's is
+  // "person"); left out, the call is an unnamed agent's.
+  async call(tool, args = {}, client = undefined) {
+    const answer = JSON.parse(this.#core.call(tool, JSON.stringify(args), client));
     await this.#store();
     return answer;
   }
