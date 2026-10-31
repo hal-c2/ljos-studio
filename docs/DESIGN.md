@@ -991,11 +991,10 @@ takes `args` and `standins`; a page imports `ljos-web/runtime.css` and calls
 is plain QML and compiles from `ljos_design_qml/qml` as a stand-in. Built
 from the fixture (`web/site/project`), the site is three files, Vite inlines
 a small SVG into the script, the text takes Ljos.Design's colour, and the
-mock never reaches the page. What it cannot do: build a site from a
-directory on its own (request 30), apply `theme.json` (Studio's native
-preview applies it through `ljos_design_qml::theme::apply`, which is Rust:
-request 20), and run `Ljos.Blocks`, `Ljos.Models` or `Ljos.Observer`, which
-are Rust types (requests 32, 33).
+mock never reaches the page. `Ljos.Blocks` and `Ljos.Models` run there since
+ljos-web d28e9440; `Ljos.Observer` does not (a Rust type). Studio's builder
+stays until `ljos-web build-site` builds a themed bundle from any directory:
+at d28e9440 it fails to resolve `ljos-web/theme` from its stage.
 
 **The site contract.** `ljos-site.json`, at the bundle's root:
 
@@ -1038,8 +1037,8 @@ among them:
 5. The native `mocked_only`.
 6. `unsupported` with `no_web_face`, its `modules` and the `docs` that
    import them: a module that is neither the project's own nor one ljos-web
-   provides. That covers `Ljos.Blocks` shells, `Ljos.Models`, a module
-   only an installed plugin gives, and a typo.
+   provides. That covers `Ljos.Observer`, a module only an installed plugin
+   gives, and a typo.
 
 DECISION: the web export reuses the native one's walk and checks, and adds
 to its manifest rather than forking it; `run` is native's alone, and
