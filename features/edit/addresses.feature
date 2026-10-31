@@ -310,3 +310,148 @@ Feature: An object keeps its handle across everyone's edits
           }
       }
       """
+
+  Scenario: A flow's trigger, state owner and navigator named by path need the generation
+    Given the file "Flow.qml":
+      """qml
+      import QtQuick
+
+      Item {
+          id: root
+          states: [
+              State {
+                  name: "on"
+              }
+          ]
+
+          Rectangle { id: card }
+          Loader { id: page }
+      }
+      """
+    And the file "Next.qml":
+      """qml
+      import QtQuick
+
+      Item {}
+      """
+    When the agent calls the tool "state_edit" with:
+      """json
+      {"doc": "Flow.qml", "action": "interaction", "trigger": {"path": "root/0"}, "state": "on"}
+      """
+    Then the agent is refused with "invalid_argument"
+    And the refusal's "/details/kind" is "invalid"
+    When the agent calls the tool "state_edit" with:
+      """json
+      {"doc": "Flow.qml", "action": "interaction", "trigger": {"id": "card"}, "node": {"path": "root"}, "state": "on"}
+      """
+    Then the agent is refused with "invalid_argument"
+    And the refusal's "/details/kind" is "invalid"
+    When the agent calls the tool "state_edit" with:
+      """json
+      {"doc": "Flow.qml", "action": "interaction", "trigger": {"id": "card"}, "open": "Next.qml", "navigator": {"path": "root/1"}}
+      """
+    Then the agent is refused with "invalid_argument"
+    And the refusal's "/details/kind" is "invalid"
+    And the file "Flow.qml" is:
+      """qml
+      import QtQuick
+
+      Item {
+          id: root
+          states: [
+              State {
+                  name: "on"
+              }
+          ]
+
+          Rectangle { id: card }
+          Loader { id: page }
+      }
+      """
+    When the agent calls the tool "state_edit" with:
+      """json
+      {"doc": "Flow.qml", "generation": 1, "action": "interaction", "trigger": {"path": "root/0"}, "open": "Next.qml", "navigator": {"path": "root/1"}}
+      """
+    Then the answer's "/generation" is 2
+    And the file "Flow.qml" is:
+      """qml
+      import QtQuick
+
+      Item {
+          id: root
+          states: [
+              State {
+                  name: "on"
+              }
+          ]
+
+          Rectangle {
+              id: card
+              TapHandler {
+                  onTapped: page.source = "Next.qml"
+              }
+          }
+          Loader { id: page }
+      }
+      """
+
+  Scenario: A flow is taken out by its trigger's path only at the generation the path was read at
+    Given the file "Flow.qml":
+      """qml
+      import QtQuick
+
+      Item {
+          id: root
+          states: [
+              State {
+                  name: "on"
+              }
+          ]
+
+          Rectangle { id: card }
+      }
+      """
+    And the agent has called the tool "state_edit" with:
+      """json
+      {"doc": "Flow.qml", "action": "interaction", "trigger": {"id": "card"}, "state": "on"}
+      """
+    When the agent calls the tool "state_edit" with:
+      """json
+      {"doc": "Flow.qml", "action": "remove_interaction", "trigger": {"path": "root/0"}}
+      """
+    Then the agent is refused with "invalid_argument"
+    And the refusal's "/details/kind" is "invalid"
+    When the agent calls the tool "state_edit" with:
+      """json
+      {"doc": "Flow.qml", "generation": 1, "action": "remove_interaction", "trigger": {"path": "root/0"}}
+      """
+    Then the agent is refused with "stale_ref"
+    And the refusal's "/details/kind" is "stale_generation"
+    When the agent calls the tool "state_edit" with:
+      """json
+      {"doc": "Flow.qml", "generation": 1, "action": "interaction", "trigger": {"path": "root/0"}, "state": ""}
+      """
+    Then the agent is refused with "stale_ref"
+    And the refusal's "/details/kind" is "stale_generation"
+    When the agent calls the tool "state_edit" with:
+      """json
+      {"doc": "Flow.qml", "generation": 2, "action": "remove_interaction", "trigger": {"path": "root/0"}}
+      """
+    Then the answer's "/generation" is 3
+    And the file "Flow.qml" is:
+      """qml
+      import QtQuick
+
+      Item {
+          id: root
+          states: [
+              State {
+                  name: "on"
+              }
+          ]
+
+          Rectangle {
+              id: card
+          }
+      }
+      """
