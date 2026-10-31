@@ -146,6 +146,10 @@ jobs:
         with:
           path: studio/target/tools
           key: ${{ steps.tools.outputs.cache-primary-key }}
+      # The one job with ljos-web at the pin: the list export checks a site
+      # against must be that package's.
+      - run: mise run check:web-modules
+      - run: mise run web:serve:test
       - run: mise run web:browser
       - run: mise run web:shell
       - run: mise run web:serve:check

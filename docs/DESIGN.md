@@ -1050,7 +1050,9 @@ is taken for the other; either may be replaced by the next export.
 DECISION: what ljos-web provides is a list in Studio
 (`export::WEB_MODULES`), its runtime package's exports at the pin plus
 `QtQuick.Controls` and `Ljos.Design`; a test compares it with the package
-when `LJOS_WEB` names a checkout, and the build task compares the manifest's
+at `web/ljos-web.rev` when `LJOS_WEB` names a checkout, `check:web-modules`
+(in CI's `browser` job) always gives it one, so a pin bump that changes the
+exports fails there, and the build task compares the manifest's
 imports with the checkout it builds with. Request 34 would let Studio read
 it instead. DECISION: a path import (`import "parts"`) is not checked: its
 files are the project's and in the bundle, or outside it and missing from
