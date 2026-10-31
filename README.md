@@ -64,14 +64,12 @@ and every web task after it). A task that needs one and lacks it says to run
 - **S0–S4 built.** The lossless edit seam; headless Studio over MCP; previews
   in a child Ljós process; the canvas, layers, inspector, palette and code
   view; variants, breakpoints, slots, tokens, user shells and the self-reskin.
-- **S5 built, as far as ljos-web goes.** The session, its tools and the
+- **S5 built.** The session, its tools and the
   shell run in a browser, with projects in browser storage. The document
   under edit is compiled by ljos-web's `qmlc` and mounted in a frame laid
-  over the Canvas panel. 21 of the 39 `@preview` scenarios run in Chromium
-  (`mise run features:browser`). The other 18 wait on numbered ljos-web
-  requests (screenshots, reading by id, themes, `Ljos.Models`, type
-  dumps); the preview refuses the calls it cannot answer as
-  `not_supported` (DESIGN.md, S5).
+  over the Canvas panel. All 42 browser scenarios run in Chromium
+  (`mise run features:browser`), screenshots, reading by id, themes,
+  `Ljos.Models` and type dumps among them.
 - **S6 built, but for multiplayer.** Prototyping flows, list data, export
   bundles and review comments. Multiplayer research has not started.
 

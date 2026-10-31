@@ -41,11 +41,7 @@ const body = (req) =>
 
 // The files qmlc is shown for a project previewed with `aliases`
 // (`[{module, dir}]`): an aliased module's own files are the alias
-// directory's, as `ljos run --alias` imports them. qmlc finds a module by
-// every `qmldir` under its root, and of two declaring one module it takes
-// either (ljos-web request 17); Qt takes the one at the module's import
-// path, so a `qmldir` elsewhere declaring a module that one at its path
-// declares too is not shown (a project's `mocks/`).
+// directory's, as `ljos run --alias` imports them.
 export function forQmlc(files, aliases = []) {
   const shown = { ...files };
   const direct = (path, dir) => path.startsWith(`${dir}/`) && !path.slice(dir.length + 1).includes("/");
@@ -53,18 +49,8 @@ export function forQmlc(files, aliases = []) {
     const at = module.replaceAll(".", "/");
     for (const path of Object.keys(shown)) if (direct(path, at)) delete shown[path];
     for (const [path, text] of Object.entries(files)) if (direct(path, dir)) shown[`${at}/${path.slice(dir.length + 1)}`] = text;
-  }
-  const declared = (path) => /^\s*module\s+([\w.]+)/m.exec(shown[path])?.[1];
-  const qmldirs = Object.keys(shown).filter((p) => p === "qmldir" || p.endsWith("/qmldir"));
-  const atPath = new Set(qmldirs.filter((p) => declared(p) && p === `${declared(p).replaceAll(".", "/")}/qmldir`).map(declared));
-  for (const p of qmldirs) if (atPath.has(declared(p)) && p !== `${declared(p).replaceAll(".", "/")}/qmldir`) delete shown[p];
-  // A Ljós block's `# block Name Version File …` line declares its type
-  // to Ljós; qmlc reads only Qt's type lines, so it is shown one as well
-  // (ljos-web request 19).
-  for (const p of Object.keys(shown).filter((p) => p === "qmldir" || p.endsWith("/qmldir"))) {
-    const typed = new Set([...shown[p].matchAll(/^\s*(?:singleton\s+)?([A-Z]\w*)\s+\d/gm)].map((m) => m[1]));
-    const blocks = [...shown[p].matchAll(/^#\s*block\s+([A-Z]\w*)\s+(\d+(?:\.\d+)?)\s+(\S+\.qml)\b/gm)].filter((m) => !typed.has(m[1]));
-    if (blocks.length > 0) shown[p] = `${shown[p].replace(/\n?$/, "\n")}${blocks.map((m) => `${m[1]} ${m[2]} ${m[3]}`).join("\n")}\n`;
+    // One qmldir says App.Data: the one at the module's path.
+    delete shown[`${dir}/qmldir`];
   }
   return shown;
 }
@@ -126,7 +112,7 @@ export async function start({ app, port = 0, record = false }) {
       if (record) compiled.push(error);
       return { status: 200, answer: { error } };
     }
-    return { status: 200, answer: { url: `/preview/projects/${n}/${entry}?import` } };
+    return { status: 200, answer: { url: `/preview/projects/${n}/${entry}?import`, base: `/preview/projects/${n}/` } };
   };
 
   const dist = join(app, "dist");
