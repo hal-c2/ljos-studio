@@ -859,7 +859,9 @@ impl Session {
                 )?;
                 let mut out = text;
                 for module in imports {
-                    out = with_import(&out, module)?;
+                    if let Imported::No = imported(&out, module) {
+                        out = with_import(&out, module)?;
+                    }
                 }
                 Ok((out, change, focus))
             }
