@@ -141,6 +141,20 @@ Feature: Objects are placed by the tools a canvas drag drops through
     And the answer's "/siblings" has 2 entries
 
   @preview
+  Scenario: Geometry without siblings reads only what was asked
+    Given the studio tools are connected with the capabilities "inspect, mutate, run"
+    And the agent has called the tool "preview_open" with:
+      """json
+      {"doc": "Main.qml", "size": {"width": 400, "height": 300}}
+      """
+    When the agent calls the tool "node_arrange" with:
+      """json
+      {"action": "geometry", "doc": "Main.qml", "nodes": [{"id": "a"}], "without_siblings": true}
+      """
+    Then the answer's "/boxes/0/window/x" is 10.0
+    And the answer's "/siblings" is absent
+
+  @preview
   Scenario: Geometry has a free object's place as the file does, ahead of the preview
     Given the studio tools are connected with the capabilities "inspect, mutate, run"
     And the agent has called the tool "preview_open" with:

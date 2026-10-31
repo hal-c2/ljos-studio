@@ -54,6 +54,10 @@ struct ArrangeArgs {
     nodes: Vec<Address>,
     /// Needed when a node is named by path.
     generation: Option<u64>,
+    /// For `geometry`: leave the siblings out, each one being a read of the
+    /// running app. Who only shows the selection does not snap to them.
+    #[serde(default)]
+    without_siblings: bool,
     /// For `place`.
     places: Option<Vec<PlaceOne>>,
     /// For `align`: left, hcenter, right, top, vcenter, bottom, distribute_h,
@@ -90,6 +94,7 @@ struct GeometryArgs {
     doc: String,
     nodes: Vec<Address>,
     generation: Option<u64>,
+    siblings: bool,
 }
 
 struct GeometryOut {
@@ -271,7 +276,7 @@ fn geometry(studio: &mut Studio, a: &GeometryArgs) -> Result<GeometryOut, Surfac
             })
         })
         .filter(|(handle, _)| !asked.iter().any(|(h, _)| h == handle))
-        .take(MOST_SIBLINGS)
+        .take(if a.siblings { MOST_SIBLINGS } else { 0 })
         .cloned()
         .collect();
     let parents: Vec<(String, Node)> = asked
@@ -407,6 +412,7 @@ fn align(studio: &mut Studio, a: &AlignArgs) -> Result<ManyOut, SurfaceError> {
             doc: a.doc.clone(),
             nodes: a.nodes.clone(),
             generation: a.generation,
+            siblings: false,
         },
     )?;
     let mut boxes = Vec::new();
@@ -657,6 +663,7 @@ fn arrange(studio: &mut Studio, a: ArrangeArgs) -> Result<ArrangeOut, SurfaceErr
                     doc,
                     nodes,
                     generation,
+                    siblings: !a.without_siblings,
                 },
             )?;
             Ok(ArrangeOut {

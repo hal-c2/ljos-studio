@@ -149,6 +149,11 @@ expression: value
           "array",
           "null"
         ]
+      },
+      "without_siblings": {
+        "default": false,
+        "description": "For `geometry`: leave the siblings out, each one being a read of the\nrunning app. Who only shows the selection does not snap to them.",
+        "type": "boolean"
       }
     },
     "required": [
