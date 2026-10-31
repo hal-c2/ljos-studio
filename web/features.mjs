@@ -373,6 +373,15 @@ const STEPS = [
     if (!Array.isArray(got)) throw new Error(`\`${pointer}\` is not a list: ${JSON.stringify(got)}`);
     if (got.length !== Number(count)) throw new Error(`\`${pointer}\` has ${got.length} entries: ${JSON.stringify(got)}`);
   }),
+  // One entry of a list, wherever it is in the list: what a scenario says
+  // of one member, not of the order of the rest.
+  step("then", /^the answer's "(\/[^"]*)" has the entry:$/, (w, s, pointer) => {
+    const got = must(w.ok(), pointer);
+    if (!Array.isArray(got)) throw new Error(`\`${pointer}\` is not a list: ${JSON.stringify(got)}`);
+    const want = json(docstring(s));
+    if (!got.some((entry) => equal(entry, want)))
+      throw new Error(`\`${pointer}\` has no entry ${JSON.stringify(want)}: ${JSON.stringify(got)}`);
+  }),
   step("then", /^the answer's "(\/[^"]*)" is absent$/, (w, s, pointer) => {
     const got = at(w.ok(), pointer);
     if (got !== undefined) throw new Error(`\`${pointer}\` is ${JSON.stringify(got)}`);
@@ -460,6 +469,7 @@ const STEPS = [
 const NATIVE_ONLY = new Map([
   ['then ^the preview shows "([^"]*)"$', "a preview is a page of its own (@preview)"],
   ['then ^Studio has reported the preview reloaded since it was read$', "a preview is a page of its own (@preview)"],
+  ['then ^the preview shows "([^"]*)" within (\\d+) seconds$', "a preview is a page of its own (@preview)"],
   ["then ^the answer has a PNG picture at most (\\d+) pixels on its longest side$", "a picture is a preview's (@preview)"],
   ['given ^the link "([^"]+)" leads to "([^"]+)"$', "storage holds no links (@disk)"],
   ['given ^the named pipe "([^"]+)"$', "storage holds no pipes (@disk)"],
@@ -474,6 +484,10 @@ const NATIVE_ONLY = new Map([
   ['then ^the endpoint\'s tool refuses it with "([a-z_]+)"$', "the endpoint is a native window's (endpoint.feature)"],
   ["then ^the endpoint listens on loopback only$", "the endpoint is a native window's (endpoint.feature)"],
   ["then ^the token file can be read by its owner alone$", "the endpoint is a native window's (endpoint.feature)"],
+  ["given ^the directory for the endpoint's token can be entered by others$", "the endpoint is a native window's (endpoint.feature)"],
+  ['when ^Studio starts serving agents with the capabilities "([^"]*)"$', "the endpoint is a native window's (endpoint.feature)"],
+  ['then ^Studio cannot serve agents, saying "([^"]+)"$', "the endpoint is a native window's (endpoint.feature)"],
+  ["then ^no token file is written$", "the endpoint is a native window's (endpoint.feature)"],
   ['given ^"([^"]+)" links to a directory outside the project that holds the file "([^"]+)"$', "storage holds no links (@disk)"],
   ['given ^"([^"]+)" links to "([^"]+)" in the project$', "storage holds no links (@disk)"],
   ['given ^a diamond of directory links (\\d+) levels deep in "([^"]+)"$', "storage holds no links (@disk)"],

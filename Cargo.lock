@@ -5447,6 +5447,7 @@ dependencies = [
  "ljos_blocks",
  "ljos_mcp_core",
  "qml_edit",
+ "qt_types",
  "regex",
  "schemars",
  "serde",
@@ -5457,7 +5458,6 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.21",
  "tokio",
- "uuid",
 ]
 
 [[package]]

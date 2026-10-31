@@ -24,6 +24,11 @@ fn named(store: &dyn Store, name: &str) -> Vec<String> {
         .collect()
 }
 
+/// The project's type dumps.
+pub(crate) fn dumps(store: &dyn Store) -> Vec<String> {
+    named(store, DUMP)
+}
+
 /// `dir/file` with `.` and `..` resolved; `None` if it climbs out of the
 /// project.
 pub(crate) fn join(dir: &str, file: &str) -> Option<String> {

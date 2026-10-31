@@ -8,7 +8,9 @@
 Feature: The preview plays a prototype's flow
   A flow is the app's own handlers, so the preview plays it by being
   clicked as a person clicks it: `preview_state` clicks an object of the
-  document, or a point, through the preview's inspector, and then reads
+  document, or a point, through the preview's inspector (`app_click` at
+  its centre or at that exact point: whatever is on top there gets it, as
+  under a person's pointer), and then reads
   the object it names, whose `variant` is the state it is in now (empty
   for the base state).
 
@@ -76,6 +78,28 @@ Feature: The preview plays a prototype's flow
       {"node": {"id": "root"}, "click_at": {"x": 50, "y": 150}}
       """
     Then the answer's "/variant" is "details"
+
+  # The badge has no `id` and is drawn over the card's right end, reaching
+  # past it: its middle (275, 110) is outside the card, the point clicked is
+  # in it. Aimed at what is drawn there, the click would miss the card.
+  Scenario: A click lands at its point, whatever is drawn there
+    Given the agent has called the tool "node_insert" with:
+      """json
+      {"doc": "Main.qml", "parent": {"id": "card"}, "id": false, "text": "Rectangle { x: 150; width: 250; height: 20 }"}
+      """
+    When the agent calls the tool "preview_state" with:
+      """json
+      {"node": {"id": "root"}, "click_at": {"x": 160, "y": 110}}
+      """
+    Then the answer's "/variant" is "details"
+
+  Scenario: A point outside the preview is refused and the preview runs on
+    When the agent calls the tool "preview_state" with:
+      """json
+      {"node": {"id": "root"}, "click_at": {"x": 400, "y": 10}}
+      """
+    Then the agent is refused with "not_actionable"
+    And the preview shows "Overview"
 
   Scenario: A click where no trigger is changes nothing
     When the agent calls the tool "preview_state" with:

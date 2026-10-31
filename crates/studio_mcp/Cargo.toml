@@ -11,8 +11,9 @@ publish.workspace = true
 [features]
 default = ["native"]
 # Projects in directories, the catch-up timer on a thread, and serving on
-# stdio. Off on the web (studio_web gives a store and a timer of its own).
-native = ["studio_core/fs"]
+# stdio (rmcp and tokio, through `ljos_mcp_core/server`). Off on the web
+# (studio_web gives a store and a timer of its own).
+native = ["studio_core/fs", "ljos_mcp_core/server"]
 # The loopback endpoint a running Studio serves agents on: a native window's.
 http = ["ljos_mcp_core/http"]
 
@@ -22,16 +23,11 @@ ljos_mcp_core.workspace = true
 ljos_blocks.workspace = true
 # Paths a window reads layers by.
 qml_edit.workspace = true
+qt_types.workspace = true
 schemars.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
-
-# Ljós's MCP core links rmcp, whose `uuid` needs a source of randomness to
-# build for a browser; the page's `crypto.getRandomValues` is it. Nothing
-# here makes a uuid: this only lets the crate compile for wasm32.
-[target.'cfg(target_arch = "wasm32")'.dependencies]
-uuid = { workspace = true, features = ["js"] }
 
 [dev-dependencies]
 # The scenarios drive the endpoint as a client does.

@@ -51,6 +51,8 @@ struct StudioWorld {
     reloads_read: usize,
     /// How long the last tool call took to answer.
     took: std::time::Duration,
+    /// Why Studio could not serve agents, when it could not.
+    not_served: Option<String>,
 }
 
 impl std::fmt::Debug for StudioWorld {
@@ -79,6 +81,7 @@ impl StudioWorld {
             reply: None,
             reloads_read: 0,
             took: std::time::Duration::ZERO,
+            not_served: None,
         }
     }
 
@@ -542,6 +545,21 @@ fn answer_has(w: &mut StudioWorld, pointer: String, count: usize) -> StepResult 
         .ok_or_else(|| format!("`{pointer}` has {len} entries: {got}"))
 }
 
+/// One entry of a list is the docstring's JSON, wherever it is in the list:
+/// what a scenario says of one member, not of the order of the rest.
+#[then(regex = r#"^the answer's "(/[^"]*)" has the entry:$"#)]
+fn answer_has_entry(w: &mut StudioWorld, pointer: String, step: &Step) -> StepResult {
+    let want: Value = serde_json::from_str(&file_text(step)?)
+        .map_err(|e| format!("the docstring is no JSON: {e}"))?;
+    let got = at(w.answer()?, &pointer)?;
+    let list = got
+        .as_array()
+        .ok_or_else(|| format!("`{pointer}` is not a list: {got}"))?;
+    list.contains(&want)
+        .then_some(())
+        .ok_or_else(|| format!("`{pointer}` has no entry {want}: {got}"))
+}
+
 #[then(regex = r#"^the answer's "(/[^"]*)" is absent$"#)]
 fn answer_absent(w: &mut StudioWorld, pointer: String) -> StepResult {
     match w.answer()?.pointer(&pointer) {
@@ -664,6 +682,7 @@ fn bundle_runs(w: &mut StudioWorld, out: String) -> StepResult {
         // What `preview_open` runs at when no size is given.
         size: Target::Desktop.size(),
         aliases: Vec::new(),
+        types: Vec::new(),
     })
     .map_err(|e| format!("the bundle does not start: {e}"))?;
     let got = host.outline().map_err(|e| e.to_string())?;
@@ -751,6 +770,26 @@ fn reloaded_since_read(w: &mut StudioWorld) -> StepResult {
     }
 }
 
+/// A file written outside Studio reaches the preview through the preview's
+/// own watch, which runs after the write returns, so the outline is read
+/// again until the deadline.
+#[then(regex = r#"^the preview shows "([^"]*)" within (\d+) seconds$"#)]
+fn preview_shows_within(w: &mut StudioWorld, text: String, seconds: u64) -> StepResult {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(seconds);
+    loop {
+        let outline = w.preview_outline()?;
+        if outline.contains(&format!("\"{text}\"")) {
+            return Ok(());
+        }
+        if std::time::Instant::now() >= deadline {
+            return Err(format!(
+                "after {seconds} seconds the preview shows:\n{outline}"
+            ));
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+}
+
 #[then(regex = r#"^the answer has a PNG picture at most (\d+) pixels on its longest side$"#)]
 fn png_picture(w: &mut StudioWorld, side: u32) -> StepResult {
     w.answer()?;
@@ -776,15 +815,60 @@ fn png_size(data: &[u8]) -> Option<(u32, u32)> {
     Some((word(16)?, word(20)?))
 }
 
-#[given(regex = r#"^Studio serves agents with the capabilities "([^"]*)"$"#)]
-fn serves_agents(w: &mut StudioWorld, caps: String) -> StepResult {
-    let caps = CapSet::parse_list(&caps).map_err(|e| e.to_string())?;
+/// Serves agents as a running Studio does, keeping the endpoint or the
+/// error it answered instead.
+fn start_serving(w: &mut StudioWorld, caps: &str) -> Result<Result<(), String>, String> {
+    let caps = CapSet::parse_list(caps).map_err(|e| e.to_string())?;
     let studio = Studio::open(w.dir.path()).map_err(|e| e.to_string())?;
     let server = Arc::new(StudioServer::new(studio));
-    let http =
-        endpoint::serve_agents(&server, caps, &w.endpoint_state()).map_err(|e| e.to_string())?;
-    w.endpoint = Some(http);
+    Ok(
+        match endpoint::serve_agents(&server, caps, &w.endpoint_state()) {
+            Ok(http) => {
+                w.endpoint = Some(http);
+                Ok(())
+            }
+            Err(e) => Err(e.to_string()),
+        },
+    )
+}
+
+#[given(regex = r#"^Studio serves agents with the capabilities "([^"]*)"$"#)]
+fn serves_agents(w: &mut StudioWorld, caps: String) -> StepResult {
+    start_serving(w, &caps)?
+}
+
+#[given("the directory for the endpoint's token can be entered by others")]
+fn token_dir_open(w: &mut StudioWorld) -> StepResult {
+    use std::os::unix::fs::PermissionsExt as _;
+    let dir = w.endpoint_state();
+    std::fs::create_dir(&dir).map_err(|e| e.to_string())?;
+    std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o755))
+        .map_err(|e| e.to_string())
+}
+
+#[when(regex = r#"^Studio starts serving agents with the capabilities "([^"]*)"$"#)]
+fn starts_serving(w: &mut StudioWorld, caps: String) -> StepResult {
+    w.not_served = start_serving(w, &caps)?.err();
     Ok(())
+}
+
+#[then(regex = r#"^Studio cannot serve agents, saying "([^"]+)"$"#)]
+fn cannot_serve(w: &mut StudioWorld, said: String) -> StepResult {
+    if w.endpoint.is_some() {
+        return Err("it serves agents".to_owned());
+    }
+    let why = w.not_served.as_deref().ok_or("no error was answered")?;
+    why.contains(&said)
+        .then_some(())
+        .ok_or_else(|| format!("it said: {why}"))
+}
+
+#[then("no token file is written")]
+fn no_token_file(w: &mut StudioWorld) -> StepResult {
+    let path = w.endpoint_state().join(endpoint::TOKEN_FILE);
+    (!path.exists())
+        .then_some(())
+        .ok_or_else(|| format!("{} exists", path.display()))
 }
 
 #[when(

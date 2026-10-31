@@ -5,7 +5,7 @@ use ljos_ir::KeySeg;
 use qml_edit::{NodePath, Step};
 use qml_syntax::{
     Allocator, GetSpan,
-    ast::{QmlBindingValue, QmlMember, QmlObject},
+    ast::{QmlBindingValue, QmlImportSource, QmlMember, QmlObject},
 };
 use serde::Serialize;
 
@@ -27,6 +27,13 @@ pub struct Node {
     /// One-based line the object starts on.
     pub line: usize,
     pub bindings: Vec<Binding>,
+    /// The signals it declares (`signal picked(int index)`), in order.
+    #[serde(skip)]
+    pub signals: Vec<DeclaredSignal>,
+    /// The properties it declares, valued or not: each has a change
+    /// signal, `nameChanged`.
+    #[serde(skip)]
+    pub properties: Vec<String>,
     /// Its place as hot reload names it ([`ljos_ir::ObjectKey`]'s steps): the
     /// most stable step at each level from the root.
     #[serde(skip)]
@@ -47,6 +54,48 @@ pub struct Binding {
     /// `property` declarations say so: they are part of the object's own
     /// interface, not settings of an inherited one.
     pub declared: bool,
+}
+
+/// A `signal` an object declares, each argument's name and type as
+/// written (empty for one written without a type).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DeclaredSignal {
+    pub name: String,
+    pub arguments: Vec<(String, String)>,
+}
+
+/// One `import` of a document.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Import {
+    /// A module by its URI (`QtQuick.Controls`), and the name it is
+    /// imported as (`as Controls`).
+    Module { uri: String, alias: Option<String> },
+    /// A directory or a JavaScript file, as the string names it.
+    Path { path: String, alias: Option<String> },
+}
+
+/// The imports of `source` in the order written; `None` when it does not
+/// parse.
+pub fn imports(source: &str) -> Option<Vec<Import>> {
+    let allocator = Allocator::default();
+    let parsed = qml_syntax::parse(&allocator, source);
+    if !parsed.is_ok() {
+        return None;
+    }
+    let imports = parsed.document.imports.iter().map(|i| {
+        let alias = i.alias.as_ref().map(|a| a.name.to_string());
+        match &i.source {
+            QmlImportSource::Module(name) => Import::Module {
+                uri: name.to_string(),
+                alias,
+            },
+            QmlImportSource::Path(path) => Import::Path {
+                path: path.trim_matches(['"', '\'']).to_owned(),
+                alias,
+            },
+        }
+    });
+    Some(imports.collect())
 }
 
 /// Whether a member written as an object is a grouped property
@@ -117,6 +166,15 @@ fn walk(
         end: object.span.end as usize,
         line: qml_syntax::position(source, object.span.start).0,
         bindings,
+        signals: declared_signals(source, object),
+        properties: object
+            .members
+            .iter()
+            .filter_map(|m| match m {
+                QmlMember::Property(p) => Some(p.name.name.to_string()),
+                _ => None,
+            })
+            .collect(),
         key: key.clone(),
     });
     let mut child = 0;
@@ -164,6 +222,28 @@ fn walk(
         key.pop();
         path.0.pop();
     }
+}
+
+fn declared_signals(source: &str, object: &QmlObject<'_>) -> Vec<DeclaredSignal> {
+    let typed = |t: &Option<qml_syntax::ast::QmlTypeName<'_>>| {
+        t.as_ref()
+            .map_or_else(String::new, |t| qml_syntax::text(source, t.span).to_owned())
+    };
+    object
+        .members
+        .iter()
+        .filter_map(|m| match m {
+            QmlMember::Signal(s) => Some(DeclaredSignal {
+                name: s.name.name.to_string(),
+                arguments: s
+                    .params
+                    .iter()
+                    .map(|p| (p.name.name.to_string(), typed(&p.type_name)))
+                    .collect(),
+            }),
+            _ => None,
+        })
+        .collect()
 }
 
 /// Whether an object has an `id` or a literal `objectName`, so that its key

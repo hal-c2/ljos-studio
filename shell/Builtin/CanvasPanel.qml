@@ -83,21 +83,24 @@ Panel {
                         }
                         TapHandler {
                             onTapped: (point) => {
-                                const at = {
-                                    x: Math.floor(point.position.x / panel.zoom),
-                                    y: Math.floor(point.position.y / panel.zoom)
-                                }
+                                const x = point.position.x / panel.zoom
+                                const y = point.position.y / panel.zoom
                                 if (panel.playing) {
-                                    // The root's state says where the flow is, when the
-                                    // preview can find the root: by its `id`.
+                                    // The app is clicked at the very point, as a person's
+                                    // pointer would be. The root's state says where the
+                                    // flow is, when the preview can find the root: by its
+                                    // `id`.
                                     const layers = panel.workspace.layers
-                                    const args = {click_at: at}
+                                    const args = {click_at: {x: x, y: y}}
                                     if (layers.length > 0 && layers[0].id !== "")
                                         args.node = {path: "root"}
                                     panel.workspace.dispatch("preview_state", args)
                                 }
                                 else {
-                                    panel.workspace.dispatch("node_select", {doc: panel.workspace.doc, at: at})
+                                    panel.workspace.dispatch("node_select", {
+                                        doc: panel.workspace.doc,
+                                        at: {x: Math.floor(x), y: Math.floor(y)}
+                                    })
                                 }
                             }
                         }

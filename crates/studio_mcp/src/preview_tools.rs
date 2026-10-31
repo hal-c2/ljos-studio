@@ -73,7 +73,7 @@ struct StateArgs {
     /// An object (with an `id`) to click first, after `set`, as a person
     /// does: the app's own handlers answer, so a flow plays.
     click: Option<Address>,
-    /// A point to click instead: the topmost item drawn there.
+    /// A point to click instead, exactly there: whatever is on top gets it.
     click_at: Option<ClickAt>,
 }
 
@@ -285,8 +285,13 @@ fn open(studio: &Mutex<Studio>, a: OpenArgs) -> Result<OpenOut, SurfaceError> {
             last.host.close();
         }
         let mut host = hosts.make(dir.as_deref()).expect("checked: it runs here");
-        host.open(&preview::spec(&a.doc, size, &aliases))
-            .map_err(preview_error)?;
+        host.open(&preview::spec(
+            studio.session.store(),
+            &a.doc,
+            size,
+            &aliases,
+        ))
+        .map_err(preview_error)?;
         previews.log_mark = 0;
         previews.events.push(PreviewEvent::Opened {
             entry: a.doc.clone(),

@@ -15,6 +15,7 @@ QtObject {
     readonly property var inspector
     readonly property var states
     readonly property var roles
+    readonly property var signals
     readonly property var flow
     readonly property var palette
     readonly property var done

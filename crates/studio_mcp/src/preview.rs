@@ -304,11 +304,14 @@ pub(crate) fn mocks(store: &dyn Store) -> Vec<Alias> {
     out
 }
 
-pub(crate) fn spec(doc: &str, size: Size, aliases: &[Alias]) -> PreviewSpec {
+pub(crate) fn spec(store: &dyn Store, doc: &str, size: Size, aliases: &[Alias]) -> PreviewSpec {
+    let mut types = crate::blocks::dumps(store);
+    types.sort();
     PreviewSpec {
         entry: doc.to_owned(),
         size,
         aliases: aliases.to_vec(),
+        types,
     }
 }
 

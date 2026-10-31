@@ -18,12 +18,15 @@ publish = false
 [workspace.dependencies]
 qml_syntax = { git = "https://github.com/hal-c2/ljos-ui", rev = "f5005294c5d6e66e0015349133e8aeca037b1454" }
 qml_edit = { git = "https://github.com/hal-c2/ljos-ui", rev = "f5005294c5d6e66e0015349133e8aeca037b1454" }
+qt_types = { git = "https://github.com/hal-c2/ljos-ui", rev = "f5005294c5d6e66e0015349133e8aeca037b1454" }
 ljos_ir = { git = "https://github.com/hal-c2/ljos-ui", rev = "f5005294c5d6e66e0015349133e8aeca037b1454" }
 # What a theme may say and when Ljós refuses one, judged by Ljós itself.
 ljos_design = { git = "https://github.com/hal-c2/ljos-ui", rev = "f5005294c5d6e66e0015349133e8aeca037b1454" }
 # Puts Studio's own theme on its window when no watched session does.
 ljos_design_qml = { git = "https://github.com/hal-c2/ljos-ui", rev = "f5005294c5d6e66e0015349133e8aeca037b1454" }
-ljos_mcp_core = { git = "https://github.com/hal-c2/ljos-ui", rev = "f5005294c5d6e66e0015349133e8aeca037b1454" }
+# The protocol alone; each crate that serves or calls MCP turns on
+# `server` (rmcp, tokio), `http` or `remote`, so the web build links neither.
+ljos_mcp_core = { git = "https://github.com/hal-c2/ljos-ui", rev = "f5005294c5d6e66e0015349133e8aeca037b1454", default-features = false }
 ljos_blocks = { git = "https://github.com/hal-c2/ljos-ui", rev = "f5005294c5d6e66e0015349133e8aeca037b1454", features = ["source"] }
 ljos_child = { git = "https://github.com/hal-c2/ljos-ui", rev = "f5005294c5d6e66e0015349133e8aeca037b1454" }
 # The facade a Ljós app is written against; each crate turns on what it
@@ -54,7 +57,6 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 tempfile = "3"
 thiserror = "2.0"
-uuid = "1.28"
 # The page glue of studio_web. The CLI that writes the JavaScript side must
 # be this exact version (`mise run web:build` installs it).
 wasm-bindgen = "=0.2.129"

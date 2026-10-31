@@ -125,6 +125,11 @@ pub struct Workspace {
     /// bindings read as `model.<role>`.
     #[qml(readonly, notify)]
     pub roles: Json,
+    /// The selected object's signals, which a flow may handle: `name`,
+    /// `arguments` (each `name`, `type`) and `change` for a property's
+    /// change signal.
+    #[qml(readonly, notify)]
+    pub signals: Json,
     /// The open document's flow: `states`, the root's, the base state
     /// (`""`) first, and `edges`, each `kind` (`transition` or
     /// `interaction`), `from` (`*` for any), `to`, `label`, and an
@@ -193,6 +198,7 @@ impl Default for Workspace {
             inspector: none(),
             states: none(),
             roles: none(),
+            signals: none(),
             flow: json!({"states": [], "edges": []}),
             palette: none(),
             done: none(),
@@ -598,6 +604,7 @@ fn publish(engine: &Engine, ws: ObjectId, view: View, seen: u64) {
     let _ = cx.set(Workspace::INSPECTOR, to_json(&view.inspector));
     let _ = cx.set(Workspace::STATES, to_json(&view.states));
     let _ = cx.set(Workspace::ROLES, to_json(&view.roles));
+    let _ = cx.set(Workspace::SIGNALS, to_json(&view.signals));
     let _ = cx.set(Workspace::FLOW, to_json(&view.flow));
     let _ = cx.set(Workspace::PALETTE, to_json(&view.palette));
     let _ = cx.set(Workspace::DONE, to_json(&view.done));

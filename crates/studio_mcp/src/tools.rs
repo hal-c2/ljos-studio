@@ -99,11 +99,27 @@ struct NewArgs {
     doc: String,
     /// Its text; an empty `Item` importing QtQuick when left out.
     text: Option<String>,
-    /// A project JSON file, an array of flat records: the document is a
-    /// `ListModel` with a `ListElement` for each. Not with `text`.
+    /// A project JSON file, an array of records: the document is a
+    /// `JsonListModel` reading it, or with `model: "list"` a `ListModel`
+    /// copy, a `ListElement` for each (flat) record. Not with `text`.
     data: Option<String>,
+    /// How `data` is kept: `json` (the default), or `list`.
+    #[serde(default)]
+    model: DataModel,
     #[serde(default)]
     dry_run: bool,
+}
+
+/// How a document keeps a JSON file's records.
+#[derive(Clone, Copy, Default, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+enum DataModel {
+    /// A `JsonListModel` whose `source` is the file: the file stays the
+    /// data.
+    #[default]
+    Json,
+    /// A `ListModel` copy of the records, edited as QML from then on.
+    List,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -276,6 +292,12 @@ struct Inspected {
     /// in a list's delegate the list's, whose roles bind as `model.role`.
     #[serde(skip_serializing_if = "Option::is_none")]
     model: Option<Model>,
+    /// Every signal it has, which a flow's `signal` may name: what it
+    /// declares, then its type's own and inherited, each with its
+    /// arguments. Absent for a type described nowhere Studio looks (no
+    /// import, project file, type dump or Ljós type has it).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    signals: Option<Vec<crate::signals::Signal>>,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -843,31 +865,21 @@ fn root(studio: &mut Studio, doc: &str) -> Result<Address, SurfaceError> {
     Ok(Address::Node(handle))
 }
 
-/// A JSON object's members in the order written, which are a row's roles
-/// in the order a person reads them; a map would sort them.
-struct Record(Vec<(String, serde_json::Value)>);
-
-impl<'de> Deserialize<'de> for Record {
-    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        struct Members;
-        impl<'de> serde::de::Visitor<'de> for Members {
-            type Value = Record;
-            fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                f.write_str("a record")
-            }
-            fn visit_map<A: serde::de::MapAccess<'de>>(
-                self,
-                mut map: A,
-            ) -> Result<Record, A::Error> {
-                let mut out = Vec::new();
-                while let Some(member) = map.next_entry()? {
-                    out.push(member);
-                }
-                Ok(Record(out))
-            }
-        }
-        d.deserialize_map(Members)
-    }
+/// A `JsonListModel` document `doc` reading the project's JSON file `data`,
+/// which must be an array of records: what a list of it shows is then
+/// what the file says, whatever saves it.
+fn json_model(doc: &str, data: &str, json: &str) -> Result<String, SurfaceError> {
+    studio_core::models::records(json).map_err(|e| {
+        SurfaceError::invalid_argument(format!("`{data}` is not an array of records: {e}"))
+            .with_details(serde_json::json!({ "kind": "not_a_list" }))
+    })?;
+    let source = Literal::String(studio_core::models::relative_url(doc, data)).to_qml();
+    // Resolved against this file whoever makes the model: a relative
+    // `source` is the file's, and saying so keeps it so when the model is
+    // made by a document elsewhere.
+    Ok(format!(
+        "import Ljos.Models\n\nJsonListModel {{\n    source: Qt.resolvedUrl({source})\n}}\n"
+    ))
 }
 
 /// A `ListModel` document holding `json`'s records, each a `ListElement`
@@ -877,7 +889,7 @@ fn list_model(path: &str, json: &str) -> Result<String, SurfaceError> {
         SurfaceError::invalid_argument(format!("`{path}` {why}"))
             .with_details(serde_json::json!({ "kind": kind }))
     };
-    let records: Vec<Record> = serde_json::from_str(json)
+    let records = studio_core::models::records(json)
         .map_err(|e| refuse("not_a_list", format!("is not an array of records: {e}")))?;
     if records.is_empty() {
         return Ok("import QtQuick\n\nListModel {\n}\n".to_owned());
@@ -928,6 +940,54 @@ fn list_model(path: &str, json: &str) -> Result<String, SurfaceError> {
     Ok(out)
 }
 
+/// Refuses a handler of a signal the trigger's type does not have, naming
+/// those it has. One whose type is described nowhere is written as asked:
+/// what it has is not known here, and Ljós says so when it compiles.
+fn has_signal(
+    studio: &Mutex<Studio>,
+    doc: &str,
+    trigger: &Address,
+    signal: &str,
+) -> Result<(), SurfaceError> {
+    // What is not a name is no signal of any type: the edit refuses it as
+    // such.
+    if !studio_core::flows::is_identifier(signal) {
+        return Ok(());
+    }
+    let mut studio = lock(studio);
+    let (handle, node) = studio.session.resolve(doc, trigger).map_err(error)?;
+    let source = studio.session.text(doc).map_err(error)?.0.to_owned();
+    let Some(signals) = crate::signals::of(studio.session.store(), doc, &source, &node) else {
+        return Ok(());
+    };
+    if signals.iter().any(|s| s.name == signal) {
+        return Ok(());
+    }
+    let offered: Vec<&str> = signals
+        .iter()
+        .filter(|s| !s.change)
+        .map(|s| s.name.as_str())
+        .collect();
+    let has = if offered.is_empty() {
+        "none but its properties' change signals".to_owned()
+    } else {
+        format!("{} and its properties' change signals", offered.join(", "))
+    };
+    Err(SurfaceError::new(
+        ErrorCode::NotFound,
+        format!(
+            "{handle} (`{}`) has no signal `{signal}`; it has {has}",
+            node.ty
+        ),
+    )
+    .with_details(json!({
+        "kind": "no_signal",
+        "signal": signal,
+        "type": node.ty,
+        "signals": offered,
+    })))
+}
+
 fn needs(field: &str, action: &str) -> SurfaceError {
     SurfaceError::invalid_argument(format!("`{action}` needs `{field}`"))
 }
@@ -956,6 +1016,9 @@ fn state_op(studio: &Mutex<Studio>, a: StateEditArgs) -> Result<Op, SurfaceError
                 },
                 (None, None) => return Err(needs("state` or `open", "interaction")),
             };
+            if let Some(signal) = &a.signal {
+                has_signal(studio, &a.doc, &trigger, signal)?;
+            }
             return Ok(Op::Interaction {
                 trigger,
                 signal: a.signal,
@@ -1226,8 +1289,9 @@ fn edits(studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
         .with(
             ToolDef::new::<NewArgs>(
                 "document_new",
-                "Create a QML document, from `text` or as a ListModel of a JSON file's records \
-                 (`data`). Refused if it exists or does not parse. Undo removes it.",
+                "Create a QML document, from `text` or reading a JSON file's records (`data`): a \
+                 JsonListModel of the file, or with `model: \"list\"` a ListModel copy. Refused \
+                 if it exists or does not parse. Undo removes it.",
             )
             .output::<EditOut>()
             .requires(Cap::Mutate)
@@ -1245,7 +1309,10 @@ fn edits(studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
                         (Some(text), None) => text,
                         (None, Some(data)) => {
                             let json = studio.session.store().read(&data).map_err(store_error)?;
-                            list_model(&data, &json)?
+                            match a.model {
+                                DataModel::Json => json_model(&a.doc, &data, &json)?,
+                                DataModel::List => list_model(&data, &json)?,
+                            }
                         }
                         (None, None) => NEW_DOCUMENT.to_owned(),
                     };
@@ -1404,8 +1471,9 @@ fn edits(studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
             ToolDef::new::<NodeArgs>(
                 "node_inspect",
                 "An object's bindings with their byte ranges, its parent, its children, its \
-                 states and transitions, the flows in it, and the roles and rows of the data it \
-                 sees (a ListModel, a list's model, in a delegate its list's).",
+                 states and transitions, the flows in it, the signals it has with their \
+                 arguments, and the roles and rows of the data it sees (a ListModel's, a JsonListModel's file's, \
+                 a list's model's, in a delegate its list's).",
             )
             .output::<Inspected>()
             .requires(Cap::Inspect),
@@ -1418,6 +1486,8 @@ fn edits(studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
                     let variants = studio.session.variants(&doc, &a.node).map_err(error)?;
                     let interactions = studio.session.interactions(&doc, &a.node).map_err(error)?;
                     let model = studio.session.model(&doc, &a.node).map_err(error)?;
+                    let source = studio.session.text(&doc).map_err(error)?.0.to_owned();
+                    let signals = crate::signals::of(studio.session.store(), &doc, &source, &node);
                     let (tree, generation) = studio.session.tree(&doc).map_err(error)?;
                     let parent_path = (!node.path.0.is_empty())
                         .then(|| studio_core::NodePath(node.path.0[..node.path.0.len() - 1].to_vec()));
@@ -1458,6 +1528,7 @@ fn edits(studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
                         transitions: variants.transitions,
                         interactions,
                         model,
+                        signals,
                     })
                 }
             }),

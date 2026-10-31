@@ -157,6 +157,8 @@ pub struct View {
     /// The roles of the data the selected object sees, as a delegate's
     /// bindings read them (`model.name`).
     pub roles: Vec<String>,
+    /// The selected object's signals, as `node_inspect` lists them.
+    pub signals: Vec<crate::signals::Signal>,
     pub flow: Flow,
     pub palette: Vec<Offered>,
     pub done: Vec<String>,
@@ -317,6 +319,8 @@ impl Studio {
             if let Ok(Some(model)) = self.session.model(doc, &Address::Node(handle.clone())) {
                 view.roles = model.roles;
             }
+            view.signals = crate::signals::of(self.session.store(), doc, &view.text, &node)
+                .unwrap_or_default();
             view.selected = handle;
         }
         view

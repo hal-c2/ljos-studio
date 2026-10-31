@@ -8,3 +8,10 @@ need_rust_parts targets
 # and stdio: what is left must stand on its own in a browser.
 cargo clippy --target wasm32-unknown-unknown -p studio_core -p studio_mcp -p studio_web \
   --no-default-features -- -D warnings
+# Ljós's MCP core without its server half is the protocol alone, so the page
+# links no rmcp or tokio and needs no `--cfg tokio_unstable` to build.
+if cargo tree -p studio_web --no-default-features -e normal \
+    --target wasm32-unknown-unknown | grep -E '\b(rmcp|tokio) '; then
+  echo "studio_web for wasm32 links rmcp or tokio" >&2
+  exit 1
+fi

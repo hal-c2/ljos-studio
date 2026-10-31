@@ -7,11 +7,3 @@ git-fetch-with-cli = true
 
 [term]
 color = "always"
-
-# Ljós's MCP core links tokio with the features its native servers use
-# (threads, stdio), which tokio refuses to compile for wasm32 unless
-# `tokio_unstable` is set. Nothing tokio does runs in Studio's wasm; this
-# only lets the crate build until the core keeps its server half behind a
-# feature (a request to ljos-ui, DESIGN.md section 7, S5).
-[target.wasm32-unknown-unknown]
-rustflags = ["--cfg", "tokio_unstable"]

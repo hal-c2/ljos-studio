@@ -82,7 +82,7 @@ fn signal_of(name: &str) -> Option<String> {
     Some(format!("{}{}", first.to_ascii_lowercase(), chars.as_str()))
 }
 
-fn is_identifier(name: &str) -> bool {
+pub fn is_identifier(name: &str) -> bool {
     let mut chars = name.chars();
     chars
         .next()

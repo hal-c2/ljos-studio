@@ -9,7 +9,7 @@ expression: value
     "open_world": false,
     "read_only": true
   },
-  "description": "An object's bindings with their byte ranges, its parent, its children, its states and transitions, the flows in it, and the roles and rows of the data it sees (a ListModel, a list's model, in a delegate its list's).",
+  "description": "An object's bindings with their byte ranges, its parent, its children, its states and transitions, the flows in it, the signals it has with their arguments, and the roles and rows of the data it sees (a ListModel's, a JsonListModel's file's, a list's model's, in a delegate its list's).",
   "inputSchema": {
     "$defs": {
       "Address": {
@@ -77,6 +77,21 @@ expression: value
   "name": "node_inspect",
   "outputSchema": {
     "$defs": {
+      "Argument": {
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "type"
+        ],
+        "type": "object"
+      },
       "BindingOut": {
         "properties": {
           "declared": {
@@ -214,7 +229,7 @@ expression: value
         "description": "The data an object sees.",
         "properties": {
           "doc": {
-            "description": "The document the `ListModel` is written in.",
+            "description": "The document the model is written in.",
             "type": "string"
           },
           "roles": {
@@ -229,6 +244,13 @@ expression: value
             "minimum": 0,
             "type": "integer"
           },
+          "source": {
+            "description": "The JSON file a `JsonListModel` reads, relative to the project.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "view": {
             "description": "The handle of the list whose delegate the object is in.",
             "type": [
@@ -241,6 +263,31 @@ expression: value
           "roles",
           "rows",
           "doc"
+        ],
+        "type": "object"
+      },
+      "Signal": {
+        "description": "One signal, which `on<Name>` handles.",
+        "properties": {
+          "arguments": {
+            "description": "What a handler may call its arguments, in order, each with its type\n(empty where nothing says it). An argument without a name has an\nempty one.",
+            "items": {
+              "$ref": "#/$defs/Argument"
+            },
+            "type": "array"
+          },
+          "change": {
+            "description": "A property's change signal (`widthChanged`): every property has one,\nso a person picking what a tap does looks past them.",
+            "type": "boolean"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "arguments",
+          "change"
         ],
         "type": "object"
       },
@@ -385,6 +432,16 @@ expression: value
       },
       "path": {
         "type": "string"
+      },
+      "signals": {
+        "description": "Every signal it has, which a flow's `signal` may name: what it\ndeclares, then its type's own and inherited, each with its\narguments. Absent for a type described nowhere Studio looks (no\nimport, project file, type dump or Ljós type has it).",
+        "items": {
+          "$ref": "#/$defs/Signal"
+        },
+        "type": [
+          "array",
+          "null"
+        ]
       },
       "start": {
         "format": "uint",

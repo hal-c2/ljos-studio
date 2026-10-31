@@ -13,6 +13,7 @@ pub mod export;
 pub mod preview;
 mod preview_tools;
 mod review;
+pub mod signals;
 pub mod timer;
 mod tools;
 pub mod view;

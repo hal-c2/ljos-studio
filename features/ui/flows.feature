@@ -13,7 +13,10 @@ Feature: A person wires and plays a prototype's flow in Studio's window
   call an agent makes. In play mode a click in a frame is a click on the
   running app (`preview_state` with `click_at`), and the panel says which
   state the app is in. The inspector lists the roles of the data the
-  selected object sees, and binds one to a property as `model.<role>`.
+  selected object sees (a JSON file's keys, when a `JsonListModel` reads
+  it), and binds one to a property as `model.<role>`,
+  and the signals it has; the flow panel wires one of them, or a tap, as
+  `node_inspect` lists them for an agent.
 
   Background:
     Given the file "Contacts.qml":
@@ -144,6 +147,31 @@ Feature: A person wires and plays a prototype's flow in Studio's window
       }
       """
 
+  Scenario: The selection's own signal is wired to go to a state
+    Given an agent has called the tool "node_insert" with:
+      """json
+      {"doc": "Main.qml", "parent": {"id": "card"}, "text": "MouseArea { id: area }", "id": false}
+      """
+    And the person has selected "MouseArea area" in the layers panel
+    Then the inspector lists the signals "pressAndHold, pressed, released, clicked, doubleClicked, positionChanged, entered, exited, canceled, wheel"
+    When the person picks the signal "clicked" to wire in the flow panel
+    And the person clicks the button "On clicked of selection go to details"
+    Then the flow panel lists the flows "clicked area to details"
+    And the history lists "clicked area to details"
+
+  Scenario: The flow panel still answers when the selection's signals change with its list open
+    Given the person has selected "Rectangle card" in the layers panel
+    And the person has opened the list of what to wire in the flow panel
+    When an agent calls the tool "document_edit" with:
+      """json
+      {"doc": "Main.qml", "generation": 1, "start": 316, "end": 316, "text": "        signal flipped()\n"}
+      """
+    Then the inspector lists the signals "flipped"
+    When the person picks the signal "flipped" to wire in the flow panel
+    And the person clicks the button "On flipped of selection go to details"
+    Then the flow panel lists the flows "flipped card to details"
+    And the history lists "flipped card to details"
+
   Scenario: A wire is taken out
     Given the person has selected "Rectangle card" in the layers panel
     And the person has clicked the button "Tap selection to go to details"
@@ -159,6 +187,20 @@ Feature: A person wires and plays a prototype's flow in Studio's window
     When the person clicks the frame "Desktop" at 50, 150
     Then the flow panel says the app is in the state "details"
 
+  # The badge has no `id` and is drawn over the card's right end, reaching
+  # past it: the click is at its point, not at the middle of the badge.
+  @preview
+  Scenario: In play mode a click plays the flow at the very point clicked
+    Given the person has selected "Rectangle card" in the layers panel
+    And the person has clicked the button "Tap selection to go to details"
+    And an agent has called the tool "node_insert" with:
+      """json
+      {"doc": "Main.qml", "parent": {"id": "card"}, "id": false, "text": "Rectangle { x: 150; width: 250; height: 20 }"}
+      """
+    And the person has clicked the button "Play"
+    When the person clicks the frame "Desktop" at 160, 110
+    Then the flow panel says the app is in the state "details"
+
   @preview
   Scenario: In play mode a click plays a document whose root has no id
     Given the person has opened "Pages.qml" in the documents list
@@ -169,6 +211,23 @@ Feature: A person wires and plays a prototype's flow in Studio's window
   Scenario: The inspector lists the roles a delegate sees
     When the person selects "Text row" in the layers panel
     Then the inspector lists the roles "name, email"
+
+  Scenario: The inspector lists the keys of a JSON list's records as roles
+    Given the file "data/staff.json":
+      """json
+      [{"name": "Ada", "room": "4"}, {"name": "Grace", "phone": "12"}]
+      """
+    And an agent has called the tool "document_new" with:
+      """json
+      {"doc": "Staff.qml", "data": "data/staff.json"}
+      """
+    And an agent has called the tool "document_new" with:
+      """json
+      {"doc": "Directory.qml", "text": "import QtQuick\n\nColumn {\n    Repeater {\n        model: Staff {}\n        Text {\n            id: member\n        }\n    }\n}\n"}
+      """
+    And the person has opened "Directory.qml" in the documents list
+    When the person selects "Text member" in the layers panel
+    Then the inspector lists the roles "name, room, phone"
 
   Scenario: A role is bound to a property
     Given the person has selected "Text row" in the layers panel
