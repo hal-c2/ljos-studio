@@ -813,6 +813,10 @@ const DESTRUCTIVE: ToolAnnotations = ToolAnnotations {
 struct BlocksArgs {
     /// Only this module's blocks (`App.Media`).
     module: Option<String>,
+    /// Also answer `types`, the toolkit types this document can place.
+    doc: Option<String>,
+    /// Only blocks and types whose name holds this, in any case.
+    search: Option<String>,
     /// From a previous page's `next`.
     cursor: Option<String>,
 }
@@ -823,6 +827,8 @@ struct BlocksOut {
     /// `category`?, `summary`?, and `state`, `inputs`, `actions`, `events`,
     /// `slots` as `ljos_blocks` writes them.
     blocks: Vec<serde_json::Value>,
+    /// The toolkit types `doc` can place, by module.
+    types: Vec<crate::toolkit::Group>,
     /// Declarations that could not be read: `file`, `line`?, `message`.
     errors: Vec<serde_json::Value>,
     next: Option<String>,
@@ -1590,9 +1596,10 @@ fn edits(studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
         .with(
             ToolDef::new::<BlocksArgs>(
                 "blocks_list",
-                "List the project's functional blocks (`# block` qmldir comments, `#[qml(block)]` \
-                 types in ljostypes.json) with their contracts: state, inputs, actions, events and \
-                 slots. `node_insert` places one by `Module.Name`. Unreadable ones are in `errors`.",
+                "List the project's functional blocks with their contracts; `node_insert` places \
+                 one by `Module.Name`. Unreadable ones are in `errors`. With `doc`, `types` lists \
+                 the toolkit types it can place: its imports first, and `node_insert`'s `import` \
+                 adds a missing one.",
             )
             .output::<BlocksOut>()
             .requires(Cap::Inspect),
@@ -1606,9 +1613,25 @@ fn edits(studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
                     };
                     let value = registry.to_value();
                     let list = |key: &str| value[key].as_array().cloned().unwrap_or_default();
-                    let (blocks, next) = paginate(list("blocks"), a.cursor.as_deref(), BLOCKS_PAGE)?;
+                    let search = a.search.as_deref().unwrap_or_default();
+                    let mut all = list("blocks");
+                    all.retain(|b| {
+                        b["name"].as_str().is_some_and(|n| {
+                            n.to_lowercase().contains(&search.to_lowercase())
+                        })
+                    });
+                    let (blocks, next) = paginate(all, a.cursor.as_deref(), BLOCKS_PAGE)?;
+                    let types = match &a.doc {
+                        Some(doc) => {
+                            let mut studio = lock(&studio);
+                            let (text, _) = studio.session.text(doc).map_err(error)?;
+                            crate::toolkit::offered(text, search)
+                        }
+                        None => Vec::new(),
+                    };
                     Ok(BlocksOut {
                         blocks,
+                        types,
                         errors: list("errors"),
                         next,
                     })

@@ -211,6 +211,18 @@
               "notify": "paletteChanged"
             },
             {
+              "name": "toolkit",
+              "type": "var",
+              "kind": "value",
+              "list": false,
+              "readonly": false,
+              "final": true,
+              "required": false,
+              "constant": false,
+              "group": false,
+              "notify": null
+            },
+            {
               "name": "done",
               "type": "var",
               "kind": "value",

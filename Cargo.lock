@@ -5457,6 +5457,7 @@ dependencies = [
  "ljos_mcp_core",
  "qml_edit",
  "qt_signals",
+ "qt_types",
  "regex",
  "schemars",
  "serde",

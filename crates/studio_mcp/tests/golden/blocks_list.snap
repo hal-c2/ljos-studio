@@ -9,7 +9,7 @@ expression: value
     "open_world": false,
     "read_only": true
   },
-  "description": "List the project's functional blocks (`# block` qmldir comments, `#[qml(block)]` types in ljostypes.json) with their contracts: state, inputs, actions, events and slots. `node_insert` places one by `Module.Name`. Unreadable ones are in `errors`.",
+  "description": "List the project's functional blocks with their contracts; `node_insert` places one by `Module.Name`. Unreadable ones are in `errors`. With `doc`, `types` lists the toolkit types it can place: its imports first, and `node_insert`'s `import` adds a missing one.",
   "inputSchema": {
     "additionalProperties": false,
     "properties": {
@@ -20,8 +20,22 @@ expression: value
           "null"
         ]
       },
+      "doc": {
+        "description": "Also answer `types`, the toolkit types this document can place.",
+        "type": [
+          "string",
+          "null"
+        ]
+      },
       "module": {
         "description": "Only this module's blocks (`App.Media`).",
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "search": {
+        "description": "Only blocks and types whose name holds this, in any case.",
         "type": [
           "string",
           "null"
@@ -34,6 +48,32 @@ expression: value
   "max_result_bytes": 40960,
   "name": "blocks_list",
   "outputSchema": {
+    "$defs": {
+      "Group": {
+        "description": "One module's types.",
+        "properties": {
+          "imported": {
+            "description": "The document imports it; otherwise placing a type adds the import.",
+            "type": "boolean"
+          },
+          "module": {
+            "type": "string"
+          },
+          "types": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "module",
+          "imported",
+          "types"
+        ],
+        "type": "object"
+      }
+    },
     "properties": {
       "blocks": {
         "description": "By module, then name: `module`, `name`, `version`, `origin`,\n`category`?, `summary`?, and `state`, `inputs`, `actions`, `events`,\n`slots` as `ljos_blocks` writes them.",
@@ -50,10 +90,18 @@ expression: value
           "string",
           "null"
         ]
+      },
+      "types": {
+        "description": "The toolkit types `doc` can place, by module.",
+        "items": {
+          "$ref": "#/$defs/Group"
+        },
+        "type": "array"
       }
     },
     "required": [
       "blocks",
+      "types",
       "errors"
     ],
     "title": "BlocksOut",

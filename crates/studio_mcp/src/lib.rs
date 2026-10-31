@@ -16,6 +16,7 @@ mod preview_tools;
 mod review;
 pub mod signals;
 pub mod timer;
+pub mod toolkit;
 mod tools;
 pub mod view;
 

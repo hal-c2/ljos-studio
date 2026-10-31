@@ -752,6 +752,34 @@ fn places(w: &mut UiWorld, name: String) -> StepResult {
     window.click_node(&button)
 }
 
+#[when(regex = r#"^the person searches the palette for "([^"]*)"$"#)]
+fn searches_palette(w: &mut UiWorld, text: String) -> StepResult {
+    let window = w.window()?;
+    let field = window.node("Palette", Some("textinput"), "Search the palette")?;
+    window.click_shown(&field)?;
+    for chord in ["Ctrl+A", "Delete"] {
+        window
+            .stage
+            .drive()
+            .chord(&Chord::parse(chord)?, 0)
+            .map_err(drive_error)?;
+    }
+    if !text.is_empty() {
+        window.stage.drive().commit(&text).map_err(drive_error)?;
+    }
+    window.rest()
+}
+
+#[then(regex = r#"^the palette (offers|does not offer) "([^"]+)"$"#)]
+fn palette_offers(w: &mut UiWorld, how: String, name: String) -> StepResult {
+    let window = w.window()?;
+    let found = window.node("Palette", None, &format!("Place {name}")).is_ok();
+    if found != (how == "offers") {
+        return Err(format!("the palette {how} {name}, and found it: {found}"));
+    }
+    Ok(())
+}
+
 #[given(regex = r#"^the person has clicked the button "([^"]+)"$"#)]
 #[when(regex = r#"^the person clicks the button "([^"]+)"$"#)]
 fn clicks_button(w: &mut UiWorld, name: String) -> StepResult {

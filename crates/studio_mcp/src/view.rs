@@ -167,6 +167,8 @@ pub struct View {
     pub signals: Vec<crate::signals::Signal>,
     pub flow: Flow,
     pub palette: Vec<Offered>,
+    /// The toolkit types the document can place, by module.
+    pub toolkit: Vec<crate::toolkit::Group>,
     pub done: Vec<String>,
     pub undone: Vec<String>,
     /// The document's review comments, in the order they were made.
@@ -224,6 +226,7 @@ impl Studio {
         let Ok((text, generation)) = self.session.text(doc) else {
             return view;
         };
+        view.toolkit = crate::toolkit::offered(text, "");
         view.text = text.to_owned();
         view.generation = generation;
         match self.session.tree(doc) {

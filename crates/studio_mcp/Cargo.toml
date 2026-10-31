@@ -29,6 +29,10 @@ serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 
+# What the palette offers is read here, on the machine that builds: see build.rs.
+[build-dependencies]
+qt_types.workspace = true
+
 [dev-dependencies]
 # The scenarios drive the endpoint as a client does.
 studio_mcp = { path = ".", features = ["http"] }
