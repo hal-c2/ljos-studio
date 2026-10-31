@@ -138,7 +138,7 @@ struct EditOut {
     text: Option<String>,
     /// The document already said this: nothing was written and no history
     /// entry made.
-    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    // Always serialised, `false` on a write: the output schema requires it.
     unchanged: bool,
 }
 

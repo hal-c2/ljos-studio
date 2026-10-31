@@ -73,7 +73,8 @@ Every `mutate` tool:
 - takes `dry_run` and then returns the changed ranges without writing;
 - returns the changed ranges, the new generation and a `history` id; an
   edit that would write the bytes already there writes nothing, keeps the
-  generation, makes no entry and says `unchanged: true`;
+  generation, makes no entry and says `unchanged: true`. `unchanged` is in
+  every answer (`false` on a write), as the output schema says;
 - refuses an edit that would not parse (`would_break`) and changes nothing.
 
 `property_set` and `binding_set` remove a binding only when `value` is
@@ -84,6 +85,21 @@ Node addresses are `{"node": "n12"}` (a handle from an earlier answer, which
 follows its object through edits), `{"id": "header"}` or
 `{"path": "root/0/2"}` with an optional `{"value": "background"}` step; paths
 are re-resolved each call.
+
+## Changes in review
+
+The contract changes s1's review made, for a client written against the
+first version:
+
+- An edit that names an object by `path` must give `generation`
+  (`invalid_argument`, kind `invalid`).
+- `value` is required for `property_set` and `binding_set`; only `null`
+  removes the binding.
+- A no-op edit answers `unchanged: true`; `unchanged` is now always
+  present, `false` on a write.
+- A file reached through a link is one document, named by its resolved
+  path.
+- `history` `list` needs only `inspect`.
 
 ## Added to Ljós's servers (general)
 

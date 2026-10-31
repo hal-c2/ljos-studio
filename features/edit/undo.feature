@@ -134,3 +134,12 @@ Feature: Undo gives back the bytes
       {"action": "list"}
       """
     Then the answer's "/done" has 0 entries
+
+  Scenario: An edit that writes says it changed something
+    When the agent calls the tool "property_set" with:
+      """json
+      {"doc": "Main.qml", "generation": 1, "node": {"id": "root"}, "name": "width", "value": 300}
+      """
+    Then the answer's "/unchanged" is false
+    And the answer's "/generation" is 2
+    And the answer's "/history" is 1
