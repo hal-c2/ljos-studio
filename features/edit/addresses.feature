@@ -9,7 +9,7 @@ Feature: An object keeps its handle across everyone's edits
   calls later, means that object. So Studio hands out handles (`n7`) and
   keeps each pointing at its object through canvas edits, typing in the
   code view and undo. An object that is gone says so instead of naming a
-  neighbour, and an edit made against an old generation is refused.
+  neighbour, and an edit by path made against an old generation is refused.
 
   Background:
     Given the file "Main.qml":
@@ -104,7 +104,9 @@ Feature: An object keeps its handle across everyone's edits
     Then the answer's "/type" is "Rectangle"
     And the answer's "/path" is "root/0"
 
-  Scenario: An edit against an old generation is refused and changes nothing
+  # A path is true of the text it was read in only; an edit by handle or `id`
+  # is rebased instead (features/edit/rebase.feature).
+  Scenario: An edit by path against an old generation is refused and changes nothing
     Given the agent has called the tool "document_text" with:
       """json
       {"doc": "Main.qml"}
@@ -116,7 +118,7 @@ Feature: An object keeps its handle across everyone's edits
       """
     When the agent calls the tool "property_set" with:
       """json
-      {"doc": "Main.qml", "generation": "$read", "node": {"id": "root"}, "name": "width", "value": 300}
+      {"doc": "Main.qml", "generation": "$read", "node": {"path": "root"}, "name": "width", "value": 300}
       """
     Then the agent is refused with "stale_ref"
     And the refusal's "/details/kind" is "stale_generation"
@@ -135,14 +137,17 @@ Feature: An object keeps its handle across everyone's edits
       }
       """
 
-  Scenario: The code view's edit needs the generation its offsets were read at
-    Given the agent has called the tool "node_insert" with:
+  # Offsets of an older generation are moved past what was written since
+  # (features/edit/rebase.feature); bytes the writer itself has changed
+  # since cannot be, as it has not seen what is there now.
+  Scenario: The code view's edit of bytes changed since its read is refused as stale
+    Given the agent has called the tool "property_set" with:
       """json
-      {"doc": "Main.qml", "parent": {"id": "root"}, "text": "Item {}"}
+      {"doc": "Main.qml", "node": {"node": "$rect"}, "name": "color", "value": "blue"}
       """
     When the agent calls the tool "document_edit" with:
       """json
-      {"doc": "Main.qml", "generation": 1, "start": 0, "end": 14, "text": "import QtQuick 2.15"}
+      {"doc": "Main.qml", "generation": 1, "start": 53, "end": 65, "text": "color: \"pink\""}
       """
     Then the agent is refused with "stale_ref"
     And the refusal's "/details/given" is 1
@@ -262,7 +267,7 @@ Feature: An object keeps its handle across everyone's edits
     And the agent keeps the answer's "/nodes/1/node" as "first"
     And the agent calls the tool "history" with:
       """json
-      {"action": "undo"}
+      {"action": "undo", "all": true}
       """
     And the agent calls the tool "node_inspect" with:
       """json
@@ -277,7 +282,7 @@ Feature: An object keeps its handle across everyone's edits
     Then the answer's "/path" is "root/0"
     When the agent calls the tool "history" with:
       """json
-      {"action": "redo"}
+      {"action": "redo", "all": true}
       """
     And the agent calls the tool "node_inspect" with:
       """json

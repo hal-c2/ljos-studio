@@ -509,8 +509,10 @@ Feature: An agent edits a component's states and transitions
         }
         """
 
-    Scenario: A stale generation is refused
-      Given the agent has called the tool "state_edit" with:
+    # A writer's own earlier edit is rebased past (features/edit/rebase.feature);
+    # another writer's change of the same object's states is not.
+    Scenario: A stale generation is refused when another writer changed the states
+      Given a second agent named "Ada" has called the tool "state_edit" with:
         """json
         {"doc": "Main.qml", "action": "add", "state": "compact"}
         """
@@ -519,6 +521,7 @@ Feature: An agent edits a component's states and transitions
         {"doc": "Main.qml", "generation": 1, "action": "add", "state": "hidden"}
         """
       Then the agent is refused with "stale_ref"
+      And the refusal's "/details/kind" is "conflict"
 
     Scenario: Undo gives back the bytes
       Given the agent has called the tool "state_edit" with:
