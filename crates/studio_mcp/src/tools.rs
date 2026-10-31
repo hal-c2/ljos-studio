@@ -811,6 +811,17 @@ fn id_of(studio: &Mutex<Studio>, doc: &str, address: &Address) -> Result<String,
     })
 }
 
+/// The root of `doc` by its handle, for an edit that leaves its object
+/// out: by path it would need the generation the path was read at, which
+/// a call that names no object has no reason to give.
+fn root(studio: &mut Studio, doc: &str) -> Result<Address, SurfaceError> {
+    let (handle, _) = studio
+        .session
+        .resolve(doc, &Address::Path("root".to_owned()))
+        .map_err(error)?;
+    Ok(Address::Node(handle))
+}
+
 fn needs(field: &str, action: &str) -> SurfaceError {
     SurfaceError::invalid_argument(format!("`{action}` needs `{field}`"))
 }
@@ -818,7 +829,10 @@ fn needs(field: &str, action: &str) -> SurfaceError {
 /// The edit a `state_edit` call asks for, with a breakpoint turned into the
 /// condition it stands for.
 fn state_op(studio: &Mutex<Studio>, a: StateEditArgs) -> Result<Op, SurfaceError> {
-    let node = a.node.unwrap_or_else(|| Address::Path("root".to_owned()));
+    let node = match a.node {
+        Some(node) => node,
+        None => root(&mut lock(studio), &a.doc)?,
+    };
     let state = |action: &str| a.state.clone().ok_or_else(|| needs("state", action));
     let when = match (a.when, a.breakpoint) {
         (Some(_), Some(_)) => {
@@ -939,10 +953,10 @@ fn contribute_op(studio: &Mutex<Studio>, a: &ContributeArgs) -> Result<Op, Surfa
     let text = studio_core::slots::contribution(&slot, a.mode, a.order, &delegate, &unit)
         .map_err(error)?;
     Ok(Op::Contribute {
-        parent: a
-            .parent
-            .clone()
-            .unwrap_or_else(|| Address::Path("root".to_owned())),
+        parent: match a.parent.clone() {
+            Some(parent) => parent,
+            None => root(&mut studio, &a.doc)?,
+        },
         slot,
         text,
         imports,
