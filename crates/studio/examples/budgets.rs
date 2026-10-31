@@ -579,6 +579,10 @@ impl PreviewHost for Timed {
         self.host.pick(x, y)
     }
 
+    fn alive(&mut self) -> Result<(), PreviewError> {
+        self.host.alive()
+    }
+
     fn close(&mut self) {
         self.host.close();
     }
