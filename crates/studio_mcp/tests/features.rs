@@ -51,6 +51,8 @@ struct StudioWorld {
     reloads_read: usize,
     /// How long the last tool call took to answer.
     took: std::time::Duration,
+    /// Why Studio could not serve agents, when it could not.
+    not_served: Option<String>,
 }
 
 impl std::fmt::Debug for StudioWorld {
@@ -79,6 +81,7 @@ impl StudioWorld {
             reply: None,
             reloads_read: 0,
             took: std::time::Duration::ZERO,
+            not_served: None,
         }
     }
 
@@ -812,15 +815,60 @@ fn png_size(data: &[u8]) -> Option<(u32, u32)> {
     Some((word(16)?, word(20)?))
 }
 
-#[given(regex = r#"^Studio serves agents with the capabilities "([^"]*)"$"#)]
-fn serves_agents(w: &mut StudioWorld, caps: String) -> StepResult {
-    let caps = CapSet::parse_list(&caps).map_err(|e| e.to_string())?;
+/// Serves agents as a running Studio does, keeping the endpoint or the
+/// error it answered instead.
+fn start_serving(w: &mut StudioWorld, caps: &str) -> Result<Result<(), String>, String> {
+    let caps = CapSet::parse_list(caps).map_err(|e| e.to_string())?;
     let studio = Studio::open(w.dir.path()).map_err(|e| e.to_string())?;
     let server = Arc::new(StudioServer::new(studio));
-    let http =
-        endpoint::serve_agents(&server, caps, &w.endpoint_state()).map_err(|e| e.to_string())?;
-    w.endpoint = Some(http);
+    Ok(
+        match endpoint::serve_agents(&server, caps, &w.endpoint_state()) {
+            Ok(http) => {
+                w.endpoint = Some(http);
+                Ok(())
+            }
+            Err(e) => Err(e.to_string()),
+        },
+    )
+}
+
+#[given(regex = r#"^Studio serves agents with the capabilities "([^"]*)"$"#)]
+fn serves_agents(w: &mut StudioWorld, caps: String) -> StepResult {
+    start_serving(w, &caps)?
+}
+
+#[given("the directory for the endpoint's token can be entered by others")]
+fn token_dir_open(w: &mut StudioWorld) -> StepResult {
+    use std::os::unix::fs::PermissionsExt as _;
+    let dir = w.endpoint_state();
+    std::fs::create_dir(&dir).map_err(|e| e.to_string())?;
+    std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o755))
+        .map_err(|e| e.to_string())
+}
+
+#[when(regex = r#"^Studio starts serving agents with the capabilities "([^"]*)"$"#)]
+fn starts_serving(w: &mut StudioWorld, caps: String) -> StepResult {
+    w.not_served = start_serving(w, &caps)?.err();
     Ok(())
+}
+
+#[then(regex = r#"^Studio cannot serve agents, saying "([^"]+)"$"#)]
+fn cannot_serve(w: &mut StudioWorld, said: String) -> StepResult {
+    if w.endpoint.is_some() {
+        return Err("it serves agents".to_owned());
+    }
+    let why = w.not_served.as_deref().ok_or("no error was answered")?;
+    why.contains(&said)
+        .then_some(())
+        .ok_or_else(|| format!("it said: {why}"))
+}
+
+#[then("no token file is written")]
+fn no_token_file(w: &mut StudioWorld) -> StepResult {
+    let path = w.endpoint_state().join(endpoint::TOKEN_FILE);
+    (!path.exists())
+        .then_some(())
+        .ok_or_else(|| format!("{} exists", path.display()))
 }
 
 #[when(
