@@ -199,12 +199,15 @@ fn watched_window(
     Ok(())
 }
 
-/// Tells the window why a save did not apply, or that the last one did.
+/// Tells the window why a save of the shell or the theme did not apply, or
+/// that none stands: a theme that loads after one that did not is a
+/// `Theme` report, not a `Cleared` one.
 fn reported(engine: &ljos::Engine, report: &ljos::reload::Report) {
     use ljos::reload::Report;
     match report {
-        Report::Failed { fault, .. } => studio_blocks::reloaded(engine, Some(fault.to_string())),
-        Report::Reloaded(..) | Report::Cleared => studio_blocks::reloaded(engine, None),
+        Report::Failed { .. } | Report::Reloaded(..) | Report::Cleared | Report::Theme { .. } => {
+            studio_blocks::reload_settled(engine);
+        }
         _ => {}
     }
 }
