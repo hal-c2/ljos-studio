@@ -1003,7 +1003,7 @@ are Rust types (requests 32, 33).
 |---|---|
 | `format`, `version`, `target` | `"ljos-site"`, `1`, `"web"`; a builder refuses anything else |
 | `entry` | the document the site mounts, a listed `.qml` |
-| `theme` | the `theme.json` beside the entry, when there is one (carried, not yet applied) |
+| `theme` | the `theme.json` Ljós reads for the entry, the nearest from its directory up to the project's, when there is one (carried, not yet applied) |
 | `files` | every file of the bundle with its size, and nothing else is in it; plain paths below the bundle, never `mocks/`, `.studio/` or `ljostypes.json`; no links, so a directory the project links to is listed again under the link's name |
 | `modules` | each of the project's modules (`module`) and its `qmldir`, both listed, each module once, and every listed qmldir that declares a module among them; every component a qmldir names is listed |
 | `imports` | every module a document imports that is not the project's, sorted: each one ljos-web at `ljos_web` provides |
