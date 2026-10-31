@@ -346,4 +346,34 @@ mod tests {
         );
         assert_eq!(nodes[2].key[1], KeySeg::Named("t".into()));
     }
+
+    #[test]
+    fn imports_are_modules_and_paths_as_written() {
+        let found = imports(
+            "import QtQuick 2.15\nimport App.Media as Media\nimport \"parts\"\nimport \"util.js\" as U\nItem {}\n",
+        )
+        .unwrap();
+        assert_eq!(
+            found,
+            [
+                Import::Module {
+                    uri: "QtQuick".into(),
+                    alias: None
+                },
+                Import::Module {
+                    uri: "App.Media".into(),
+                    alias: Some("Media".into())
+                },
+                Import::Path {
+                    path: "parts".into(),
+                    alias: None
+                },
+                Import::Path {
+                    path: "util.js".into(),
+                    alias: Some("U".into())
+                },
+            ]
+        );
+        assert_eq!(imports("Item {"), None);
+    }
 }

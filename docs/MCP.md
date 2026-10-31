@@ -52,7 +52,7 @@ documents: export), `run` (start previews). They are granted at launch with
 | 20 | `preview_state` | Read an object's state and a block's published state in the preview; set it when the block is mocked; click first | run |
 | 21 | `preview_screenshot` | A PNG of the preview (≤ 1280 px), or its outline as text | inspect |
 | 22 | `preview_events` | Since a cursor: opened, reloaded (with ms), reload failed, logs, ended | inspect |
-| 23 | `export` | Write a bundle that `ljos run` starts: the project's QML, theme, assets and own blocks with a manifest, never mocks or `.studio/` | fs |
+| 23 | `export` | Write a bundle that `ljos run` starts (`native`) or that ljos-web builds a site from (`web`): the project's QML, theme, assets and own modules with a manifest, never mocks or `.studio/` | fs |
 | 24 | `review` | Add, reply to, resolve, reopen or list design review comments on objects, kept in `.studio/` | inspect (writing: mutate) |
 
 A document is a `.qml` file or a `theme.json` of the project outside the
@@ -403,7 +403,8 @@ own beside it, and the list's text is unchanged.
 `export {entry, target?, out?, dry_run?}` (`fs`) writes a bundle of the
 project below its `build/` (`build/native` by default) and answers `out`,
 `files` and `bytes` (totals that stay true when a long manifest is cut
-short in the answer), the `manifest` and `ms`. The bundle holds every file
+short in the answer), the `manifest`, `written` (false for `dry_run`) and
+`ms`. The bundle holds every file
 of the project except `.studio/`, the top-level `mocks/`, hidden files,
 `build/`, `target/`, `node_modules/` and unfinished writes, and beside them
 `ljos-bundle.json`:
@@ -418,11 +419,28 @@ of the project except `.studio/`, the top-level `mocks/`, hidden files,
 | `files` | Every file, `path` and `bytes`, sorted |
 | `left_out` | What of the project is not in it, `path` and `why` |
 
+`target: "web"` writes the same files to `build/web` with `ljos-site.json`
+instead (DESIGN.md S6, the site contract), which a site builder reads:
+
+| Field | Holds |
+|---|---|
+| `format`, `version` | `ljos-site`, 1 |
+| `target`, `entry` | `web`; the document the site mounts |
+| `theme`, `blocks`, `files`, `left_out` | As above |
+| `modules` | The project's own modules, `module` and `qmldir` |
+| `imports` | The modules the documents import that are not the project's, sorted |
+| `ljos_web` | The ljos-web commit they were checked against |
+
+It has no `run`. `mise run export:web:build build/web` builds the site
+with an ljos-web checkout.
+
 A bundle is written beside its place and swapped in, so it is never half
 of two exports. Refusals: `capability_denied` without `fs`; `not_found`
-for an entry that is not a document; `unsupported` for `target: "web"`
-(`no_web_build`) and for types written in Rust (`native_types`, with
-`details.files`); `syntax` for a document that does not parse (`broken`,
+for an entry that is not a document; `unsupported` for types written in
+Rust (`native_types`, with `details.files`) and, for `web`, for a module
+neither the project nor ljos-web provides (`no_web_face`, with
+`details.modules` and `details.docs`: `Ljos.Blocks`, `Ljos.Models`, a
+plugin's); `syntax` for a document that does not parse (`broken`,
 `details.doc`); `not_actionable` for a module only a mock provides
 (`mocked_only`, `details.modules`) and for a project not in a directory
 (`no_directory`) and for an entry that is not in the bundle
@@ -430,15 +448,17 @@ for an entry that is not a document; `unsupported` for `target: "web"`
 `build/` or one a link leads elsewhere; a link out of the project is left
 out (`left_out`, "a link out of the project");
 `invalid_argument` (`exists`) for an `out` that holds something other
-than a bundle.
+than a bundle of either kind (a site built from one, say).
 
 - DECISION: the native bundle is the project directory as `ljos run`
   starts it. Ljós's production bundles (ARCHITECTURE.md 12.2: hashed,
   signed, A/B) and AOT binaries need a build Studio does not make, so the
   manifest has no hashes or signature yet.
-- DECISION: a web site is refused rather than half made: ljos-web compiles
-  QML to modules that need its runtime package and a bundler, and builds
-  no site on its own.
+- DECISION: a web export is a directory and its manifest, not a site:
+  compiling and bundling are ljos-web's, choosing the files and refusing
+  what has no face on the web are Studio's. Until ljos-web builds a site
+  from one (its request 30), `export:web:build` does it with ljos-web's
+  compiler and Vite plugin.
 - DECISION: `export` writes no history entry; it changes no document.
 
 `review {action, doc?, node?, comment?, text?, author?}` keeps design
@@ -523,4 +543,5 @@ JSON save's time to show.
   `review` (`add` or `reply`, one per finding, on the object it is about)
   → `review` (`resolve`) once an edit answers one.
 - **ship:** `export` with `dry_run` → mend what it refuses → `export` →
-  start the bundle with its manifest's `run`.
+  start the bundle with its manifest's `run`; for the web, `export` with
+  `target: "web"` and build the site from `build/web`.

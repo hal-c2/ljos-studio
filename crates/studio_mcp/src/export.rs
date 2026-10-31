@@ -6,11 +6,18 @@
 //! binaries are not something Studio can make without building an app
 //! crate. So a native export is that directory: the project's own files
 //! as the shipped app needs them, and a manifest saying what is in it and
-//! how to start it. A web site needs ljos-web to build one from QML on its
-//! own, which it does not yet; that target is refused, saying so.
+//! how to start it.
+//!
+//! A web export is the same walk written for a site builder (DESIGN.md S6,
+//! the site contract): the files, and a manifest (`ljos-site.json`) saying
+//! where the site starts, where the project's modules are, what it imports
+//! from ljos-web and which ljos-web it was checked against. Compiling and
+//! bundling are ljos-web's; choosing the files and refusing what has no
+//! face on the web are Studio's, so a site builder is never handed a
+//! project it can only half build.
 
 use std::{
-    collections::{BTreeSet, HashMap},
+    collections::{BTreeMap, BTreeSet, HashMap},
     fs,
     path::{Component, Path, PathBuf},
     sync::{Arc, Mutex},
@@ -28,6 +35,66 @@ use crate::{Studio, blocks, lock, preview};
 pub const MANIFEST: &str = "ljos-bundle.json";
 const FORMAT: &str = "ljos-bundle";
 const VERSION: u32 = 1;
+/// A web export's manifest, at the site bundle's root.
+pub const SITE_MANIFEST: &str = "ljos-site.json";
+const SITE_FORMAT: &str = "ljos-site";
+const SITE_VERSION: u32 = 1;
+/// The ljos-web commit Studio is checked against; its one place is
+/// `web/ljos-web.rev`, which the tasks and CI read too.
+pub const LJOS_WEB: &str = include_str!("../../../web/ljos-web.rev").trim_ascii();
+/// The modules a page can import from ljos-web at `LJOS_WEB`: its runtime
+/// package's exports (`packages/runtime/package.json`), `ljos-web/QtQuick/Layouts`
+/// being `QtQuick.Layouts`. `QtQuick.Controls` is compiled from Qt's own
+/// QML, so building it needs Qt; `Ljos.Design` is Ljós's QML, compiled as
+/// a stand-in. A Ljós module written in Rust is in neither (DESIGN.md S6,
+/// requests 32 to 34).
+pub const WEB_MODULES: &[&str] = &[
+    "Ljos.Design",
+    "Qt.labs.folderlistmodel",
+    "Qt.labs.qmlmodels",
+    "Qt.labs.settings",
+    "Qt.labs.synchronizer",
+    "QtCharts",
+    "QtCore",
+    "QtGraphs",
+    "QtLocation",
+    "QtMultimedia",
+    "QtPositioning",
+    "QtQml",
+    "QtQml.Models",
+    "QtQml.XmlListModel",
+    "QtQuick",
+    "QtQuick.Controls",
+    "QtQuick.Controls.Basic",
+    "QtQuick.Controls.Basic.impl",
+    "QtQuick.Controls.Fusion",
+    "QtQuick.Controls.Fusion.impl",
+    "QtQuick.Controls.Imagine",
+    "QtQuick.Controls.Material",
+    "QtQuick.Controls.Material.impl",
+    "QtQuick.Controls.Universal",
+    "QtQuick.Controls.Universal.impl",
+    "QtQuick.Controls.impl",
+    "QtQuick.Dialogs",
+    "QtQuick.Effects",
+    "QtQuick.Layouts",
+    "QtQuick.LocalStorage",
+    "QtQuick.Particles",
+    "QtQuick.Shapes",
+    "QtQuick.Templates",
+    "QtQuick.Timeline",
+    "QtQuick.VectorImage",
+    "QtQuick.Window",
+    "QtQuick3D",
+    "QtQuick3D.Effects",
+    "QtQuick3D.Helpers",
+    "QtQuick3D.Helpers.impl",
+    "QtQuick3D.Particles3D",
+    "QtQuick3D.Physics",
+    "QtQuick3D.Xr",
+    "QtSensors",
+    "QtWebSockets",
+];
 /// Bundles are written below this directory of the project, which is not
 /// part of its documents (the store does not list it), so a bundle never
 /// becomes part of the design nor of the next bundle.
@@ -47,7 +114,7 @@ pub enum Target {
     /// A directory `ljos run` starts.
     #[default]
     Native,
-    /// A static site (not built yet: refused with the reason).
+    /// A directory ljos-web builds a static site from.
     Web,
 }
 
@@ -76,15 +143,17 @@ struct ExportArgs {
     dry_run: bool,
 }
 
-/// What a bundle holds; written beside it as `ljos-bundle.json`.
+/// What a bundle holds; written beside it as `ljos-bundle.json`, or for
+/// the web as `ljos-site.json`.
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 pub struct Manifest {
     pub format: String,
     pub version: u32,
     pub target: Target,
     pub entry: String,
-    /// The command that starts it, run in the bundle's directory.
-    pub run: Vec<String>,
+    /// The command that starts it, run in the bundle's directory (native).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub run: Option<Vec<String>>,
     /// The theme file the app reads, beside its entry.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub theme: Option<String>,
@@ -100,6 +169,22 @@ pub struct Manifest {
     pub links: Vec<LinkEntry>,
     /// What of the project is not in the bundle, and why.
     pub left_out: Vec<LeftOut>,
+    /// The project's own modules and their `qmldir`s (web).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub modules: Option<Vec<ModuleDir>>,
+    /// The modules the site imports that are not the project's, sorted:
+    /// what the builder takes from ljos-web (web).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub imports: Option<Vec<String>>,
+    /// The ljos-web commit the imports were checked against (web).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ljos_web: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+pub struct ModuleDir {
+    pub module: String,
+    pub qmldir: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
@@ -324,15 +409,6 @@ fn plan(
     entry: &str,
     target: Target,
 ) -> Result<Manifest, SurfaceError> {
-    if target == Target::Web {
-        return Err(refused(
-            ErrorCode::Unsupported,
-            "no_web_build",
-            "a site for the web is not built yet: ljos-web compiles QML to modules that need its \
-             runtime package and a bundler, and builds no site on its own; export `native` and \
-             run it with `ljos run`",
-        ));
-    }
     let store = studio.session.store();
     if !entry.ends_with(".qml") || !store.exists(entry) {
         return Err(SurfaceError::not_found(format!(
@@ -340,6 +416,14 @@ fn plan(
         )));
     }
     let (files, links, left_out) = walk(root)?;
+    // A site is plain files: its builder and the hosts it goes to keep no
+    // links, so a linked directory is in it as a copy under the link's name.
+    let (files, links, copies) = if target == Target::Web {
+        let (files, copies) = copied_under_links(files, &links)?;
+        (files, Vec::new(), copies)
+    } else {
+        (files, links, BTreeMap::new())
+    };
     // The store has every file of the project; the bundle only what the
     // walk keeps, and a manifest that starts a file it does not hold
     // would not start.
@@ -360,20 +444,34 @@ fn plan(
     };
 
     // A document that does not parse would ship an app that does not start
-    // or a screen of it that does not show.
+    // or a screen of it that does not show. What each imports is kept for
+    // a site, whose builder has to be told it.
+    let mut imported: Vec<(&str, Vec<String>)> = Vec::new();
     for path in files
         .iter()
-        .map(|f| &f.path)
+        .map(|f| f.path.as_str())
         .filter(|p| p.ends_with(".qml"))
     {
         let text = read(path)?;
-        if studio_core::outline::outline(&text).is_none() {
+        // Reading its imports parses it, and no more than that: the
+        // objects' outline is not needed to know it parses.
+        let Some(modules) = studio_core::outline::imports(&text) else {
             return Err(SurfaceError::new(
                 ErrorCode::Syntax,
                 format!("`{path}` does not parse; mend it before exporting"),
             )
             .with_details(json!({ "kind": "broken", "doc": path })));
-        }
+        };
+        let modules = modules
+            .into_iter()
+            .filter_map(|i| match i {
+                studio_core::outline::Import::Module { uri, .. } => Some(uri),
+                // A directory or script of the project's own is among its
+                // files; one outside it is no more in a native bundle.
+                studio_core::outline::Import::Path { .. } => None,
+            })
+            .collect();
+        imported.push((path, modules));
     }
 
     // Types and blocks in Rust are registered by the app's own program;
@@ -386,13 +484,19 @@ fn plan(
     if !native.is_empty() {
         return Err(SurfaceError::new(
             ErrorCode::Unsupported,
-            "the project has types written in Rust, which only the app's own program registers; \
-             `ljos run` cannot start it",
+            if target == Target::Web {
+                "the project has types written in Rust, which only the app's own program \
+                 registers; they have no face on the web yet (ljos-web request 33)"
+            } else {
+                "the project has types written in Rust, which only the app's own program \
+                 registers; `ljos run` cannot start it"
+            },
         )
         .with_details(json!({ "kind": "native_types", "files": native })));
     }
 
     let mut live = Vec::new();
+    let mut module_dirs = Vec::new();
     let mut blocks_out = Vec::new();
     for path in files
         .iter()
@@ -403,6 +507,26 @@ fn plan(
         let Some(module) = module_of(&text) else {
             continue;
         };
+        // A site's builder finds modules by the qmldirs below it, so a copy
+        // of a module's directory under a link's name would be a second
+        // directory claiming the same module, and which one an import
+        // reads would be the builder's guess.
+        if let Some(of) = copies.get(path.as_str()) {
+            return Err(SurfaceError::new(
+                ErrorCode::Unsupported,
+                format!(
+                    "`{path}` is `{of}` again through a link, so the site would hold module \
+                     {module} twice; import it by its name rather than through the link, or \
+                     leave the link out of the project"
+                ),
+            )
+            .with_details(json!({
+                "kind": "linked_module",
+                "module": module,
+                "qmldir": of,
+                "through": path,
+            })));
+        }
         let dir = path.rsplit_once('/').map_or("", |(dir, _)| dir);
         for (_, decl) in read_qmldir(&text).blocks {
             if let Some(file) = blocks::join(dir, &decl.file) {
@@ -412,8 +536,13 @@ fn plan(
                 });
             }
         }
+        module_dirs.push(ModuleDir {
+            module: module.clone(),
+            qmldir: path.clone(),
+        });
         live.push(module);
     }
+    module_dirs.sort_by(|a, b| a.module.cmp(&b.module));
     blocks_out.sort_by(|a, b| a.block.cmp(&b.block));
     let mocked_only: Vec<String> = preview::mocks(store)
         .into_iter()
@@ -431,6 +560,13 @@ fn plan(
         .with_details(json!({ "kind": "mocked_only", "modules": mocked_only })));
     }
 
+    let site = (target == Target::Web).then(|| web_imports(&imported, &live));
+    let imports = match site {
+        Some(Err(refusal)) => return Err(refusal),
+        Some(Ok(imports)) => Some(imports),
+        None => None,
+    };
+
     let beside = entry.rsplit_once('/').map_or("", |(dir, _)| dir);
     let theme_path = if beside.is_empty() {
         "theme.json".to_owned()
@@ -441,21 +577,99 @@ fn plan(
         .iter()
         .any(|f| f.path == theme_path)
         .then_some(theme_path);
+    let web = target == Target::Web;
     let manifest = Manifest {
-        format: FORMAT.to_owned(),
-        version: VERSION,
+        format: if web { SITE_FORMAT } else { FORMAT }.to_owned(),
+        version: if web { SITE_VERSION } else { VERSION },
         target,
         entry: entry.to_owned(),
-        run: ["ljos", "run", entry, "--project", "."]
-            .map(str::to_owned)
-            .to_vec(),
+        run: (!web).then(|| {
+            ["ljos", "run", entry, "--project", "."]
+                .map(str::to_owned)
+                .to_vec()
+        }),
         theme,
         blocks: blocks_out,
         files,
         links,
         left_out,
+        modules: web.then_some(module_dirs),
+        imports,
+        ljos_web: web.then(|| LJOS_WEB.to_owned()),
     };
     Ok(manifest)
+}
+
+/// `files` and, under each link's name, the files of the directory it
+/// leads to: a site keeps no links, so it holds them as the native fallback
+/// writes them where no link can be made, and refused past the same bound.
+/// Also which file each copy is a copy of.
+fn copied_under_links(
+    mut files: Vec<FileEntry>,
+    links: &[LinkEntry],
+) -> Result<(Vec<FileEntry>, BTreeMap<String, String>), SurfaceError> {
+    let all: Vec<&LinkEntry> = links.iter().collect();
+    let (mut through, copies): (Vec<FileEntry>, BTreeMap<String, String>) =
+        through_links(&files, links, &all)?
+            .into_iter()
+            .map(|(path, file)| {
+                (
+                    FileEntry {
+                        path: path.clone(),
+                        bytes: file.bytes,
+                    },
+                    (path, file.path.clone()),
+                )
+            })
+            .unzip();
+    files.append(&mut through);
+    files.sort_by(|a, b| a.path.cmp(&b.path));
+    Ok((files, copies))
+}
+
+/// The modules a site imports from ljos-web, sorted; refused when a
+/// document imports one that is neither the project's own nor ljos-web's,
+/// which no site builder could compile.
+fn web_imports(
+    imported: &[(&str, Vec<String>)],
+    live: &[String],
+) -> Result<Vec<String>, SurfaceError> {
+    let mut from_web = BTreeSet::new();
+    let mut faceless: BTreeMap<&str, BTreeSet<&str>> = BTreeMap::new();
+    for (doc, modules) in imported {
+        for module in modules {
+            if live.contains(module) {
+                continue;
+            }
+            if WEB_MODULES.contains(&module.as_str()) {
+                from_web.insert(module.clone());
+            } else {
+                faceless.entry(module).or_default().insert(doc);
+            }
+        }
+    }
+    if faceless.is_empty() {
+        return Ok(from_web.into_iter().collect());
+    }
+    let modules: Vec<&str> = faceless.keys().copied().collect();
+    let docs: BTreeSet<&str> = faceless.values().flatten().copied().collect();
+    Err(SurfaceError::new(
+        ErrorCode::Unsupported,
+        format!(
+            "{} has no face on the web: neither the project nor ljos-web ({}) provides it; \
+             export `native` to run it with `ljos run`",
+            modules.join(", "),
+            &LJOS_WEB[..LJOS_WEB.len().min(7)],
+        ),
+    )
+    .with_details(json!({ "kind": "no_web_face", "modules": modules, "docs": docs })))
+}
+
+fn manifest_name(target: Target) -> &'static str {
+    match target {
+        Target::Native => MANIFEST,
+        Target::Web => SITE_MANIFEST,
+    }
 }
 
 /// `out` as a place below the project's `build/`, by its names and on
@@ -507,16 +721,21 @@ fn leads_elsewhere(root: &Path, full: &Path) -> bool {
     false
 }
 
-/// Whether `dir` holds a bundle's own manifest: a file, not a link to
-/// one, that says it is a manifest. A file only named like one is
-/// somebody's, and the directory with it.
+/// Whether `dir` holds either kind of bundle's own manifest: a file, not
+/// a link to one, that says it is that manifest. A file only named like
+/// one is somebody's, and the directory with it; so is a site built from
+/// a bundle.
 fn holds_bundle(dir: &Path) -> bool {
-    let at = dir.join(MANIFEST);
-    fs::symlink_metadata(&at).is_ok_and(|m| m.file_type().is_file())
-        && fs::read_to_string(&at)
-            .ok()
-            .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
-            .is_some_and(|v| v.get("format").and_then(|f| f.as_str()) == Some(FORMAT))
+    [(MANIFEST, FORMAT), (SITE_MANIFEST, SITE_FORMAT)]
+        .iter()
+        .any(|(name, format)| {
+            let at = dir.join(name);
+            fs::symlink_metadata(&at).is_ok_and(|m| m.file_type().is_file())
+                && fs::read_to_string(&at)
+                    .ok()
+                    .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
+                    .is_some_and(|v| v.get("format").and_then(|f| f.as_str()) == Some(format))
+        })
 }
 
 /// Refuses an `out` that leads elsewhere now, or that holds something other
@@ -624,7 +843,7 @@ fn write_with(
     }
     let mut text = serde_json::to_string_pretty(manifest).expect("a manifest is JSON");
     text.push('\n');
-    let at = staging.join(MANIFEST);
+    let at = staging.join(manifest_name(manifest.target));
     fs::write(&at, text).map_err(|e| io(&at, &e))?;
     copied();
     // Path by path, so what is checked is what is there now: what is left
@@ -812,8 +1031,9 @@ pub(crate) fn add(registry: ToolRegistry, studio: &Arc<Mutex<Studio>>) -> ToolRe
         ToolDef::new::<ExportArgs>(
             "export",
             "Write a bundle of the project that runs without Studio: its QML, theme, assets and \
-             own blocks, never mocks or `.studio/`, with a manifest (`ljos-bundle.json`) saying \
-             what it holds and how to start it (`ljos run`). `dry_run` writes nothing.",
+             own modules, never mocks or `.studio/`. `native`: `ljos-bundle.json` says how \
+             `ljos run` starts it. `web`: `ljos-site.json` says what ljos-web builds a site \
+             from. `dry_run` writes nothing.",
         )
         .output::<ExportOut>()
         .requires(Cap::Fs)
@@ -839,7 +1059,7 @@ mod tests {
             version: VERSION,
             target: Target::Native,
             entry: files[0].to_owned(),
-            run: Vec::new(),
+            run: None,
             theme: None,
             blocks: Vec::new(),
             files: files
@@ -851,6 +1071,9 @@ mod tests {
                 .collect(),
             links: Vec::new(),
             left_out: Vec::new(),
+            modules: None,
+            imports: None,
+            ljos_web: None,
         }
     }
 
