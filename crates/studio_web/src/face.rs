@@ -63,7 +63,18 @@ impl Face {
     /// "images": [{"mime", "data"}]}` with each image's bytes as base64, or
     /// the refusal, `{"error": {"code", "message", …}}`.
     pub fn call(&self, tool: &str, args: Value) -> Value {
-        match self.server.call(tool, &CallCtx::new(self.caps), args) {
+        self.call_as(tool, args, None)
+    }
+
+    /// [`Face::call`] by the client that named itself `client`: one writer
+    /// to the session, whose undo takes its own edits (`None` for one that
+    /// gave no name). A page's window calls as [`studio_mcp::PERSON`].
+    pub fn call_as(&self, tool: &str, args: Value, client: Option<String>) -> Value {
+        let ctx = CallCtx {
+            caps: self.caps,
+            client,
+        };
+        match self.server.call(tool, &ctx, args) {
             Ok(reply) => json!({
                 "ok": reply.structured,
                 "text": reply.text,
@@ -156,6 +167,9 @@ impl Face {
         }
         let studio = self.server.studio();
         let mut studio = studio_lock(&studio);
+        // Typing is the person's, whoever called last.
+        let now = studio.session.now_ms();
+        studio.session.act_as(studio_mcp::PERSON, now);
         let (current, _) = studio.session.text(doc)?;
         let range = byte_offset(current, start)?..byte_offset(current, end)?;
         studio

@@ -24,6 +24,7 @@ use std::collections::VecDeque;
 use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::time::{Duration, Instant};
 
 use ljos::item::{self, DisplayListBuilder, ImageHandle, ItemPaint, TextEngine, kurbo};
 use ljos::prelude::*;
@@ -75,6 +76,9 @@ struct Context {
     /// count was `n` shows every change up to `n`.
     writes: Arc<AtomicU64>,
     statuses: RefCell<Vec<ObjectId>>,
+    /// When a lease shown ends and the workspaces read the session again;
+    /// `None` when no wake waits.
+    wake_at: std::cell::Cell<Option<Instant>>,
     /// What the last reload said, for a status made after it.
     reload_error: RefCell<String>,
 }
@@ -103,8 +107,9 @@ pub struct Workspace {
     #[qml(readonly, notify)]
     pub text: String,
     /// One row per object, in order: `node`, `type`, `id`, `depth`,
-    /// `label`, `parent` and `index`, its place as `node_move` counts, and
-    /// `comments`, how many open review comments are on it.
+    /// `label`, `parent` and `index`, its place as `node_move` counts,
+    /// `comments`, how many open review comments are on it, and `held`,
+    /// who else holds it (empty when nobody does).
     #[qml(readonly, notify)]
     pub layers: Json,
     /// The handle of the selected object of `doc`; empty when none is.
@@ -140,7 +145,13 @@ pub struct Workspace {
     /// `slots`.
     #[qml(readonly, notify)]
     pub palette: Json,
-    /// What undo and redo would take back and do again, latest last.
+    /// What other writers hold (`node_select` with `hold`): `doc`, `node`,
+    /// `holder`, `ends_in_ms`. A layer another holds, or that is in one,
+    /// names the holder in `held`; the window's edit of it is refused.
+    #[qml(readonly, notify)]
+    pub leases: Json,
+    /// What the person's undo and redo would take back and do again,
+    /// latest last; an agent's edits are its own to undo.
     #[qml(readonly, notify)]
     pub done: Json,
     #[qml(readonly, notify)]
@@ -203,6 +214,7 @@ impl Default for Workspace {
             palette: none(),
             done: none(),
             undone: none(),
+            leases: none(),
             preview: Json::Null,
             error: String::new(),
             problem: String::new(),
@@ -300,10 +312,14 @@ enum Done {
     },
 }
 
-/// Everything a workspace's calls are allowed: a person at the window
-/// may do anything an agent may.
-fn caps() -> CapSet {
-    CapSet::of([Cap::Inspect, Cap::Mutate, Cap::Run])
+/// A call from the window: a person, who may do anything an agent may.
+/// The name is what the session counts as one writer, so the window's
+/// Undo takes the person's edits and an agent's lease holds against them.
+fn person() -> CallCtx {
+    CallCtx {
+        caps: CapSet::of([Cap::Inspect, Cap::Mutate, Cap::Run]),
+        client: Some(studio_mcp::PERSON.to_owned()),
+    }
 }
 
 fn enqueue(engine: &Engine, ws: ObjectId, job: Job) {
@@ -397,7 +413,7 @@ fn run(server: &StudioServer, writes: &AtomicU64, doc: &str, job: Job) -> Done {
     match job {
         Job::Call { tool, args } => {
             let answer = server
-                .call(&tool, &CallCtx::new(caps()), args.clone())
+                .call(&tool, &person(), args.clone())
                 .map(|reply| reply.structured)
                 .map_err(|e| refusal(e.to_value()));
             let (view, seen) = read();
@@ -416,7 +432,7 @@ fn run(server: &StudioServer, writes: &AtomicU64, doc: &str, job: Job) -> Done {
         Job::Picture { generation } => {
             let args = json!({"format": "png", "max_size": 1280});
             let picture = server
-                .shown_picture(&CallCtx::new(caps()), args)
+                .shown_picture(&person(), args)
                 .map_err(|e| e.to_string())
                 .and_then(|reply| {
                     let image = reply
@@ -609,6 +625,10 @@ fn publish(engine: &Engine, ws: ObjectId, view: View, seen: u64) {
     let _ = cx.set(Workspace::PALETTE, to_json(&view.palette));
     let _ = cx.set(Workspace::DONE, to_json(&view.done));
     let _ = cx.set(Workspace::UNDONE, to_json(&view.undone));
+    let _ = cx.set(Workspace::LEASES, to_json(&view.leases));
+    if let Some(ms) = view.leases.iter().map(|l| l.ends_in_ms).min() {
+        wake_after(engine, Duration::from_millis(ms));
+    }
     let _ = cx.set(Workspace::COMMENTS, to_json(&view.comments));
     let _ = cx.set(Workspace::PREVIEW, preview);
     let _ = cx.set(Workspace::PROBLEM, view.problem);
@@ -626,6 +646,45 @@ fn publish(engine: &Engine, ws: ObjectId, view: View, seen: u64) {
             queue.borrow_mut().fetched = generation;
             enqueue(engine, ws, Job::Picture { generation });
         }
+    }
+}
+
+/// A lease ends without a write or a call to tell of it: every workspace
+/// reads the session again once `after` went by. One wake waits at a
+/// time, the earliest; a later one is asked for again by the refresh it
+/// brings.
+fn wake_after(engine: &Engine, after: Duration) {
+    let context = engine.extension::<Context>();
+    let at = Instant::now() + after;
+    if context.wake_at.get().is_some_and(|w| w <= at) {
+        return;
+    }
+    context.wake_at.set(Some(at));
+    let post = Platform::of(engine).poster();
+    let spawned = std::thread::Builder::new()
+        .name("studio-lease-wake".to_owned())
+        .spawn(move || {
+            std::thread::sleep(after);
+            post.send(move |engine| {
+                let context = engine.extension::<Context>();
+                if context.wake_at.get() != Some(at) {
+                    return;
+                }
+                context.wake_at.set(None);
+                let live: Vec<ObjectId> = {
+                    let mut all = context.workspaces.borrow_mut();
+                    all.retain(|&ws| engine.is_alive(ws));
+                    all.clone()
+                };
+                for ws in live {
+                    enqueue(engine, ws, Job::Refresh);
+                }
+            });
+        });
+    if spawned.is_err() {
+        // No thread to wait on: the label stays until the next write or
+        // gesture reads the session again.
+        context.wake_at.set(None);
     }
 }
 

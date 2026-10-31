@@ -143,3 +143,30 @@ Feature: Undo gives back the bytes
     Then the answer's "/unchanged" is false
     And the answer's "/generation" is 2
     And the answer's "/history" is 1
+
+  Scenario: An undone change found in the file is not redone over a later edit
+    Given the agent has called the tool "property_set" with:
+      """json
+      {"doc": "Main.qml", "node": {"id": "root"}, "name": "height", "value": 5}
+      """
+    When the file "Main.qml" is rewritten outside Studio:
+      """qml
+      import QtQuick
+
+      Item { id: root; width: 7 }
+      """
+    And the agent calls the tool "history" with:
+      """json
+      {"action": "undo"}
+      """
+    And the agent calls the tool "property_set" with:
+      """json
+      {"doc": "Main.qml", "node": {"id": "root"}, "name": "x", "value": 1}
+      """
+    Then the answer's "/unchanged" is false
+    When the agent calls the tool "history" with:
+      """json
+      {"action": "redo"}
+      """
+    Then the agent is refused with "not_actionable"
+    And the refusal's "/details/kind" is "nothing_to_do"

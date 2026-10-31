@@ -81,7 +81,7 @@ expression: value
         "type": "boolean"
       },
       "generation": {
-        "description": "The generation read; refused if the document moved on. Needed when\nan address is a `path`, which is true of one generation only.",
+        "description": "The generation read. By handle or `id`, the edit is moved past what\nothers wrote since, or refused as a conflict; by `path`, which is true\nof one generation only, it is refused if the document moved on, so\na `path` needs it.",
         "format": "uint64",
         "minimum": 0,
         "type": [
@@ -175,6 +175,15 @@ expression: value
         "description": "The handle of the object put or moved.",
         "type": [
           "string",
+          "null"
+        ]
+      },
+      "rebased_from": {
+        "description": "The `generation` the edit was made against, when the document had\nmoved on since and the edit was applied past what others wrote.",
+        "format": "uint64",
+        "minimum": 0,
+        "type": [
+          "integer",
           "null"
         ]
       },

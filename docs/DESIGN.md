@@ -1222,6 +1222,139 @@ reach it. The project stays in browser storage (OPFS, with the names in
 What each task finds and what it says when something is missing is pinned by
 `mise run check:tasks`; the pin of ljos-web is `web/ljos-web.rev`.
 
+#### Phase 4: rebase by handle, as built
+
+MULTIPLAYER.md chose one authority, ordered edits addressed by handle, and
+leases. Phase 4 builds seams 1 to 5 of its section 6; MCP.md "Phase 4"
+has the contract. The scenarios are `features/edit/rebase.feature`,
+`features/edit/lease.feature` and `features/ui/writers.feature`.
+
+- **Who writes.** A call's author is its MCP client's name (`CallCtx::client`),
+  `agent` when it gave none; the window is `person`. Two clients giving
+  one name are one writer.
+- **The log** (`studio_core::log`) keeps 256 entries a document, each with
+  its generation, author, label, text changes and touched set: `(handle,
+  Some(binding))` for a binding, `(handle, None)` for an object as a whole.
+- **Rebase by handle or id.** An edit made at an older generation passes
+  every entry since when none by another writer touched its `(handle,
+  name)`, or its object or an ancestor with `None`; else it is refused
+  `conflict` naming the newest such entry, its writer and the value now.
+  A path address is refused on the generation alone, as before.
+- **Rebase of text** moves the ranges with `qml_edit::transform`, the
+  earlier change first; an overlap is a `conflict`, and a result that
+  newly breaks the parse is refused.
+- **Leases.** `node_select {hold: true}` (`mutate`) leases the selection
+  and all it holds: 5 s past the holder's last call, 5 min at most. Every
+  write by another writer that reaches into a held object, by handle or by
+  bytes, is refused `busy`, kind `leased`. Time is the server's `Timer`;
+  leases end lazily, when the session is next touched.
+- **Presence.** The Workspace block publishes `leases`; the layers panel
+  says "held by Ada" on a held layer and those inside it, and the canvas
+  frame lists what is held.
+- **History by author.** Entries carry their author; undo and redo take
+  the caller's own, moved over what others wrote since; `all` takes the
+  newest anyone made. The window's Undo, and the done and undone lists it
+  shows, are the person's.
+
+DECISIONs:
+
+- DECISION: the caller is a thread-local set by `StudioServer::call`, and
+  the server's `lock` hands it to the session (`Session::act_as`) with the
+  time, on every call. Two clients on two threads never write as each
+  other, and no write method grew a caller argument. Code that holds the
+  session directly (the web's code view, a test's person) calls `act_as`
+  itself; the session's default author is `person`.
+- DECISION: a change found in the file is an entry by `outside Studio`
+  that nothing is rebased across: an edit older than it is refused stale,
+  as before, so the changed-outside scenarios keep their answers. Every
+  writer's undo takes it as its own, so undoing a change made outside
+  needs no `all`.
+- DECISION: a text edit's touched set is the innermost objects its ranges
+  reach: a binding it falls inside is `(h, Some(name))`, anything else
+  `(h, None)`. A text edit of a document that does not parse touches what
+  is not known, and no structural edit is rebased across it.
+- DECISION: what each structural edit touches: a binding `(node, name)`;
+  a state edit `(owner, "states")`; an insert or a contribution `(parent,
+  "<children>")`, so two inserts into one parent both land; a move `(node,
+  None)` with all it holds and `(parent, "<children>")`; a remove `(node,
+  None)` with all it holds; an interaction what its planned edit does. Any
+  write, undo included, that leaves a parent's direct `TapHandler`s different
+  also touches `(parent, "<taps>")`, read from the text on both sides. That
+  is what a tap flow from an older generation meets, whichever handler it read.
+- DECISION: an incoming remove or move also conflicts with another
+  writer's change inside its object, beyond the brief: removing a card
+  someone just restyled loses their work silently otherwise.
+- DECISION: a writer's own entries never conflict with it, so an agent's
+  burst of edits from one read lands without reading again between them.
+  A text overlap with the writer's own edit is still refused stale: its
+  ranges are of a text it has not seen.
+- DECISION: `document_edit` with no range (the whole text) at an old
+  generation is refused stale; a whole text has nothing to move.
+- DECISION: theme writes touch `None`: a theme file has no objects, and
+  two writers setting tokens from one old read conflict rather than
+  merge.
+- DECISION: an undo or redo is rebased like an edit: the entry's inverse
+  is moved over every logged entry since, parse-checked and lease-checked,
+  and applied as a text change. When the document has the entry's text
+  again it replays exactly, whatever was written and taken back between.
+  It refuses to cross a change found in the file (`conflict` naming it),
+  an undo of a document's creation after others wrote is a `conflict`, and
+  a log that does not reach back refuses with "too much was written since".
+- DECISION: `hold` replaces everything the caller holds, in any document,
+  with the selection, keeping
+  each still-held handle's start, so renewing by holding again does not
+  stretch the five minutes. Holding inside or around another's lease is
+  refused `leased`.
+- DECISION: a lease that ran its five minutes marks its holder spent; the
+  holder's next `hold` is refused `lease_spent` saying to release and plan
+  again, until it releases (`node_select` with no nodes).
+- DECISION: lease checks come after the stale and conflict checks: a
+  writer told `leased` and retrying later should not then learn its edit
+  was stale all along.
+- DECISION: the window's done and undone lists are the person's, what its
+  Undo takes; an agent's edit shows on the canvas and in the layers, not
+  in the window's undo list (`features/ui/compose.feature` no longer lists
+  it).
+- DECISION: a lease ending is shown without polling: the native block
+  starts one sleeping thread for the earliest end and refreshes then; the
+  web Workspace sets one timeout. Neither runs with no lease held.
+- DECISION: the canvas says "Rectangle held by Ada" as a text mark on the
+  frame: the picture has no geometry of objects to outline.
+- DECISION: two writers editing one owner's states conflict
+  (`features/edit/states.feature`), as two writers' bindings do.
+- DECISION: `Error::Conflict` boxes its fields (`studio_core::Conflict`):
+  unboxed, every `Result` of the session carries them, which clippy's
+  `result_large_err` refuses.
+- DECISION: three older scenarios now say what holds. A code-view edit of
+  bytes the writer itself changed since is what stays `stale`
+  (`features/edit/addresses.feature`), since other stale offsets are moved;
+  an agent undoing what a person typed passes `all`, since its own undo takes
+  only its own edits.
+- DECISION: the scenarios' clock is real time plus an offset a step
+  moves; `@clock` scenarios run natively only, since the web page's clock
+  is the page's own.
+
+Measured (`cargo run --release -p studio_mcp --example rebase_perf`, 200
+calls each, a 1,000-line document with 50 entries by another writer since
+the agent's read, each call a `dry_run`):
+
+| Call, at 1,000 lines | p50 | p95 |
+|---|---|---|
+| `property_set` at the current generation | 0.309 ms | 0.371 ms |
+| `property_set` rebased over 50 entries | 0.415 ms | 0.598 ms |
+| `document_edit` at the current generation | 0.019 ms | 0.026 ms |
+| `document_edit` rebased over 50 entries | 0.710 ms | 0.898 ms |
+
+The log kept 10,260 bytes for those 50 entries, 205 bytes an entry, so a full
+log of one-binding edits is about 52 KB a document. An entry holds what it
+replaced with, so a large paste costs its own length.
+
+Risks: `diff` reads a whole new text as one hunk, so an edit that also
+adds an import touches more than it changed and conflicts more often; the
+objects a rebased undo brings back get new handles; a text edit's `None`
+touches are cautious. `node_select` sets the session's one selection, so
+an agent holding objects also moves the window's selection.
+
 ## 8. Risks
 
 - **Addressing across edits.** Child-index paths shift. Studio gives an

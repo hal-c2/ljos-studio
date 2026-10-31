@@ -163,6 +163,10 @@ struct EditOut {
     /// entry made.
     // Always serialised, `false` on a write: the output schema requires it.
     unchanged: bool,
+    /// The `generation` the edit was made against, when the document had
+    /// moved on since and the edit was applied past what others wrote.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    rebased_from: Option<u64>,
 }
 
 impl From<Outcome> for EditOut {
@@ -183,6 +187,7 @@ impl From<Outcome> for EditOut {
             node: o.node,
             unchanged: o.unchanged,
             text: o.text,
+            rebased_from: o.rebased,
         }
     }
 }
@@ -235,6 +240,12 @@ struct SelectArgs {
     /// logical pixels. Selects the object declared where the preview's
     /// topmost object there is declared; nothing there clears it.
     at: Option<Point>,
+    /// Also hold the selected objects and all they hold (`mutate`): another
+    /// writer's edit of them is refused as `busy` until the caller has made
+    /// no call for five seconds, and for five minutes at most. Selecting
+    /// nothing lets go of what the caller holds.
+    #[serde(default)]
+    hold: bool,
 }
 
 #[derive(Clone, Copy, Deserialize, JsonSchema)]
@@ -247,6 +258,8 @@ struct Point {
 #[derive(Serialize, JsonSchema)]
 struct Selection {
     selection: Vec<Found>,
+    /// The handles of `doc` the caller holds.
+    held: Vec<String>,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -304,8 +317,10 @@ struct Inspected {
 #[serde(deny_unknown_fields)]
 struct InsertArgs {
     doc: String,
-    /// The generation read; refused if the document moved on. Needed when
-    /// an address is a `path`, which is true of one generation only.
+    /// The generation read. By handle or `id`, the edit is moved past what
+    /// others wrote since, or refused as a conflict; by `path`, which is true
+    /// of one generation only, it is refused if the document moved on, so
+    /// a `path` needs it.
     generation: Option<u64>,
     parent: Address,
     /// Child position; the end when left out.
@@ -328,8 +343,10 @@ struct InsertArgs {
 #[serde(deny_unknown_fields)]
 struct MoveArgs {
     doc: String,
-    /// The generation read; refused if the document moved on. Needed when
-    /// an address is a `path`, which is true of one generation only.
+    /// The generation read. By handle or `id`, the edit is moved past what
+    /// others wrote since, or refused as a conflict; by `path`, which is true
+    /// of one generation only, it is refused if the document moved on, so
+    /// a `path` needs it.
     generation: Option<u64>,
     node: Address,
     parent: Address,
@@ -344,8 +361,10 @@ struct MoveArgs {
 #[serde(deny_unknown_fields)]
 struct RemoveArgs {
     doc: String,
-    /// The generation read; refused if the document moved on. Needed when
-    /// an address is a `path`, which is true of one generation only.
+    /// The generation read. By handle or `id`, the edit is moved past what
+    /// others wrote since, or refused as a conflict; by `path`, which is true
+    /// of one generation only, it is refused if the document moved on, so
+    /// a `path` needs it.
     generation: Option<u64>,
     node: Address,
     #[serde(default)]
@@ -396,8 +415,10 @@ impl<T: JsonSchema> JsonSchema for Present<T> {
 #[serde(deny_unknown_fields)]
 struct PropertyArgs {
     doc: String,
-    /// The generation read; refused if the document moved on. Needed when
-    /// an address is a `path`, which is true of one generation only.
+    /// The generation read. By handle or `id`, the edit is moved past what
+    /// others wrote since, or refused as a conflict; by `path`, which is true
+    /// of one generation only, it is refused if the document moved on, so
+    /// a `path` needs it.
     generation: Option<u64>,
     node: Address,
     /// `width`, `font.bold`; written grouped or dotted as the file already does.
@@ -412,8 +433,10 @@ struct PropertyArgs {
 #[serde(deny_unknown_fields)]
 struct BindingArgs {
     doc: String,
-    /// The generation read; refused if the document moved on. Needed when
-    /// an address is a `path`, which is true of one generation only.
+    /// The generation read. By handle or `id`, the edit is moved past what
+    /// others wrote since, or refused as a conflict; by `path`, which is true
+    /// of one generation only, it is refused if the document moved on, so
+    /// a `path` needs it.
     generation: Option<u64>,
     node: Address,
     /// A property (`width`) or a handler (`onClicked`).
@@ -522,6 +545,9 @@ enum HistoryAction {
 #[serde(deny_unknown_fields)]
 struct HistoryArgs {
     action: HistoryAction,
+    /// Undo or redo the newest edit whoever made it, not the caller's own.
+    #[serde(default)]
+    all: bool,
 }
 
 #[derive(Serialize, JsonSchema)]
@@ -529,6 +555,10 @@ struct EntryOut {
     id: u64,
     doc: String,
     label: String,
+    /// Who made it: an MCP client's name, `agent` for one that gave none,
+    /// `person` for the window, `outside Studio` for a change found in the
+    /// file.
+    author: String,
     removed: usize,
     added: usize,
 }
@@ -539,6 +569,7 @@ impl From<studio_core::EntrySummary> for EntryOut {
             id: e.id,
             doc: e.doc,
             label: e.label,
+            author: e.author,
             removed: e.removed,
             added: e.added,
         }
@@ -993,7 +1024,11 @@ fn has_signal(
         return Ok(());
     }
     let mut studio = lock(studio);
-    let (handle, node) = studio.session.resolve(doc, trigger).map_err(error)?;
+    // An object that is gone is the edit's to answer for: it can say which
+    // writer took it out.
+    let Ok((handle, node)) = studio.session.resolve(doc, trigger) else {
+        return Ok(());
+    };
     let source = studio.session.text(doc).map_err(error)?.0.to_owned();
     let Some(signals) = crate::signals::of(studio.session.store(), doc, &source, &node) else {
         return Ok(());
@@ -1470,7 +1505,12 @@ fn edits(studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
             .requires(Cap::Inspect),
             typed({
                 let studio = s();
-                move |_, a: SelectArgs| {
+                move |ctx: &CallCtx, a: SelectArgs| {
+                    // Holding changes what others may write: checked here,
+                    // refused the way the registry does.
+                    if a.hold && !ctx.caps.contains(Cap::Mutate) {
+                        return Err(denied("node_select", Cap::Mutate, ctx));
+                    }
                     let mut studio = lock(&studio);
                     match a.at {
                         Some(_) if !a.nodes.is_empty() => {
@@ -1501,7 +1541,21 @@ fn edits(studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
                             .map_err(error)?;
                         selection.push(found(&doc, handle, &node));
                     }
-                    Ok(Selection { selection })
+                    // A point can select an object declared in another file,
+                    // and a lease is on the document that object is in.
+                    let doc = match selection.first() {
+                        Some(first) => first.doc.clone(),
+                        None => studio.session.canonical(&a.doc).map_err(error)?,
+                    };
+                    if selection.is_empty() {
+                        studio.session.release();
+                    } else if a.hold {
+                        let handles: Vec<String> =
+                            selection.iter().map(|f| f.node.clone()).collect();
+                        studio.session.hold(&doc, &handles).map_err(error)?;
+                    }
+                    let held = studio.session.held(&doc);
+                    Ok(Selection { selection, held })
                 }
             }),
         )
@@ -1754,8 +1808,9 @@ fn edits(studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
         .with(
             ToolDef::new::<HistoryArgs>(
                 "history",
-                "List edits (`inspect`), or undo or redo the last one (`mutate`). Undo gives back \
-                 the document's bytes.",
+                "List edits and who made them (`inspect`), or undo or redo the caller's last \
+                 one (`mutate`), moved past what others wrote since; `all` takes the newest \
+                 whoever made it. Undo gives back the document's bytes.",
             )
             .output::<HistoryOut>()
             .requires(Cap::Inspect)
@@ -1771,7 +1826,13 @@ fn edits(studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
                     let mut studio = lock(&studio);
                     let entry = match a.action {
                         HistoryAction::List => None,
+                        HistoryAction::Undo if a.all => {
+                            Some(studio.session.undo_newest().map_err(error)?)
+                        }
                         HistoryAction::Undo => Some(studio.session.undo().map_err(error)?),
+                        HistoryAction::Redo if a.all => {
+                            Some(studio.session.redo_newest().map_err(error)?)
+                        }
                         HistoryAction::Redo => Some(studio.session.redo().map_err(error)?),
                     };
                     let generation = match &entry {

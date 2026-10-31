@@ -9,7 +9,7 @@ expression: value
     "open_world": false,
     "read_only": false
   },
-  "description": "List edits (`inspect`), or undo or redo the last one (`mutate`). Undo gives back the document's bytes.",
+  "description": "List edits and who made them (`inspect`), or undo or redo the caller's last one (`mutate`), moved past what others wrote since; `all` takes the newest whoever made it. Undo gives back the document's bytes.",
   "inputSchema": {
     "$defs": {
       "HistoryAction": {
@@ -25,6 +25,11 @@ expression: value
     "properties": {
       "action": {
         "$ref": "#/$defs/HistoryAction"
+      },
+      "all": {
+        "default": false,
+        "description": "Undo or redo the newest edit whoever made it, not the caller's own.",
+        "type": "boolean"
       }
     },
     "required": [
@@ -43,6 +48,10 @@ expression: value
             "format": "uint",
             "minimum": 0,
             "type": "integer"
+          },
+          "author": {
+            "description": "Who made it: an MCP client's name, `agent` for one that gave none,\n`person` for the window, `outside Studio` for a change found in the\nfile.",
+            "type": "string"
           },
           "doc": {
             "type": "string"
@@ -65,6 +74,7 @@ expression: value
           "id",
           "doc",
           "label",
+          "author",
           "removed",
           "added"
         ],

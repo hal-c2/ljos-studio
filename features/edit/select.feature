@@ -86,3 +86,47 @@ Feature: Studio's selection is set by address or by a point in the preview
       """
     Then the answer's "/selection/0/id" is "badge"
     And the answer's "/selection/0/path" is "root/0/0"
+
+  @preview
+  Scenario: A point on an object from another file holds it in that file
+    Given the file "Tile.qml":
+      """qml
+      import QtQuick
+
+      Item {
+          width: 100; height: 100
+
+          Rectangle {
+              id: tile
+              width: 100; height: 100
+              color: "red"
+          }
+      }
+      """
+    And the file "Wall.qml":
+      """qml
+      import QtQuick
+
+      Item {
+          width: 200; height: 200
+
+          Tile {}
+      }
+      """
+    And the studio tools are connected with the capabilities "inspect, mutate, run"
+    And the agent has called the tool "preview_open" with:
+      """json
+      {"doc": "Wall.qml"}
+      """
+    When the agent calls the tool "node_select" with:
+      """json
+      {"doc": "Wall.qml", "at": {"x": 30, "y": 30}, "hold": true}
+      """
+    Then the answer's "/selection/0/doc" is "Tile.qml"
+    When a second agent named "Ada" calls the tool "property_set" with:
+      """json
+      {"doc": "Tile.qml", "node": {"id": "tile"}, "name": "color", "value": "blue"}
+      """
+    Then the agent is refused with "busy"
+    And the refusal's "/details/kind" is "leased"
+

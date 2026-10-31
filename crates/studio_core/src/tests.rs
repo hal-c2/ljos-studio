@@ -106,16 +106,77 @@ fn undo_gives_back_the_bytes() {
 }
 
 #[test]
-fn a_stale_generation_is_refused_and_changes_nothing() {
+fn a_stale_generation_by_path_is_refused_and_changes_nothing() {
     let mut s = session();
     let g = s.generation("Main.qml").unwrap();
     s.edit("Main.qml", Some(g), &insert("Item {}", None), false)
         .unwrap();
-    let err = s
-        .edit("Main.qml", Some(g), &insert("Item {}", None), false)
-        .unwrap_err();
+    let by_path = Op::SetBinding {
+        node: Address::Path("root".into()),
+        name: "width".into(),
+        value: "3".into(),
+    };
+    let err = s.edit("Main.qml", Some(g), &by_path, false).unwrap_err();
     assert!(matches!(err, Error::Stale { given, current, .. } if given == g && current == g + 1));
     assert_eq!(s.history().0.len(), 1);
+}
+
+#[test]
+fn an_older_generation_by_id_is_rebased_past_another_writers_insert() {
+    let mut s = session();
+    let g = s.generation("Main.qml").unwrap();
+    s.act_as("Ada", 0);
+    s.edit("Main.qml", Some(g), &insert("Item {}", None), false)
+        .unwrap();
+    s.act_as("agent", 0);
+    let out = s
+        .edit("Main.qml", Some(g), &insert("Item {}", None), false)
+        .unwrap();
+    assert_eq!(out.rebased, Some(g));
+    assert_eq!(out.generation, g + 2);
+    let (done, _) = s.history();
+    let authors: Vec<&str> = done.iter().map(|e| e.author.as_str()).collect();
+    assert_eq!(authors, ["Ada", "agent"]);
+}
+
+#[test]
+fn another_writers_change_of_the_binding_is_a_conflict() {
+    let mut s = session();
+    let g = s.generation("Main.qml").unwrap();
+    let set = |value: &str| Op::SetBinding {
+        node: Address::Id("root".into()),
+        name: "width".into(),
+        value: value.into(),
+    };
+    s.act_as("Ada", 0);
+    s.edit("Main.qml", Some(g), &set("3"), false).unwrap();
+    s.act_as("agent", 0);
+    let err = s.edit("Main.qml", Some(g), &set("4"), false).unwrap_err();
+    assert!(
+        matches!(&err, Error::Conflict(c)
+            if c.author == "Ada" && c.name.as_deref() == Some("width")
+                && c.now.as_deref() == Some("3")),
+        "{err:?}"
+    );
+}
+
+#[test]
+fn a_held_object_refuses_another_writer_until_the_lease_lapses() {
+    let mut s = session();
+    let (handle, _) = s.resolve("Main.qml", &Address::Id("root".into())).unwrap();
+    s.act_as("Ada", 0);
+    s.hold("Main.qml", std::slice::from_ref(&handle)).unwrap();
+    s.act_as("agent", LEASE_TTL_MS - 1);
+    let err = s
+        .edit("Main.qml", None, &insert("Item {}", None), false)
+        .unwrap_err();
+    assert!(
+        matches!(&err, Error::Leased { holder, .. } if holder == "Ada"),
+        "{err:?}"
+    );
+    s.act_as("agent", LEASE_TTL_MS);
+    s.edit("Main.qml", None, &insert("Item {}", None), false)
+        .unwrap();
 }
 
 #[test]

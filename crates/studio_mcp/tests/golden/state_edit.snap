@@ -334,6 +334,15 @@ expression: value
           "null"
         ]
       },
+      "rebased_from": {
+        "description": "The `generation` the edit was made against, when the document had\nmoved on since and the edit was applied past what others wrote.",
+        "format": "uint64",
+        "minimum": 0,
+        "type": [
+          "integer",
+          "null"
+        ]
+      },
       "text": {
         "description": "The text the edit would give, for a dry run.",
         "type": [

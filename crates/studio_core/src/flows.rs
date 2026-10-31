@@ -17,6 +17,12 @@ use qml_edit::Step;
 
 /// The type that turns a tap on any item into a signal.
 const TAP_HANDLER: &str = "TapHandler";
+
+/// Each object holding `TapHandler`s directly, with their handles.
+pub(crate) type Taps = std::collections::BTreeMap<u64, Vec<u64>>;
+
+/// In `Taps`, a `TapHandler` no reader has a handle for yet.
+const NEW: u64 = u64::MAX;
 /// The types a flow can open a document in.
 const NAVIGATORS: [&str; 2] = ["Loader", "StackView"];
 
@@ -374,6 +380,59 @@ impl Session {
                 })
             }
         }
+    }
+
+    /// The document's `Taps` as it is now; none while it does not parse.
+    /// Gives out no handles: this runs while an edit is under way, and a
+    /// handle given out then would go to the wrong history entry. An object
+    /// an edit made has none yet, and is `NEW` here.
+    pub(crate) fn taps_now(&self, path: &str) -> Taps {
+        let mut taps = Taps::new();
+        let Some(doc) = self.docs.get(path).filter(|d| d.text.contains(TAP_HANDLER)) else {
+            return taps;
+        };
+        let handle = |at: &NodePath| {
+            doc.tracked
+                .iter()
+                .find(|t| t.path.as_ref() == Some(at))
+                .map(|t| t.handle)
+        };
+        for node in doc.nodes.iter().flatten() {
+            if short(&node.ty) != TAP_HANDLER {
+                continue;
+            }
+            // A parent with no handle is new too: no edit from an older
+            // generation can name it.
+            let parent = doc
+                .nodes
+                .iter()
+                .flatten()
+                .find(|p| is_child_of(node, &p.path))
+                .and_then(|p| handle(&p.path));
+            if let Some(parent) = parent {
+                taps.entry(parent)
+                    .or_default()
+                    .push(handle(&node.path).unwrap_or(NEW));
+            }
+        }
+        taps
+    }
+
+    /// The `TapHandler`s `handle` holds now, each with whether it writes
+    /// `onTapped`: what a tap flow on it meets. None when `handle` is gone.
+    pub(crate) fn taps_of(&mut self, path: &str, handle: u64) -> Result<Vec<(u64, bool)>, Error> {
+        let (tree, _) = self.tree(path)?;
+        let Some((_, trigger)) = tree.iter().find(|(h, _)| *h == format!("n{handle}")) else {
+            return Ok(Vec::new());
+        };
+        Ok(tree
+            .iter()
+            .filter(|(_, n)| is_child_of(n, &trigger.path) && short(&n.ty) == TAP_HANDLER)
+            .map(|(tap, n)| {
+                let tapped = n.bindings.iter().any(|b| b.name == "onTapped");
+                (super::number(tap), tapped)
+            })
+            .collect())
     }
 
     /// The edit that takes a flow out: its handler, and the `TapHandler`

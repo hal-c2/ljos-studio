@@ -162,4 +162,3 @@ Feature: A person composes a shell in Studio's window
       """
     And the person selects "Rectangle" in the layers panel
     Then the inspector shows "color" as "\"blue\""
-    And the history lists "set color"

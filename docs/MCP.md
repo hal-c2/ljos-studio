@@ -36,7 +36,7 @@ documents: export), `run` (start previews). They are granted at launch with
 | 4 | `document_new` | Create a QML document, or one keeping a project JSON file's records (`data`): a `JsonListModel` of the file, or a `ListModel` copy; undo removes it | mutate |
 | 5 | `document_edit` | Replace a byte range of a document's text, as the code view does | mutate |
 | 6 | `node_find` | Find objects by `id`, type, binding name or text in a binding's value | inspect |
-| 7 | `node_select` | Set Studio's selection (shown on the canvas and in the inspector) by addresses or by a point `at` in the preview | inspect |
+| 7 | `node_select` | Set Studio's selection (shown on the canvas and in the inspector) by addresses or by a point `at` in the preview; `hold` leases them to the caller | inspect (`hold`: mutate) |
 | 8 | `node_inspect` | An object's bindings with byte ranges, its parent, its children, its type's members, its signals, its states and transitions, its flows and the data it sees | inspect |
 | 9 | `blocks_list` | Registered blocks with contracts: state, actions, events, slots, mocks | inspect |
 | 10 | `node_insert` | Insert QML text or a block instance as a child at an index | mutate |
@@ -46,7 +46,7 @@ documents: export), `run` (start previews). They are granted at launch with
 | 14 | `binding_set` | Set a binding expression or a handler, checked before it is written | mutate |
 | 15 | `state_edit` | Add, rename or remove a `State`; set its changes, its `when` or a breakpoint; add or remove a `Transition` or an interaction | mutate |
 | 16 | `slot_contribute` | Write a `Contribution` to a block's slot, or take one out | mutate |
-| 17 | `history` | List, undo or redo edits (each with its inverse changes) | inspect to list; mutate to undo or redo |
+| 17 | `history` | List, undo or redo edits (each with its inverse changes and its author); undo and redo take the caller's own, `all` the newest | inspect to list; mutate to undo or redo |
 | 18 | `theme_set` | Read the tokens (`Ljos.Design` roles and the theme file, light and dark), or set one; the preview reloads live | mutate |
 | 19 | `preview_open` | Start a preview of a shell on a target (desktop, tablet, phone) or size with live or mocked state; on the open one, change size or state in place | run |
 | 20 | `preview_state` | Read an object's state and a block's published state in the preview; set it when the block is mocked; click first | run |
@@ -314,6 +314,10 @@ handler on the object tapped. `state_edit` carries it:
 
 `node` names the owner of the state (the root by default). The history
 labels are `tapped card to details` and `remove tapped interaction`.
+From an older generation, a tap flow lands past another writer's new child
+of the trigger, but conflicts with another writer adding or taking out a
+`TapHandler` that is a direct child of it (`details.name` is `<taps>`).
+Taking a tap flow out also conflicts with any change to the handler it is in.
 Refusals: `not_found` with `details.kind` `no_state`, `no_document` (the
 document must be beside this one) or `no_interaction`; `invalid_argument`
 for `exists`, an owner or navigator with no `id` (`no_id`), a navigator
@@ -527,6 +531,64 @@ type dump):
 
 `preview_open` and `preview_state` wait on the preview; DESIGN.md has a
 JSON save's time to show.
+
+## Phase 4: writers side by side, as built
+
+Several writers edit one project at once: agents over MCP and the person
+at the window. Still 24 tools; MULTIPLAYER.md section 6 has the design,
+DESIGN.md "Phase 4: rebase by handle, as built" the DECISIONs and numbers.
+
+**Who writes.** A call's writer is its MCP client's name, or `agent` when
+the client gave none; the window is `person`. Two clients giving one name
+are one writer: they share an undo stack and leases.
+
+**Rebase.** An edit made at an older `generation` is moved onto the
+current text rather than refused, and its answer says `rebased_from`
+(the generation it was made at; absent when it was current):
+
+- an edit naming its object by handle or `id` passes the entries since
+  its generation when none of them, by another writer, touched the same
+  binding of the same object, or touched the object or an object holding
+  it as a whole (a remove, a move, a replace, or a write of the binding
+  whose value it is written in). An edit giving a child `index` also
+  conflicts with another writer's change of that parent's children, as the
+  index counts the children it read; one with no `index` appends. Otherwise it is refused
+  `stale_ref`, kind `conflict`, with `doc`, `handle` (`null` for a change of
+  the text that is no one object's), `name`, the other
+  writer (`author`), its edit's `label` and `generation`, and the value
+  `now` (or `null`);
+- an edit by `path` is never rebased: a path is true of one text, so an
+  old generation stays `stale_ref`, kind `stale_generation`;
+- `document_edit` moves its ranges over the changes since
+  (`qml_edit::transform`, the earlier change first). A range that overlaps
+  one of them is a `conflict`; a moved edit that newly breaks the parse is
+  refused `invalid_argument`;
+- the log keeps 256 entries a document. A base older than those, or an
+  entry from a change found in the file, is refused as before.
+
+A writer's own entries never conflict with it: an agent making a burst of
+edits from one read does not have to read again between them.
+
+**Leases.** `node_select` with `hold: true` (needs `mutate`) leases the
+selected objects and all they hold to the caller; the answer's `held`
+lists the handles the caller holds in that document. A lease lasts 5 s
+past the holder's last call (any call renews it) and 5 min at most; then
+it ends, and the holder's next `hold` is refused `not_actionable`, kind
+`lease_spent`, saying to release and plan again, until they release.
+Leases end when their time is up; nothing watches the clock. `node_select` with no nodes and `hold:
+false` lets go. While a lease stands, another writer's `property_set`,
+`binding_set`, `node_*` edits, `state_edit`, `slot_contribute`,
+`document_edit`, `theme_set` and `history` undo or redo changes reaching
+into its bytes, and
+`review` writes on a held object are refused `busy`, kind `leased`, with
+`holder` and `until_ms`. Reading is never refused. The window shows the
+holder in the layers panel and on the canvas ("held by Ada").
+
+**History by author.** Every `history` entry has an `author`. `undo` and
+`redo` take the caller's newest own entry, moved past what others wrote
+since (refused `conflict` when someone changed the same thing); `all:
+true` takes the newest anyone made, as before. The window's Undo takes the
+person's own. `list` lists every writer's entries.
 
 ## Prompts
 
