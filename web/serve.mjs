@@ -7,7 +7,7 @@
 //
 //   node web/serve.mjs <the assembled app's directory> [port]
 
-import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createServer as createHttp } from "node:http";
 import { dirname, extname, join, normalize } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -69,14 +69,17 @@ export function forQmlc(files, aliases = []) {
   return shown;
 }
 
-export async function start({ app, port = 0 }) {
+// `record` keeps every error the compiler answers, for a runner that reads
+// them; a person's server, typing into a refused compile, keeps none.
+export async function start({ app, port = 0, record = false }) {
   process.env.VITE_CONFIG_NATIVE_IGNORE_WARNING = "true";
   // Vite and the plugin, from the checkout the app's `node_modules` links to.
   const { createServer: createVite } = await import(pathToFileURL(join(app, "node_modules/vite/dist/node/index.js")).href);
   const projects = join(app, "projects");
   // The app's vite.config.js gives `--root` only to files under this
-  // directory, not to any path that has `projects/<n>` in it.
-  process.env.STUDIO_PREVIEW_PROJECTS = projects;
+  // directory, not to any path that has `projects/<n>` in it. Vite hands it
+  // real paths, so a checkout reached through a link is named by its real one.
+  process.env.STUDIO_PREVIEW_PROJECTS = join(realpathSync(app), "projects");
   const vite = await createVite({
     configFile: join(app, "vite.config.js"),
     root: app,
@@ -118,7 +121,7 @@ export async function start({ app, port = 0 }) {
       }
     } catch (e) {
       const error = String(e?.message ?? e).split(dir + "/").join("");
-      compiled.push(error);
+      if (record) compiled.push(error);
       return { status: 200, answer: { error } };
     }
     return { status: 200, answer: { url: `/preview/projects/${n}/${entry}?import` } };

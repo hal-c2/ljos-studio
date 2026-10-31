@@ -296,7 +296,7 @@ function drift() {
 // Chromium with Studio's page and `serve.mjs` behind one origin.
 export async function launch(app) {
   const { chromium } = await import(process.env.PLAYWRIGHT ?? "playwright");
-  const served = await start({ app });
+  const served = await start({ app, record: true });
   const browser = await chromium.launch({ headless: true });
   const context = await browser.newContext({ ignoreHTTPSErrors: true });
   await context.route(`${ORIGIN}/**`, async (route) => {
