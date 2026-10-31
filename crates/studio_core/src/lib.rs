@@ -15,7 +15,10 @@ mod address;
 mod history;
 pub mod outline;
 pub mod preview;
+pub mod slots;
+pub mod states;
 mod store;
+pub mod theme;
 
 use std::collections::BTreeMap;
 
@@ -23,6 +26,8 @@ pub use address::{Address, PathChange, parse_path};
 pub use history::{Entry, EntrySummary};
 pub use outline::{Binding, Node};
 pub use qml_edit::{Change, Error as EditError, NodePath};
+pub use slots::Mode;
+pub use states::{ChangeInfo, StateEdit, StateInfo, TransitionInfo, Variants};
 pub use store::{FsStore, MemStore, Store, StoreError};
 
 use address::{Tracked, find_by_key};
@@ -52,6 +57,24 @@ pub enum Error {
     Invalid(String),
     #[error("nothing to {0}")]
     NothingTo(&'static str),
+    #[error("no state `{0}`")]
+    NoState(String),
+    #[error("no transition from `{from}` to `{to}`")]
+    NoTransition { from: String, to: String },
+    #[error("the state `{state}` does not change `{name}`")]
+    NoChange { state: String, name: String },
+    /// A state names objects by `id`: one without cannot be changed by it
+    /// nor, for the root, compared with a breakpoint.
+    #[error("{0} has no `id`; give it one first")]
+    NoId(String),
+    #[error("{0} is not a `Contribution`")]
+    NotAContribution(String),
+    #[error("`Ljos.Design` has no token `{0}`")]
+    NoToken(String),
+    /// Ljós would not load the theme; its reasons, each
+    /// `file:line:column: message`.
+    #[error("{}", .0.iter().map(ToString::to_string).collect::<Vec<_>>().join("\n"))]
+    Theme(Vec<theme::ThemeError>),
 }
 
 /// A literal a property can be set to.
@@ -122,6 +145,23 @@ pub enum Op {
         node: Address,
         name: String,
     },
+    /// A change to `node`'s states or transitions.
+    State {
+        node: Address,
+        edit: StateEdit,
+    },
+    /// Put a `Contribution` to `slot`, written in `text`, into `parent`
+    /// last, with an `id`, importing each of `imports`.
+    Contribute {
+        parent: Address,
+        slot: String,
+        text: String,
+        imports: Vec<String>,
+    },
+    /// Take out a `Contribution`; refused for any other object.
+    RemoveContribution {
+        node: Address,
+    },
 }
 
 impl Op {
@@ -129,9 +169,12 @@ impl Op {
         match self {
             Op::Insert { parent, .. } => vec![parent],
             Op::Move { node, parent, .. } => vec![node, parent],
-            Op::Remove { node } | Op::SetBinding { node, .. } | Op::RemoveBinding { node, .. } => {
-                vec![node]
-            }
+            Op::Remove { node }
+            | Op::SetBinding { node, .. }
+            | Op::RemoveBinding { node, .. }
+            | Op::State { node, .. }
+            | Op::RemoveContribution { node } => vec![node],
+            Op::Contribute { parent, .. } => vec![parent],
         }
     }
 
@@ -147,6 +190,9 @@ impl Op {
             Op::Remove { .. } => "remove".to_owned(),
             Op::SetBinding { name, .. } => format!("set {name}"),
             Op::RemoveBinding { name, .. } => format!("remove {name}"),
+            Op::State { edit, .. } => edit.label(),
+            Op::Contribute { slot, .. } => format!("contribute to {slot}"),
+            Op::RemoveContribution { .. } => "remove contribution".to_owned(),
         }
     }
 }
@@ -169,8 +215,25 @@ pub struct Outcome {
     pub unchanged: bool,
 }
 
+/// The tokens [`Session::tokens`] read.
+#[derive(Clone, Debug)]
+pub struct Tokens {
+    /// The theme file, as the session names it.
+    pub file: String,
+    pub exists: bool,
+    /// The file's generation, 0 while it does not exist.
+    pub generation: u64,
+    /// Why Ljós would not load the file, when it would not; its values
+    /// are then left out.
+    pub problem: Option<String>,
+    pub tokens: Vec<theme::Token>,
+}
+
+/// The type a slot's elements have (`ljos_blocks::CONTRIBUTION`).
+const CONTRIBUTION: &str = "Contribution";
+
 /// One open document.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 struct Document {
     text: String,
     generation: u64,
@@ -272,12 +335,6 @@ impl Session {
         self.on_write.push(Box::new(f));
     }
 
-    fn put(&mut self, path: &str, text: &str) -> Result<(), StoreError> {
-        self.store.write(path, text)?;
-        self.wrote(path);
-        Ok(())
-    }
-
     fn wrote(&mut self, path: &str) {
         for f in &mut self.on_write {
             f(path);
@@ -341,9 +398,9 @@ impl Session {
         Ok(())
     }
 
-    /// Refuses a path that is not one of the project's documents, as written
-    /// or where its links lead: the right to edit a document is not the right
-    /// to change `.git/config`.
+    /// Refuses a path that is not one of the project's documents (its `.qml`
+    /// files and theme files), as written or where its links lead: the right
+    /// to edit a document is not the right to change `.git/config`.
     pub fn check_document(&self, path: &str) -> Result<(), Error> {
         let real = self.store.resolved(path)?;
         if store::document_path(path) && store::document_path(&real) {
@@ -491,6 +548,19 @@ impl Session {
                     .ok_or_else(not_found)
             }
         }
+    }
+
+    /// The states and transitions of the object `address` names.
+    ///
+    /// # Errors
+    /// An address that names nothing, or a document that does not parse.
+    pub fn variants(&mut self, path: &str, address: &Address) -> Result<Variants, Error> {
+        let (_, node) = self.resolve(path, address)?;
+        let text = &self.doc(path)?.text;
+        states::variants(text, node.start).ok_or_else(|| Error::NotFound {
+            doc: path.to_owned(),
+            address: node.path.to_string(),
+        })
     }
 
     /// The object whose type name starts at `line`, `column` (one-based,
@@ -762,6 +832,49 @@ impl Session {
                 .text;
                 Ok((out, PathChange::Same, None))
             }
+            Op::State { node, edit } => {
+                let (_, owner) = self.resolve(path, node)?;
+                let out = states::apply(before, owner.start, &owner.path, edit)?;
+                // States and transitions written in a list are no objects of
+                // the outline; one written alone (`states: State {}`) is, and
+                // its handle is kept by its key.
+                Ok((out, PathChange::Same, None))
+            }
+            Op::Contribute {
+                parent,
+                text,
+                imports,
+                ..
+            } => {
+                let (text, change, focus) = self.plan(
+                    path,
+                    before,
+                    &Op::Insert {
+                        parent: parent.clone(),
+                        index: None,
+                        text: text.clone(),
+                        add_id: true,
+                        import: None,
+                    },
+                )?;
+                let mut out = text;
+                for module in imports {
+                    if let Imported::No = imported(&out, module) {
+                        out = with_import(&out, module)?;
+                    }
+                }
+                Ok((out, change, focus))
+            }
+            Op::RemoveContribution { node } => {
+                let (handle, removed) = self.resolve(path, node)?;
+                if removed.ty.rsplit('.').next() != Some(CONTRIBUTION) {
+                    return Err(Error::NotAContribution(format!(
+                        "{handle} (`{}`)",
+                        removed.ty
+                    )));
+                }
+                self.plan(path, before, &Op::Remove { node: node.clone() })
+            }
         }
     }
 
@@ -853,11 +966,11 @@ impl Session {
                 unchanged: false,
             });
         }
-        self.put(path, text)?;
         let past = self.retired.get(path).copied().unwrap_or(0);
-        self.docs
-            .insert(path.to_owned(), Document::new(text.to_owned(), past));
-        let generation = self.docs[path].generation;
+        let doc = Document::new(text.to_owned(), past);
+        let generation = doc.generation;
+        self.store.write(path, text)?;
+        self.docs.insert(path.to_owned(), doc);
         let entry = self.history.push(Entry {
             id: 0,
             doc: path.to_owned(),
@@ -875,6 +988,7 @@ impl Session {
             handles_after: Vec::new(),
             change: None,
         });
+        self.wrote(path);
         Ok(Outcome {
             doc: path.to_owned(),
             generation,
@@ -903,7 +1017,136 @@ impl Session {
         })
     }
 
-    /// Writes the new text, moves the handles and records the entry.
+    /// The tokens of `Ljos.Design` (`filter`: one, or one singleton's) with
+    /// the theme file's values.
+    pub fn tokens(&mut self, file: &str, filter: Option<&str>) -> Result<Tokens, Error> {
+        let file = &self.canonical(file)?;
+        let exists = self.store.exists(file) || self.docs.contains_key(file);
+        let (theme, generation, problem) = if exists {
+            let (text, generation) = self.text(file)?;
+            match theme::read(file, text) {
+                Ok(theme) => (Some(theme), generation, None),
+                Err(errors) => (None, generation, Some(Error::Theme(errors).to_string())),
+            }
+        } else {
+            (None, 0, None)
+        };
+        let tokens = theme::tokens(theme.as_ref(), filter);
+        if let Some(filter) = filter
+            && tokens.is_empty()
+        {
+            return Err(Error::NoToken(filter.to_owned()));
+        }
+        Ok(Tokens {
+            file: file.to_owned(),
+            exists,
+            generation,
+            problem,
+            tokens,
+        })
+    }
+
+    /// Sets `token` (in `variant` of a colour) in the theme file `file`,
+    /// creating it, or gives it back to the module when `value` is `None`.
+    /// Refused unless Ljós would load the result.
+    pub fn set_token(
+        &mut self,
+        file: &str,
+        generation: Option<u64>,
+        token: &str,
+        variant: Option<&str>,
+        value: Option<&serde_json::Value>,
+        dry_run: bool,
+    ) -> Result<Outcome, Error> {
+        let file = &self.canonical(file)?;
+        let exists = self.store.exists(file) || self.docs.contains_key(file);
+        let before = if exists {
+            self.check_generation(file, generation)?;
+            self.doc(file)?.text.clone()
+        } else {
+            if let Some(given) = generation.filter(|g| *g != 0) {
+                return Err(Error::Stale {
+                    doc: file.to_owned(),
+                    given,
+                    current: 0,
+                });
+            }
+            String::new()
+        };
+        let after = theme::set(&before, token, variant, value).map_err(|e| match e {
+            theme::SetError::NotSet(_) => Error::NothingTo("remove"),
+            // Ljós's reasons say where the file is wrong; Studio's only that
+            // it cannot edit it.
+            theme::SetError::NotJson(_) if theme::read(file, &before).is_err() => {
+                Error::Theme(theme::read(file, &before).err().unwrap_or_default())
+            }
+            e => Error::Invalid(e.to_string()),
+        })?;
+        theme::check(file, &after).map_err(Error::Theme)?;
+        let label = match (value, variant) {
+            (None, None) => format!("remove {token}"),
+            (None, Some(v)) => format!("remove {token} {v}"),
+            (Some(_), None) => format!("set {token}"),
+            (Some(_), Some(v)) => format!("set {token} {v}"),
+        };
+        let changes = diff(&before, &after);
+        let unchanged = exists && after == before;
+        if dry_run {
+            return Ok(Outcome {
+                doc: file.to_owned(),
+                generation: if exists {
+                    self.doc(file)?.generation
+                } else {
+                    0
+                },
+                changes,
+                history: None,
+                node: None,
+                text: Some(after),
+                unchanged,
+            });
+        }
+        if unchanged {
+            return self.unchanged(file, None);
+        }
+        let entry = if exists {
+            self.commit(file, before, after, None, label)?
+        } else {
+            let past = self.retired.get(file).copied().unwrap_or(0);
+            let doc = Document::new(after.clone(), past);
+            self.store.write(file, &after)?;
+            self.docs.insert(file.to_owned(), doc);
+            let entry = self.history.push(Entry {
+                id: 0,
+                doc: file.to_owned(),
+                label,
+                forward: changes.clone(),
+                inverse: vec![Change {
+                    range: 0..after.len(),
+                    replacement: String::new(),
+                }],
+                created: true,
+                handles_before: Vec::new(),
+                handles_after: Vec::new(),
+                change: None,
+            });
+            self.wrote(file);
+            entry
+        };
+        Ok(Outcome {
+            doc: file.to_owned(),
+            generation: self.doc(file)?.generation,
+            changes,
+            history: Some(entry),
+            node: None,
+            text: None,
+            unchanged: false,
+        })
+    }
+
+    /// Writes the new text, moves the handles and records the entry. The
+    /// session's lock outlives a panic (`studio_mcp::lock`), so what can panic
+    /// comes first, the parts that must agree together, and the telling last.
     fn commit(
         &mut self,
         path: &str,
@@ -912,12 +1155,16 @@ impl Session {
         change: Option<PathChange>,
         label: String,
     ) -> Result<u64, Error> {
-        self.put(path, &after)?;
-        self.record(path, before, after, change, label)
+        let (next, entry) = self.step(path, before, after.clone(), change, label)?;
+        self.store.write(path, &after)?;
+        *self.doc(path)? = next;
+        let id = self.history.push(entry);
+        self.wrote(path);
+        Ok(id)
     }
 
-    /// Takes `after` as the document's text: moves the handles and records
-    /// the entry.
+    /// Takes `after` as the document's text, which the file already has:
+    /// moves the handles and records the entry.
     fn record(
         &mut self,
         path: &str,
@@ -926,27 +1173,44 @@ impl Session {
         change: Option<PathChange>,
         label: String,
     ) -> Result<u64, Error> {
+        let (next, entry) = self.step(path, before, after, change, label)?;
+        *self.doc(path)? = next;
+        Ok(self.history.push(entry))
+    }
+
+    /// The document as it is after the edit, and the edit's entry, worked
+    /// out without changing the session.
+    fn step(
+        &mut self,
+        path: &str,
+        before: String,
+        after: String,
+        change: Option<PathChange>,
+        label: String,
+    ) -> Result<(Document, Entry), Error> {
         let doc = self.doc(path)?;
         let handles_before = doc.tracked.clone();
-        for change in diff(&before, &after) {
-            for t in &mut doc.tracked {
-                t.shift(&change);
+        let mut next = doc.clone();
+        let forward = diff(&before, &after);
+        for change in &forward {
+            for t in &mut next.tracked {
+                t.shift(change);
             }
         }
-        doc.set_text(after.clone());
-        remap(doc, change.as_ref());
-        let handles_after = doc.tracked.clone();
-        Ok(self.history.push(Entry {
+        next.set_text(after.clone());
+        remap(&mut next, change.as_ref());
+        let entry = Entry {
             id: 0,
             doc: path.to_owned(),
             label,
-            forward: diff(&before, &after),
+            forward,
             inverse: diff(&after, &before),
             created: false,
             handles_before,
-            handles_after,
+            handles_after: next.tracked.clone(),
             change,
-        }))
+        };
+        Ok((next, entry))
     }
 
     fn handle_at(&mut self, path: &str, at: &NodePath) -> Result<String, Error> {
@@ -960,7 +1224,9 @@ impl Session {
             })
     }
 
-    /// Undoes the last edit; its document gets the bytes it had before.
+    /// Undoes the last edit; its document gets the bytes it had before. The
+    /// history moves only once the file has: one that could not be written
+    /// can be tried again.
     pub fn undo(&mut self) -> Result<EntrySummary, Error> {
         // A change made outside Studio goes on top here and is what is
         // undone: the entry below it has offsets on a text the file left.
@@ -980,6 +1246,7 @@ impl Session {
         // to be tried again, and the lists still say where the file is.
         self.replay(&entry, false)?;
         self.history.commit_undo();
+        self.wrote(&entry.doc);
         Ok(entry.summary())
     }
 
@@ -1008,23 +1275,25 @@ impl Session {
         // to be tried again, and the lists still say where the file is.
         self.replay(&entry, true)?;
         self.history.commit_redo();
+        self.wrote(&entry.doc);
         Ok(entry.summary())
     }
 
+    /// Brings the file and the document to that side of `entry`, for the
+    /// caller to move the history and tell who watches.
     fn replay(&mut self, entry: &Entry, forward: bool) -> Result<(), Error> {
         let path = entry.doc.clone();
         if entry.created && !forward {
             self.store.remove(&path)?;
-            self.wrote(&path);
             self.retire(&path);
             return Ok(());
         }
         if entry.created && forward {
             let text = qml_edit::splice("", &entry.forward);
-            self.put(&path, &text)?;
             let past = self.retired.get(&path).copied().unwrap_or(0);
-            let mut doc = Document::new(text, past);
+            let mut doc = Document::new(text.clone(), past);
             doc.tracked = entry.handles_after.clone();
+            self.store.write(&path, &text)?;
             self.docs.insert(path, doc);
             return Ok(());
         }
@@ -1035,15 +1304,13 @@ impl Session {
             &entry.inverse
         };
         let text = qml_edit::splice(&doc.text, changes);
-        self.put(&path, &text)?;
-        let doc = self.doc(&path)?;
-        let shifts = diff(&doc.text, &text);
-        for change in &shifts {
-            for t in &mut doc.tracked {
+        let mut next = doc.clone();
+        for change in &diff(&doc.text, &text) {
+            for t in &mut next.tracked {
                 t.shift(change);
             }
         }
-        doc.set_text(text);
+        next.set_text(text.clone());
         // The handles as they were on that side of the edit: exact, where
         // working them out again from keys could guess.
         let snapshot = if forward {
@@ -1060,14 +1327,14 @@ impl Session {
         // text: a structural edit says where their objects are on this
         // side, and one it made has no place here. A change of the text
         // says nothing, so they are found by bytes and key.
-        for t in &doc.tracked {
+        for t in &next.tracked {
             if tracked.iter().any(|old| old.handle == t.handle) {
                 continue;
             }
             leads.push(match (&entry.change, &t.path) {
                 (Some(change), Some(path)) if forward => Lead::Known(change.apply(path)),
                 (Some(change), Some(path)) => Lead::Known(
-                    doc.nodes
+                    next.nodes
                         .iter()
                         .flatten()
                         .find(|n| change.apply(&n.path).as_ref() == Some(path))
@@ -1078,8 +1345,10 @@ impl Session {
             });
             tracked.push(t.clone());
         }
-        doc.tracked = tracked;
-        place(doc, leads);
+        next.tracked = tracked;
+        place(&mut next, leads);
+        self.store.write(&path, &text)?;
+        *self.doc(&path)? = next;
         Ok(())
     }
 

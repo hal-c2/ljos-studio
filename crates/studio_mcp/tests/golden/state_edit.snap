@@ -1,0 +1,317 @@
+---
+source: crates/studio_mcp/tests/golden_tools.rs
+expression: value
+---
+{
+  "annotations": {
+    "destructive": true,
+    "idempotent": false,
+    "open_world": false,
+    "read_only": false
+  },
+  "description": "Add, rename or remove an object's State; set or remove a value it changes or its `when` (a `breakpoint` writes the root's width bound); add or remove a Transition. Refused with `would_break` if the file would not parse.",
+  "inputSchema": {
+    "$defs": {
+      "Address": {
+        "description": "How a caller names an object.",
+        "oneOf": [
+          {
+            "additionalProperties": false,
+            "description": "A handle the session gave out (`n7`); stable for the session.",
+            "properties": {
+              "node": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "node"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "description": "The object's `id` in the document.",
+            "properties": {
+              "id": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "description": "A path as `document_tree` prints it (`root/0/contentItem:`), true of\nthe current text only.",
+            "properties": {
+              "path": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "path"
+            ],
+            "type": "object"
+          }
+        ]
+      },
+      "LiteralArg": {
+        "anyOf": [
+          {
+            "type": "boolean"
+          },
+          {
+            "type": "number"
+          },
+          {
+            "type": "string"
+          }
+        ],
+        "description": "A literal a property is set to."
+      },
+      "StateAction": {
+        "oneOf": [
+          {
+            "enum": [
+              "add",
+              "rename",
+              "remove",
+              "add_transition",
+              "remove_transition"
+            ],
+            "type": "string"
+          },
+          {
+            "const": "change",
+            "description": "Set or remove one value the state changes.",
+            "type": "string"
+          },
+          {
+            "const": "when",
+            "description": "Set or remove the state's `when`.",
+            "type": "string"
+          }
+        ]
+      },
+      "Target": {
+        "description": "The shape of screen a preview is laid out for.",
+        "enum": [
+          "desktop",
+          "tablet",
+          "phone"
+        ],
+        "type": "string"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "action": {
+        "$ref": "#/$defs/StateAction"
+      },
+      "animations": {
+        "description": "`add_transition`: the animations it runs, in QML.",
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "binding": {
+        "description": "`change`: an expression (`root.width / 2`).",
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "breakpoint": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/Target"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "description": "`add`, `when`: a preview target whose width bound becomes the `when`\n(`root.width < 600`); not with `when`."
+      },
+      "doc": {
+        "type": "string"
+      },
+      "dry_run": {
+        "default": false,
+        "type": "boolean"
+      },
+      "from": {
+        "description": "Transitions: the states it runs between; `*` (any) when left out.",
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "generation": {
+        "format": "uint64",
+        "minimum": 0,
+        "type": [
+          "integer",
+          "null"
+        ]
+      },
+      "name": {
+        "description": "`change`: its property (`text`, `anchors.left`).",
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "new_name": {
+        "description": "`rename`: the new name.",
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "node": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/Address"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "description": "The object whose states these are; the root when left out."
+      },
+      "state": {
+        "description": "The state's name; every action but the transition ones needs it.",
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "target": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/Address"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "description": "`change`: the object, which must have an id."
+      },
+      "to": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "value": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/LiteralArg"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "description": "`change`: a literal. With neither this nor `binding`, the value is\nremoved."
+      },
+      "when": {
+        "description": "`add`, `when`: the condition, QML after `when:`. Left out of `when`,\nit removes it.",
+        "type": [
+          "string",
+          "null"
+        ]
+      }
+    },
+    "required": [
+      "doc",
+      "action"
+    ],
+    "title": "StateEditArgs",
+    "type": "object"
+  },
+  "max_result_bytes": 40960,
+  "name": "state_edit",
+  "outputSchema": {
+    "$defs": {
+      "ChangeOut": {
+        "properties": {
+          "end": {
+            "format": "uint",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "start": {
+            "description": "Byte range of the text before the edit.",
+            "format": "uint",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "text": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "start",
+          "end",
+          "text"
+        ],
+        "type": "object"
+      }
+    },
+    "properties": {
+      "changes": {
+        "items": {
+          "$ref": "#/$defs/ChangeOut"
+        },
+        "type": "array"
+      },
+      "doc": {
+        "type": "string"
+      },
+      "generation": {
+        "description": "The document's generation now; pass it with the next edit.",
+        "format": "uint64",
+        "minimum": 0,
+        "type": "integer"
+      },
+      "history": {
+        "description": "The history entry; absent for a dry run or an unchanged document.",
+        "format": "uint64",
+        "minimum": 0,
+        "type": [
+          "integer",
+          "null"
+        ]
+      },
+      "node": {
+        "description": "The handle of the object put or moved.",
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "text": {
+        "description": "The text the edit would give, for a dry run.",
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "unchanged": {
+        "description": "The document already said this: nothing was written and no history\nentry made.",
+        "type": "boolean"
+      }
+    },
+    "required": [
+      "doc",
+      "generation",
+      "changes",
+      "unchanged"
+    ],
+    "title": "EditOut",
+    "type": "object"
+  },
+  "required_cap": "mutate"
+}

@@ -1,5 +1,5 @@
 // The document running on its target: a frame of the preview's size with
-// the preview's latest picture in it. Ctrl+wheel zooms; a click selects
+// the preview's latest picture in it, and the state its breakpoint shows. Ctrl+wheel zooms; a click selects
 // the object drawn there, as `node_select` with a point does for an agent.
 import QtQuick
 import QtQuick.Controls
@@ -54,6 +54,16 @@ Panel {
                         text: frame.name + " · " + frame.modelData.width + " × " + frame.modelData.height
                         color: Colors.text
                         font.pixelSize: Typography.captionSize
+                    }
+                    // The state the frame's breakpoint turns on, as the
+                    // file's `when` says.
+                    Label {
+                        objectName: "frameState"
+                        text: frame.modelData.variant !== "" ? "State " + frame.modelData.variant : "No state"
+                        color: Colors.text
+                        font.pixelSize: Typography.captionSize
+                        Accessible.role: Accessible.StaticText
+                        Accessible.name: text
                     }
                     Rectangle {
                         width: frame.modelData.width * panel.zoom

@@ -23,6 +23,8 @@ struct Seen {
     errors: Vec<(String, PreviewError)>,
     /// What `pick` answers.
     declared: Option<Declared>,
+    /// The calls a second the host says it answers; 0 leaves Ljós's default.
+    rate: u32,
 }
 
 struct Recorder(Arc<Mutex<Seen>>);
@@ -49,6 +51,13 @@ impl Recorder {
 }
 
 impl PreviewHost for Recorder {
+    fn calls_per_second(&self) -> u32 {
+        match self.0.lock().unwrap().rate {
+            0 => studio_core::preview::DEFAULT_CALLS_PER_SECOND,
+            rate => rate,
+        }
+    }
+
     fn open(&mut self, spec: &PreviewSpec) -> Result<(), PreviewError> {
         let aliases: Vec<String> = spec
             .aliases
@@ -411,6 +420,32 @@ fn a_window_fetching_pictures_in_a_burst_stays_within_the_budget_and_ends_up_sho
     f.call("preview_events", json!({})).unwrap();
     assert_within_the_budget(&f);
     assert!(*f.seen.lock().unwrap().reloads.last().unwrap() >= last_write);
+}
+
+/// The budget is the host's: a preview that answers more calls a second
+/// reloads more of a burst at once.
+#[test]
+fn a_host_that_answers_more_calls_reloads_more_of_a_burst() {
+    let counted = |rate| {
+        let f = Fixture::new();
+        f.seen.lock().unwrap().rate = rate;
+        f.call("preview_open", json!({ "doc": "Shell.qml" }))
+            .unwrap();
+        f.calls();
+        for i in 0..40 {
+            set_text(&f, i);
+        }
+        f.calls().len()
+    };
+    let (default, granted) = (counted(0), counted(50));
+    assert!(
+        default < granted,
+        "{default} reloads at the default rate, {granted} at 50 a second"
+    );
+    assert!(
+        granted < 40,
+        "{granted} reloads for 40 writes at 50 a second"
+    );
 }
 
 #[test]

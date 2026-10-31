@@ -12,6 +12,7 @@ publish.workspace = true
 qml_syntax.workspace = true
 qml_edit.workspace = true
 ljos_ir.workspace = true
+ljos_design.workspace = true
 schemars.workspace = true
 serde.workspace = true
 serde_json.workspace = true

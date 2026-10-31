@@ -9,7 +9,7 @@ expression: value
     "open_world": false,
     "read_only": true
   },
-  "description": "An object's bindings with their byte ranges, its parent and its children.",
+  "description": "An object's bindings with their byte ranges, its parent, its children, and its states and transitions.",
   "inputSchema": {
     "$defs": {
       "Address": {
@@ -109,6 +109,28 @@ expression: value
         ],
         "type": "object"
       },
+      "ChangeInfo": {
+        "description": "One value a state changes: `target`'s property `name` to `value`.",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "target": {
+            "description": "The changed object's `id`.",
+            "type": "string"
+          },
+          "value": {
+            "description": "As written after the `:`.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "target",
+          "name",
+          "value"
+        ],
+        "type": "object"
+      },
       "Found": {
         "properties": {
           "doc": {
@@ -135,6 +157,80 @@ expression: value
           "node",
           "path",
           "type"
+        ],
+        "type": "object"
+      },
+      "StateInfo": {
+        "description": "One `State` of an object.",
+        "properties": {
+          "changes": {
+            "description": "The values it changes, in the order written.",
+            "items": {
+              "$ref": "#/$defs/ChangeInfo"
+            },
+            "type": "array"
+          },
+          "end": {
+            "format": "uint",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "name": {
+            "type": "string"
+          },
+          "start": {
+            "description": "Byte range of the `State` in the text.",
+            "format": "uint",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "when": {
+            "description": "The condition that turns it on, as written.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "name",
+          "changes",
+          "start",
+          "end"
+        ],
+        "type": "object"
+      },
+      "TransitionInfo": {
+        "description": "One `Transition` of an object.",
+        "properties": {
+          "animations": {
+            "description": "The objects it runs (its animations), as written.",
+            "type": "string"
+          },
+          "end": {
+            "format": "uint",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "from": {
+            "description": "A state's name, or `*` for any.",
+            "type": "string"
+          },
+          "start": {
+            "format": "uint",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "to": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "from",
+          "to",
+          "animations",
+          "start",
+          "end"
         ],
         "type": "object"
       }
@@ -193,6 +289,19 @@ expression: value
         "minimum": 0,
         "type": "integer"
       },
+      "states": {
+        "description": "Its `State`s in order, each with the values it changes as written.",
+        "items": {
+          "$ref": "#/$defs/StateInfo"
+        },
+        "type": "array"
+      },
+      "transitions": {
+        "items": {
+          "$ref": "#/$defs/TransitionInfo"
+        },
+        "type": "array"
+      },
       "type": {
         "type": "string"
       }
@@ -207,7 +316,9 @@ expression: value
       "end",
       "line",
       "bindings",
-      "children"
+      "children",
+      "states",
+      "transitions"
     ],
     "title": "Inspected",
     "type": "object"

@@ -20,7 +20,8 @@ Studio composes three servers rather than duplicating them:
 
 Budgets follow ARCHITECTURE.md section 19.6: tools listed in a fixed order,
 descriptions ≤ 300 characters, responses ≤ 40 KB with cursors, ≤ 25 tools
-on one server. Studio's list is 24. Capabilities as in section 19.7:
+on one server. Studio offers 22 tools today; with `export` and `review`,
+still to come in S6, it offers 24. Capabilities as in section 19.7:
 `inspect` (read), `mutate` (edit documents), `fs` (write files outside
 documents: export), `run` (start previews). They are granted at launch with
 `--caps`: by default `inspect` on a running window's endpoint and
@@ -30,38 +31,50 @@ documents: export), `run` (start previews). They are granted at launch with
 
 | # | Tool | Does | Needs |
 |---|---|---|---|
-| 1 | `project_open` | Open a project directory; returns documents, blocks count, targets | inspect |
-| 2 | `project_info` | Documents, modules, shells, themes, mock modules, preview targets | inspect |
-| 3 | `document_tree` | A document's object tree: path, `id`, type, bindings summary; paginated | inspect |
-| 4 | `document_text` | A document's text, or a range of it, with the current generation | inspect |
-| 5 | `document_new` | Create a QML document; undo removes it | mutate |
-| 6 | `document_edit` | Replace a byte range of a document's text, as the code view does | mutate |
-| 7 | `node_find` | Find nodes by `id`, type, property value or text; returns addresses | inspect |
-| 8 | `node_select` | Set Studio's selection (shown on the canvas and in the inspector) by addresses or by a point `at` in the preview | inspect |
-| 9 | `node_inspect` | A node's bindings and properties with source spans, its type's members, its states | inspect |
+| 1 | `project_open` | Open a project directory below the workspace, or describe the open one: documents, blocks, targets | inspect |
+| 2 | `document_tree` | A document's objects in order: handle, path, type, `id`, bindings; paginated | inspect |
+| 3 | `document_text` | A document's text or a byte range of it, with its generation and whether it parses | inspect |
+| 4 | `document_new` | Create a QML document; undo removes it | mutate |
+| 5 | `document_edit` | Replace a byte range of a document's text, as the code view does | mutate |
+| 6 | `node_find` | Find objects by `id`, type, binding name or text in a binding's value | inspect |
+| 7 | `node_select` | Set Studio's selection (shown on the canvas and in the inspector) by addresses or by a point `at` in the preview | inspect |
+| 8 | `node_inspect` | An object's bindings with byte ranges, its parent, its children, its type's members, its states and transitions | inspect |
+| 9 | `blocks_list` | Registered blocks with contracts: state, actions, events, slots, mocks | inspect |
 | 10 | `node_insert` | Insert QML text or a block instance as a child at an index | mutate |
 | 11 | `node_move` | Move a node to a parent and index (reparent or reorder) | mutate |
 | 12 | `node_remove` | Remove a node with its comments | mutate |
-| 13 | `node_wrap` | Wrap nodes in a container (`Row`, `ColumnLayout`, `Item`…) | mutate |
-| 14 | `property_set` | Set or remove a property's value (a literal) | mutate |
-| 15 | `binding_set` | Set a binding expression or a handler, checked before it is written | mutate |
-| 16 | `state_edit` | Add, rename or remove a `State`; set a property change in it; add a transition | mutate |
-| 17 | `blocks_list` | Registered blocks with contracts: state, actions, events, slots, mocks | inspect |
-| 18 | `slot_contribute` | Add a `Contribution` to a block's slot | mutate |
-| 19 | `theme_tokens` | Read tokens (`Ljos.Design` roles and the theme file), light and dark | inspect |
-| 20 | `theme_set` | Set a token's value; preview reloads live | mutate |
-| 21 | `history` | List, undo or redo edits (each with its inverse changes) | inspect to list; mutate to undo or redo |
-| 22 | `preview_open` | Start a preview of a shell on a target (desktop, tablet, phone) or size with live or mocked state; on the open one, change size or state in place | run |
-| 23 | `preview_state` | Read a block's published state in the preview; set it when the block is mocked | run |
-| 24 | `preview_screenshot` | A PNG of the preview (≤ 1280 px), or its outline as text | inspect |
-| 25 | `preview_events` | Since a cursor: opened, reloaded (with ms), reload failed, logs, ended | inspect |
-| 26 | `export` | Write a build bundle or a site for a target | fs |
+| 13 | `property_set` | Set or remove a property's value (a literal) | mutate |
+| 14 | `binding_set` | Set a binding expression or a handler, checked before it is written | mutate |
+| 15 | `state_edit` | Add, rename or remove a `State`; set its changes, its `when` or a breakpoint; add or remove a `Transition` | mutate |
+| 16 | `slot_contribute` | Write a `Contribution` to a block's slot, or take one out | mutate |
+| 17 | `history` | List, undo or redo edits (each with its inverse changes) | inspect to list; mutate to undo or redo |
+| 18 | `theme_set` | Read the tokens (`Ljos.Design` roles and the theme file, light and dark), or set one; the preview reloads live | mutate |
+| 19 | `preview_open` | Start a preview of a shell on a target (desktop, tablet, phone) or size with live or mocked state; on the open one, change size or state in place | run |
+| 20 | `preview_state` | Read a block's published state in the preview; set it when the block is mocked | run |
+| 21 | `preview_screenshot` | A PNG of the preview (≤ 1280 px), or its outline as text | inspect |
+| 22 | `preview_events` | Since a cursor: opened, reloaded (with ms), reload failed, logs, ended | inspect |
 
-A document is a `.qml` file of the project outside the directories a walk
-leaves out, judged where its links lead; anything else is `path_denied`.
-A file reached by two names is one document: answers name it by where it
-really is, and it has one generation and one history whichever name an
-edit uses.
+A document is a `.qml` file or a `theme.json` of the project outside the
+directories a walk leaves out, judged where its links lead; anything else is
+`path_denied`. A file reached by two names is one document: answers name it
+by where it really is, and it has one generation and one history whichever
+name an edit uses.
+
+Still to come:
+
+| # | Tool | Does | Needs |
+|---|---|---|---|
+| 23 | `export` | Write a build bundle or a site for a target | fs |
+| 24 | `review` | Comments on nodes: add, list, resolve | mutate |
+
+- DECISION: `theme_tokens` folds into `theme_set`, which reads the tokens
+  when it is given no value, as `history` lists when given no action.
+  Reading the tokens then needs `mutate`, but the same tokens are in the
+  theme file, and `document_text` reads that with `inspect`.
+- DECISION: `project_info` and `node_wrap` from the first plan are not
+  tools. `project_open` with no path describes the open project, and a
+  wrap is `node_insert` of the container followed by `node_move` of each
+  node, two undo steps.
 
 Every `mutate` tool:
 
@@ -123,9 +136,11 @@ agent's edit, a person's typing, undo) Studio asks the child to reload at
 once (`app_reload`), so the edit's tool call answers after the preview
 shows it; the watcher's quiet time is not on that path.
 
-- DECISION: Studio asks for at most 8 reloads a second (the inspector
-  answers at most 20 calls a second, and a refused call waits a second to
-  retry). A write past the budget is left to the child's watcher; the
+- DECISION: Studio launches the child with `--mcp-rate 200`: Studio is
+  its only client, and Ljós's default of 20 calls a second made a brisk
+  person wait on its one-second `Retry-After`. Studio asks for at most two
+  fifths of the host's rate in reloads a second (80 for a native preview,
+  8 for a host that states no rate). A write past the budget is left to the child's watcher; the
   reload it missed is asked for when the budget next allows (one timer per
   burst, which tells a window as any change does) or before the next look
   at the preview (`preview_state`, `preview_screenshot`, `preview_events`),
@@ -179,10 +194,110 @@ are used.
   content, under every stack) clears the selection.
 - Giving both `nodes` and `at` is `invalid_argument`.
 
+## Variants and slots (S4)
+
+`state_edit {doc, generation, node?, action, …}` edits one object's
+`states` and `transitions` (the root's when `node` is not given). Each
+action is one undo step, labelled as the history shows it
+(`add state compact`):
+
+| `action` | Takes | Does |
+|---|---|---|
+| `add` | `state`, `when` or `breakpoint` | Append a `State` (creating `states: [ … ]`) |
+| `rename` | `state`, `new_name` | Rename it, and the transitions' `from` and `to` that name it |
+| `remove` | `state` | Take it out (and `states` with the last one) |
+| `when` | `state`, `when` or `breakpoint`, or neither | Set or remove the condition that turns it on |
+| `change` | `state`, `target`, `name`, `value` or `binding`, or neither | Set or remove one value in its `PropertyChanges` for `target` |
+| `add_transition` | `from?`, `to?`, `animations?` | Append a `Transition` (`"*"` when not given) |
+| `remove_transition` | `from?`, `to?` | Take it out |
+
+`breakpoint` (`phone`, `tablet`, `desktop`) writes the root's width bound
+between the preview targets: `root.width < 600`,
+`root.width >= 600 && root.width < 1024`, `root.width >= 1024`. Refusals:
+`not_found` with `details.kind` `no_state`, `no_transition` or
+`no_change`; `invalid_argument` for a state or transition that exists
+already (`exists`), `when` and `breakpoint` together, a
+missing argument, a target or a root with no `id` (`no_id`), or a value or
+animation that would not parse. `node_inspect` lists the object's
+`states` (`name`, `when`, `changes`: `target`, `name`, `value`) and
+`transitions` (`from`, `to`).
+
+- DECISION: states are named, transitions by `from` and `to`; neither has
+  a path of its own, since `qml_edit`'s node paths do not step into list
+  elements. An edit splices inside one element's text.
+- DECISION: a breakpoint names the root by its `id`, so it is refused on a
+  root without one rather than giving it one unasked.
+- DECISION: the bounds are those of the preview targets (`phone` 390,
+  `tablet` 820, `desktop` 1280 wide), so each target's preview shows its
+  own state. A person who wants another bound edits `when`.
+
+`slot_contribute {doc, generation, slot, text | block, parent?, mode?,
+order?}` writes a `Contribution` into `parent` (the root by default) with
+the next free `contributionN` id, its `slot`, `mode` and `order` when they
+are given, and a `delegate: Component { … }` holding `text` or an instance
+of `block`. It imports `Ljos.Blocks`, and the block's module for a
+`block`, when the document does not. `{doc, generation, remove}` takes one
+out. Refusals: `not_found` (`no_slot`) for a slot no registered block
+offers, `no_block`; `invalid_argument` for a delegate that is not one
+object that parses, and (`not_a_contribution`) for removing anything else.
+
+- DECISION: slot names are one namespace: a slot is valid when any block
+  offers it, since a contribution names the slot and not the block
+  (Ljos.Blocks' `Contribution`). Studio's palette contributes beside the
+  selected instance, into its parent.
+- DECISION: both tools are annotated destructive, since they can take
+  things out.
+
+## Tokens (S4)
+
+`theme_set {doc?, token?, value?, variant?, generation?, dry_run?}` works
+on the theme file of `doc`: the `theme.json` beside it, the document
+itself when it is a `theme.json`, the open preview's when `doc` is left
+out, else the project's own. It is listed with the edit tools, after
+`history`, so the tools a reader or an editor is offered come before the
+preview tools, as they did.
+
+- **Reading** (no `value`): `file`, its `generation` (0 while it does
+  not exist), `exists`, `problem` (why Ljós would not load the file, with
+  its values then left out), and `tokens`: one row per role of
+  `Ljos.Design` (or the one `token` names, or a singleton's roles) with
+  its `kind` (`color`, `int`, `real`, `curve`), the module's value and
+  the theme file's. A colour's values are `light`, `dark`, `lightHigh`
+  and `darkHigh`.
+- **Setting** (`token` and `value`): `value` is a colour string, a
+  number or a curve's JSON; `null` gives the role back to the module. A
+  colour string sets every variant; `variant` sets one. The answer is
+  an edit's (`doc`, `changes`, `generation`, `history`, `unchanged`,
+  which every write's answer has and a read's has not), the rest of the
+  file is kept byte for byte, and `history` undoes it.
+- **Refusals**: `invalid_argument` with `details.kind` `theme` and Ljós's
+  own `errors` (`file`, `line`, `column`, `message`) for a theme Ljós
+  would not load, a colour pair below its contrast among them, so a theme
+  Studio writes always loads; `not_found` (`no_token`) for a role the
+  module does not have; `invalid_argument` (`invalid`) for a value or
+  variant that does not fit the role; `not_actionable` (`nothing_to_do`)
+  for `null` on a role the file does not set; `stale_ref` for a stale
+  `generation`.
+
+- DECISION: Studio checks a theme with Ljós's reader (`ljos_design`)
+  before it writes, rather than writing and letting the preview say why
+  it did not load: an agent learns at once, and the file on disk always
+  loads.
+- DECISION: a write is renamed over the file, as document writes are, so
+  a watcher (the preview's, or Studio's own window's) never reads half
+  of one.
+
+Studio's window shows the same tokens in its *Tokens* panel (DESIGN.md,
+S4 "As built: tokens, shells and the self-reskin"): its `Workspace`
+publishes `theme` (the file) and `tokens` (the rows `theme_set` reads),
+and an edit there is `dispatch("theme_set", …)`.
+
 ## Prompts
 
 - **compose-shell:** `blocks_list` → `node_insert` per block →
   `binding_set` for skins → `preview_open` → `preview_screenshot`.
-- **restyle:** `theme_tokens` → `theme_set` → `preview_screenshot`.
+- **restyle:** `theme_set` (read: the tokens and the file's `problem`) →
+  `theme_set` per role, a refusal's `errors` saying which pair fails its
+  contrast → `preview_events` (the reload) → `preview_screenshot`.
 - **fix-preview:** `preview_events` → `document_text` → `binding_set` /
   `property_set` → `preview_events`.

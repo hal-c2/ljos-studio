@@ -4,14 +4,17 @@
 //! does, by role and name, and click, type and press keys as a person does;
 //! the oracle is the file text, as for the MCP scenarios.
 
-use std::sync::Arc;
+use std::sync::{Arc, mpsc};
+use std::time::Duration;
 
 use cucumber::{World, gherkin::Step, given, then, when};
 use ljos::item::{DrawOp, MouseButtons, kurbo::Point};
 use ljos::prelude::*;
 use ljos::testing::AccessibleNode;
+use ljos_dev::{DevSession, Host, Report};
 use ljos_drive::{Chord, DriveError, Stage};
 use ljos_mcp_core::{CallCtx, Cap, CapSet};
+use ljos_runtime::SystemClock;
 use serde_json::Value as Json;
 use studio_mcp::{Studio, StudioServer};
 use studio_preview::NativeHost;
@@ -32,6 +35,8 @@ struct UiWorld {
 }
 
 struct Window {
+    /// Dropped first: the watcher's thread ends before the engine goes.
+    watch: Option<Watch>,
     stage: Stage,
     root: ObjectId,
     workspace: ObjectId,
@@ -75,7 +80,70 @@ impl UiWorld {
             .ok_or_else(|| "Studio's window is not open".to_owned())
     }
 
+    /// Studio's window on the shell Studio ships, compiled once.
     fn open(&mut self) -> StepResult {
+        self.open_with(|engine| {
+            let source = ljos::dev::compile_dir_with(shell().as_ref(), engine)
+                .map_err(|e| format!("the shell does not compile: {e}"))?;
+            if let Some((key, why)) = source.failures().next() {
+                return Err(format!("the shell's {key} does not compile: {why}"));
+            }
+            let root = ljos::create_root(engine, source, "Window")
+                .map_err(|e| format!("the shell is not made: {e}"))?;
+            Ok((root, None))
+        })
+    }
+
+    /// Studio's window as `studio --shell` runs it on the project's
+    /// directory: the person's shell there and Studio's beneath it,
+    /// watched with the theme file beside the person's `Shell.qml`.
+    fn open_watched(&mut self) -> StepResult {
+        // As the watcher names what changed, so a save of the theme file is
+        // known for it.
+        let dir = self.dir.path().canonicalize().map_err(|e| e.to_string())?;
+        let builtin = self
+            .state
+            .path()
+            .canonicalize()
+            .map_err(|e| e.to_string())?
+            .join("shell");
+        studio_blocks::shell::write(&builtin).map_err(|e| e.to_string())?;
+        let user_shell =
+            studio_blocks::shell::url(&dir.join("Shell.qml")).map_err(|e| e.to_string())?;
+        self.open_with(move |engine| {
+            let (tx, woke) = mpsc::channel();
+            let session = DevSession::open_roots_themed(
+                engine,
+                &[&dir, &builtin],
+                &["Window"],
+                vec![("userShell".to_owned(), user_shell.as_str().into())],
+                ljos_dev::Aliases::default(),
+                Some(&dir.join("theme.json")),
+                ljos::dev::EngineOracle::from_engine(engine),
+                Arc::new(move || {
+                    let _ = tx.send(());
+                }),
+            )
+            .map_err(|e| format!("the shell cannot be watched: {e}"))?;
+            // As `studio` does once the window is made: a theme that did
+            // not load as it opened sent no report.
+            studio_blocks::reload_settled(engine);
+            let root = session.root().ok_or("the watched shell made no window")?;
+            Ok((
+                root,
+                Some(Watch {
+                    session,
+                    clock: SystemClock::new(),
+                    woke,
+                }),
+            ))
+        })
+    }
+
+    fn open_with(
+        &mut self,
+        make: impl FnOnce(&Engine) -> Result<(ObjectId, Option<Watch>), String>,
+    ) -> StepResult {
         // A directory for the host to make, as the program names one: a
         // temporary directory itself is as open as the umask leaves it.
         let state = self.state.path().join("preview");
@@ -89,52 +157,193 @@ impl UiWorld {
         studio_blocks::register(&engine);
         let mut stage = Stage::new(&engine, WIDTH, HEIGHT);
         studio_blocks::serve(&engine, Arc::clone(&server));
-        let source = ljos::dev::compile_dir_with(shell().as_ref(), &engine)
-            .map_err(|e| format!("the shell does not compile: {e}"))?;
-        if let Some((key, why)) = source.failures().next() {
-            return Err(format!("the shell's {key} does not compile: {why}"));
-        }
-        let root = ljos::create_root(&engine, source, "Main")
-            .map_err(|e| format!("the shell is not made: {e}"))?;
+        let (root, watch) = make(&engine)?;
         stage
             .scene
             .set_root(&engine, root)
             .map_err(|e| e.to_string())?;
         stage.scene.set_accessibility_active(&engine, true);
-        let workspace =
-            find_workspace(&engine, root).ok_or("the shell binds no Studio.Workspace")?;
         let mut window = Window {
+            watch,
             stage,
             root,
-            workspace,
+            workspace: root,
             server,
             idle: None,
         };
+        if window.loader_status()? == ShellStatus::Null {
+            return Err(format!(
+                "the window shows no shell: {}",
+                window.loader_read("error").to_js_string()
+            ));
+        }
+        window.workspace = window.find_workspace()?;
         window.rest()?;
         self.window = Some(window);
         Ok(())
     }
 }
 
-fn shell() -> String {
-    concat!(env!("CARGO_MANIFEST_DIR"), "/../../shell").to_owned()
+/// A `ShellLoader`'s `status`, as `Ljos.Blocks` numbers it.
+#[derive(Debug, PartialEq, Eq)]
+enum ShellStatus {
+    Null,
+    Ready,
+    Fallback,
+    Error,
 }
 
-/// The first `Studio.Workspace` under `root`, depth first.
-fn find_workspace(engine: &Engine, root: ObjectId) -> Option<ObjectId> {
-    let mut stack = vec![root];
-    while let Some(obj) = stack.pop() {
-        if engine.with(obj, |_: &studio_blocks::Workspace| ()).is_ok() {
-            return Some(obj);
+/// The watched session behind a window `studio --shell` runs, pumped as
+/// the shell's event loop pumps it: when the watcher wakes it.
+struct Watch {
+    session: DevSession,
+    clock: SystemClock,
+    woke: mpsc::Receiver<()>,
+}
+
+/// Tells the window what `reports` say of the person's shell, as
+/// `studio`'s reload hook does; whether one of them answers a save.
+fn told(engine: &Engine, reports: &[Report]) -> bool {
+    let mut answered = false;
+    for report in reports {
+        match report {
+            Report::Failed { .. }
+            | Report::Reloaded(_)
+            | Report::Cleared
+            | Report::Theme { .. } => {
+                studio_blocks::reload_settled(engine);
+                answered = true;
+            }
+            _ => {}
         }
-        stack.extend(engine.children(obj).into_iter().rev());
     }
-    None
+    answered
+}
+
+/// The scene a reload shows its new root in.
+struct SceneHost<'a>(&'a mut ljos_quick::QuickScene);
+
+impl Host for SceneHost<'_> {
+    fn window(&self) -> Option<ObjectId> {
+        self.0.root()
+    }
+
+    fn show(&mut self, engine: &Engine, _old: Option<ObjectId>, new: ObjectId) {
+        self.0
+            .set_root(engine, new)
+            .expect("Studio's window is an Item");
+    }
+}
+
+/// How long a save may take to reach the window: the watcher's quiet
+/// period and a build of the shell, on a loaded machine.
+const PATIENCE: Duration = Duration::from_secs(30);
+
+fn shell() -> String {
+    concat!(env!("CARGO_MANIFEST_DIR"), "/../../shell").to_owned()
 }
 
 impl Window {
     fn engine(&self) -> &Engine {
         &self.stage.engine
+    }
+
+    /// The first `Studio.Workspace` of the shell the window shows, depth
+    /// first.
+    /// The workspace of the shell the window shows: one the loader gave up
+    /// on may still be below the window until it is collected.
+    fn find_workspace(&self) -> Result<ObjectId, String> {
+        let engine = self.engine();
+        let shown = self.loader_read("item").as_object().unwrap_or(self.root);
+        let mut stack = vec![shown];
+        while let Some(obj) = stack.pop() {
+            if engine.with(obj, |_: &studio_blocks::Workspace| ()).is_ok() {
+                return Ok(obj);
+            }
+            stack.extend(engine.children(obj).into_iter().rev());
+        }
+        Err("the shell binds no Studio.Workspace".to_owned())
+    }
+
+    fn loader_read(&self, name: &str) -> Value {
+        ljos_drive::find_below(self.engine(), self.root, "shellLoader")
+            .map_or(Value::Null, |loader| {
+                self.engine().read_by_name(loader, name)
+            })
+    }
+
+    fn loader_status(&self) -> Result<ShellStatus, String> {
+        if ljos_drive::find_below(self.engine(), self.root, "shellLoader").is_none() {
+            return Err("the window has no shell loader".to_owned());
+        }
+        let status = self.loader_read("status");
+        match status.as_number() {
+            Some(0.0) => Ok(ShellStatus::Null),
+            Some(1.0) => Ok(ShellStatus::Ready),
+            Some(2.0) => Ok(ShellStatus::Fallback),
+            Some(3.0) => Ok(ShellStatus::Error),
+            _ => Err(format!("the shell loader's status is {status:?}")),
+        }
+    }
+
+    /// What the window's banner says, empty when it is hidden.
+    fn banner(&self) -> Result<String, String> {
+        let banner = ljos_drive::find_below(self.engine(), self.root, "shellBanner")
+            .ok_or("the window has no shell banner")?;
+        if self.engine().read_by_name(banner, "visible") != Value::Bool(true) {
+            return Ok(String::new());
+        }
+        Ok(self
+            .engine()
+            .read_by_name(banner, "text")
+            .to_js_string()
+            .to_string())
+    }
+
+    /// Waits for the watcher to see the last save and pumps the session
+    /// until it has applied it, or said why not, as Studio's event loop
+    /// does; then tells the window, as `studio`'s reload hook does, and
+    /// lets what the reload made settle.
+    fn take_change(&mut self) -> StepResult {
+        let Self { watch, stage, .. } = self;
+        let watch = watch
+            .as_mut()
+            .ok_or("Studio's window does not watch a shell")?;
+        let mut seen = Vec::new();
+        loop {
+            watch.woke.recv_timeout(PATIENCE).map_err(|_| {
+                format!("the window took no change in {PATIENCE:?}; it reported {seen:?}")
+            })?;
+            let reports = watch.session.pump(
+                &stage.engine,
+                &watch.clock,
+                &mut SceneHost(&mut stage.scene),
+            );
+            let taken = told(&stage.engine, &reports);
+            seen.extend(reports);
+            if taken {
+                break;
+            }
+        }
+        self.root = self.stage.scene.root().ok_or("the window shows nothing")?;
+        self.rest()?;
+        // The frame after a reload has run: the session matches what it
+        // made late, a Loader's item among them.
+        let Self { watch, stage, .. } = self;
+        if let Some(watch) = watch {
+            let reports = watch.session.pump(
+                &stage.engine,
+                &watch.clock,
+                &mut SceneHost(&mut stage.scene),
+            );
+            told(&stage.engine, &reports);
+        }
+        self.rest()?;
+        // A reload may make the shell again, and its workspace with it.
+        if self.loader_status()? != ShellStatus::Null {
+            self.workspace = self.find_workspace()?;
+        }
+        Ok(())
     }
 
     /// Lets everything the last gesture started finish: its tool calls,
@@ -158,6 +367,37 @@ impl Window {
         <Json as QmlValue>::from_value(&self.read(name)).unwrap_or_default()
     }
 
+    /// Clicks `row` of the list named `list` where it shows: a list
+    /// clips the rows past its ends, and the driver aims at a node's
+    /// middle whatever clips it, so a row half past the end would give
+    /// the click to what lies below the list.
+    fn click_row(&mut self, list: &str, row: &AccessibleNode) -> StepResult {
+        let key = row.key.ok_or("the row has no key")?;
+        let shown = self
+            .bounds(&|role, name| role == "list" && name == list)
+            .ok_or_else(|| format!("no list {list:?} in the window"))?;
+        let mut at = None;
+        self.stage.scene.accessibility_tree().walk(|k, _, d| {
+            if k == key {
+                let b = d.bounds;
+                at = Some(ljos::item::kurbo::Rect::new(b.x0, b.y0, b.x1, b.y1));
+            }
+        });
+        let at = at.ok_or_else(|| format!("{:?} is not in {list:?}", row.name))?;
+        let seen = at.intersect(shown);
+        if seen.area() <= 0.0 {
+            return Err(format!(
+                "{:?} at {at:?} is out of the view of {list:?}, {shown:?}",
+                row.name
+            ));
+        }
+        self.stage
+            .drive()
+            .click(seen.center(), MouseButtons::LEFT, 1)
+            .map_err(drive_error)?;
+        self.rest()
+    }
+
     /// The node named `name` inside the one named `within`.
     fn node(&self, within: &str, role: Option<&str>, name: &str) -> Result<AccessibleNode, String> {
         let tree = self.tree();
@@ -174,6 +414,30 @@ impl Window {
                 names(container)
             )
         })
+    }
+
+    /// Clicks the part of `node` the window shows: a text area as tall as
+    /// its text reaches past the window's edge, and the driver aims at a
+    /// node's middle wherever that is.
+    fn click_shown(&mut self, node: &AccessibleNode) -> StepResult {
+        let key = node.key.ok_or("the node has no key")?;
+        let mut at = None;
+        self.stage.scene.accessibility_tree().walk(|k, _, d| {
+            if k == key {
+                let b = d.bounds;
+                at = Some(ljos::item::kurbo::Rect::new(b.x0, b.y0, b.x1, b.y1));
+            }
+        });
+        let at = at.ok_or_else(|| format!("{:?} is not in the window", node.name))?;
+        let seen = at.intersect(ljos::item::kurbo::Rect::new(0.0, 0.0, WIDTH, HEIGHT));
+        if seen.area() <= 0.0 {
+            return Err(format!("{:?} at {at:?} is out of the window", node.name));
+        }
+        self.stage
+            .drive()
+            .click(seen.center(), MouseButtons::LEFT, 1)
+            .map_err(drive_error)?;
+        self.rest()
     }
 
     fn click_node(&mut self, node: &AccessibleNode) -> StepResult {
@@ -357,10 +621,16 @@ fn shows_the_project(w: &mut UiWorld) -> StepResult {
 fn opens(w: &mut UiWorld, doc: String) -> StepResult {
     let window = w.window()?;
     let row = window.node("Documents", None, &doc)?;
-    window.click_node(&row)?;
+    window.click_row("Documents", &row)?;
     (window.read("doc").to_js_string().as_ref() as &str == doc)
         .then_some(())
-        .ok_or_else(|| format!("the window shows {:?}", window.read("doc").to_js_string()))
+        .ok_or_else(|| {
+            format!(
+                "the window shows {:?}; the last refusal {:?}",
+                window.read("doc").to_js_string(),
+                window.read("error").to_js_string()
+            )
+        })
 }
 
 #[given(regex = r#"^the person has selected "([^"]+)" in the layers panel$"#)]
@@ -450,6 +720,7 @@ fn places(w: &mut UiWorld, name: String) -> StepResult {
     window.click_node(&button)
 }
 
+#[given(regex = r#"^the person has clicked the button "([^"]+)"$"#)]
 #[when(regex = r#"^the person clicks the button "([^"]+)"$"#)]
 fn clicks_button(w: &mut UiWorld, name: String) -> StepResult {
     let window = w.window()?;
@@ -460,6 +731,134 @@ fn clicks_button(w: &mut UiWorld, name: String) -> StepResult {
     .cloned()
     .ok_or_else(|| format!("no button {name:?}; the window holds {}", names(&tree)))?;
     window.click_node(&button)
+}
+
+#[given(regex = r#"^the person has added the state "([^"]+)" in the inspector$"#)]
+#[when(regex = r#"^the person adds the state "([^"]+)" in the inspector$"#)]
+fn adds_state(w: &mut UiWorld, name: String) -> StepResult {
+    let window = w.window()?;
+    let field = window.node("Inspector", Some("textinput"), "New state")?;
+    window.enter(&field, &name)?;
+    let shown = shown_states(window)?;
+    shown.contains(&name).then_some(()).ok_or_else(|| {
+        format!(
+            "the inspector lists the states {shown:?}; the last refusal {:?}",
+            window.read("error").to_js_string()
+        )
+    })
+}
+
+#[given(regex = r#"^the person has picked the state "([^"]+)" in the inspector$"#)]
+#[when(regex = r#"^the person picks the state "([^"]+)" in the inspector$"#)]
+fn picks_state(w: &mut UiWorld, name: String) -> StepResult {
+    let window = w.window()?;
+    let button = window.node("Inspector", Some("button"), &format!("State {name}"))?;
+    window.click_node(&button)?;
+    // Picking shows the state's condition, which only a picked state has.
+    window
+        .node("Inspector", Some("textinput"), "When")
+        .map(drop)
+}
+
+#[when(regex = r#"^the person renames the state "([^"]+)" to "([^"]+)" in the inspector$"#)]
+fn renames_state(w: &mut UiWorld, name: String, to: String) -> StepResult {
+    let window = w.window()?;
+    let field = window.node("Inspector", Some("textinput"), &format!("Name of {name}"))?;
+    window.enter(&field, &to)
+}
+
+#[when(regex = r#"^the person changes "([^"]+)" of "([^"]+)" to "(.*)" in the state$"#)]
+fn changes_in_state(w: &mut UiWorld, name: String, target: String, value: String) -> StepResult {
+    let value = unescape(&value);
+    let window = w.window()?;
+    for (field, text) in [
+        ("Change target", target.as_str()),
+        ("Change property", name.as_str()),
+        ("Change value", value.as_str()),
+    ] {
+        let field = window.node("Inspector", Some("textinput"), field)?;
+        window.enter(&field, text)?;
+    }
+    Ok(())
+}
+
+#[then(regex = r#"^the inspector lists the states "([^"]*)"$"#)]
+fn lists_states(w: &mut UiWorld, names: String) -> StepResult {
+    let window = w.window()?;
+    let want: Vec<String> = if names.is_empty() {
+        Vec::new()
+    } else {
+        list(&names)
+    };
+    let shown = shown_states(window)?;
+    (shown == want)
+        .then_some(())
+        .ok_or_else(|| format!("the inspector lists the states {shown:?}"))
+}
+
+/// The states the inspector shows a button for, in order.
+fn shown_states(window: &Window) -> Result<Vec<String>, String> {
+    let tree = window.tree();
+    let inspector = find(&tree, &|n| n.name == "Inspector" && n.role != "label")
+        .ok_or("no inspector in the window")?;
+    let mut shown = Vec::new();
+    collect(inspector, &mut |n| {
+        if n.role == "button"
+            && n.key.is_some()
+            && let Some(name) = n.name.strip_prefix("State ")
+        {
+            shown.push(name.to_owned());
+        }
+    });
+    Ok(shown)
+}
+
+#[then(regex = r#"^the frame "([^"]+)" shows the state "([^"]+)"$"#)]
+fn frame_shows_state(w: &mut UiWorld, target: String, state: String) -> StepResult {
+    frame_state_is(w.window()?, &target, &format!("State {state}"))
+}
+
+#[then(regex = r#"^the frame "([^"]+)" shows no state$"#)]
+fn frame_shows_no_state(w: &mut UiWorld, target: String) -> StepResult {
+    frame_state_is(w.window()?, &target, "No state")
+}
+
+fn frame_state_is(window: &Window, target: &str, want: &str) -> StepResult {
+    let frame = window.frame(target)?;
+    let label = ljos_drive::find_below(window.engine(), frame, "frameState")
+        .ok_or("the frame does not say which state it shows")?;
+    let text = window
+        .engine()
+        .read_by_name(label, "text")
+        .to_js_string()
+        .to_string();
+    (text == want).then_some(()).ok_or_else(|| {
+        format!(
+            "the frame says {text:?}; the preview is {}",
+            window.read_json("preview")
+        )
+    })
+}
+
+#[then(regex = r#"^the palette lists the slots "([^"]*)" of "([^"]+)"$"#)]
+fn palette_lists_slots(w: &mut UiWorld, slots: String, block: String) -> StepResult {
+    let window = w.window()?;
+    for slot in list(&slots) {
+        window.node("Palette", None, &format!("Slot {slot} of {block}"))?;
+    }
+    Ok(())
+}
+
+#[when(regex = r#"^the person contributes "(.*)" to the slot "([^"]+)" from the palette$"#)]
+fn contributes(w: &mut UiWorld, text: String, slot: String) -> StepResult {
+    let text = unescape(&text);
+    let window = w.window()?;
+    let field = window.node(
+        "Palette",
+        Some("textinput"),
+        &format!("Contribution to {slot}"),
+    )?;
+    window.enter(&field, &text)
 }
 
 #[when(regex = r#"^the person presses "([^"]+)"$"#)]
@@ -475,7 +874,7 @@ fn replaces_in_code(w: &mut UiWorld, old: String, new: String) -> StepResult {
     let (old, new) = (unescape(&old), unescape(&new));
     let window = w.window()?;
     let code = window.code()?;
-    window.click_node(&code)?;
+    window.click_shown(&code)?;
     let item = window
         .stage
         .scene
@@ -497,10 +896,20 @@ fn replaces_in_code(w: &mut UiWorld, old: String, new: String) -> StepResult {
             &[Value::Int(start as i32), Value::Int(end as i32)],
         )
         .map_err(|e| e.to_string())?;
-    window.stage.drive().commit(&new).map_err(drive_error)?;
+    if new.is_empty() {
+        // Typing nothing is no edit; a person deletes the selection.
+        window
+            .stage
+            .drive()
+            .chord(&Chord::parse("Backspace")?, 0)
+            .map_err(drive_error)?;
+    } else {
+        window.stage.drive().commit(&new).map_err(drive_error)?;
+    }
     window.rest()
 }
 
+#[given(regex = r#"^an agent has called the tool "([^"]+)" with:$"#)]
 #[when(regex = r#"^an agent calls the tool "([^"]+)" with:$"#)]
 fn agent_calls(w: &mut UiWorld, tool: String, step: &Step) -> StepResult {
     let args: Json = serde_json::from_str(&docstring(step)?).map_err(|e| e.to_string())?;
@@ -569,7 +978,68 @@ fn nobody_touches(w: &mut UiWorld, seconds: u64) -> StepResult {
     Ok(())
 }
 
+/// Narrows the tokens panel to `token`, as a person does to find a role
+/// among the module's hundred and more.
+fn filter_tokens(window: &mut Window, token: &str) -> StepResult {
+    let field = window.node("Tokens", Some("textinput"), "Filter tokens")?;
+    if field.value != token {
+        window.enter(&field, token)?;
+    }
+    Ok(())
+}
+
+/// The role a field of the tokens panel sets: `Colors.accent light` is
+/// `Colors.accent`.
+fn token_of(field: &str) -> &str {
+    field
+        .strip_suffix(" light")
+        .or_else(|| field.strip_suffix(" dark"))
+        .unwrap_or(field)
+}
+
+#[given(regex = r#"^the person has set "([^"]+)" to "(.*)" in the tokens panel$"#)]
+#[when(regex = r#"^the person sets "([^"]+)" to "(.*)" in the tokens panel$"#)]
+fn sets_token(w: &mut UiWorld, name: String, value: String) -> StepResult {
+    let window = w.window()?;
+    filter_tokens(window, token_of(&name))?;
+    let field = window.node("Tokens", Some("textinput"), &name)?;
+    window.enter(&field, &value)
+}
+
 // ------------------------------------------------------------------- then
+
+#[then(regex = r#"^the tokens panel shows "([^"]+): ([^"]*)"$"#)]
+fn tokens_show(w: &mut UiWorld, name: String, value: String) -> StepResult {
+    let window = w.window()?;
+    filter_tokens(window, token_of(&name))?;
+    let field = window.node("Tokens", Some("textinput"), &name)?;
+    (field.value == value).then_some(()).ok_or_else(|| {
+        format!(
+            "the tokens panel shows {name} as {:?}; the last refusal {:?}",
+            field.value,
+            window.read("error").to_js_string()
+        )
+    })
+}
+
+#[then(regex = r#"^the tokens panel says "(.+)"$"#)]
+fn tokens_say(w: &mut UiWorld, pattern: String) -> StepResult {
+    let pattern = regex::Regex::new(&pattern).map_err(|e| e.to_string())?;
+    let window = w.window()?;
+    let tree = window.tree();
+    let panel = find(&tree, &|n| n.name == "Tokens" && n.role != "label")
+        .ok_or("no tokens panel in the window")?;
+    find(panel, &|n| pattern.is_match(&n.name))
+        .map(drop)
+        .ok_or_else(|| {
+            format!(
+                "the tokens panel says none of {}; the last refusal {:?}, history {}",
+                names(panel),
+                window.read("error").to_js_string(),
+                window.read_json("done")
+            )
+        })
+}
 
 #[then(regex = r#"^the layers panel lists "([^"]*)"$"#)]
 fn layers_list(w: &mut UiWorld, want: String) -> StepResult {
@@ -655,6 +1125,16 @@ fn file_is(w: &mut UiWorld, name: String, step: &Step) -> StepResult {
     })
 }
 
+#[then(regex = r#"^the file "([^"]+)" does not exist$"#)]
+fn file_absent(w: &mut UiWorld, name: String) -> StepResult {
+    let path = w.dir.path().join(&name);
+    match std::fs::read_to_string(&path) {
+        Ok(text) => Err(format!("`{name}` is:\n{text}")),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(format!("`{name}`: {e}")),
+    }
+}
+
 #[then(regex = r#"^the history lists "([^"]+)"$"#)]
 fn history_lists(w: &mut UiWorld, label: String) -> StepResult {
     let window = w.window()?;
@@ -734,6 +1214,118 @@ fn ran_no_frames(w: &mut UiWorld) -> StepResult {
     (idle.shown == 0)
         .then_some(())
         .ok_or_else(|| format!("the window showed {} new frames", idle.shown))
+}
+
+#[given("Studio's window runs the person's shell, a copy of its own")]
+fn runs_own_shell(w: &mut UiWorld) -> StepResult {
+    studio_blocks::shell::seed(w.dir.path()).map_err(|e| e.to_string())?;
+    w.open_watched()
+}
+
+#[given(regex = r#"^the person's "([^"]+)" has "(.*)" replaced with "(.*)"$"#)]
+fn file_replaced(w: &mut UiWorld, file: String, old: String, new: String) -> StepResult {
+    let (old, new) = (unescape(&old), unescape(&new));
+    let path = w.dir.path().join(&file);
+    let text = std::fs::read_to_string(&path).map_err(|e| format!("{file}: {e}"))?;
+    if !text.contains(&old) {
+        return Err(format!("{file} does not have {old:?}"));
+    }
+    std::fs::write(&path, text.replacen(&old, &new, 1)).map_err(|e| format!("{file}: {e}"))
+}
+
+#[when("Studio's window opens again")]
+fn opens_again(w: &mut UiWorld) -> StepResult {
+    // The old window, its watcher first, goes before the new one watches
+    // the same files.
+    w.window = None;
+    w.open_watched()
+}
+
+#[given("the window has taken the change")]
+#[when("the window takes the change")]
+fn takes_change(w: &mut UiWorld) -> StepResult {
+    w.window()?.take_change()
+}
+
+#[then("the window shows the person's shell")]
+fn shows_own_shell(w: &mut UiWorld) -> StepResult {
+    shows_shell(w, ShellStatus::Ready)
+}
+
+#[then("the window shows the built-in shell")]
+fn shows_builtin_shell(w: &mut UiWorld) -> StepResult {
+    shows_shell(w, ShellStatus::Fallback)
+}
+
+fn shows_shell(w: &mut UiWorld, want: ShellStatus) -> StepResult {
+    let window = w.window()?;
+    let status = window.loader_status()?;
+    if status == want {
+        return Ok(());
+    }
+    Err(format!(
+        "the shell loader is {status:?}, not {want:?}; its error is {:?}, the banner {:?}",
+        window.loader_read("error").to_js_string(),
+        window.banner()?
+    ))
+}
+
+#[then("the window has no shell banner")]
+fn no_banner(w: &mut UiWorld) -> StepResult {
+    match w.window()?.banner()? {
+        said if said.is_empty() => Ok(()),
+        said => Err(format!("the shell banner says {said:?}")),
+    }
+}
+
+#[then(regex = r#"^the shell banner says "(.+)"$"#)]
+fn banner_says(w: &mut UiWorld, pattern: String) -> StepResult {
+    let pattern = regex::Regex::new(&pattern).map_err(|e| e.to_string())?;
+    let window = w.window()?;
+    let said = window.banner()?;
+    if !pattern.is_match(&said) {
+        return Err(format!("the shell banner says {said:?}"));
+    }
+    // An assistive technology hears it as an alert, by the same words.
+    let tree = window.tree();
+    let alert = find(&tree, &|n| n.name == "Shell error").ok_or_else(|| {
+        format!(
+            "no \"Shell error\" in the window; it holds {}",
+            names(&tree)
+        )
+    })?;
+    if alert.description != said {
+        return Err(format!(
+            "the banner is heard as {:?}, not {said:?}",
+            alert.description
+        ));
+    }
+    Ok(())
+}
+
+#[then(regex = r#"^the window's canvas is "(#[0-9a-fA-F]{6})"$"#)]
+fn canvas_is(w: &mut UiWorld, colour: String) -> StepResult {
+    let window = w.window()?;
+    let shown = window
+        .engine()
+        .read_by_name(window.root, "color")
+        .to_js_string();
+    if shown.eq_ignore_ascii_case(&colour) {
+        return Ok(());
+    }
+    Err(format!("the window's canvas is {shown}"))
+}
+
+#[then(regex = r#"^the window has a pane "([^"]+)"$"#)]
+fn has_pane(w: &mut UiWorld, name: String) -> StepResult {
+    let tree = w.window()?.tree();
+    if find(&tree, &|n| n.name == name && n.role == "pane").is_some() {
+        return Ok(());
+    }
+    Err(format!(
+        "no pane {name:?} in the window; it holds {}",
+        names(&tree)
+    ))
 }
 
 fn main() {

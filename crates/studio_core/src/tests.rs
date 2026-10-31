@@ -1,3 +1,8 @@
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+};
+
 use super::*;
 
 const MAIN: &str = "import QtQuick
@@ -18,6 +23,13 @@ fn session() -> Session {
     Session::open(Box::new(MemStore::new([(
         "Main.qml".to_owned(),
         MAIN.to_owned(),
+    )])))
+}
+
+fn session_of(text: &str) -> Session {
+    Session::open(Box::new(MemStore::new([(
+        "Main.qml".to_owned(),
+        text.to_owned(),
     )])))
 }
 
@@ -678,4 +690,174 @@ fn a_place_names_the_object_declared_there_not_its_parent() {
     // Without a column the line must say which.
     assert_eq!(ty(&mut s, 3, 0).unwrap(), "root");
     assert!(matches!(ty(&mut s, 4, 0), Err(Error::Invalid(_))));
+}
+
+#[test]
+fn each_target_is_inside_its_own_breakpoint() {
+    use crate::preview::Target;
+    for target in Target::ALL {
+        assert_eq!(Target::of_width(target.size().width), target);
+        assert_eq!(
+            Target::of_condition(&target.condition("root"), "root"),
+            Some(target)
+        );
+    }
+    assert_eq!(Target::of_width(599), Target::Phone);
+    assert_eq!(Target::of_width(600), Target::Tablet);
+    assert_eq!(Target::of_width(1024), Target::Desktop);
+}
+
+#[test]
+fn a_state_in_a_list_is_edited_inside_its_own_text() {
+    let mut s = session_of(
+        "Item {\n    id: root\n    states: [\n        State { name: \"a\" },\n        State {\n            name: \"b\"\n        }\n    ]\n}\n",
+    );
+    let when = |w: &str| Op::State {
+        node: Address::Id("root".into()),
+        edit: crate::StateEdit::When {
+            name: "b".into(),
+            when: Some(w.into()),
+        },
+    };
+    s.edit("Main.qml", None, &when("root.width < 600"), false)
+        .unwrap();
+    assert_eq!(
+        s.text("Main.qml").unwrap().0,
+        "Item {\n    id: root\n    states: [\n        State { name: \"a\" },\n        State {\n            name: \"b\"\n            when: root.width < 600\n        }\n    ]\n}\n"
+    );
+    let v = s.variants("Main.qml", &Address::Id("root".into())).unwrap();
+    assert_eq!(v.states[1].when.as_deref(), Some("root.width < 600"));
+    assert!(matches!(
+        s.edit("Main.qml", None, &when("root.width <"), false),
+        Err(Error::Edit(qml_edit::Error::WouldBreak(_)))
+    ));
+}
+
+#[test]
+fn a_single_state_becomes_a_list_of_two() {
+    let mut s = session_of("Item {\n    id: root\n    states: State { name: \"a\" }\n}\n");
+    let add = Op::State {
+        node: Address::Id("root".into()),
+        edit: crate::StateEdit::Add {
+            name: "b".into(),
+            when: None,
+        },
+    };
+    s.edit("Main.qml", None, &add, false).unwrap();
+    assert_eq!(
+        s.text("Main.qml").unwrap().0,
+        "Item {\n    id: root\n    states: [\n        State { name: \"a\" },\n        State {\n            name: \"b\"\n        }\n    ]\n}\n"
+    );
+}
+
+fn set_width(s: &mut Session, width: &str) -> Result<Outcome, Error> {
+    s.edit(
+        "Main.qml",
+        None,
+        &Op::SetBinding {
+            node: Address::Id("root".into()),
+            name: "width".into(),
+            value: width.into(),
+        },
+        false,
+    )
+}
+
+/// What a person sees through every part of the session afterwards: the
+/// text, the file and the history agree, and undo gives the bytes back.
+fn assert_whole(s: &mut Session, before: &str, after: &str) {
+    assert_eq!(s.text("Main.qml").unwrap().0, after);
+    assert_eq!(s.store().read("Main.qml").unwrap(), after);
+    s.undo().unwrap();
+    assert_eq!(s.text("Main.qml").unwrap().0, before);
+    assert_eq!(s.store().read("Main.qml").unwrap(), before);
+}
+
+/// `f` panics as it tells who watches the session about the write.
+fn panicking_on_write(s: &mut Session, f: impl FnOnce(&mut Session)) {
+    let armed = Arc::new(AtomicBool::new(true));
+    let disarm = Arc::clone(&armed);
+    s.on_write(move |_| {
+        if disarm.swap(false, Ordering::SeqCst) {
+            panic!("told of a write");
+        }
+    });
+    let panicked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| f(s))).is_err();
+    assert!(panicked && !armed.load(Ordering::SeqCst));
+}
+
+#[test]
+fn a_panic_telling_of_an_edit_leaves_the_session_whole() {
+    let mut s = session();
+    panicking_on_write(&mut s, |s| {
+        let _ = set_width(s, "300");
+    });
+    assert_whole(&mut s, MAIN, &MAIN.replace("200", "300"));
+}
+
+#[test]
+fn a_panic_telling_of_an_undo_leaves_the_session_whole() {
+    let mut s = session();
+    set_width(&mut s, "300").unwrap();
+    panicking_on_write(&mut s, |s| {
+        let _ = s.undo();
+    });
+    assert_eq!(s.text("Main.qml").unwrap().0, MAIN);
+    assert_eq!(s.store().read("Main.qml").unwrap(), MAIN);
+    s.redo().unwrap();
+    assert_whole(&mut s, MAIN, &MAIN.replace("200", "300"));
+}
+
+#[test]
+fn a_panic_telling_of_a_new_document_leaves_the_session_whole() {
+    let mut s = session();
+    panicking_on_write(&mut s, |s| {
+        let _ = s.create("New.qml", "Item {}\n", false);
+    });
+    assert_eq!(s.text("New.qml").unwrap().0, "Item {}\n");
+    s.undo().unwrap();
+    assert!(!s.store().exists("New.qml"));
+}
+
+#[test]
+fn a_theme_file_reached_through_a_link_is_one_document() {
+    // s1 holds a document under where it really is; a theme write through
+    // a link must not make a second copy that takes the first's writes for
+    // changes made outside Studio.
+    let dir = tempfile::tempdir().unwrap();
+    let store = store::FsStore::new(dir.path()).unwrap();
+    store
+        .write("app/theme.json", "{ \"Spacing\": { \"md\": 20 } }\n")
+        .unwrap();
+    std::os::unix::fs::symlink(
+        dir.path().join("app/theme.json"),
+        dir.path().join("theme.json"),
+    )
+    .unwrap();
+    let mut s = Session::open(Box::new(store));
+    let g = s.text("app/theme.json").unwrap().1;
+    let value = serde_json::json!(24);
+    let out = s
+        .set_token(
+            "theme.json",
+            Some(g),
+            "Spacing.md",
+            None,
+            Some(&value),
+            false,
+        )
+        .unwrap();
+    assert_eq!(out.doc, "app/theme.json");
+    let read = s.tokens("theme.json", Some("Spacing.md")).unwrap();
+    assert_eq!(read.file, "app/theme.json");
+    assert_eq!(read.generation, out.generation);
+    let (text, g) = s.text("app/theme.json").unwrap();
+    assert!(text.contains("24"), "{text}");
+    assert_eq!(g, out.generation);
+    s.undo().unwrap();
+    assert!(
+        std::fs::read_to_string(dir.path().join("app/theme.json"))
+            .unwrap()
+            .contains("20")
+    );
 }

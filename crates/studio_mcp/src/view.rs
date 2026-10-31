@@ -8,8 +8,9 @@
 
 use qml_edit::Step;
 use serde::Serialize;
+use serde_json::Value as Json;
 use studio_core::{
-    Address,
+    Address, StateInfo,
     preview::{PreviewEvent, Target},
 };
 
@@ -55,6 +56,25 @@ pub struct Offered {
     pub name: String,
     pub summary: String,
     pub category: String,
+    /// The slots it offers, by name.
+    pub slots: Vec<String>,
+}
+
+/// A role of `Ljos.Design` as the tokens panel lists it: what the window
+/// shows, the theme file's value where it has one and the module's where it
+/// does not.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct TokenRow {
+    pub token: String,
+    /// `color`, `int`, `real` or `curve`.
+    pub kind: String,
+    /// A colour's light and dark; empty for any other role.
+    pub light: String,
+    pub dark: String,
+    /// Any other role's value as JSON writes it; empty for a colour.
+    pub value: String,
+    /// The theme file sets it, in any variant.
+    pub set: bool,
 }
 
 /// The preview of the open document, when one runs.
@@ -70,6 +90,9 @@ pub struct Previewed {
     pub generation: u64,
     /// `live` or `mocked`.
     pub state: String,
+    /// The root's state whose `when` is the breakpoint of the preview's
+    /// width, as `state_edit` writes it; empty when none is.
+    pub variant: String,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize)]
@@ -85,12 +108,19 @@ pub struct View {
     pub selected: String,
     pub selection: Span,
     pub inspector: Vec<Shown>,
+    /// The selected object's states.
+    pub states: Vec<StateInfo>,
     pub palette: Vec<Offered>,
     pub done: Vec<String>,
     pub undone: Vec<String>,
     pub preview: Option<Previewed>,
     /// The server can start previews.
     pub previews: bool,
+    /// The theme file beside `doc` (or the project's, with none open).
+    pub theme: String,
+    /// Why the theme file is not read: Ljós would refuse it.
+    pub theme_problem: String,
+    pub tokens: Vec<TokenRow>,
 }
 
 impl Studio {
@@ -112,9 +142,18 @@ impl Studio {
                 name: b.name.clone(),
                 summary: b.summary.clone().unwrap_or_default(),
                 category: b.category.clone().unwrap_or_default(),
+                slots: b.slots.iter().map(|s| s.name.clone()).collect(),
             })
             .collect();
         view.preview = preview_of(&preview::lock(&self.previews));
+        if let Some(p) = &mut view.preview {
+            p.variant = self.variant(&p.doc, p.width).unwrap_or_default();
+        }
+        view.theme = crate::tools::theme_file(doc);
+        if let Ok(read) = self.session.tokens(&view.theme, None) {
+            view.theme_problem = read.problem.unwrap_or_default();
+            view.tokens = read.tokens.into_iter().map(row).collect();
+        }
         if doc.is_empty() {
             return view;
         }
@@ -185,9 +224,55 @@ impl Studio {
                     value: b.value.clone(),
                 })
                 .collect();
+            if let Ok(variants) = self.session.variants(doc, &Address::Node(handle.clone())) {
+                view.states = variants.states;
+            }
             view.selected = handle;
         }
         view
+    }
+
+    /// The state of `doc`'s root that a window `width` wide turns on by
+    /// its breakpoint. Only the condition `state_edit` writes for a
+    /// breakpoint is read as one: any other `when` is the app's own logic,
+    /// which only running it can answer.
+    fn variant(&mut self, doc: &str, width: u32) -> Option<String> {
+        let root = Address::Path("root".to_owned());
+        let (_, node) = self.session.resolve(doc, &root).ok()?;
+        let condition = Target::of_width(width).condition(&node.id?);
+        let variants = self.session.variants(doc, &root).ok()?;
+        variants
+            .states
+            .into_iter()
+            .find(|s| s.when.as_deref() == Some(condition.as_str()))
+            .map(|s| s.name)
+    }
+}
+
+fn row(t: studio_core::theme::Token) -> TokenRow {
+    let set = t.theme.is_some();
+    let shown = |variant: &str| {
+        t.theme
+            .as_ref()
+            .and_then(|theme| theme.get(variant))
+            .or_else(|| t.module.get(variant))
+            .and_then(Json::as_str)
+            .unwrap_or_default()
+            .to_owned()
+    };
+    let (light, dark, value) = if t.kind == "color" {
+        (shown("light"), shown("dark"), String::new())
+    } else {
+        let value = t.theme.as_ref().unwrap_or(&t.module);
+        (String::new(), String::new(), value.to_string())
+    };
+    TokenRow {
+        token: t.token,
+        kind: t.kind.to_owned(),
+        light,
+        dark,
+        value,
+        set,
     }
 }
 
@@ -222,6 +307,7 @@ fn preview_of(previews: &preview::Previews) -> Option<Previewed> {
             preview::State::Mocked => "mocked",
         }
         .to_owned(),
+        variant: String::new(),
     })
 }
 

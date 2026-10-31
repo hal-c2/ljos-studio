@@ -181,7 +181,12 @@ fn is_named(source: &str, object: &QmlObject<'_>) -> bool {
     })
 }
 
-fn collect_bindings(source: &str, object: &QmlObject<'_>, prefix: &str, out: &mut Vec<Binding>) {
+pub(crate) fn collect_bindings(
+    source: &str,
+    object: &QmlObject<'_>,
+    prefix: &str,
+    out: &mut Vec<Binding>,
+) {
     for member in &object.members {
         match member {
             QmlMember::Binding(b) => {
@@ -227,7 +232,7 @@ fn binding(source: &str, name: String, span: qml_syntax::Span, declared: bool) -
     }
 }
 
-fn literal_string(value: &str) -> Option<String> {
+pub(crate) fn literal_string(value: &str) -> Option<String> {
     let inner = value
         .strip_prefix('"')
         .and_then(|v| v.strip_suffix('"'))

@@ -21,8 +21,12 @@ serde_json.workspace = true
 ljos = { workspace = true, features = ["dev-qml", "testing"] }
 ljos_drive.workspace = true
 ljos_a11y.workspace = true
+ljos_dev.workspace = true
+ljos_quick.workspace = true
+ljos_runtime.workspace = true
 studio_preview = { path = "../studio_preview" }
 cucumber.workspace = true
+regex.workspace = true
 tempfile.workspace = true
 tokio.workspace = true
 

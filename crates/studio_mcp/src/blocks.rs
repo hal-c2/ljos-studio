@@ -9,6 +9,9 @@
 use ljos_blocks::{BlockContract, BlockRegistry, read_qmldir};
 use studio_core::{Store, StoreError};
 
+/// The module that defines `Contribution` and `Slot` (ADR 0003, section 4).
+pub(crate) const RUNTIME: &str = "Ljos.Blocks";
+
 const DUMP: &str = "ljostypes.json";
 const QMLDIR: &str = "qmldir";
 

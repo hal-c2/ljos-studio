@@ -8,7 +8,7 @@
 //! A preview's inspector answers a bounded number of calls a second (Ljós
 //! ARCHITECTURE.md 19.7), and one that asks too often waits a second for its
 //! answer. So a burst of writes (typing in the code view) reloads at most
-//! [`RELOADS_PER_SECOND`] times a second, whoever asks; the writes in between
+//! [`reloads_per_second`] times a second, whoever asks; the writes in between
 //! are shown by the preview's own file watcher a moment later, and the reload
 //! they missed is asked for once the budget allows ([`Previews::catch_up`]).
 //! A reader that must see the last write waits for that ([`caught_up`]).
@@ -26,9 +26,11 @@ use studio_core::{
     },
 };
 
-/// Reloads asked for after writes in any second: well within the 20 calls
-/// a second an inspector answers, leaving the rest to pictures and reads.
-pub(crate) const RELOADS_PER_SECOND: usize = 8;
+/// Reloads asked for after writes in any second: two fifths of the calls
+/// the preview answers, leaving the rest to pictures and reads.
+pub(crate) fn reloads_per_second(calls_per_second: u32) -> usize {
+    (calls_per_second as usize * 2 / 5).max(1)
+}
 
 /// Makes a host for the project in a directory.
 pub type HostFactory = Arc<dyn Fn(&std::path::Path) -> Box<dyn PreviewHost> + Send + Sync>;
@@ -77,7 +79,7 @@ impl Open {
         {
             self.reloads.pop_front();
         }
-        if self.reloads.len() < RELOADS_PER_SECOND {
+        if self.reloads.len() < reloads_per_second(self.host.calls_per_second()) {
             return None;
         }
         self.reloads.front().map(|at| *at + Duration::from_secs(1))
@@ -139,9 +141,12 @@ impl Previews {
         let Some(open) = &mut self.open else {
             return;
         };
-        open.behind = false;
         let started = Instant::now();
         let reload = open.host.reload();
+        // Only now: a host that panics has not shown the write, and the lock
+        // outlives the panic for the next reader to catch up.
+        open.behind = false;
+
         // Stamped once answered: however long the call took, the reload the
         // budget allows a second after this reaches the inspector more than
         // a second after this one did.
@@ -324,9 +329,28 @@ mod tests {
     fn a_catch_up_with_the_budget_spent_stays_behind_and_says_until_when() {
         // In the future, so no pause of this test can let them expire.
         let at = Instant::now() + Duration::from_secs(60);
-        let (mut p, count) = previews(vec![at; RELOADS_PER_SECOND].into(), true);
+        let (mut p, count) = previews(
+            vec![at; reloads_per_second(Counting(Default::default()).calls_per_second())].into(),
+            true,
+        );
         assert_eq!(p.catch_up(), Some(at + Duration::from_secs(1)));
         assert_eq!(*count.lock().unwrap(), 0);
+        assert!(p.open.as_ref().unwrap().behind);
+    }
+
+    #[test]
+    fn a_host_that_panics_leaves_the_preview_behind() {
+        let (mut p, count) = previews(VecDeque::new(), true);
+        // A poisoned count makes the stub host's next reload panic.
+        let held = Arc::clone(&count);
+        std::thread::spawn(move || {
+            let _held = held.lock().unwrap();
+            panic!("poisoning the count");
+        })
+        .join()
+        .unwrap_err();
+        let reload = std::panic::AssertUnwindSafe(|| p.catch_up());
+        assert!(std::panic::catch_unwind(reload).is_err());
         assert!(p.open.as_ref().unwrap().behind);
     }
 

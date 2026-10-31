@@ -19,6 +19,10 @@ publish = false
 qml_syntax = { git = "https://github.com/hal-c2/ljos-ui", rev = "63ec3fa4ad17dbc7ed126be86796703201e30403" }
 qml_edit = { git = "https://github.com/hal-c2/ljos-ui", rev = "63ec3fa4ad17dbc7ed126be86796703201e30403" }
 ljos_ir = { git = "https://github.com/hal-c2/ljos-ui", rev = "63ec3fa4ad17dbc7ed126be86796703201e30403" }
+# What a theme may say and when Ljós refuses one, judged by Ljós itself.
+ljos_design = { git = "https://github.com/hal-c2/ljos-ui", rev = "63ec3fa4ad17dbc7ed126be86796703201e30403" }
+# Puts Studio's own theme on its window when no watched session does.
+ljos_design_qml = { git = "https://github.com/hal-c2/ljos-ui", rev = "63ec3fa4ad17dbc7ed126be86796703201e30403" }
 ljos_mcp_core = { git = "https://github.com/hal-c2/ljos-ui", rev = "63ec3fa4ad17dbc7ed126be86796703201e30403" }
 ljos_blocks = { git = "https://github.com/hal-c2/ljos-ui", rev = "63ec3fa4ad17dbc7ed126be86796703201e30403", features = ["source"] }
 ljos_child = { git = "https://github.com/hal-c2/ljos-ui", rev = "63ec3fa4ad17dbc7ed126be86796703201e30403" }
@@ -27,6 +31,11 @@ ljos_child = { git = "https://github.com/hal-c2/ljos-ui", rev = "63ec3fa4ad17dbc
 ljos = { git = "https://github.com/hal-c2/ljos-ui", rev = "63ec3fa4ad17dbc7ed126be86796703201e30403", default-features = false }
 # What settles a scene and counts its frames, for the UI scenarios.
 ljos_drive = { git = "https://github.com/hal-c2/ljos-ui", rev = "63ec3fa4ad17dbc7ed126be86796703201e30403" }
+# The watched session the self-reskin scenarios drive in-process, the
+# clock it is pumped with, and the scene a reload shows its root in.
+ljos_dev = { git = "https://github.com/hal-c2/ljos-ui", rev = "63ec3fa4ad17dbc7ed126be86796703201e30403" }
+ljos_runtime = { git = "https://github.com/hal-c2/ljos-ui", rev = "63ec3fa4ad17dbc7ed126be86796703201e30403" }
+ljos_quick = { git = "https://github.com/hal-c2/ljos-ui", rev = "63ec3fa4ad17dbc7ed126be86796703201e30403" }
 # The role words the driver names nodes by, for tests that find a node by
 # role among several.
 ljos_a11y = { git = "https://github.com/hal-c2/ljos-ui", rev = "63ec3fa4ad17dbc7ed126be86796703201e30403" }
@@ -37,6 +46,7 @@ clap = { version = "4.6", features = ["derive"] }
 cucumber = "0.23.0"
 insta = { version = "1.49", features = ["json"] }
 png = "0.18"
+regex = "1.13"
 rmcp = { version = "3.5", default-features = false }
 schemars = "1.2"
 serde = { version = "1.0", features = ["derive"] }

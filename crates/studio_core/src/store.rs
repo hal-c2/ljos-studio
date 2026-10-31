@@ -94,13 +94,13 @@ impl FsStore {
     }
 }
 
-/// Whether `path` can be a document: a `.qml` file, in normal form so one
-/// file is not two documents by spelling, outside the directories a walk
-/// leaves out.
+/// Whether `path` can be a document: a `.qml` file or a theme file, in
+/// normal form so one file is not two documents by spelling, outside the
+/// directories a walk leaves out.
 pub(crate) fn document_path(path: &str) -> bool {
     let mut parts = path.split('/').rev();
     let file = parts.next().unwrap_or_default();
-    file.ends_with(".qml")
+    (file.ends_with(".qml") || file == crate::theme::FILE)
         && !matches!(file, "." | "..")
         && parts.all(|dir| !dir.is_empty() && dir != "." && dir != ".." && !skipped(dir))
 }
@@ -165,7 +165,12 @@ impl Store for FsStore {
             std::fs::create_dir_all(parent).map_err(io)?;
         }
         // Written beside and renamed over, so a watcher (the preview's hot
-        // reload) never reads half a file.
+        // reload) never reads half a file and a crash leaves the old text
+        // or the new, never a mix. The price is the rename: ext4 has the
+        // new file's data on its way to the disk before it replaces the
+        // old one, and behind other writing to the same drive that takes
+        // up to a second, which is the whole tail of an edit's way to the
+        // preview (DESIGN.md section 6).
         let tmp = full.with_extension("qml.studio-tmp");
         // A link left at that name would take the text wherever it leads.
         match std::fs::remove_file(&tmp) {
@@ -372,8 +377,14 @@ mod tests {
     }
 
     #[test]
-    fn a_document_is_a_qml_file_outside_the_skipped_directories() {
-        for good in ["Main.qml", "a/b/Card.qml", ".hidden.qml"] {
+    fn a_document_is_a_qml_or_theme_file_outside_the_skipped_directories() {
+        for good in [
+            "Main.qml",
+            "a/b/Card.qml",
+            ".hidden.qml",
+            "theme.json",
+            "app/theme.json",
+        ] {
             assert!(document_path(good), "{good}");
         }
         for bad in [
@@ -381,6 +392,9 @@ mod tests {
             ".env",
             ".git/config",
             "README.md",
+            "other.json",
+            "theme.json.bak",
+            ".git/theme.json",
             ".git/Hook.qml",
             "a/.cache/B.qml",
             "node_modules/x/Y.qml",

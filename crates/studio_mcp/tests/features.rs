@@ -375,14 +375,20 @@ fn answer_is(w: &mut StudioWorld, pointer: String, want: String) -> StepResult {
 fn answer_text_is(w: &mut StudioWorld, pointer: String, step: &Step) -> StepResult {
     let want = file_text(step)?;
     let got = at(w.answer()?, &pointer)?;
-    (got.as_str() == Some(want.as_str()))
-        .then_some(())
-        .ok_or_else(|| {
-            format!(
-                "`{pointer}` is:\n{}\nnot:\n{want}",
-                got.as_str().unwrap_or("")
-            )
-        })
+    // A string is compared as text; anything else as the JSON the docstring
+    // holds, so a list of records reads as one.
+    let same = match got.as_str() {
+        Some(text) => text == want,
+        None => {
+            serde_json::from_str::<serde_json::Value>(&want).map_err(|e| {
+                format!("`{pointer}` is not text, and the docstring is no JSON: {e}")
+            })? == *got
+        }
+    };
+    same.then_some(()).ok_or_else(|| {
+        let shown = got.as_str().map_or_else(|| got.to_string(), str::to_owned);
+        format!("`{pointer}` is:\n{shown}\nnot:\n{want}")
+    })
 }
 
 #[then(regex = r#"^the answer's "(/[^"]*)" has (\d+) entr(?:y|ies)$"#)]
@@ -434,6 +440,19 @@ fn refusal_is(w: &mut StudioWorld, pointer: String, want: String) -> StepResult 
     (*got == want)
         .then_some(())
         .ok_or_else(|| format!("`{pointer}` is {got}, not {want}"))
+}
+
+/// Ljós's messages name a column and a contrast that are its to choose;
+/// a scenario pins what it means and leaves those to a pattern.
+#[then(regex = r#"^the refusal's message matches "(.+)"$"#)]
+fn refusal_matches(w: &mut StudioWorld, pattern: String) -> StepResult {
+    let error = w.refusal()?;
+    let message = error["message"].as_str().unwrap_or_default();
+    let pattern = regex::Regex::new(&pattern).map_err(|e| e.to_string())?;
+    pattern
+        .is_match(message)
+        .then_some(())
+        .ok_or_else(|| format!("the message is {message:?}"))
 }
 
 #[then(regex = r#"^the file "([^"]+)" is:$"#)]
