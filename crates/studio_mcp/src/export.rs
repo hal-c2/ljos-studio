@@ -10,6 +10,7 @@
 //! own, which it does not yet; that target is refused, saying so.
 
 use std::{
+    collections::HashMap,
     fs,
     path::{Component, Path, PathBuf},
     sync::{Arc, Mutex},
@@ -168,15 +169,43 @@ fn target_left_out_why(root: &Path, real: &Path, is_dir: bool) -> Option<&'stati
 /// in the project; one that leads out of it is left out, so a link a
 /// checked-out project brings cannot copy somebody's directory into the
 /// bundle, and one back to a directory the walk is inside would never end.
+/// Each real directory is walked once: a link to one already walked is
+/// left out, saying where the bundle has it, or links that fan out and
+/// meet again (`a -> b`, `a -> c`, `b -> d`, `c -> d`, a few levels deep)
+/// would copy it once for every way down. Directories under their own
+/// names go first and links after them, in order of path, so a directory
+/// is in the bundle where it is, whatever order the disk lists it in.
 fn walk(root: &Path) -> Result<(Vec<FileEntry>, Vec<LeftOut>), SurfaceError> {
     let mut files = Vec::new();
     let mut left_out = Vec::new();
+    // Each real directory walked, with where it is in the bundle.
+    let mut walked = HashMap::from([(root.to_owned(), String::new())]);
     // Each directory with the real directories it is below, itself first.
     let mut stack = vec![(root.to_owned(), String::new(), vec![root.to_owned()])];
-    while let Some((dir, prefix, within)) = stack.pop() {
-        let entries = fs::read_dir(&dir).map_err(|e| io(&dir, &e))?;
+    let mut links: Vec<Pending> = Vec::new();
+    loop {
+        let (dir, prefix, within) = match stack.pop() {
+            Some(next) => next,
+            None => {
+                // Links last, first by path, each walked unless something
+                // walked since it was met holds its directory.
+                links.sort_by(|a: &Pending, b: &Pending| b.1.cmp(&a.1));
+                let Some(next) = links.pop() else { break };
+                let path = next.1.trim_end_matches('/').to_owned();
+                if let Some(at) = walked.get(&next.2[0]) {
+                    left_out.push(already(path, at));
+                    continue;
+                }
+                walked.insert(next.2[0].clone(), path);
+                next
+            }
+        };
+        let mut entries = fs::read_dir(&dir)
+            .map_err(|e| io(&dir, &e))?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| io(&dir, &e))?;
+        entries.sort_by_key(fs::DirEntry::file_name);
         for entry in entries {
-            let entry = entry.map_err(|e| io(&dir, &e))?;
             let name = entry.file_name().to_string_lossy().into_owned();
             let path = format!("{prefix}{name}");
             let full = entry.path();
@@ -220,10 +249,18 @@ fn walk(root: &Path) -> Result<(Vec<FileEntry>, Vec<LeftOut>), SurfaceError> {
                     path,
                     why: "a link back to a directory it is in".to_owned(),
                 });
+            } else if let Some(at) = meta.is_dir().then(|| walked.get(&real)).flatten() {
+                left_out.push(already(path, at));
             } else if meta.is_dir() {
                 let mut below = vec![real];
                 below.extend(within.iter().cloned());
-                stack.push((full, format!("{path}/"), below));
+                let next = (full, format!("{path}/"), below);
+                if link {
+                    links.push(next);
+                } else {
+                    walked.insert(next.2[0].clone(), path);
+                    stack.push(next);
+                }
             } else {
                 files.push(FileEntry {
                     path,
@@ -235,6 +272,19 @@ fn walk(root: &Path) -> Result<(Vec<FileEntry>, Vec<LeftOut>), SurfaceError> {
     files.sort_by(|a, b| a.path.cmp(&b.path));
     left_out.sort_by(|a, b| a.path.cmp(&b.path));
     Ok((files, left_out))
+}
+
+/// A directory the walk has yet to go down, as `walk` keeps them.
+type Pending = (PathBuf, String, Vec<PathBuf>);
+
+/// Why the link at `path` is left out: the bundle has its directory at `at`.
+fn already(path: String, at: &str) -> LeftOut {
+    let why = if at.is_empty() {
+        "a link to the project, which the bundle holds already".to_owned()
+    } else {
+        format!("a link to `{at}`, which the bundle holds already")
+    };
+    LeftOut { path, why }
 }
 
 fn file_name(path: &str) -> &str {
@@ -510,10 +560,12 @@ fn write_with(
             fs::create_dir_all(dir).map_err(|e| io(dir, &e))?;
         }
         let from = root.join(path);
-        // As the walk found it: a file swapped for a link out of the
-        // project, or for a pipe, since then is not read.
-        let still = from.canonicalize().is_ok_and(|real| real.starts_with(root))
-            && fs::metadata(&from).is_ok_and(|m| m.is_file());
+        // As the walk found it: a file swapped since then for a link out of
+        // the project, or to what the bundle leaves out (`.studio/`, the
+        // mocks, build output), or for a pipe, is not read.
+        let still = from.canonicalize().is_ok_and(|real| {
+            real.starts_with(root) && target_left_out_why(root, &real, false).is_none()
+        }) && fs::metadata(&from).is_ok_and(|m| m.is_file());
         if !still {
             return Err(refused(
                 ErrorCode::NotActionable,
@@ -656,6 +708,22 @@ mod tests {
         // What the walk saw was a file of the project.
         let checked = manifest(&["Shell.qml"]);
         symlink(outside.path().join("secret.txt"), root.join("Shell.qml")).unwrap();
+        let out = root.join(BUILD).join("native");
+        let refused = write(&root, &out, &checked).unwrap_err();
+        assert_eq!(refused.code, ErrorCode::NotActionable, "{refused:?}");
+        assert!(!out.exists());
+        assert!(!root.join(BUILD).join(".native.partial/Shell.qml").exists());
+    }
+
+    #[test]
+    fn a_file_swapped_for_a_link_to_what_is_left_out_after_the_walk_is_not_copied() {
+        let project = tempfile::tempdir().unwrap();
+        let root = project.path().canonicalize().unwrap();
+        fs::create_dir_all(root.join(".studio")).unwrap();
+        fs::write(root.join(".studio/review.json"), "{}").unwrap();
+        // What the walk saw was a file of the project.
+        let checked = manifest(&["Shell.qml"]);
+        symlink(root.join(".studio/review.json"), root.join("Shell.qml")).unwrap();
         let out = root.join(BUILD).join("native");
         let refused = write(&root, &out, &checked).unwrap_err();
         assert_eq!(refused.code, ErrorCode::NotActionable, "{refused:?}");

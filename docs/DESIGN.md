@@ -788,6 +788,16 @@ can already remove the directory itself, so the window only matters for a
 swap made by accident, such as a checkout. Directory handles would need a
 dependency on each platform, and the browser build has no directory to
 export. Handles are the next step if Studio ever exports for another user.
+DECISION: export walks each real directory once, under its own name: a
+link to a directory the bundle already holds is left out, saying where
+the bundle has it, so links that fan out and meet again (a diamond at
+each of 24 levels took 56 s and failed before) stay linear in time and
+size. The bundle copies files, not links, so an app that reads a
+directory through a link's name finds it only under the directory's own;
+writing the links into the bundle is the next step if a project needs
+that. A file's check right before it is copied applies the walk's
+exclusions again to where it now leads, so a file swapped for a link into
+`.studio/`, the mocks or build output is not copied.
 
 Measured in a release build on the reference desktop:
 
