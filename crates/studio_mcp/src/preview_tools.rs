@@ -142,6 +142,11 @@ struct ScreenshotOut {
 struct EventsArgs {
     /// The `next` of an earlier answer; 0 or left out: from the start.
     since: Option<usize>,
+    /// Instead of events, wait until the preview's app rests saying something
+    /// new: at most this long (up to 3 600 000), past `rests`.
+    wait_ms: Option<u64>,
+    /// The `rests` of an earlier answer; left out, the answer comes at once.
+    rests: Option<u64>,
 }
 
 #[derive(Serialize, JsonSchema)]
@@ -151,6 +156,13 @@ struct EventsOut {
     next: usize,
     /// A preview is running now.
     open: bool,
+    /// With `wait_ms`: how many times the app has rested saying something new.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    rests: Option<u64>,
+    /// With `wait_ms`: when the app wakes by itself next; absent for not until
+    /// something happens, so its picture will not change by itself.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    wake_in_ms: Option<u64>,
 }
 
 pub(crate) fn preview_error(e: PreviewError) -> SurfaceError {
@@ -625,7 +637,45 @@ pub(crate) fn placed(
     }
 }
 
-fn events(studio: &Mutex<Studio>, a: EventsArgs) -> EventsOut {
+/// Holds the session only to find the preview: the wait is outside the lock,
+/// and asks the app nothing else, since a follower asks this many times a second.
+fn wait_for_rest(
+    studio: &Mutex<Studio>,
+    since: usize,
+    rests: Option<u64>,
+    wait_ms: u64,
+) -> Result<EventsOut, SurfaceError> {
+    let waiting = {
+        let studio = lock(studio);
+        let previews = preview::lock(&studio.previews);
+        let open = previews
+            .open
+            .as_ref()
+            .ok_or_else(|| preview_error(PreviewError::NotOpen))?;
+        open.host.rest_watch().ok_or_else(|| {
+            SurfaceError::new(
+                ErrorCode::NotActionable,
+                "this preview cannot say when it rests",
+            )
+            .with_details(json!({ "kind": "not_supported" }))
+        })?
+    };
+    let rest = waiting
+        .wait(rests, wait_ms.min(3_600_000))
+        .map_err(preview_error)?;
+    Ok(EventsOut {
+        events: Vec::new(),
+        next: since,
+        open: true,
+        rests: Some(rest.rests),
+        wake_in_ms: rest.wake_in_ms,
+    })
+}
+
+fn events(studio: &Mutex<Studio>, a: EventsArgs) -> Result<EventsOut, SurfaceError> {
+    if let Some(wait_ms) = a.wait_ms {
+        return wait_for_rest(studio, a.since.unwrap_or(0), a.rests, wait_ms);
+    }
     let studio = lock(studio);
     // What a burst of writes left out is reloaded first, so its outcome
     // is among the events.
@@ -633,11 +683,13 @@ fn events(studio: &Mutex<Studio>, a: EventsArgs) -> EventsOut {
     previews.pull_logs();
     let since = a.since.unwrap_or(0).min(previews.events.len());
     let end = (since + EVENTS_PAGE).min(previews.events.len());
-    EventsOut {
+    Ok(EventsOut {
         events: previews.events[since..end].to_vec(),
         next: end,
         open: previews.open.is_some(),
-    }
+        rests: None,
+        wake_in_ms: None,
+    })
 }
 
 pub(crate) fn add(registry: ToolRegistry, studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
@@ -691,14 +743,15 @@ pub(crate) fn add(registry: ToolRegistry, studio: &Arc<Mutex<Studio>>) -> ToolRe
             ToolDef::new::<EventsArgs>(
                 "preview_events",
                 "What happened to the preview since a cursor: opened, reloaded (with ms), \
-                 reload_failed (the last good one stays), log lines, ended.",
+                 reload_failed (the last good one stays), log lines, ended. `wait_ms` instead waits \
+                 for it to rest past `rests`, and says `wake_in_ms`.",
             )
             .answers::<EventsOut>()
             .requires(Cap::Inspect)
             .annotated(ToolAnnotations::READ_ONLY),
             typed({
                 let studio = s();
-                move |_, a: EventsArgs| Ok::<_, SurfaceError>(events(&studio, a))
+                move |_, a: EventsArgs| events(&studio, a)
             }),
         )
 }

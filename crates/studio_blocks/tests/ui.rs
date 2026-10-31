@@ -17,7 +17,7 @@ use ljos_mcp_core::{CallCtx, Cap, CapSet};
 use ljos_runtime::SystemClock;
 use serde_json::Value as Json;
 use studio_core::preview::{
-    Declared, LogLine, Picture, PreviewError, PreviewHost, PreviewSpec, Reload, Size,
+    Declared, LogLine, Picture, PreviewError, PreviewHost, PreviewSpec, Reload, RestWatch, Size,
 };
 use studio_mcp::{Studio, StudioServer};
 use studio_preview::NativeHost;
@@ -39,6 +39,7 @@ struct UiWorld {
     window: Option<Window>,
     /// How many different pictures the frame had drawn when last looked at.
     looked: u64,
+    asked: u64,
     /// The previews say nothing of where their objects are, as a web host.
     no_places: bool,
     /// Where a step left the hand holding the canvas.
@@ -71,6 +72,10 @@ impl PreviewHost for NoPlaces {
 
     fn outline(&mut self) -> Result<String, PreviewError> {
         self.0.outline()
+    }
+
+    fn rest_watch(&self) -> Option<Box<dyn RestWatch>> {
+        self.0.rest_watch()
     }
 
     fn read(
@@ -141,6 +146,7 @@ impl UiWorld {
             state: tempfile::tempdir().expect("a temporary directory"),
             window: None,
             looked: 0,
+            asked: 0,
             no_places: false,
             held: None,
         }
@@ -2337,6 +2343,44 @@ fn frame_drew_another(w: &mut UiWorld, target: String) -> StepResult {
     (preview["shots"].as_u64().unwrap_or(0) > looked)
         .then_some(())
         .ok_or_else(|| format!("the frame still draws the picture it had; {preview}"))
+}
+
+/// The app is another process on the real clock, the window's timers on the
+/// driver's: both have to move.
+fn let_pass(w: &mut UiWorld, seconds: u64) -> StepResult {
+    let window = w.window()?;
+    for _ in 0..seconds * 10 {
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        window.stage.drive().advance(100).map_err(drive_error)?;
+        window.rest()?;
+    }
+    Ok(())
+}
+
+#[given(regex = r"^(\d+) seconds have passed$")]
+fn seconds_have_passed(w: &mut UiWorld, seconds: u64) -> StepResult {
+    let_pass(w, seconds)
+}
+
+#[when(regex = r"^(\d+) seconds pass$")]
+fn seconds_pass(w: &mut UiWorld, seconds: u64) -> StepResult {
+    let_pass(w, seconds)
+}
+
+#[given(regex = r"^the person has counted the pictures asked for$")]
+fn counts_pictures(w: &mut UiWorld) -> StepResult {
+    let window = w.window()?;
+    w.asked = window.read_json("looks").as_u64().unwrap_or(0);
+    Ok(())
+}
+
+#[then(regex = r"^no more pictures have been asked for$")]
+fn no_more_pictures(w: &mut UiWorld) -> StepResult {
+    let asked = w.asked;
+    let now = w.window()?.read_json("looks").as_u64().unwrap_or(0);
+    (now == asked)
+        .then_some(())
+        .ok_or_else(|| format!("{} pictures asked for since", now - asked))
 }
 
 #[then(regex = r#"^the frame "([^"]+)" shows the preview's generation (\d+)$"#)]
