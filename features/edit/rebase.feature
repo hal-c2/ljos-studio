@@ -655,3 +655,23 @@ Feature: An edit made against an older generation is rebased by its handles
           Text { id: label; text: "hello" }
       }
       """
+
+  Scenario: Taking out a tap flow lands past a change to another TapHandler of the object
+    Given the agent has called the tool "node_insert" with:
+      """json
+      {"doc": "Main.qml", "parent": {"id": "card"}, "text": "TapHandler { id: one; onTapped: root.state = \"\" }"}
+      """
+    And the agent has called the tool "node_insert" with:
+      """json
+      {"doc": "Main.qml", "parent": {"id": "card"}, "text": "TapHandler { id: two; enabled: true }"}
+      """
+    And the agent keeps the answer's "/generation" as "tapped"
+    And a second agent named "Ada" has called the tool "binding_set" with:
+      """json
+      {"doc": "Main.qml", "generation": "$tapped", "node": {"id": "two"}, "name": "enabled", "value": "false"}
+      """
+    When the agent calls the tool "state_edit" with:
+      """json
+      {"doc": "Main.qml", "generation": "$tapped", "action": "remove_interaction", "trigger": {"node": "$card"}}
+      """
+    Then the answer's "/rebased_from" is 3

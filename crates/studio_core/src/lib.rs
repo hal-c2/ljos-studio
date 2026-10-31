@@ -931,9 +931,13 @@ impl Session {
                     let removes = matches!(op, Op::RemoveInteraction { .. });
                     let member = (!removes).then(|| "onTapped".to_owned());
                     let mut touched = vec![(h, Some(CHILDREN.to_owned()))];
+                    let taps = self.taps_of(path, h)?;
+                    // The flow is in the handler writing `onTapped`; with
+                    // none, another writer may have just taken it from one.
+                    let any_tapped = taps.iter().any(|(_, tapped)| *tapped);
                     touched.extend(
-                        self.taps_of(path, h)?
-                            .into_iter()
+                        taps.into_iter()
+                            .filter(|(_, tapped)| !removes || *tapped || !any_tapped)
                             .map(|(tap, _)| (tap, member.clone())),
                     );
                     return Ok(touched);

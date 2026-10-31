@@ -317,7 +317,8 @@ labels are `tapped card to details` and `remove tapped interaction`.
 From an older generation, a tap flow past another writer's new child of
 the trigger lands beside it, unless the trigger's `TapHandler` already writes
 `onTapped`. Taking a tap flow out conflicts with any change to that handler,
-and with any change to the trigger's children once it has none.
+and with any change to the trigger's children once it has none. That
+conflict names the newest such writer, who may have only added a child.
 Refusals: `not_found` with `details.kind` `no_state`, `no_document` (the
 document must be beside this one) or `no_interaction`; `invalid_argument`
 for `exists`, an owner or navigator with no `id` (`no_id`), a navigator
