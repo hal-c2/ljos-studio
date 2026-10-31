@@ -317,8 +317,10 @@ struct Inspected {
 #[serde(deny_unknown_fields)]
 struct InsertArgs {
     doc: String,
-    /// The generation read; refused if the document moved on. Needed when
-    /// an address is a `path`, which is true of one generation only.
+    /// The generation read. By handle or `id`, the edit is moved past what
+    /// others wrote since, or refused as a conflict; by `path`, which is true
+    /// of one generation only, it is refused if the document moved on, so
+    /// a `path` needs it.
     generation: Option<u64>,
     parent: Address,
     /// Child position; the end when left out.
@@ -341,8 +343,10 @@ struct InsertArgs {
 #[serde(deny_unknown_fields)]
 struct MoveArgs {
     doc: String,
-    /// The generation read; refused if the document moved on. Needed when
-    /// an address is a `path`, which is true of one generation only.
+    /// The generation read. By handle or `id`, the edit is moved past what
+    /// others wrote since, or refused as a conflict; by `path`, which is true
+    /// of one generation only, it is refused if the document moved on, so
+    /// a `path` needs it.
     generation: Option<u64>,
     node: Address,
     parent: Address,
@@ -357,8 +361,10 @@ struct MoveArgs {
 #[serde(deny_unknown_fields)]
 struct RemoveArgs {
     doc: String,
-    /// The generation read; refused if the document moved on. Needed when
-    /// an address is a `path`, which is true of one generation only.
+    /// The generation read. By handle or `id`, the edit is moved past what
+    /// others wrote since, or refused as a conflict; by `path`, which is true
+    /// of one generation only, it is refused if the document moved on, so
+    /// a `path` needs it.
     generation: Option<u64>,
     node: Address,
     #[serde(default)]
@@ -409,8 +415,10 @@ impl<T: JsonSchema> JsonSchema for Present<T> {
 #[serde(deny_unknown_fields)]
 struct PropertyArgs {
     doc: String,
-    /// The generation read; refused if the document moved on. Needed when
-    /// an address is a `path`, which is true of one generation only.
+    /// The generation read. By handle or `id`, the edit is moved past what
+    /// others wrote since, or refused as a conflict; by `path`, which is true
+    /// of one generation only, it is refused if the document moved on, so
+    /// a `path` needs it.
     generation: Option<u64>,
     node: Address,
     /// `width`, `font.bold`; written grouped or dotted as the file already does.
@@ -425,8 +433,10 @@ struct PropertyArgs {
 #[serde(deny_unknown_fields)]
 struct BindingArgs {
     doc: String,
-    /// The generation read; refused if the document moved on. Needed when
-    /// an address is a `path`, which is true of one generation only.
+    /// The generation read. By handle or `id`, the edit is moved past what
+    /// others wrote since, or refused as a conflict; by `path`, which is true
+    /// of one generation only, it is refused if the document moved on, so
+    /// a `path` needs it.
     generation: Option<u64>,
     node: Address,
     /// A property (`width`) or a handler (`onClicked`).
@@ -1512,7 +1522,12 @@ fn edits(studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
                             .map_err(error)?;
                         selection.push(found(&doc, handle, &node));
                     }
-                    let doc = studio.session.canonical(&a.doc).map_err(error)?;
+                    // A point can select an object declared in another file,
+                    // and a lease is on the document that object is in.
+                    let doc = match selection.first() {
+                        Some(first) => first.doc.clone(),
+                        None => studio.session.canonical(&a.doc).map_err(error)?,
+                    };
                     if selection.is_empty() {
                         studio.session.release();
                     } else if a.hold {

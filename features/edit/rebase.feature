@@ -432,3 +432,67 @@ Feature: An edit made against an older generation is rebased by its handles
           Text { id: label; text: "hello" }
       }
       """
+
+  Scenario: Writing a binding conflicts with a change inside the object written in it
+    Given the file "Boxed.qml":
+      """qml
+      import QtQuick
+
+      Item {
+          id: root
+          box: Rectangle { id: inner; color: "red" }
+      }
+      """
+    And the agent has called the tool "document_tree" with:
+      """json
+      {"doc": "Boxed.qml"}
+      """
+    And the agent keeps the answer's "/generation" as "boxed"
+    And a second agent named "Ada" has called the tool "property_set" with:
+      """json
+      {"doc": "Boxed.qml", "generation": "$boxed", "node": {"id": "inner"}, "name": "color", "value": "blue"}
+      """
+    When the agent calls the tool "binding_set" with:
+      """json
+      {"doc": "Boxed.qml", "generation": "$boxed", "node": {"id": "root"}, "name": "box", "value": "Item {}"}
+      """
+    Then the agent is refused with "stale_ref"
+    And the refusal's "/details/kind" is "conflict"
+    And the refusal's "/details/author" is "Ada"
+
+  Scenario: A child index read before another writer's insert is a conflict
+    Given a second agent named "Ada" has called the tool "node_insert" with:
+      """json
+      {"doc": "Main.qml", "generation": "$read", "parent": {"id": "root"}, "index": 0, "text": "Item { id: ada }"}
+      """
+    When the agent calls the tool "node_insert" with:
+      """json
+      {"doc": "Main.qml", "generation": "$read", "parent": {"id": "root"}, "index": 1, "text": "Item { id: mine }"}
+      """
+    Then the agent is refused with "stale_ref"
+    And the refusal's "/details/kind" is "conflict"
+    And the refusal's "/details/author" is "Ada"
+
+  Scenario: A child index read before another writer's remove is a conflict
+    Given a second agent named "Ada" has called the tool "node_remove" with:
+      """json
+      {"doc": "Main.qml", "generation": "$read", "node": {"id": "card"}}
+      """
+    When the agent calls the tool "node_insert" with:
+      """json
+      {"doc": "Main.qml", "generation": "$read", "parent": {"id": "root"}, "index": 1, "text": "Item { id: mine }"}
+      """
+    Then the agent is refused with "stale_ref"
+    And the refusal's "/details/kind" is "conflict"
+
+  Scenario: An insert with no index still lands past another writer's
+    Given a second agent named "Ada" has called the tool "node_insert" with:
+      """json
+      {"doc": "Main.qml", "generation": "$read", "parent": {"id": "root"}, "index": 0, "text": "Item { id: ada }"}
+      """
+    When the agent calls the tool "node_insert" with:
+      """json
+      {"doc": "Main.qml", "generation": "$read", "parent": {"id": "root"}, "text": "Item { id: mine }"}
+      """
+    Then the answer's "/rebased_from" is 1
+

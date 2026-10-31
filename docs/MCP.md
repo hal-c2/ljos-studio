@@ -545,7 +545,10 @@ current text rather than refused, and its answer says `rebased_from`
 - an edit naming its object by handle or `id` passes the entries since
   its generation when none of them, by another writer, touched the same
   binding of the same object, or touched the object or an object holding
-  it as a whole (a remove, a move, a replace). Otherwise it is refused
+  it as a whole (a remove, a move, a replace, or a write of the binding
+  whose value it is written in). An edit giving a child `index` also
+  conflicts with another writer's change of that parent's children, as the
+  index counts the children it read; one with no `index` appends. Otherwise it is refused
   `stale_ref`, kind `conflict`, with `doc`, `handle` (`null` for a change of
   the text that is no one object's), `name`, the other
   writer (`author`), its edit's `label` and `generation`, and the value

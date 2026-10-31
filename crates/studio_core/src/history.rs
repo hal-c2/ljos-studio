@@ -95,15 +95,18 @@ pub(crate) struct History {
 impl History {
     /// Records an edit. What its author undid can no longer be redone, and
     /// a change found in the file ends what anybody could redo of that
-    /// document: no redo is rebased across a guess. Another writer's undone
-    /// entries stay: their redo is rebased past this edit.
+    /// document: no redo is rebased across a guess, and an undone change
+    /// found in the file is itself one, with no author to lose it otherwise.
+    /// Another writer's undone entries stay: their redo is rebased past this
+    /// edit.
     pub fn push(&mut self, mut entry: Entry) -> u64 {
         self.next_id += 1;
         entry.id = self.next_id;
         if entry.outside {
             self.undone.retain(|e| e.doc != entry.doc);
         } else {
-            self.undone.retain(|e| e.author != entry.author);
+            self.undone
+                .retain(|e| e.author != entry.author && !(e.outside && e.doc == entry.doc));
         }
         self.done.push(entry);
         self.next_id

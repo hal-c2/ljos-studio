@@ -831,14 +831,21 @@ impl Session {
         }
         let intent = self.intent(path, op)?;
         let doc = self.doc(path)?;
+        // A child index counts the children of the generation it was read
+        // at; an append has none to count.
+        let counted = matches!(
+            op,
+            Op::Insert { index: Some(_), .. } | Op::Move { index: Some(_), .. }
+        );
         // The newest change names what is there now.
         for entry in others.iter().rev() {
             for (h, name) in &intent {
                 let hit = entry.touched.iter().flatten().find(|(a, m)| {
                     (m.is_none() && within(doc, *h, *a))
                         || (name.is_none() && within(doc, *a, *h))
-                        // Two writers' children of one parent both land.
-                        || (a == h && m == name && name.as_deref() != Some(CHILDREN))
+                        // Two writers' children of one parent both land,
+                        // unless one of them says where among the others.
+                        || (a == h && m == name && (counted || name.as_deref() != Some(CHILDREN)))
                 });
                 if hit.is_some() {
                     let now = name.as_ref().and_then(|n| {
@@ -890,7 +897,12 @@ impl Session {
                 vec![(handle(self, node)?, None)]
             }
             Op::SetBinding { node, name, .. } | Op::RemoveBinding { node, name } => {
-                vec![(handle(self, node)?, Some(name.clone()))]
+                let h = handle(self, node)?;
+                // Writing the binding replaces or takes out what is written
+                // in its value, as a remove of those objects would.
+                let mut touched = vec![(h, Some(name.clone()))];
+                touched.extend(in_binding(self.doc(path)?, h, name).map(|t| (t, None)));
+                touched
             }
             Op::State { node, .. } => vec![(handle(self, node)?, Some(STATES.to_owned()))],
             Op::Interaction { trigger, .. } | Op::RemoveInteraction { trigger, .. } => {
@@ -901,7 +913,7 @@ impl Session {
 
     /// What `op` changes in the text it is about to be applied to: its
     /// intent, with an object it replaces, moves or takes out standing for
-    /// all it holds, and a move taking a child from its old parent too.
+    /// all it holds, and a move or remove taking a child from its parent too.
     fn touches(&mut self, path: &str, op: &Op) -> Result<Vec<Touch>, Error> {
         let intent = self.intent(path, op)?;
         let doc = self.doc(path)?;
@@ -913,7 +925,11 @@ impl Session {
                     .iter()
                     .find(|t| t.handle == h)
                     .and_then(|t| t.path.clone());
-                if let (Op::Move { .. }, Some(at)) = (op, &at)
+                let leaves_parent = matches!(
+                    op,
+                    Op::Move { .. } | Op::Remove { .. } | Op::RemoveContribution { .. }
+                );
+                if let (true, Some(at)) = (leaves_parent, &at)
                     && let Some(parent) = at.0.split_last().map(|(_, p)| p)
                     && let Some(t) = doc
                         .tracked
@@ -2622,6 +2638,28 @@ fn conflict(doc: &str, entry: &Logged, now: Option<String>) -> Error {
 /// The number of a handle the session gave out (`n12`).
 fn number(handle: &str) -> u64 {
     handle[1..].parse().expect("handles are n and a number")
+}
+
+/// The objects written in the value of `handle`'s binding `name`, a group's
+/// (`font`) naming those of its members (`font.family`) too.
+fn in_binding<'a>(doc: &'a Document, handle: u64, name: &'a str) -> impl Iterator<Item = u64> + 'a {
+    let at = doc
+        .tracked
+        .iter()
+        .find(|t| t.handle == handle)
+        .and_then(|t| t.path.as_ref());
+    doc.tracked.iter().filter_map(move |t| {
+        let (at, path) = (at?, t.path.as_ref()?);
+        let below = path.0.strip_prefix(at.0.as_slice())?;
+        let Some(qml_edit::Step::Value(step)) = below.first() else {
+            return None;
+        };
+        let inside = step == name
+            || step
+                .strip_prefix(name)
+                .is_some_and(|rest| rest.starts_with('.'));
+        inside.then_some(t.handle)
+    })
 }
 
 /// Whether the object `inner` is `outer` or one it holds, by where their

@@ -320,19 +320,27 @@ impl Studio {
             .collect();
         // A lease holds an object and all it holds, so a layer is held when
         // it or one it is written in is.
-        for i in 0..view.layers.len() {
-            let mut at = Some(i);
-            while let Some(j) = at {
-                let layer = &view.layers[j];
-                if let Some(l) = view
-                    .leases
-                    .iter()
-                    .find(|l| l.doc == doc && l.node == layer.node)
-                {
-                    view.layers[i].held = l.holder.clone();
-                    break;
+        if view.leases.iter().any(|l| l.doc == doc) {
+            let index: std::collections::HashMap<String, usize> = view
+                .layers
+                .iter()
+                .enumerate()
+                .map(|(i, l)| (l.node.clone(), i))
+                .collect();
+            for i in 0..view.layers.len() {
+                let mut at = Some(i);
+                while let Some(j) = at {
+                    let layer = &view.layers[j];
+                    if let Some(l) = view
+                        .leases
+                        .iter()
+                        .find(|l| l.doc == doc && l.node == layer.node)
+                    {
+                        view.layers[i].held = l.holder.clone();
+                        break;
+                    }
+                    at = index.get(&layer.parent).copied();
                 }
-                at = view.layers.iter().position(|p| p.node == layer.parent);
             }
         }
         for c in view

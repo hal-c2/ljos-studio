@@ -185,3 +185,25 @@ Feature: A writer can hold the objects it is working on for a few seconds
     Then the agent is refused with "not_actionable"
     And the refusal's "/details/kind" is "lease_spent"
     And the refusal's message matches "release .* and plan again"
+
+  Scenario: Writing the binding an object is written in reaches into its lease
+    Given the file "Boxed.qml":
+      """qml
+      import QtQuick
+
+      Item {
+          id: root
+          box: Rectangle { id: inner; color: "red" }
+      }
+      """
+    And a second agent named "Ada" has called the tool "node_select" with:
+      """json
+      {"doc": "Boxed.qml", "nodes": [{"id": "inner"}], "hold": true}
+      """
+    When the agent calls the tool "binding_set" with:
+      """json
+      {"doc": "Boxed.qml", "node": {"id": "root"}, "name": "box", "value": "Item {}"}
+      """
+    Then the agent is refused with "busy"
+    And the refusal's "/details/kind" is "leased"
+    And the refusal's "/details/holder" is "Ada"
