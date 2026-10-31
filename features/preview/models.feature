@@ -90,7 +90,7 @@ Feature: A list shows its data in the preview
       """
     When the agent calls the tool "node_insert" with:
       """json
-      {"doc": "App/Data/Contacts.qml", "parent": {"path": "root"}, "text": "ListElement { name: \"Hopper\" }", "id": false}
+      {"doc": "App/Data/Contacts.qml", "generation": 1, "parent": {"path": "root"}, "text": "ListElement { name: \"Hopper\" }", "id": false}
       """
     Then the preview shows "Hopper"
 

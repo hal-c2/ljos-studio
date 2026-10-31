@@ -138,7 +138,7 @@ Feature: Design review comments sit on objects, in the sidecar
         """
       And the agent has called the tool "node_remove" with:
         """json
-        {"doc": "Main.qml", "node": {"path": "root/1"}}
+        {"doc": "Main.qml", "generation": 1, "node": {"path": "root/1"}}
         """
       When the agent calls the tool "review" with:
         """json
@@ -155,7 +155,7 @@ Feature: Design review comments sit on objects, in the sidecar
         """
       And the agent has called the tool "node_remove" with:
         """json
-        {"doc": "Main.qml", "node": {"path": "root/1"}}
+        {"doc": "Main.qml", "generation": 1, "node": {"path": "root/1"}}
         """
       And the agent has called the tool "history" with:
         """json
@@ -198,7 +198,7 @@ Feature: Design review comments sit on objects, in the sidecar
         """
       And the agent has called the tool "node_remove" with:
         """json
-        {"doc": "Main.qml", "node": {"path": "root/1"}}
+        {"doc": "Main.qml", "generation": 1, "node": {"path": "root/1"}}
         """
       When the agent calls the tool "review" with:
         """json
