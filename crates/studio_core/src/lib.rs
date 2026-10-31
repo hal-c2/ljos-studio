@@ -832,9 +832,7 @@ impl Session {
         let intent = self.intent(path, op)?;
         // A child index counts the children of the generation it was read
         // at; an append has none to count. A tap flow's new `TapHandler` is
-        // such an append, unless one is already there to answer for; a
-        // removal's handler that is no longer there left through the same
-        // list of children, and no other trace of it is left to meet.
+        // such an append, unless one is already there to answer for.
         let counted = match op {
             Op::Insert { index, .. } | Op::Move { index, .. } => index.is_some(),
             Op::Interaction {
@@ -842,12 +840,11 @@ impl Session {
                 trigger,
                 ..
             } => self.tapped(path, trigger)?,
-            Op::RemoveInteraction {
-                signal: None,
-                trigger,
-            } => !self.tapped(path, trigger)?,
             _ => false,
         };
+        // A handler taken off the trigger may be the flow this removal read,
+        // and what stands there now another writer's replacement.
+        let removes_tap = matches!(op, Op::RemoveInteraction { signal: None, .. });
         let doc = self.doc(path)?;
         // The newest change names what is there now.
         for entry in others.iter().rev() {
@@ -858,6 +855,10 @@ impl Session {
                         // Two writers' children of one parent both land,
                         // unless one of them says where among the others.
                         || (a == h && m == name && (counted || name.as_deref() != Some(CHILDREN)))
+                        || (removes_tap
+                            && a == h
+                            && m == name
+                            && took_out_tap(doc, entry))
                 });
                 if hit.is_some() {
                     let now = name.as_ref().and_then(|n| {
@@ -926,20 +927,15 @@ impl Session {
                 let h = handle(self, trigger)?;
                 let Some(signal) = signal else {
                     // Taking a tap flow out changes its `TapHandler`, however
-                    // little else that holds; adding one meets only the
-                    // `onTapped` it would write.
+                    // little else that holds. What adds one, or a handler
+                    // with no flow in it now, meets only the `onTapped` that
+                    // is or was written there: another writer may have just
+                    // taken the flow out of it.
                     let removes = matches!(op, Op::RemoveInteraction { .. });
-                    let member = (!removes).then(|| "onTapped".to_owned());
                     let mut touched = vec![(h, Some(CHILDREN.to_owned()))];
-                    let taps = self.taps_of(path, h)?;
-                    // The flow is in the handler writing `onTapped`; with
-                    // none, another writer may have just taken it from one.
-                    let any_tapped = taps.iter().any(|(_, tapped)| *tapped);
-                    touched.extend(
-                        taps.into_iter()
-                            .filter(|(_, tapped)| !removes || *tapped || !any_tapped)
-                            .map(|(tap, _)| (tap, member.clone())),
-                    );
+                    touched.extend(self.taps_of(path, h)?.into_iter().map(|(tap, tapped)| {
+                        (tap, (!removes || !tapped).then(|| "onTapped".to_owned()))
+                    }));
                     return Ok(touched);
                 };
                 vec![(h, Some(flows::handler_name(signal)))]
@@ -2739,6 +2735,18 @@ fn in_binding<'a>(doc: &'a Document, handle: u64, name: &'a str) -> impl Iterato
                 .strip_prefix(name)
                 .is_some_and(|rest| rest.starts_with('.'));
         inside.then_some(t.handle)
+    })
+}
+
+/// Whether `entry` took a `TapHandler` out, which the log says only by the
+/// object it names as a whole.
+fn took_out_tap(doc: &Document, entry: &Logged) -> bool {
+    entry.touched.iter().flatten().any(|(a, m)| {
+        m.is_none()
+            && doc
+                .tracked
+                .iter()
+                .any(|t| t.handle == *a && flows::is_tap_handler(&t.ty))
     })
 }
 

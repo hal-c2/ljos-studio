@@ -17,6 +17,10 @@ use qml_edit::Step;
 
 /// The type that turns a tap on any item into a signal.
 const TAP_HANDLER: &str = "TapHandler";
+
+pub(crate) fn is_tap_handler(ty: &str) -> bool {
+    short(ty) == TAP_HANDLER
+}
 /// The types a flow can open a document in.
 const NAVIGATORS: [&str; 2] = ["Loader", "StackView"];
 
