@@ -146,12 +146,15 @@ async function refresh() {
     if (!entry) break;
     element("state").textContent = "Compiling…";
     const box = frame.getBoundingClientRect();
+    const size = { width: Math.round(box.width), height: Math.round(box.height) };
+    // An open lays the document out at this size, so it need not be asked again.
+    told = wanted = JSON.stringify(size);
     const answer = await ask({
       call: "open",
       files: Object.fromEntries(files),
       entry,
       aliases: [],
-      size: { width: Math.round(box.width), height: Math.round(box.height) },
+      size,
     });
     // A failure leaves the last picture that worked on show, as a native
     // preview does when a reload fails.
@@ -171,6 +174,22 @@ refresh();
 // to give (ljos-web request 2) and needs none, as its frame draws itself.
 // It follows the panel as the shell lays it out: observers, nothing polled.
 const aside = element("preview");
+// The shell's styles change far more often than the frame's size does, and a
+// resize lays the document out again: only a new size is asked for, one at a
+// time, and sizes that pass while one is asked for give way to the latest.
+let wanted = null;
+let told = null;
+let telling = false;
+const tellSize = async (size) => {
+  wanted = JSON.stringify(size);
+  if (telling) return;
+  telling = true;
+  while (wanted !== told) {
+    told = wanted;
+    await ask({ call: "resize", size: JSON.parse(told) });
+  }
+  telling = false;
+};
 let placing = false;
 const place = () => {
   if (placing) return;
@@ -184,7 +203,7 @@ const place = () => {
     Object.assign(aside.style, over ? { left: `${box.left}px`, top: `${box.top}px`, width: `${box.width}px`, height: `${box.height}px` } : { left: "", top: "", width: "", height: "" });
     // The document is laid out at the size it now has.
     const frameBox = frame.getBoundingClientRect();
-    if (generation > 0) ask({ call: "resize", size: { width: Math.round(frameBox.width), height: Math.round(frameBox.height) } });
+    if (generation > 0) tellSize({ width: Math.round(frameBox.width), height: Math.round(frameBox.height) });
     if (canvas !== watched) {
       if (watched) sized.unobserve(watched);
       if (canvas) sized.observe(canvas);

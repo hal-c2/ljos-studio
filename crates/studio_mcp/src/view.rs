@@ -171,7 +171,7 @@ pub struct View {
     pub preview: Option<Previewed>,
     /// The server can start previews.
     pub previews: bool,
-    /// The theme file beside `doc` (or the project's, with none open).
+    /// The theme file Ljós reads for `doc` (`tools::theme_file`).
     pub theme: String,
     /// Why the theme file is not read: Ljós would refuse it.
     pub theme_problem: String,
