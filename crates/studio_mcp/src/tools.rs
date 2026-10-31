@@ -193,11 +193,11 @@ struct Found {
 struct FindOut {
     nodes: Vec<Found>,
     /// Documents left out because they do not parse.
-    #[serde(skip_serializing_if = "Vec::is_empty")]
+    // This and `unreadable` are serialised when empty too: the output
+    // schema requires both.
     broken: Vec<String>,
     /// Documents left out because they could not be read (not UTF-8, gone
     /// since they were listed); `document_text` on one says why.
-    #[serde(skip_serializing_if = "Vec::is_empty")]
     unreadable: Vec<String>,
 }
 
