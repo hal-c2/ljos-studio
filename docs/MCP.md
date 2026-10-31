@@ -38,7 +38,7 @@ documents: export), `run` (start previews). They are granted at launch with
 | 6 | `node_find` | Find objects by `id`, type, binding name or text in a binding's value | inspect |
 | 7 | `node_select` | Set Studio's selection (shown on the canvas and in the inspector) by addresses or by a point `at` in the preview; `hold` leases them to the caller | inspect (`hold`: mutate) |
 | 8 | `node_inspect` | An object's bindings with byte ranges, its parent, its children, its type's members, its signals, its states and transitions, its flows and the data it sees | inspect |
-| 9 | `blocks_list` | Registered blocks with contracts: state, actions, events, slots, mocks | inspect |
+| 9 | `blocks_list` | Registered blocks with contracts: state, actions, events, slots, mocks; per document, the toolkit types it can place, QtQuick3D among them | inspect |
 | 10 | `node_insert` | Insert QML text or a block instance as a child at an index | mutate |
 | 11 | `node_move` | Move a node to a parent and index (reparent or reorder) | mutate |
 | 12 | `node_remove` | Remove a node with its comments | mutate |
