@@ -6,7 +6,8 @@
 //
 // With no arguments it runs every scenario that needs no preview: a
 // preview is a page of its own (`@preview`), a window is native (`@ui`),
-// and a link is the file system's, which storage has not (`@disk`).
+// and a link or a file that is not text is the file system's, which
+// storage has not (`@disk`).
 //
 // DECISION: node, not Playwright. These scenarios touch no DOM and no
 // browser storage, and node runs the very module a page loads; the OPFS
@@ -438,6 +439,7 @@ const NATIVE_ONLY = new Map([
   ['given ^the link "([^"]+)" leads to a directory outside the project holding "([^"]+)"$', "storage holds no links (@disk)"],
   ['given ^the link "([^"]+)" leads to the file "([^"]+)" outside the project$', "storage holds no links (@disk)"],
   ["then ^nothing was written outside the project$", "storage has no outside (@disk)"],
+  ['given ^the file "([^"]+)" holds bytes that are not UTF-8$', "storage holds text (@disk)"],
   ['given ^Studio serves agents with the capabilities "([^"]*)"$', "the endpoint is a native window's (endpoint.feature)"],
   ['when ^a client calls the tool "([^"]+)" on the endpoint( with the token| with another token)?(?: and the (Origin|Host) "([^"]+)")?$', "the endpoint is a native window's (endpoint.feature)"],
   ["then ^the endpoint answers it$", "the endpoint is a native window's (endpoint.feature)"],

@@ -120,6 +120,7 @@ Feature: The document tools reach the project's documents and nothing else
       """
     Then the answer's "/generation" is 1
 
+  @disk
   Scenario: A link and the document it leads to are one document
     Given the file "parts/Card.qml":
       """qml
