@@ -869,12 +869,12 @@ lists marked `change`. DECISION: a dump is read when the preview starts,
 as `ljos run` reads it once; an edit of the dump shows when the preview is
 opened again. DECISION: in the mocked state a mock module stands in for a
 module a dump describes, as for one of QML. DECISION: the Flow panel
-offers the signals in a short scrolling list, not a row of buttons (a
-`MouseArea` has ten, which pushed the graph out of the panel) and not a
-`ComboBox`: in 2582cba2 a `ComboBox` whose model changes after its popup
-was open panics the scene (`records.rs:57`, a removed record removed
-again), and the selection's signals change with every edit (a Ljós
-request). DECISION: `document_new`
+offers the signals in a `ComboBox`, not a row of buttons (a `MouseArea`
+has ten, which pushed the graph out of the panel); the pick is kept by
+name, so it holds across an edit while the selection still has the
+signal, and an edit that changes the selection's signals with the box
+open leaves the panel answering (`features/ui/flows.feature`).
+DECISION: `document_new`
 writes the source as `Qt.resolvedUrl("…")`, which resolves against the
 file it is written in; in 2582cba2 a plain relative `source` resolves
 against the document the model is created from, so a data module's model

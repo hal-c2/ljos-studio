@@ -963,13 +963,48 @@ fn lists_signals(w: &mut UiWorld, names: String) -> StepResult {
         .ok_or_else(|| format!("the inspector lists the signals {shown:?}"))
 }
 
-/// Picks `signal` from the flow panel's list of what a wire handles,
+/// Opens the flow panel's box of what a wire handles, as a person clicks
+/// it.
+#[given("the person has opened the list of what to wire in the flow panel")]
+fn opens_wire_box(w: &mut UiWorld) -> StepResult {
+    let window = w.window()?;
+    let tree = window.tree();
+    let box_ = find(&tree, &|n| {
+        n.name == "Wire" && n.role != "label" && n.key.is_some()
+    })
+    .cloned()
+    .ok_or_else(|| format!("no box \"Wire\"; the window holds {}", names(&tree)))?;
+    window.click_node(&box_)
+}
+
+/// Picks `signal` from the flow panel's box of what a wire handles: opens
+/// it unless it is open, then clicks the signal's row in its list,
 /// scrolling the list to it as a person does.
 #[when(regex = r#"^the person picks the signal "([^"]+)" to wire in the flow panel$"#)]
 fn picks_signal(w: &mut UiWorld, signal: String) -> StepResult {
+    if wire_row(w.window()?, &signal).is_none() {
+        opens_wire_box(w)?;
+    }
     let window = w.window()?;
-    let row = window.node("Wire", None, &signal)?;
-    window.click_row("Wire", &row)
+    let row = wire_row(window, &signal).ok_or_else(|| {
+        format!(
+            "the open box of what to wire has no {signal:?}; the window holds {}",
+            names(&window.tree())
+        )
+    })?;
+    window.click_row(WIRE_LIST, &row)
+}
+
+/// The accessible name of the list the open box of what a wire handles
+/// shows.
+const WIRE_LIST: &str = "Wire list";
+
+/// `signal`'s row in the open box of what a wire handles; none while it is
+/// closed.
+fn wire_row(window: &Window, signal: &str) -> Option<AccessibleNode> {
+    let tree = window.tree();
+    let list = find(&tree, &|n| n.name == WIRE_LIST && n.role == "list")?;
+    find(list, &|n| n.name == signal && n.key.is_some()).cloned()
 }
 
 #[when(regex = r#"^the person binds the role "([^"]+)" to "([^"]+)" in the inspector$"#)]

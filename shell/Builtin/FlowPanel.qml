@@ -27,10 +27,12 @@ Panel {
     readonly property var triggers: ["tapped"].concat(workspace.signals
         .filter(s => !s.change && s.name !== "tapped")
         .map(s => s.name))
-    readonly property string trigger: triggerList.currentIndex > 0
-                                      ? triggers[triggerList.currentIndex] : "tapped"
+    // The trigger the person picked, kept by name: an edit gives the
+    // selection's signals again, and the pick holds while it still has it.
+    property string picked: "tapped"
+    readonly property string trigger: triggers.indexOf(picked) >= 0 ? picked : "tapped"
     readonly property string selected: workspace.selected
-    onSelectedChanged: triggerList.currentIndex = 0
+    onSelectedChanged: picked = "tapped"
 
     function stateName(state) {
         return state === "" ? "Base" : state
@@ -65,27 +67,23 @@ Panel {
             Accessible.name: text
         }
 
-        // A short list however many signals the selection has: a MouseArea
-        // has ten, which as a row of buttons would push the graph out of
-        // the panel.
-        ListView {
-            id: triggerList
+        // A box however many signals the selection has: a MouseArea has
+        // ten, which as a row of buttons would push the graph out of the
+        // panel.
+        ComboBox {
+            id: triggerBox
             Layout.fillWidth: true
-            Layout.preferredHeight: Math.min(contentHeight, 72)
-            clip: true
             visible: panel.workspace.selected !== ""
             model: panel.triggers
-            Accessible.role: Accessible.List
+            currentIndex: panel.triggers.indexOf(panel.trigger)
+            displayText: "Wire " + panel.trigger
             Accessible.name: "Wire"
-
-            delegate: ItemDelegate {
-                required property string modelData
-                required property int index
-                width: ListView.view.width
-                text: "Wire " + modelData
-                Accessible.name: modelData
-                highlighted: index === triggerList.currentIndex
-                onClicked: triggerList.currentIndex = index
+            onActivated: index => panel.picked = panel.triggers[index]
+            // The popup's list is the style's; it is named here so a
+            // reader of the window can tell it from the others.
+            Component.onCompleted: {
+                popup.contentItem.Accessible.role = Accessible.List
+                popup.contentItem.Accessible.name = "Wire list"
             }
         }
 
