@@ -18,9 +18,8 @@ use qml_edit::Step;
 /// The type that turns a tap on any item into a signal.
 const TAP_HANDLER: &str = "TapHandler";
 
-pub(crate) fn is_tap_handler(ty: &str) -> bool {
-    short(ty) == TAP_HANDLER
-}
+/// Each object holding `TapHandler`s directly, with their handles.
+pub(crate) type Taps = std::collections::BTreeMap<u64, Vec<u64>>;
 /// The types a flow can open a document in.
 const NAVIGATORS: [&str; 2] = ["Loader", "StackView"];
 
@@ -378,6 +377,30 @@ impl Session {
                 })
             }
         }
+    }
+
+    /// The document's `Taps` as it is now; none while it does not parse, when
+    /// no handles are known either.
+    pub(crate) fn taps_now(&mut self, path: &str) -> Taps {
+        let mut taps = Taps::new();
+        // Most documents name none, and this runs on every edit.
+        let named = self
+            .doc(path)
+            .is_ok_and(|doc| doc.text.contains(TAP_HANDLER));
+        if !named {
+            return taps;
+        }
+        let Ok((tree, _)) = self.tree_now(path) else {
+            return taps;
+        };
+        for (tap, node) in tree.iter().filter(|(_, n)| short(&n.ty) == TAP_HANDLER) {
+            if let Some((parent, _)) = tree.iter().find(|(_, p)| is_child_of(node, &p.path)) {
+                taps.entry(super::number(parent))
+                    .or_default()
+                    .push(super::number(tap));
+            }
+        }
+        taps
     }
 
     /// The `TapHandler`s `handle` holds now, each with whether it writes

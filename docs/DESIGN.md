@@ -1277,10 +1277,10 @@ DECISIONs:
   a state edit `(owner, "states")`; an insert or a contribution `(parent,
   "<children>")`, so two inserts into one parent both land; a move `(node,
   None)` with all it holds and `(parent, "<children>")`; a remove `(node,
-  None)` with all it holds; an interaction what its planned edit does. A
-  `TapHandler` arriving among or leaving a parent's children also touches
-  `(parent, "<taps>")`, which is what a tap flow from an older generation
-  meets, whichever handler it read.
+  None)` with all it holds; an interaction what its planned edit does. Any
+  write, undo included, that leaves a parent's direct `TapHandler`s different
+  also touches `(parent, "<taps>")`, read from the text on both sides. That
+  is what a tap flow from an older generation meets, whichever handler it read.
 - DECISION: an incoming remove or move also conflicts with another
   writer's change inside its object, beyond the brief: removing a card
   someone just restyled loses their work silently otherwise.

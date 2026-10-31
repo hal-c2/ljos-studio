@@ -955,21 +955,6 @@ impl Session {
         }
         let intent = self.intent(path, op)?;
         let doc = self.doc(path)?;
-        // The parent a `TapHandler` arrives among the children of.
-        let arrives = match op {
-            Op::Insert { text, .. }
-                if flows::is_tap_handler(
-                    text.trim_start()
-                        .split(['{', ' ', '\n'])
-                        .next()
-                        .unwrap_or_default(),
-                ) =>
-            {
-                Some(intent[0].0)
-            }
-            Op::Move { .. } if is_tap(doc, intent[0].0) => Some(intent[1].0),
-            _ => None,
-        };
         let mut out = Vec::with_capacity(intent.len());
         for (h, name) in intent {
             if name.is_none() {
@@ -990,9 +975,6 @@ impl Session {
                         .find(|t| t.path.as_ref().is_some_and(|p| p.0 == parent))
                 {
                     out.push((t.handle, Some(CHILDREN.to_owned())));
-                    if is_tap(doc, h) {
-                        out.push((t.handle, Some(TAPS.to_owned())));
-                    }
                 }
                 out.extend(
                     doc.tracked
@@ -1003,7 +985,6 @@ impl Session {
             }
             out.push((h, name));
         }
-        out.extend(arrives.map(|parent| (parent, Some(TAPS.to_owned()))));
         Ok(out)
     }
 
@@ -1036,12 +1017,6 @@ impl Session {
                     let touch = (number(parent), Some(CHILDREN.to_owned()));
                     if !out.contains(&touch) {
                         out.push(touch);
-                    }
-                    if flows::is_tap_handler(&node.ty) {
-                        let touch = (number(parent), Some(TAPS.to_owned()));
-                        if !out.contains(&touch) {
-                            out.push(touch);
-                        }
                     }
                 }
                 let inner = tree.iter().any(|(_, m)| {
@@ -1786,9 +1761,11 @@ impl Session {
         // Comments follow handles: theirs must be known before the handles
         // move.
         self.look_up(path);
+        let taps = self.taps_now(path);
         let (next, entry) = self.step(path, before, after.clone(), change, label, false)?;
         self.store.write(path, &after)?;
         *self.doc(path)? = next;
+        let touched = self.with_taps(path, &taps, touched);
         self.log(&entry, touched);
         let id = self.history.push(entry);
         self.reanchor(path);
@@ -1813,6 +1790,30 @@ impl Session {
         let id = self.history.push(entry);
         self.reanchor(path);
         Ok(id)
+    }
+
+    /// `touched`, and the `<taps>` of each object whose `TapHandler`s are not
+    /// `before`'s any more. Read from the text on both sides, as how a
+    /// handler got there has too many forms to name.
+    fn with_taps(
+        &mut self,
+        path: &str,
+        before: &flows::Taps,
+        touched: Option<Vec<Touch>>,
+    ) -> Option<Vec<Touch>> {
+        let after = self.taps_now(path);
+        let mut touched = touched?;
+        let differs = before
+            .iter()
+            .chain(&after)
+            .filter(|(parent, _)| before.get(parent) != after.get(parent))
+            .map(|(parent, _)| (*parent, Some(TAPS.to_owned())));
+        for touch in differs {
+            if !touched.contains(&touch) {
+                touched.push(touch);
+            }
+        }
+        Some(touched)
     }
 
     /// Puts a new history entry's edit in its document's log.
@@ -2090,6 +2091,7 @@ impl Session {
         let made = diff(current, &text);
         let back = diff(&text, current);
         let touched = self.text_touches(path, &made);
+        let taps = self.taps_now(path);
         let doc = self.doc(path)?;
         let mut next = doc.clone();
         for change in &made {
@@ -2103,6 +2105,7 @@ impl Session {
         self.store.write(path, &text)?;
         *self.doc(path)? = next;
         self.reanchor(path);
+        let touched = self.with_taps(path, &taps, touched);
         self.log_replay(path, generation, label, made.clone(), touched, reverts);
         let replayed = if forward {
             Replayed {
@@ -2150,6 +2153,7 @@ impl Session {
         reverts: Option<u64>,
     ) -> Result<(u64, u64, Option<Replayed>), Error> {
         let path = entry.doc.clone();
+        let taps = self.taps_now(&path);
         let doc = self.doc(&path)?;
         let changes = if forward {
             &entry.forward
@@ -2205,6 +2209,7 @@ impl Session {
         self.store.write(&path, &text)?;
         *self.doc(&path)? = next;
         self.reanchor(&path);
+        let touched = self.with_taps(&path, &taps, touched);
         self.log_replay(&path, generation, label, made, touched, reverts);
         Ok((generation, side(&text), None))
     }
@@ -2736,14 +2741,6 @@ fn in_binding<'a>(doc: &'a Document, handle: u64, name: &'a str) -> impl Iterato
                 .is_some_and(|rest| rest.starts_with('.'));
         inside.then_some(t.handle)
     })
-}
-
-/// Whether the object `handle` is, or was when it was last in the text, a
-/// `TapHandler`.
-fn is_tap(doc: &Document, handle: u64) -> bool {
-    doc.tracked
-        .iter()
-        .any(|t| t.handle == handle && flows::is_tap_handler(&t.ty))
 }
 
 /// Whether the object `inner` is `outer` or one it holds, by where their
