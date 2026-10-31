@@ -178,3 +178,35 @@ Feature: Objects are moved and resized on the canvas
     And the person presses "Right"
     And the person presses "Down"
     Then the file "Main.qml" says "id: a; x: 22; y: 21;"
+
+  # A drop used to write the object's own value whatever the inspector said it
+  # was recording, so the state stayed empty and the base value changed.
+  Scenario: A drop while a state is picked goes into that state
+    Given the person has selected "Rectangle root" in the layers panel
+    And the person has added the state "compact" in the inspector
+    And the person has picked the state "compact" in the inspector
+    And the person has clicked the frame "Desktop" at 40, 40
+    When the person drags in the frame "Desktop" from 40, 40 to 90, 63
+    Then the file "Main.qml" says "id: a; x: 20; y: 20;"
+    And the file "Main.qml" says "target: a"
+    And the file "Main.qml" says "x: 70"
+    And the file "Main.qml" says "y: 43"
+
+  Scenario: An arrow press while a state is picked goes into that state
+    Given the person has selected "Rectangle root" in the layers panel
+    And the person has added the state "compact" in the inspector
+    And the person has picked the state "compact" in the inspector
+    And the person has clicked the frame "Desktop" at 40, 40
+    When the person presses "Right"
+    Then the file "Main.qml" says "id: a; x: 20; y: 20;"
+    And the file "Main.qml" says "x: 21"
+
+  Scenario: A state cannot change the order of a layout
+    Given the person has selected "Rectangle root" in the layers panel
+    And the person has added the state "compact" in the inspector
+    And the person has picked the state "compact" in the inspector
+    And the person has clicked the frame "Desktop" at 50, 220
+    When the person drags in the frame "Desktop" from 50, 220 to 160, 220
+    Then the window says "A state cannot change the order of a layout"
+    And the file "Main.qml" says "id: one;"
+    And the file "Main.qml" does not say "target: one"

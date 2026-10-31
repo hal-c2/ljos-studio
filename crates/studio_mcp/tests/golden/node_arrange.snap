@@ -90,6 +90,22 @@ expression: value
           "node"
         ],
         "type": "object"
+      },
+      "RecordInto": {
+        "description": "The state a gesture is recorded into, and the object that holds it.",
+        "properties": {
+          "on": {
+            "$ref": "#/$defs/Address"
+          },
+          "state": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "state",
+          "on"
+        ],
+        "type": "object"
       }
     },
     "properties": {
@@ -149,6 +165,17 @@ expression: value
           "array",
           "null"
         ]
+      },
+      "record": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/RecordInto"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "description": "For `place` and `align`: write into this state, not the object."
       },
       "without_siblings": {
         "default": false,
