@@ -695,6 +695,17 @@ pub(crate) fn theme_file(store: &dyn studio_core::Store, doc: &str) -> String {
     file.to_owned()
 }
 
+/// The theme file Ljós reads for `doc` when it runs it: it starts from the
+/// real file, so a link in the project has the theme of what it leads to. An
+/// export keeps the path as written ([`theme_file`]): a bundle lists a linked
+/// file as a real one under the link's name.
+pub(crate) fn running_theme_file(store: &dyn studio_core::Store, doc: &str) -> String {
+    match store.resolved(doc) {
+        Ok(real) => theme_file(store, &real),
+        Err(_) => theme_file(store, doc),
+    }
+}
+
 fn theme_set(studio: &Mutex<Studio>, a: ThemeArgs) -> Result<ThemeOut, SurfaceError> {
     let mut studio = lock(studio);
     let doc = a.doc.or_else(|| {
@@ -703,7 +714,7 @@ fn theme_set(studio: &Mutex<Studio>, a: ThemeArgs) -> Result<ThemeOut, SurfaceEr
             .as_ref()
             .map(|o| o.doc.clone())
     });
-    let file = theme_file(studio.session.store(), doc.as_deref().unwrap_or(""));
+    let file = running_theme_file(studio.session.store(), doc.as_deref().unwrap_or(""));
     let Some(value) = a.value else {
         let read = studio
             .session
