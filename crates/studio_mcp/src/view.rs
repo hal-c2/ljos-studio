@@ -35,6 +35,9 @@ pub struct Layer {
     pub index: Option<usize>,
     /// How many open review comments are on it.
     pub comments: usize,
+    /// Who holds it, or an object it is in, when that is another writer
+    /// than the window (`node_select` with `hold`); empty otherwise.
+    pub held: String,
 }
 
 /// A review comment of the open document, as a window lists it.
@@ -173,6 +176,20 @@ pub struct View {
     /// Why the theme file is not read: Ljós would refuse it.
     pub theme_problem: String,
     pub tokens: Vec<TokenRow>,
+    /// What other writers hold now, in every document: what the window's
+    /// edit of would be refused as `leased`.
+    pub leases: Vec<Held>,
+}
+
+/// An object another writer holds.
+#[derive(Clone, Debug, Default, PartialEq, Serialize)]
+pub struct Held {
+    pub doc: String,
+    pub node: String,
+    pub holder: String,
+    /// How long it lasts if the holder calls no more: a window reads the
+    /// session again then, as nothing else would tell it.
+    pub ends_in_ms: u64,
 }
 
 impl Studio {
@@ -186,7 +203,24 @@ impl Studio {
                 .is_some_and(|h| h.runs(self.dir().as_deref())),
             ..View::default()
         };
-        let (done, undone) = self.session.history();
+        // The window's Undo takes the person's own edits, so its lists
+        // are the person's.
+        let (done, undone) = self.session.history_by(studio_core::PERSON);
+        let now = crate::millis(self.timer.now());
+        self.session.tick(now);
+        let now = self.session.now_ms();
+        view.leases = self
+            .session
+            .leases()
+            .into_iter()
+            .filter(|l| l.holder != studio_core::PERSON)
+            .map(|l| Held {
+                doc: l.doc,
+                node: l.handle,
+                holder: l.holder,
+                ends_in_ms: l.until_ms.saturating_sub(now),
+            })
+            .collect();
         view.done = done.into_iter().map(|e| e.label).collect();
         view.undone = undone.into_iter().map(|e| e.label).collect();
         let registry = blocks::registry(self.session.store());
@@ -253,6 +287,7 @@ impl Studio {
                             parent,
                             index,
                             comments: 0,
+                            held: String::new(),
                         }
                     })
                     .collect();
@@ -283,6 +318,23 @@ impl Studio {
                 }
             })
             .collect();
+        // A lease holds an object and all it holds, so a layer is held when
+        // it or one it is written in is.
+        for i in 0..view.layers.len() {
+            let mut at = Some(i);
+            while let Some(j) = at {
+                let layer = &view.layers[j];
+                if let Some(l) = view
+                    .leases
+                    .iter()
+                    .find(|l| l.doc == doc && l.node == layer.node)
+                {
+                    view.layers[i].held = l.holder.clone();
+                    break;
+                }
+                at = view.layers.iter().position(|p| p.node == layer.parent);
+            }
+        }
         for c in view
             .comments
             .iter()

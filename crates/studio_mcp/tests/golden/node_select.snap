@@ -91,6 +91,11 @@ expression: value
       "doc": {
         "type": "string"
       },
+      "hold": {
+        "default": false,
+        "description": "Also hold the selected objects and all they hold (`mutate`): another\nwriter's edit of them is refused as `busy` until the caller has made\nno call for five seconds, and for five minutes at most. Selecting\nnothing lets go of what the caller holds.",
+        "type": "boolean"
+      },
       "nodes": {
         "default": [],
         "description": "Empty clears the selection.",
@@ -141,6 +146,13 @@ expression: value
       }
     },
     "properties": {
+      "held": {
+        "description": "The handles of `doc` the caller holds.",
+        "items": {
+          "type": "string"
+        },
+        "type": "array"
+      },
       "selection": {
         "items": {
           "$ref": "#/$defs/Found"
@@ -149,7 +161,8 @@ expression: value
       }
     },
     "required": [
-      "selection"
+      "selection",
+      "held"
     ],
     "title": "Selection",
     "type": "object"
