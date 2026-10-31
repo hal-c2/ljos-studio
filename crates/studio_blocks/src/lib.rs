@@ -301,6 +301,9 @@ struct Queue {
     /// not, so a picture that cannot be had is not asked for again until
     /// the preview changes.
     fetched: u64,
+    /// The preview's size when last published: a new size is a new picture
+    /// of the same generation.
+    size: (u32, u32),
     image: Option<ImageHandle>,
     /// The generation `image` shows.
     picture: u64,
@@ -689,12 +692,15 @@ fn publish(engine: &Engine, ws: ObjectId, view: View, seen: u64) {
         }),
         _ => Json::Null,
     };
+    let size = view.preview.as_ref().map_or((0, 0), |p| (p.width, p.height));
+    let resized = queue_of(engine, ws)
+        .is_some_and(|q| std::mem::replace(&mut q.borrow_mut().size, size) != size);
     let wanted = view
         .preview
         .as_ref()
         .filter(|p| p.doc == view.doc)
         .map(|p| p.generation)
-        .filter(|&g| g != picture && g != fetched);
+        .filter(|&g| resized || (g != picture && g != fetched));
     let _ = cx.set(Workspace::BLANK, view.blank);
     let _ = cx.set(Workspace::DOCUMENTS, to_json(&view.documents));
     let _ = cx.set(Workspace::GENERATION, view.generation as f64);
