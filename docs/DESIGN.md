@@ -788,14 +788,20 @@ can already remove the directory itself, so the window only matters for a
 swap made by accident, such as a checkout. Directory handles would need a
 dependency on each platform, and the browser build has no directory to
 export. Handles are the next step if Studio ever exports for another user.
-DECISION: export walks each real directory once, under its own name: a
-link to a directory the bundle already holds is left out, saying where
-the bundle has it, so links that fan out and meet again (a diamond at
-each of 24 levels took 56 s and failed before) stay linear in time and
-size. The bundle copies files, not links, so an app that reads a
-directory through a link's name finds it only under the directory's own;
-writing the links into the bundle is the next step if a project needs
-that. A file's check right before it is copied applies the walk's
+DECISION: export walks each real directory once, under its own name, and
+never walks a link to a directory: links that fan out and meet again (a
+diamond at each of 24 levels took 56 s and failed before) stay linear in
+time and size. Every directory of the project is walked under its own
+name or left out by the walk's rules, so a link to a directory leads to
+one the bundle holds or to one it leaves out. The first goes into the
+bundle as a relative link (the manifest's `links`), so an app that
+imports a directory through the link's name (`import "alias"`) runs
+from the bundle as from the project. Where the system makes no links (a
+Windows user without the privilege), that directory is copied once under
+the link's name, with the links inside it; links that lead into each
+other copy each directory once along the way. The second stays out with
+its reason, as does a link to a directory it is in, which would make the
+bundle hold itself. A file's check right before it is copied applies the walk's
 exclusions again to where it now leads, so a file swapped for a link into
 `.studio/`, the mocks or build output is not copied.
 

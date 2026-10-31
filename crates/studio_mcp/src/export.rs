@@ -86,8 +86,22 @@ pub struct Manifest {
     pub blocks: Vec<BlockFile>,
     /// Every file, by path relative to the bundle.
     pub files: Vec<FileEntry>,
+    /// Links to directories the bundle holds, so what the app reads
+    /// through a link's name is there too: written as links where the
+    /// system makes them, and where it does not as a copy of the
+    /// directory under the link's name.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub links: Vec<LinkEntry>,
     /// What of the project is not in the bundle, and why.
     pub left_out: Vec<LeftOut>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+pub struct LinkEntry {
+    /// Where the link is, relative to the bundle.
+    pub path: String,
+    /// The directory it leads to, relative to the bundle.
+    pub to: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
@@ -165,41 +179,26 @@ fn target_left_out_why(root: &Path, real: &Path, is_dir: bool) -> Option<&'stati
 /// The project's files that go in a bundle, sorted, and what is left out.
 /// `root` is canonical.
 ///
-/// A link is followed as `ljos run` would read through it while it stays
-/// in the project; one that leads out of it is left out, so a link a
-/// checked-out project brings cannot copy somebody's directory into the
-/// bundle, and one back to a directory the walk is inside would never end.
-/// Each real directory is walked once: a link to one already walked is
-/// left out, saying where the bundle has it, or links that fan out and
-/// meet again (`a -> b`, `a -> c`, `b -> d`, `c -> d`, a few levels deep)
-/// would copy it once for every way down. Directories under their own
-/// names go first and links after them, in order of path, so a directory
-/// is in the bundle where it is, whatever order the disk lists it in.
-fn walk(root: &Path) -> Result<(Vec<FileEntry>, Vec<LeftOut>), SurfaceError> {
+/// A link to a file in the project is copied as the file. A link to a
+/// directory is not walked: every directory of the project is walked under
+/// its own name or left out by the rules above, so the bundle holds where
+/// the link leads under that name, and the link goes in as a link to it
+/// (`Manifest::links`), which keeps an app that reads the directory
+/// through the link's name working without a second copy. A link to a
+/// directory it is in stays out (the bundle would hold itself), as does
+/// one to what the bundle leaves out, saying why, and one out of the
+/// project, so a link a checked-out project brings cannot copy somebody's
+/// directory into the bundle.
+fn walk(root: &Path) -> Result<Walked, SurfaceError> {
     let mut files = Vec::new();
     let mut left_out = Vec::new();
     // Each real directory walked, with where it is in the bundle.
     let mut walked = HashMap::from([(root.to_owned(), String::new())]);
-    // Each directory with the real directories it is below, itself first.
-    let mut stack = vec![(root.to_owned(), String::new(), vec![root.to_owned()])];
-    let mut links: Vec<Pending> = Vec::new();
-    loop {
-        let (dir, prefix, within) = match stack.pop() {
-            Some(next) => next,
-            None => {
-                // Links last, first by path, each walked unless something
-                // walked since it was met holds its directory.
-                links.sort_by(|a: &Pending, b: &Pending| b.1.cmp(&a.1));
-                let Some(next) = links.pop() else { break };
-                let path = next.1.trim_end_matches('/').to_owned();
-                if let Some(at) = walked.get(&next.2[0]) {
-                    left_out.push(already(path, at));
-                    continue;
-                }
-                walked.insert(next.2[0].clone(), path);
-                next
-            }
-        };
+    let mut stack = vec![(root.to_owned(), String::new())];
+    // Links to directories, answered once every directory has been walked,
+    // since one may lead to a directory the walk has yet to reach.
+    let mut links: Vec<(String, PathBuf)> = Vec::new();
+    while let Some((dir, prefix)) = stack.pop() {
         let mut entries = fs::read_dir(&dir)
             .map_err(|e| io(&dir, &e))?
             .collect::<Result<Vec<_>, _>>()
@@ -225,7 +224,7 @@ fn walk(root: &Path) -> Result<(Vec<FileEntry>, Vec<LeftOut>), SurfaceError> {
                     }
                 }
             } else {
-                within[0].join(&name)
+                dir.join(&name)
             };
             let meta = fs::metadata(&full).map_err(|e| io(&full, &e))?;
             let own = left_out_why(&name, meta.is_dir(), prefix.is_empty());
@@ -244,23 +243,11 @@ fn walk(root: &Path) -> Result<(Vec<FileEntry>, Vec<LeftOut>), SurfaceError> {
                     path,
                     why: why.to_owned(),
                 });
-            } else if meta.is_dir() && within.contains(&real) {
-                left_out.push(LeftOut {
-                    path,
-                    why: "a link back to a directory it is in".to_owned(),
-                });
-            } else if let Some(at) = meta.is_dir().then(|| walked.get(&real)).flatten() {
-                left_out.push(already(path, at));
+            } else if meta.is_dir() && link {
+                links.push((path, real));
             } else if meta.is_dir() {
-                let mut below = vec![real];
-                below.extend(within.iter().cloned());
-                let next = (full, format!("{path}/"), below);
-                if link {
-                    links.push(next);
-                } else {
-                    walked.insert(next.2[0].clone(), path);
-                    stack.push(next);
-                }
+                walked.insert(real, path.clone());
+                stack.push((full, format!("{path}/")));
             } else {
                 files.push(FileEntry {
                     path,
@@ -269,20 +256,43 @@ fn walk(root: &Path) -> Result<(Vec<FileEntry>, Vec<LeftOut>), SurfaceError> {
             }
         }
     }
+    let mut kept = Vec::new();
+    for (path, real) in links {
+        left_out.push(match walked.get(&real) {
+            Some(at) if !(at.is_empty() || path.starts_with(&format!("{at}/"))) => {
+                kept.push(LinkEntry {
+                    path,
+                    to: at.clone(),
+                });
+                continue;
+            }
+            Some(at) => already(path, at),
+            // Never met while `target_left_out_why` leaves out every
+            // directory the walk does not go down; said rather than
+            // assumed, so the two cannot drift into copying it.
+            None => LeftOut {
+                path,
+                why: "a link to a directory the bundle does not hold".to_owned(),
+            },
+        });
+    }
     files.sort_by(|a, b| a.path.cmp(&b.path));
+    kept.sort_by(|a, b| a.path.cmp(&b.path));
     left_out.sort_by(|a, b| a.path.cmp(&b.path));
-    Ok((files, left_out))
+    Ok((files, kept, left_out))
 }
 
-/// A directory the walk has yet to go down, as `walk` keeps them.
-type Pending = (PathBuf, String, Vec<PathBuf>);
+/// The files, the links to directories and what is left out, as `walk`
+/// finds them.
+type Walked = (Vec<FileEntry>, Vec<LinkEntry>, Vec<LeftOut>);
 
-/// Why the link at `path` is left out: the bundle has its directory at `at`.
+/// Why the link at `path` to the directory the bundle has at `at`, one it
+/// is in, is left out.
 fn already(path: String, at: &str) -> LeftOut {
     let why = if at.is_empty() {
         "a link to the project, which the bundle holds already".to_owned()
     } else {
-        format!("a link to `{at}`, which the bundle holds already")
+        format!("a link to `{at}`, which it is in and the bundle holds already")
     };
     LeftOut { path, why }
 }
@@ -322,7 +332,7 @@ fn plan(
             "no document `{entry}` to start the app with"
         )));
     }
-    let (files, left_out) = walk(root)?;
+    let (files, links, left_out) = walk(root)?;
     // The store has every file of the project; the bundle only what the
     // walk keeps, and a manifest that starts a file it does not hold
     // would not start.
@@ -435,6 +445,7 @@ fn plan(
         theme,
         blocks: blocks_out,
         files,
+        links,
         left_out,
     };
     Ok(manifest)
@@ -534,15 +545,35 @@ fn may_replace(root: &Path, out: &Path) -> Result<(), SurfaceError> {
 /// Copies the files into a place beside `out` and swaps it in, so a
 /// bundle is never half one export and half another.
 fn write(root: &Path, out: &Path, manifest: &Manifest) -> Result<(), SurfaceError> {
-    write_with(root, out, manifest, || {})
+    write_with(root, out, manifest, link_dir, || {})
 }
 
-/// [`write`]; `copied` runs once the files are copied and before `out` is
-/// replaced, where a test swaps a directory.
+/// A link at `at` to the directory `to`, relative to where `at` is.
+fn link_dir(to: &Path, at: &Path) -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        std::os::unix::fs::symlink(to, at)
+    }
+    // Refused to a user without the privilege to make links.
+    #[cfg(windows)]
+    {
+        std::os::windows::fs::symlink_dir(to, at)
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        let _ = (to, at);
+        Err(std::io::ErrorKind::Unsupported.into())
+    }
+}
+
+/// [`write`]; `link` makes a link to a directory, which a test refuses, and
+/// `copied` runs once the files are copied and before `out` is replaced,
+/// where a test swaps a directory.
 fn write_with(
     root: &Path,
     out: &Path,
     manifest: &Manifest,
+    link: impl Fn(&Path, &Path) -> std::io::Result<()>,
     copied: impl FnOnce(),
 ) -> Result<(), SurfaceError> {
     may_replace(root, out)?;
@@ -555,25 +586,18 @@ fn write_with(
     }
     fs::create_dir_all(&staging).map_err(|e| io(&staging, &e))?;
     for path in manifest.files.iter().map(|f| &f.path) {
-        let to = staging.join(path);
-        if let Some(dir) = to.parent() {
-            fs::create_dir_all(dir).map_err(|e| io(dir, &e))?;
-        }
-        let from = root.join(path);
-        // As the walk found it: a file swapped since then for a link out of
-        // the project, or to what the bundle leaves out (`.studio/`, the
-        // mocks, build output), or for a pipe, is not read.
-        let still = from.canonicalize().is_ok_and(|real| {
-            real.starts_with(root) && target_left_out_why(root, &real, false).is_none()
-        }) && fs::metadata(&from).is_ok_and(|m| m.is_file());
-        if !still {
-            return Err(refused(
-                ErrorCode::NotActionable,
-                "changed",
-                format!("`{path}` changed while the bundle was written; export again"),
-            ));
-        }
-        fs::copy(&from, &to).map_err(|e| io(&from, &e))?;
+        copy_file(root, path, &staging.join(path))?;
+    }
+    for entry in &manifest.links {
+        place_link(
+            root,
+            &staging,
+            manifest,
+            &entry.path,
+            &entry.to,
+            &link,
+            &mut Vec::new(),
+        )?;
     }
     let mut text = serde_json::to_string_pretty(manifest).expect("a manifest is JSON");
     text.push('\n');
@@ -594,6 +618,72 @@ fn write_with(
         fs::remove_dir_all(out).map_err(|e| io(out, &e))?;
     }
     fs::rename(&staging, out).map_err(|e| io(out, &e))
+}
+
+/// Copies the project's `path` to `to`, as the walk found it: a file
+/// swapped since then for a link out of the project, or to what the bundle
+/// leaves out (`.studio/`, the mocks, build output), or for a pipe, is not
+/// read.
+fn copy_file(root: &Path, path: &str, to: &Path) -> Result<(), SurfaceError> {
+    if let Some(dir) = to.parent() {
+        fs::create_dir_all(dir).map_err(|e| io(dir, &e))?;
+    }
+    let from = root.join(path);
+    let still = from.canonicalize().is_ok_and(|real| {
+        real.starts_with(root) && target_left_out_why(root, &real, false).is_none()
+    }) && fs::metadata(&from).is_ok_and(|m| m.is_file());
+    if !still {
+        return Err(refused(
+            ErrorCode::NotActionable,
+            "changed",
+            format!("`{path}` changed while the bundle was written; export again"),
+        ));
+    }
+    fs::copy(&from, to).map_err(|e| io(&from, &e))?;
+    Ok(())
+}
+
+/// Puts the link at `path` to the bundle's directory `to` in `staging`:
+/// a link where `link` makes one, else a copy of `to`'s files and links
+/// under `path`. `copying` holds the directories being copied around it,
+/// so links that lead into each other copy each directory once along the
+/// way rather than for ever.
+fn place_link(
+    root: &Path,
+    staging: &Path,
+    manifest: &Manifest,
+    path: &str,
+    to: &str,
+    link: &impl Fn(&Path, &Path) -> std::io::Result<()>,
+    copying: &mut Vec<String>,
+) -> Result<(), SurfaceError> {
+    let at = staging.join(path);
+    if let Some(dir) = at.parent() {
+        fs::create_dir_all(dir).map_err(|e| io(dir, &e))?;
+    }
+    // A directory without files has no place in the bundle yet.
+    let target = staging.join(to);
+    fs::create_dir_all(&target).map_err(|e| io(&target, &e))?;
+    let relative: PathBuf = std::iter::repeat_n("..", path.matches('/').count())
+        .collect::<PathBuf>()
+        .join(to);
+    if link(&relative, &at).is_ok() {
+        return Ok(());
+    }
+    copying.push(to.to_owned());
+    fs::create_dir_all(&at).map_err(|e| io(&at, &e))?;
+    let below = format!("{to}/");
+    for file in manifest.files.iter().filter(|f| f.path.starts_with(&below)) {
+        copy_file(root, &file.path, &at.join(&file.path[below.len()..]))?;
+    }
+    for inner in manifest.links.iter().filter(|l| l.path.starts_with(&below)) {
+        if !copying.contains(&inner.to) {
+            let path = format!("{path}/{}", &inner.path[below.len()..]);
+            place_link(root, staging, manifest, &path, &inner.to, link, copying)?;
+        }
+    }
+    copying.pop();
+    Ok(())
 }
 
 fn export(studio: &Mutex<Studio>, a: ExportArgs) -> Result<ExportOut, SurfaceError> {
@@ -665,8 +755,30 @@ mod tests {
                     bytes: 0,
                 })
                 .collect(),
+            links: Vec::new(),
             left_out: Vec::new(),
         }
+    }
+
+    /// What `plan` would bundle of `root`, entry aside.
+    fn walked(root: &Path) -> Manifest {
+        let (files, links, left_out) = walk(root).unwrap();
+        Manifest {
+            files,
+            links,
+            left_out,
+            ..manifest(&[""])
+        }
+    }
+
+    fn refuse(_: &Path, _: &Path) -> std::io::Result<()> {
+        Err(std::io::ErrorKind::PermissionDenied.into())
+    }
+
+    fn file(root: &Path, path: &str) {
+        let at = root.join(path);
+        fs::create_dir_all(at.parent().unwrap()).unwrap();
+        fs::write(at, path).unwrap();
     }
 
     fn names(dir: &Path) -> Vec<String> {
@@ -690,7 +802,7 @@ mod tests {
         fs::write(theirs.join(MANIFEST), r#"{"format": "ljos-bundle"}"#).unwrap();
         fs::write(theirs.join("precious.txt"), "keep me").unwrap();
         let out = root.join(BUILD).join("native");
-        let swapped = write_with(&root, &out, &manifest(&["Shell.qml"]), || {
+        let swapped = write_with(&root, &out, &manifest(&["Shell.qml"]), link_dir, || {
             fs::rename(root.join(BUILD), root.join("build.was")).unwrap();
             symlink(outside.path(), root.join(BUILD)).unwrap();
         });
@@ -729,5 +841,74 @@ mod tests {
         assert_eq!(refused.code, ErrorCode::NotActionable, "{refused:?}");
         assert!(!out.exists());
         assert!(!root.join(BUILD).join(".native.partial/Shell.qml").exists());
+    }
+
+    #[test]
+    fn a_link_to_a_directory_the_bundle_holds_goes_in_as_a_link_to_it() {
+        let project = tempfile::tempdir().unwrap();
+        let root = project.path().canonicalize().unwrap();
+        file(&root, "zone/Part.qml");
+        fs::create_dir(root.join("ui")).unwrap();
+        symlink(root.join("zone"), root.join("ui/alias")).unwrap();
+        let bundle = walked(&root);
+        assert_eq!(
+            bundle.links,
+            [LinkEntry {
+                path: "ui/alias".to_owned(),
+                to: "zone".to_owned()
+            }]
+        );
+        let out = root.join(BUILD).join("native");
+        write(&root, &out, &bundle).unwrap();
+        assert_eq!(
+            fs::read_link(out.join("ui/alias")).unwrap(),
+            Path::new("../zone")
+        );
+        assert_eq!(
+            fs::read_to_string(out.join("ui/alias/Part.qml")).unwrap(),
+            "zone/Part.qml"
+        );
+    }
+
+    #[test]
+    fn where_no_link_can_be_made_the_directory_is_copied_under_its_name() {
+        let project = tempfile::tempdir().unwrap();
+        let root = project.path().canonicalize().unwrap();
+        file(&root, "zone/Part.qml");
+        file(&root, "deep/More.qml");
+        symlink(root.join("deep"), root.join("zone/inner")).unwrap();
+        symlink(root.join("zone"), root.join("alias")).unwrap();
+        let out = root.join(BUILD).join("native");
+        write_with(&root, &out, &walked(&root), refuse, || {}).unwrap();
+        for path in [
+            "alias/Part.qml",
+            "alias/inner/More.qml",
+            "zone/inner/More.qml",
+        ] {
+            let at = out.join(path);
+            let meta = fs::symlink_metadata(&at).unwrap();
+            assert!(meta.is_file(), "{path}");
+        }
+        assert!(
+            !fs::symlink_metadata(out.join("alias"))
+                .unwrap()
+                .is_symlink()
+        );
+    }
+
+    #[test]
+    fn links_that_lead_into_each_other_copy_each_directory_once_along_the_way() {
+        let project = tempfile::tempdir().unwrap();
+        let root = project.path().canonicalize().unwrap();
+        file(&root, "top/Top.qml");
+        file(&root, "zone/Part.qml");
+        symlink(root.join("zone"), root.join("top/a")).unwrap();
+        symlink(root.join("top"), root.join("zone/b")).unwrap();
+        let out = root.join(BUILD).join("native");
+        write_with(&root, &out, &walked(&root), refuse, || {}).unwrap();
+        assert!(out.join("top/a/b/Top.qml").is_file());
+        assert!(!out.join("top/a/b/a").exists());
+        assert!(out.join("zone/b/a/Part.qml").is_file());
+        assert!(!out.join("zone/b/a/b").exists());
     }
 }

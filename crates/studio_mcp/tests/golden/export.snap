@@ -108,6 +108,23 @@ expression: value
         ],
         "type": "object"
       },
+      "LinkEntry": {
+        "properties": {
+          "path": {
+            "description": "Where the link is, relative to the bundle.",
+            "type": "string"
+          },
+          "to": {
+            "description": "The directory it leads to, relative to the bundle.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "path",
+          "to"
+        ],
+        "type": "object"
+      },
       "Manifest": {
         "description": "What a bundle holds; written beside it as `ljos-bundle.json`.",
         "properties": {
@@ -135,6 +152,13 @@ expression: value
             "description": "What of the project is not in the bundle, and why.",
             "items": {
               "$ref": "#/$defs/LeftOut"
+            },
+            "type": "array"
+          },
+          "links": {
+            "description": "Links to directories the bundle holds, so what the app reads\nthrough a link's name is there too: written as links where the\nsystem makes them, and where it does not as a copy of the\ndirectory under the link's name.",
+            "items": {
+              "$ref": "#/$defs/LinkEntry"
             },
             "type": "array"
           },
