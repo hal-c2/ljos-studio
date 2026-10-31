@@ -133,6 +133,7 @@ Panel {
                             workspace: panel.workspace
                         }
                         CanvasOverlay {
+                            id: overlay
                             objectName: "overlay"
                             anchors.fill: parent
                             workspace: panel.workspace
@@ -198,7 +199,7 @@ Panel {
         }
         Repeater {
             // A selection of two lines up; three or more can be evened out.
-            model: panel.workspace.chosen.length === 0 || panel.playing ? [] : [
+            model: panel.workspace.chosen.length === 0 || panel.playing || !overlay.hasBoxes ? [] : [
                 {label: "Left", align: "left"}, {label: "Centre", align: "hcenter"},
                 {label: "Right", align: "right"}, {label: "Top", align: "top"},
                 {label: "Middle", align: "vcenter"}, {label: "Bottom", align: "bottom"},

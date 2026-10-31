@@ -47,6 +47,8 @@ MouseArea {
     readonly property real snapReach: 6
     readonly property real handleSize: 8
 
+    // Lining up needs a box: an object of a 3D scene is seen and has none.
+    readonly property bool hasBoxes: nodes.length === 0 || nodes.some(n => n.window !== undefined)
     readonly property var selectedOne: nodes.length === 1 && nodes[0].window !== undefined ? nodes[0] : null
     readonly property bool resizable: selectedOne !== null && selectedOne.drag.resize !== "none"
     readonly property int handlesShown: resizable && !playing && ghost === null ? 8 : 0
@@ -57,7 +59,7 @@ MouseArea {
         if (workspace.chosen.length === 0 || playing)
             return ""
         if (nodes.length > 0 && nodes.every(n => n.window === undefined))
-            return "The preview does not show this object"
+            return "This object has no box on the canvas"
         if (told !== "")
             return told
         return nodes.length === 1 ? nodes[0].drag.says : ""

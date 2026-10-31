@@ -359,7 +359,7 @@ whether the feature exists.
 | Nudge with arrow keys | yes, once the canvas has focus; one undo step a press | D1 fixed |
 | Copy, paste, duplicate | yes, with Studio's own clipboard, not the system's | D1 fixed |
 | Undo a person trusts | yes: a drop is one step, typing one per word or pause | D10 fixed |
-| Layers: drag to reorder, rename, hide, lock | no: Move up and Move down only | D13 |
+| Layers: drag to reorder, rename, hide, lock | yes, driven in a real window off-screen | D13 fixed |
 | Inspector fields for Layouts, anchors, padding, margins | partly: plain text rows; no dedicated fields seen | D15 |
 | Image and asset import | not tried: neither sample has an image | |
 | Zoom and pan feel | partly: drag pans, no zoom or fit | D1, D6 |
@@ -415,6 +415,20 @@ hit that limit.
 | `samples/notes`, new directory, 2026-10-31 about 16:25 UTC | 32 (was 34), none failed | 17 261 (was 17 409) | 18 109 (was 37 421); images not counted |
 | `samples/site`, new directory | 40, none failed (was 2, D23) | 18 246 | 19 195 (screenshot images not counted) |
 | `tools/list`, once per session | 1, 25 tools | | 37 585 (was 62 218; cap 40 KB) |
+
+#### D23. Objects of a 3D scene were told they are not shown
+
+- **Where:** window, found placing a `View3D` on the native preview.
+- **Happened:** selecting a `Model` said "The preview does not show this
+  object" with the cube in plain sight, the align buttons stayed and answered
+  "the preview does not show `n6`". Editing `eulerRotation` and pressing Enter
+  was refused as "not a literal", though the row held an expression.
+- **Fixed:** the canvas says the object has no box and offers no alignment; a
+  row holding an expression stays one when edited; a literal row still refuses
+  (`features/ui/quick3d.feature`). Driven in a real window off-screen.
+- **Open:** a click on the picture selects the `View3D`, not the model under
+  the pointer, and there are no 3D handles or orbit: a 3D object is chosen in
+  Layers and edited in the inspector.
 
 ## Not done
 

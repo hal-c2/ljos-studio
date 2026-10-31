@@ -458,7 +458,7 @@ fn align(studio: &mut Studio, a: &AlignArgs) -> Result<ManyOut, SurfaceError> {
         let (Some(window), Some(local)) = (node.window, node.local) else {
             return Err(refused(
                 "not_shown",
-                format!("the preview does not show `{}`", node.node),
+                format!("the preview has no box for `{}`", node.node),
             ));
         };
         boxes.push(window);
