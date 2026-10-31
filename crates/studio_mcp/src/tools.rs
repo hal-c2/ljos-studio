@@ -679,7 +679,8 @@ struct ThemeOut {
 /// reads for an entry there (`ljos_design::theme::find`), the nearest
 /// `theme.json` from its directory up to the project's; else the project's
 /// own, where Ljós looks and watches when there is none, so a new one is
-/// made there.
+/// made there. A `doc` outside the project gets the one beside it, unwalked,
+/// which the store refuses: it has no project to fall back on.
 pub(crate) fn theme_file(store: &dyn studio_core::Store, doc: &str) -> String {
     let file = studio_core::theme::FILE;
     if doc.is_empty() {
@@ -693,6 +694,14 @@ pub(crate) fn theme_file(store: &dyn studio_core::Store, doc: &str) -> String {
         dir => format!("{dir}/{file}"),
     };
     let mut dir = doc.rsplit_once('/').map_or("", |(dir, _)| dir);
+    // `MemStore` confines nothing, so the path is judged here as well as by
+    // the store, which alone sees where a link leads.
+    let plain = std::path::Path::new(doc)
+        .components()
+        .all(|c| matches!(c, std::path::Component::Normal(_)));
+    if !plain || store.resolved(doc).is_err() {
+        return beside(dir);
+    }
     loop {
         if store.exists(&beside(dir)) {
             return beside(dir);
