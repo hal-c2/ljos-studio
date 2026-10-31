@@ -93,6 +93,9 @@ pub struct Workspace {
     /// The project's documents, as paths from its root.
     #[qml(readonly, notify)]
     pub documents: Json,
+    /// The project's directory has nothing in it yet.
+    #[qml(readonly, notify)]
+    pub blank: bool,
     /// The document the window shows. The shell sets it; the rest of the
     /// state follows.
     #[qml(notify, change = Self::doc_changed)]
@@ -192,6 +195,7 @@ impl Default for Workspace {
         let none = || Json::Array(Vec::new());
         Self {
             documents: none(),
+            blank: false,
             doc: String::new(),
             generation: 0.0,
             text: String::new(),
@@ -606,6 +610,7 @@ fn publish(engine: &Engine, ws: ObjectId, view: View, seen: u64) {
         .filter(|p| p.doc == view.doc)
         .map(|p| p.generation)
         .filter(|&g| g != picture && g != fetched);
+    let _ = cx.set(Workspace::BLANK, view.blank);
     let _ = cx.set(Workspace::DOCUMENTS, to_json(&view.documents));
     let _ = cx.set(Workspace::GENERATION, view.generation as f64);
     let _ = cx.set(Workspace::TEXT, view.text);

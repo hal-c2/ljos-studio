@@ -31,6 +31,18 @@
               "notify": "documentsChanged"
             },
             {
+              "name": "blank",
+              "type": "bool",
+              "kind": "value",
+              "list": false,
+              "readonly": true,
+              "final": true,
+              "required": false,
+              "constant": false,
+              "group": false,
+              "notify": "blankChanged"
+            },
+            {
               "name": "doc",
               "type": "string",
               "kind": "value",

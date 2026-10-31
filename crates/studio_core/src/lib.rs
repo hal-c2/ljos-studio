@@ -417,6 +417,11 @@ impl Session {
         self.store.list(".qml")
     }
 
+    /// Whether the project holds no file at all that a walk would list.
+    pub fn blank(&self) -> bool {
+        self.store.list("").is_empty()
+    }
+
     /// A document [`Session::sync`] has brought up to date.
     fn doc(&mut self, path: &str) -> Result<&mut Document, Error> {
         self.docs

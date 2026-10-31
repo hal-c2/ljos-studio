@@ -1132,6 +1132,15 @@ fn replaces_in_code(w: &mut UiWorld, old: String, new: String) -> StepResult {
     window.rest()
 }
 
+#[when(regex = r#"^the person enters "([^"]+)" as the new document's name$"#)]
+fn enters_new_name(w: &mut UiWorld, name: String) -> StepResult {
+    let window = w.window()?;
+    let field = window.node("Documents", Some("textinput"), "New document's name")?;
+    window.click_shown(&field)?;
+    window.stage.drive().commit(&name).map_err(drive_error)?;
+    window.rest()
+}
+
 // Focus without a click: a click would drop a text selection by itself, and
 // the object the layers panel chose would seem safe from the next key.
 #[when(regex = r#"^the person tabs to the code view and types "(.*)"$"#)]
@@ -1471,6 +1480,25 @@ fn code_selects(w: &mut UiWorld, want: String) -> StepResult {
     (code.selected == want)
         .then_some(())
         .ok_or_else(|| format!("the code view selects {:?}", code.selected))
+}
+
+#[then(regex = r#"^the window shows the document "([^"]+)"$"#)]
+fn window_shows_document(w: &mut UiWorld, want: String) -> StepResult {
+    let doc = w.window()?.read("doc").to_js_string().to_string();
+    (doc == want)
+        .then_some(())
+        .ok_or_else(|| format!("the window shows the document {doc:?}"))
+}
+
+#[then("the documents panel says why it made no document")]
+fn documents_says_why(w: &mut UiWorld) -> StepResult {
+    let window = w.window()?;
+    let label = ljos_drive::find_below(window.engine(), window.root, "newDocumentRefusal")
+        .ok_or("the documents panel has no place for a refusal")?;
+    let text = window.engine().read_by_name(label, "text").to_js_string().to_string();
+    (!text.is_empty())
+        .then_some(())
+        .ok_or_else(|| "the documents panel says nothing".to_owned())
 }
 
 #[then(regex = r#"^the code view marks "(.*)"$"#)]

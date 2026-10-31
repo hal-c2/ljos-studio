@@ -142,6 +142,8 @@ pub struct Edge {
 #[derive(Clone, Debug, Default, PartialEq, Serialize)]
 pub struct View {
     pub documents: Vec<String>,
+    /// The project's directory has nothing in it a walk would list.
+    pub blank: bool,
     pub doc: String,
     pub generation: u64,
     pub text: String,
@@ -180,8 +182,10 @@ pub struct View {
 impl Studio {
     /// The session as a window showing `doc` sees it now.
     pub fn view(&mut self, doc: &str) -> View {
+        let documents = self.session.documents();
         let mut view = View {
-            documents: self.session.documents(),
+            blank: documents.is_empty() && self.session.blank(),
+            documents,
             previews: self
                 .hosts
                 .as_ref()
