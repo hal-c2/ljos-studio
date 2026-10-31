@@ -513,6 +513,7 @@ const NATIVE_ONLY = new Map([
   ['then ^the preview shows "([^"]*)"$', "a preview is a page of its own (@preview): web/features.browser.mjs"],
   ['then ^Studio has reported the preview reloaded since it was read$', "a preview is a page of its own (@preview)"],
   ['then ^the preview shows "([^"]*)" within (\\d+) seconds$', "a preview is a page of its own (@preview)"],
+  ["then ^the answer's picture has (some|no) (red|green)$", "a picture is a preview's (@preview): web/features.browser.mjs"],
   ["then ^the answer has a PNG picture at most (\\d+) pixels on its longest side$", "a picture is a preview's (@preview): web/features.browser.mjs"],
   ['given ^the link "([^"]+)" leads to "([^"]+)"$', "storage holds no links (@disk)"],
   ['given ^the named pipe "([^"]+)"$', "storage holds no pipes (@disk)"],
