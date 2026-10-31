@@ -314,11 +314,10 @@ handler on the object tapped. `state_edit` carries it:
 
 `node` names the owner of the state (the root by default). The history
 labels are `tapped card to details` and `remove tapped interaction`.
-From an older generation, a tap flow past another writer's new child of
-the trigger lands beside it, unless the trigger's `TapHandler` already writes
-`onTapped`. Taking a tap flow out conflicts with any change to that handler,
-and with another writer taking a `TapHandler` off the trigger, also when a
-new one stands there now.
+From an older generation, a tap flow lands past another writer's new child
+of the trigger, but conflicts with another writer adding or taking out a
+`TapHandler` that is a direct child of it (`details.name` is `<taps>`).
+Taking a tap flow out also conflicts with any change to the handler it is in.
 Refusals: `not_found` with `details.kind` `no_state`, `no_document` (the
 document must be beside this one) or `no_interaction`; `invalid_argument`
 for `exists`, an owner or navigator with no `id` (`no_id`), a navigator

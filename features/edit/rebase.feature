@@ -731,3 +731,36 @@ Feature: An edit made against an older generation is rebased by its handles
     Then the agent is refused with "stale_ref"
     And the refusal's "/details/kind" is "conflict"
     And the refusal's "/details/author" is "Ada"
+
+  Scenario: Taking out a tap flow another writer added after it read is a conflict
+    Given a second agent named "Ada" has called the tool "node_insert" with:
+      """json
+      {"doc": "Main.qml", "generation": "$read", "parent": {"id": "card"}, "text": "TapHandler { id: adas; onTapped: root.state = \"\" }"}
+      """
+    When the agent calls the tool "state_edit" with:
+      """json
+      {"doc": "Main.qml", "generation": "$read", "action": "remove_interaction", "trigger": {"node": "$card"}}
+      """
+    Then the agent is refused with "stale_ref"
+    And the refusal's "/details/kind" is "conflict"
+    And the refusal's "/details/author" is "Ada"
+
+  Scenario: Taking out a tap flow lands past another writer removing a child that holds a TapHandler
+    Given the agent has called the tool "node_insert" with:
+      """json
+      {"doc": "Main.qml", "parent": {"id": "card"}, "text": "TapHandler { id: one; onTapped: root.state = \"\" }"}
+      """
+    And the agent has called the tool "node_insert" with:
+      """json
+      {"doc": "Main.qml", "parent": {"id": "card"}, "text": "Item { id: box; TapHandler { id: inner } }"}
+      """
+    And the agent keeps the answer's "/generation" as "tapped"
+    And a second agent named "Ada" has called the tool "node_remove" with:
+      """json
+      {"doc": "Main.qml", "generation": "$tapped", "node": {"id": "box"}}
+      """
+    When the agent calls the tool "state_edit" with:
+      """json
+      {"doc": "Main.qml", "generation": "$tapped", "action": "remove_interaction", "trigger": {"node": "$card"}}
+      """
+    Then the answer's "/rebased_from" is 3

@@ -25,6 +25,9 @@ pub(crate) type Touch = (u64, Option<String>);
 /// The name an insert touches on its parent: two inserts into one parent
 /// both land, but a remove of the parent conflicts with either.
 pub(crate) const CHILDREN: &str = "<children>";
+/// The `TapHandler`s directly among a parent's children, which hold its one
+/// tap flow: a writer adding or taking out one also touches this.
+pub(crate) const TAPS: &str = "<taps>";
 
 /// What a state edit touches on the state's owner.
 pub(crate) const STATES: &str = "states";

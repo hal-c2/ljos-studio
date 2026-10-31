@@ -43,7 +43,7 @@ pub use store::{MemStore, Store, StoreError, inside, listed};
 
 use address::{Tracked, find_by_key};
 use history::{History, Replayed};
-use log::{CHILDREN, Lease, Log, Logged, STATES, Touch, reaches};
+use log::{CHILDREN, Lease, Log, Logged, STATES, TAPS, Touch, reaches};
 pub use log::{LEASE_LIFE_MS, LEASE_TTL_MS, LeaseView};
 
 /// Who wrote a change found in the file: nobody Studio knows.
@@ -831,20 +831,11 @@ impl Session {
         }
         let intent = self.intent(path, op)?;
         // A child index counts the children of the generation it was read
-        // at; an append has none to count. A tap flow's new `TapHandler` is
-        // such an append, unless one is already there to answer for.
-        let counted = match op {
-            Op::Insert { index, .. } | Op::Move { index, .. } => index.is_some(),
-            Op::Interaction {
-                signal: None,
-                trigger,
-                ..
-            } => self.tapped(path, trigger)?,
-            _ => false,
-        };
-        // A handler taken off the trigger may be the flow this removal read,
-        // and what stands there now another writer's replacement.
-        let removes_tap = matches!(op, Op::RemoveInteraction { signal: None, .. });
+        // at; an append has none to count.
+        let counted = matches!(
+            op,
+            Op::Insert { index: Some(_), .. } | Op::Move { index: Some(_), .. }
+        );
         let doc = self.doc(path)?;
         // The newest change names what is there now.
         for entry in others.iter().rev() {
@@ -855,10 +846,6 @@ impl Session {
                         // Two writers' children of one parent both land,
                         // unless one of them says where among the others.
                         || (a == h && m == name && (counted || name.as_deref() != Some(CHILDREN)))
-                        || (removes_tap
-                            && a == h
-                            && m == name
-                            && took_out_tap(doc, entry))
                 });
                 if hit.is_some() {
                     let now = name.as_ref().and_then(|n| {
@@ -932,7 +919,7 @@ impl Session {
                     // is or was written there: another writer may have just
                     // taken the flow out of it.
                     let removes = matches!(op, Op::RemoveInteraction { .. });
-                    let mut touched = vec![(h, Some(CHILDREN.to_owned()))];
+                    let mut touched = vec![(h, Some(TAPS.to_owned()))];
                     touched.extend(self.taps_of(path, h)?.into_iter().map(|(tap, tapped)| {
                         (tap, (!removes || !tapped).then(|| "onTapped".to_owned()))
                     }));
@@ -941,18 +928,6 @@ impl Session {
                 vec![(h, Some(flows::handler_name(signal)))]
             }
         })
-    }
-
-    /// Whether the object `trigger` names has a `TapHandler` writing
-    /// `onTapped` now: the one tap flow it can have.
-    fn tapped(&mut self, path: &str, trigger: &Address) -> Result<bool, Error> {
-        let Ok((handle, _)) = self.resolve(path, trigger) else {
-            return Ok(false);
-        };
-        Ok(self
-            .taps_of(path, number(&handle))?
-            .iter()
-            .any(|(_, tapped)| *tapped))
     }
 
     /// The edit a flow is written as, the handler or `TapHandler` that
@@ -980,6 +955,21 @@ impl Session {
         }
         let intent = self.intent(path, op)?;
         let doc = self.doc(path)?;
+        // The parent a `TapHandler` arrives among the children of.
+        let arrives = match op {
+            Op::Insert { text, .. }
+                if flows::is_tap_handler(
+                    text.trim_start()
+                        .split(['{', ' ', '\n'])
+                        .next()
+                        .unwrap_or_default(),
+                ) =>
+            {
+                Some(intent[0].0)
+            }
+            Op::Move { .. } if is_tap(doc, intent[0].0) => Some(intent[1].0),
+            _ => None,
+        };
         let mut out = Vec::with_capacity(intent.len());
         for (h, name) in intent {
             if name.is_none() {
@@ -1000,6 +990,9 @@ impl Session {
                         .find(|t| t.path.as_ref().is_some_and(|p| p.0 == parent))
                 {
                     out.push((t.handle, Some(CHILDREN.to_owned())));
+                    if is_tap(doc, h) {
+                        out.push((t.handle, Some(TAPS.to_owned())));
+                    }
                 }
                 out.extend(
                     doc.tracked
@@ -1010,6 +1003,7 @@ impl Session {
             }
             out.push((h, name));
         }
+        out.extend(arrives.map(|parent| (parent, Some(TAPS.to_owned()))));
         Ok(out)
     }
 
@@ -1042,6 +1036,12 @@ impl Session {
                     let touch = (number(parent), Some(CHILDREN.to_owned()));
                     if !out.contains(&touch) {
                         out.push(touch);
+                    }
+                    if flows::is_tap_handler(&node.ty) {
+                        let touch = (number(parent), Some(TAPS.to_owned()));
+                        if !out.contains(&touch) {
+                            out.push(touch);
+                        }
                     }
                 }
                 let inner = tree.iter().any(|(_, m)| {
@@ -2738,16 +2738,12 @@ fn in_binding<'a>(doc: &'a Document, handle: u64, name: &'a str) -> impl Iterato
     })
 }
 
-/// Whether `entry` took a `TapHandler` out, which the log says only by the
-/// object it names as a whole.
-fn took_out_tap(doc: &Document, entry: &Logged) -> bool {
-    entry.touched.iter().flatten().any(|(a, m)| {
-        m.is_none()
-            && doc
-                .tracked
-                .iter()
-                .any(|t| t.handle == *a && flows::is_tap_handler(&t.ty))
-    })
+/// Whether the object `handle` is, or was when it was last in the text, a
+/// `TapHandler`.
+fn is_tap(doc: &Document, handle: u64) -> bool {
+    doc.tracked
+        .iter()
+        .any(|t| t.handle == handle && flows::is_tap_handler(&t.ty))
 }
 
 /// Whether the object `inner` is `outer` or one it holds, by where their
