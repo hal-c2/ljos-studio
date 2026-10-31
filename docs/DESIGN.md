@@ -726,18 +726,9 @@ native one lacks is a failure. 21 of 39 pass. The other 18 are in
 nothing when that error comes after the open);
 one that passes, or fails another way, fails the run:
 
-- request 4: the six flow scenarios that read or click (`preview_state`),
-  one of them a click at a point, a mocked block's state set from
-  outside, a live block's state read;
-- request 2: a picture of the preview;
-- request 20: a token set shows in the preview, and its undo shows the
-  module's value again. The undo's last step reads what a preview that
-  never drew the token shows too, so its entry has a probe: once the
-  token is set the preview must show it, and its absence is the wait.
-- request 21: the three scenarios of a JSON list in the preview
-  (`Ljos.Models`);
-- request 22: four of the five scenarios of a project's type dumps
-  (stand-ins from `ljostypes.json`; the mocked state's passes).
+- request 25: waiting on the preview (`preview_events` with `wait_ms`): the
+  page cannot say when the app rests. A browser preview draws itself, so the
+  window has no picture to keep current; only an agent's wait waits on it.
 
 CI's `browser` job runs it after `web:serve:check`.
 

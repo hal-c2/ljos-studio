@@ -43,6 +43,18 @@
               "notify": "settlingChanged"
             },
             {
+              "name": "looks",
+              "type": "int",
+              "kind": "value",
+              "list": false,
+              "readonly": true,
+              "final": true,
+              "required": false,
+              "constant": false,
+              "group": false,
+              "notify": "looksChanged"
+            },
+            {
               "name": "blank",
               "type": "bool",
               "kind": "value",
@@ -415,6 +427,16 @@
             {
               "name": "lookAgain",
               "parameters": [],
+              "returnType": "void"
+            },
+            {
+              "name": "followPicture",
+              "parameters": [
+                {
+                  "name": "on",
+                  "type": "bool"
+                }
+              ],
               "returnType": "void"
             }
           ],
