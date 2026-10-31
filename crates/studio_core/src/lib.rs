@@ -532,6 +532,18 @@ impl Session {
         self.on_write.push(Box::new(f));
     }
 
+    /// Calls `f` with each file the session is about to write (with its
+    /// text) or remove (`None`) from now on: told before the store has it,
+    /// so whoever watches the disk knows the change for its own however
+    /// fast the disk tells them.
+    pub fn on_writing(&mut self, f: impl Fn(&str, Option<&str>) + Send + Sync + 'static) {
+        let inner = std::mem::replace(&mut self.store, Box::new(MemStore::default()));
+        self.store = Box::new(store::Announcing {
+            inner,
+            writing: Box::new(f),
+        });
+    }
+
     fn wrote(&mut self, path: &str) {
         for f in &mut self.on_write {
             f(path);

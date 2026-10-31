@@ -3,7 +3,7 @@
 //! blocked on a channel.
 
 use std::{
-    collections::{HashMap, hash_map::DefaultHasher},
+    collections::{HashMap, VecDeque, hash_map::DefaultHasher},
     hash::{Hash, Hasher},
     path::{Path, PathBuf},
     sync::{
@@ -15,8 +15,23 @@ use std::{
 use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use studio_core::{document_path, listed};
 
-/// What a document last said, as far as the watch knows: `None` when gone.
-type Known = Arc<Mutex<HashMap<String, Option<u64>>>>;
+/// What a document says, as far as the watch knows: a hash, `None` when gone.
+type Said = Option<u64>;
+
+#[derive(Default)]
+struct Document {
+    /// `None` until the disk first tells of it.
+    last: Option<Said>,
+    /// What the session wrote and the disk has not yet told of, oldest first.
+    /// Each goes when told of, so a later save by another program that says
+    /// what the session once said is still news. A write that failed stays
+    /// until the bound pushes it out.
+    own: VecDeque<Said>,
+}
+
+const OWN_WRITES_AHEAD: usize = 64;
+
+type Known = Arc<Mutex<HashMap<String, Document>>>;
 
 enum Message {
     Event(notify::Result<notify::Event>),
@@ -26,7 +41,6 @@ enum Message {
 /// Stops following when dropped.
 pub(crate) struct ProjectWatch {
     stop: Sender<Message>,
-    root: PathBuf,
     known: Known,
 }
 
@@ -48,34 +62,39 @@ impl ProjectWatch {
         .ok()?;
         watch_tree(&mut watcher, &root, &root);
         let known = Known::default();
-        let (thread_root, thread_known) = (root.clone(), known.clone());
+        let thread_known = known.clone();
         std::thread::Builder::new()
             .name("studio-project-watch".to_owned())
-            .spawn(move || follow(watcher, &thread_root, &thread_known, &messages, &*told))
+            .spawn(move || follow(watcher, &root, &thread_known, &messages, &*told))
             .ok()?;
-        Some(Self { stop, root, known })
+        Some(Self { stop, known })
     }
 
-    /// What the session calls with each path it writes or removes.
-    pub(crate) fn own_writes(&self) -> impl Fn(&str) + Send + 'static {
-        let (root, known) = (self.root.clone(), self.known.clone());
-        move |path| {
+    /// What the session calls before it writes (`Some`) or removes (`None`)
+    /// a file: called after, the disk could tell of it first.
+    pub(crate) fn own_writes(&self) -> impl Fn(&str, Option<&str>) + Send + Sync + 'static {
+        let known = self.known.clone();
+        move |path, text| {
             if document_path(path) {
-                let said = said(&root.join(path));
-                known
-                    .lock()
-                    .unwrap_or_else(PoisonError::into_inner)
-                    .insert(path.to_owned(), said);
+                let mut known = known.lock().unwrap_or_else(PoisonError::into_inner);
+                let own = &mut known.entry(path.to_owned()).or_default().own;
+                if own.len() == OWN_WRITES_AHEAD {
+                    own.pop_front();
+                }
+                own.push_back(text.map(|text| hashed(text.as_bytes())));
             }
         }
     }
 }
 
-fn said(path: &Path) -> Option<u64> {
-    let bytes = std::fs::read(path).ok()?;
+fn hashed(bytes: &[u8]) -> u64 {
     let mut hasher = DefaultHasher::new();
     bytes.hash(&mut hasher);
-    Some(hasher.finish())
+    hasher.finish()
+}
+
+fn said(path: &Path) -> Said {
+    Some(hashed(&std::fs::read(path).ok()?))
 }
 
 /// Each directory by itself, not the root recursively: the directories a
@@ -162,7 +181,15 @@ fn is_news(watcher: &mut RecommendedWatcher, path: &Path, root: &Path, known: &K
     }
     let now = said(path);
     let mut known = known.lock().unwrap_or_else(PoisonError::into_inner);
-    known.insert(rel, now) != Some(now)
+    let document = known.entry(rel).or_default();
+    let was = document.last.replace(now);
+    if let Some(at) = document.own.iter().position(|own| *own == now) {
+        // The disk tells of a write once it has it, and of the ones before
+        // it together with it.
+        document.own.drain(..=at);
+        return false;
+    }
+    was != Some(now)
 }
 
 #[cfg(test)]
@@ -180,6 +207,13 @@ mod tests {
             assert!(started.elapsed() < Duration::from_secs(5), "never: {what}");
             std::thread::sleep(Duration::from_millis(5));
         }
+    }
+
+    /// As the store saves: all at once, so nothing reads half of it.
+    fn saved(dir: &Path, name: &str, text: &str) {
+        let temporary = dir.join(format!("{name}.studio-tmp"));
+        std::fs::write(&temporary, text).unwrap();
+        std::fs::rename(&temporary, dir.join(name)).unwrap();
     }
 
     fn watched(dir: &Path) -> (ProjectWatch, Arc<AtomicU64>) {
@@ -202,11 +236,30 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let (watch, told) = watched(dir.path());
         let own = watch.own_writes();
-        std::fs::write(dir.path().join("Mine.qml"), "Item {}\n").unwrap();
-        own("Mine.qml");
+        for n in 0..50 {
+            let text = format!("Item {{ width: {n} }}\n");
+            own("Mine.qml", Some(&text));
+            saved(dir.path(), "Mine.qml", &text);
+        }
         std::fs::write(dir.path().join("Theirs.qml"), "Item {}\n").unwrap();
         waits_for("the later file", || told.load(Ordering::SeqCst) > 0);
         assert_eq!(told.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn another_programs_save_of_what_the_session_once_wrote_tells() {
+        let dir = tempfile::tempdir().unwrap();
+        let (watch, told) = watched(dir.path());
+        let own = watch.own_writes();
+        for text in ["Item { width: 1 }\n", "Item { width: 2 }\n"] {
+            own("Mine.qml", Some(text));
+            saved(dir.path(), "Mine.qml", text);
+        }
+        // Told of the session's last write, so the window has room for news.
+        std::fs::write(dir.path().join("Marker.qml"), "Item {}\n").unwrap();
+        waits_for("the marker", || told.load(Ordering::SeqCst) > 0);
+        saved(dir.path(), "Mine.qml", "Item { width: 1 }\n");
+        waits_for("the save", || told.load(Ordering::SeqCst) > 1);
     }
 
     #[test]
