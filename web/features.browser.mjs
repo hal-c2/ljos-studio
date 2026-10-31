@@ -52,7 +52,9 @@ const uncompiled = (request, type) => {
       message.includes(missing) || (message === "the preview shows: []" && compiled.some((e) => e.includes(missing))),
   };
 };
-export const WAITING = new Map([]);
+export const WAITING = new Map([
+  ["Waiting on the preview says when its app wakes next", refused(25)],
+]);
 
 // Every event of the preview's, and the reloads among them, as the native
 // runner's World reads them.

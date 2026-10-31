@@ -653,11 +653,10 @@ fn wait_for_rest(
             .as_ref()
             .ok_or_else(|| preview_error(PreviewError::NotOpen))?;
         open.host.rest_watch().ok_or_else(|| {
-            SurfaceError::new(
-                ErrorCode::NotActionable,
-                "this preview cannot say when it rests",
-            )
-            .with_details(json!({ "kind": "not_supported" }))
+            preview_error(PreviewError::NotSupported {
+                message: "this preview cannot say when it rests".to_owned(),
+                ljos_web_request: 25,
+            })
         })?
     };
     let rest = waiting
