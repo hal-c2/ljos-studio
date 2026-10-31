@@ -431,7 +431,7 @@ fn state(studio: &Mutex<Studio>, a: StateArgs) -> Result<StateOut, SurfaceError>
         let known = show.is_empty()
             || studio
                 .session
-                .variants(&doc, &&address)
+                .variants(&doc, &address)
                 .map_err(error)?
                 .states
                 .iter()

@@ -14,7 +14,9 @@ use ljos_mcp_core::ToolDef;
 use schemars::JsonSchema;
 use serde_json::{Map, Value, json};
 
-static ANSWERS: Mutex<BTreeMap<&'static str, fn() -> Value>> = Mutex::new(BTreeMap::new());
+type AnswerTable = BTreeMap<&'static str, fn() -> Value>;
+
+static ANSWERS: Mutex<AnswerTable> = Mutex::new(BTreeMap::new());
 
 pub(crate) trait Answers {
     /// `ToolDef::output`, for the list: `O` is what the tool answers.
