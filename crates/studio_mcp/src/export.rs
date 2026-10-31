@@ -227,6 +227,9 @@ struct ExportOut {
     manifest: Manifest,
     /// False for a dry run.
     written: bool,
+    /// Whether `out` held a bundle of either kind before this call, which
+    /// a real export replaces: what a person is told before they write it.
+    replaces: bool,
     ms: f64,
 }
 
@@ -1007,6 +1010,7 @@ fn export(studio: &Mutex<Studio>, a: ExportArgs) -> Result<ExportOut, SurfaceErr
     let root = root.canonicalize().map_err(|e| io(&root, &e))?;
     let manifest = plan(&root, &studio, &a.entry, a.target)?;
     let out = out_dir(&root, a.out.as_deref(), a.target)?;
+    let replaces = holds_bundle(&root.join(&out));
     let copied = if a.dry_run {
         Copied::default()
     } else {
@@ -1018,6 +1022,7 @@ fn export(studio: &Mutex<Studio>, a: ExportArgs) -> Result<ExportOut, SurfaceErr
         bytes: manifest.files.iter().map(|f| f.bytes).sum::<u64>() + copied.bytes,
         manifest,
         written: !a.dry_run,
+        replaces,
         ms: studio_core::preview::ms(studio.timer.now().saturating_sub(started)),
     })
 }

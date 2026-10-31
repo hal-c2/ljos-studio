@@ -5,7 +5,10 @@
 //! replaces the last bundle, as re-exporting after an edit does. `web`
 //! writes the site bundle instead, whose imports are checked too.
 //!
-//! `cargo run --release -p studio_mcp --example export_perf [-- EXPORTS [native|web]]`
+//! `dry` as a third argument times the dry run the window's export panel
+//! asks for on opening instead.
+//!
+//! `cargo run --release -p studio_mcp --example export_perf [-- EXPORTS [native|web [dry]]]`
 
 use std::{
     path::Path,
@@ -35,6 +38,7 @@ fn main() {
     let target = std::env::args()
         .nth(2)
         .unwrap_or_else(|| "native".to_owned());
+    let dry = std::env::args().nth(3).is_some_and(|a| a == "dry");
     let dir = tempfile::tempdir().unwrap();
     let root = dir.path();
     let mut files = 0;
@@ -90,12 +94,15 @@ fn main() {
         let (out, _) = server.tools().call(
             "export",
             &ctx,
-            json!({ "entry": "Shell.qml", "target": target }),
+            json!({ "entry": "Shell.qml", "target": target, "dry_run": dry }),
         );
         samples.push(started.elapsed());
         let out = out.unwrap_or_else(|e| panic!("export was refused: {}", e.to_value()));
         assert_eq!(out["files"], 200);
         bytes = out["bytes"].as_u64().unwrap();
+        if dry {
+            continue;
+        }
         let name = if target == "web" {
             studio_mcp::export::SITE_MANIFEST
         } else {
@@ -109,7 +116,8 @@ fn main() {
     let at = |p: f64| samples[((samples.len() - 1) as f64 * p).round() as usize];
     let ms = |d: Duration| d.as_secs_f64() * 1e3;
     println!(
-        "{target} export of 200 files ({bytes} bytes and a manifest of {manifest}): p50 {:.2} ms, p95 {:.2} ms, max {:.2} ms over {}",
+        "{target} {} of 200 files ({bytes} bytes and a manifest of {manifest}): p50 {:.2} ms, p95 {:.2} ms, max {:.2} ms over {}",
+        if dry { "dry run" } else { "export" },
         ms(at(0.5)),
         ms(at(0.95)),
         ms(at(1.0)),
