@@ -50,7 +50,9 @@ pub const LJOS_WEB: &str = include_str!("../../../web/ljos-web.rev").trim_ascii(
 /// a stand-in. A Ljós module written in Rust is in neither (DESIGN.md S6,
 /// requests 32 to 34).
 pub const WEB_MODULES: &[&str] = &[
+    "Ljos.Blocks",
     "Ljos.Design",
+    "Ljos.Models",
     "Qt.labs.folderlistmodel",
     "Qt.labs.qmlmodels",
     "Qt.labs.settings",

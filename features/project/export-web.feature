@@ -220,9 +220,9 @@ Feature: A project is exported for ljos-web to build a site from
         }
         """
 
-  Rule: What cannot go on the web is refused with the reason
+  Rule: What ljos-web has is exported, Ljós's own modules among them
 
-    Scenario: A shell over Ljos.Blocks has no web face yet
+    Scenario: A shell over Ljos.Blocks and a page over Ljos.Models go on the web
       Given the file "Shell.qml":
         """qml
         import QtQuick
@@ -230,13 +230,37 @@ Feature: A project is exported for ljos-web to build a site from
 
         ShellLoader {}
         """
+      And the file "Pages/Data.qml":
+        """qml
+        import QtQuick
+        import Ljos.Models
+
+        Item {}
+        """
+      When the agent calls the tool "export" with:
+        """json
+        {"entry": "Shell.qml", "target": "web"}
+        """
+      Then the answer's "/manifest/imports" is ["Ljos.Blocks", "Ljos.Models", "QtQuick"]
+      And the file "build/web/ljos-site.json" exists
+
+  Rule: What cannot go on the web is refused with the reason
+
+    Scenario: A Ljós module ljos-web has not got has no web face
+      Given the file "Shell.qml":
+        """qml
+        import QtQuick
+        import Ljos.Observer
+
+        Item {}
+        """
       When the agent calls the tool "export" with:
         """json
         {"entry": "Shell.qml", "target": "web"}
         """
       Then the agent is refused with "unsupported"
       And the refusal's "/details/kind" is "no_web_face"
-      And the refusal's "/details/modules" is ["Ljos.Blocks"]
+      And the refusal's "/details/modules" is ["Ljos.Observer"]
       And the refusal's "/details/docs" is ["Shell.qml"]
       And the file "build/web/ljos-site.json" does not exist
 
@@ -256,22 +280,6 @@ Feature: A project is exported for ljos-web to build a site from
       And the refusal's "/details/kind" is "no_web_face"
       And the refusal's "/details/modules" is ["App.Store"]
       And the refusal's "/details/docs" is ["Pages/Cart.qml"]
-
-    Scenario: A Ljós module written in Rust has no web face
-      Given the file "Pages/Data.qml":
-        """qml
-        import QtQuick
-        import Ljos.Models
-
-        Item {}
-        """
-      When the agent calls the tool "export" with:
-        """json
-        {"entry": "Shell.qml", "target": "web"}
-        """
-      Then the agent is refused with "unsupported"
-      And the refusal's "/details/kind" is "no_web_face"
-      And the refusal's "/details/modules" is ["Ljos.Models"]
 
     Scenario: A link to a module's directory is refused for the web, which would hold the module twice
       Given the file "App/Media/qmldir":
