@@ -366,6 +366,7 @@ Feature: Tokens are read and set in the project's theme file
       Examples:
         | doc                   |
         | ../elsewhere/Main.qml |
+        | /Main.qml             |
         | /elsewhere/Main.qml   |
         | app/../../Main.qml    |
 
@@ -386,3 +387,21 @@ Feature: Tokens are read and set in the project's theme file
         """
       Then the agent is refused with "path_denied"
       And the file "theme.json" does not exist
+
+    @disk
+    Scenario: A document that is a link out of the project, at its top, has no theme of the project's
+      Given the file "theme.json":
+        """json
+        {"Spacing": {"md": 8}}
+        """
+      And the link "out" leads to a directory outside the project holding "Main.qml"
+      And the link "Out.qml" leads to "out/Main.qml"
+      When the agent calls the tool "theme_set" with:
+        """json
+        {"doc": "Out.qml", "token": "Spacing.md", "value": 24}
+        """
+      Then the agent is refused with "path_denied"
+      And the file "theme.json" is:
+        """json
+        {"Spacing": {"md": 8}}
+        """
