@@ -160,6 +160,9 @@ pub struct View {
     pub inspector: Vec<Shown>,
     /// The selected object's states.
     pub states: Vec<StateInfo>,
+    /// The root's states, which stay editable while another object is
+    /// selected.
+    pub root_states: Vec<StateInfo>,
     /// The roles of the data the selected object sees, as a delegate's
     /// bindings read them (`model.name`).
     pub roles: Vec<String>,
@@ -212,7 +215,10 @@ impl Studio {
             .collect();
         view.preview = preview_of(&preview::lock(&self.previews));
         if let Some(p) = &mut view.preview {
-            p.variant = self.variant(&p.doc, p.width).unwrap_or_default();
+            let shown = shown(&preview::lock(&self.previews));
+            p.variant = shown
+                .or_else(|| self.variant(&p.doc, p.width))
+                .unwrap_or_default();
         }
         view.theme = crate::tools::running_theme_file(self.session.store(), doc);
         if let Ok(read) = self.session.tokens(&view.theme, None) {
@@ -229,6 +235,12 @@ impl Studio {
         view.toolkit = crate::toolkit::offered(text, "");
         view.text = text.to_owned();
         view.generation = generation;
+        if let Ok(variants) = self
+            .session
+            .variants(doc, &Address::Path("root".to_owned()))
+        {
+            view.root_states = variants.states;
+        }
         match self.session.tree(doc) {
             Ok((tree, _)) => {
                 let handle_of = |path: &[Step]| {
@@ -413,6 +425,16 @@ impl Studio {
             .find(|s| s.when.as_deref() == Some(condition.as_str()))
             .map(|s| s.name)
     }
+}
+
+/// The state `preview_state` is showing, which wins over a breakpoint's.
+fn shown(previews: &preview::Previews) -> Option<String> {
+    previews
+        .open
+        .as_ref()?
+        .shown
+        .as_ref()
+        .map(|(_, s)| s.clone())
 }
 
 fn row(t: studio_core::theme::Token) -> TokenRow {

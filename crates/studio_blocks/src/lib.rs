@@ -152,7 +152,11 @@ pub struct Workspace {
     #[qml(readonly, notify)]
     pub palette: Json,
     /// The toolkit types the document can place, by module.
+    #[qml(readonly, notify)]
     pub toolkit: Json,
+    /// The root's states, which stay editable while another object is selected.
+    #[qml(readonly, notify)]
+    pub root_states: Json,
     /// What undo and redo would take back and do again, latest last.
     #[qml(readonly, notify)]
     pub done: Json,
@@ -218,6 +222,7 @@ impl Default for Workspace {
             flow: json!({"states": [], "edges": []}),
             palette: none(),
             toolkit: none(),
+            root_states: none(),
             done: none(),
             undone: none(),
             preview: Json::Null,
@@ -705,6 +710,7 @@ fn publish(engine: &Engine, ws: ObjectId, view: View, seen: u64) {
     let _ = cx.set(Workspace::FLOW, to_json(&view.flow));
     let _ = cx.set(Workspace::PALETTE, to_json(&view.palette));
     let _ = cx.set(Workspace::TOOLKIT, to_json(&view.toolkit));
+    let _ = cx.set(Workspace::ROOT_STATES, to_json(&view.root_states));
     let _ = cx.set(Workspace::DONE, to_json(&view.done));
     let _ = cx.set(Workspace::UNDONE, to_json(&view.undone));
     let _ = cx.set(Workspace::COMMENTS, to_json(&view.comments));

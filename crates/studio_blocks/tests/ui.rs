@@ -773,7 +773,9 @@ fn searches_palette(w: &mut UiWorld, text: String) -> StepResult {
 #[then(regex = r#"^the palette (offers|does not offer) "([^"]+)"$"#)]
 fn palette_offers(w: &mut UiWorld, how: String, name: String) -> StepResult {
     let window = w.window()?;
-    let found = window.node("Palette", None, &format!("Place {name}")).is_ok();
+    let found = window
+        .node("Palette", None, &format!("Place {name}"))
+        .is_ok();
     if found != (how == "offers") {
         return Err(format!("the palette {how} {name}, and found it: {found}"));
     }
@@ -1309,6 +1311,23 @@ fn overlay_part(window: &Window, name: &str) -> Result<ObjectId, String> {
     let frame = window.frame("Desktop")?;
     ljos_drive::find_below(window.engine(), frame, name)
         .ok_or_else(|| format!("the canvas has no {name}"))
+}
+
+#[then(regex = r#"^the file "([^"]+)" does not say "(.*)"$"#)]
+fn file_does_not_say(w: &mut UiWorld, name: String, want: String) -> StepResult {
+    let got = std::fs::read_to_string(w.dir.path().join(&name)).map_err(|e| e.to_string())?;
+    if got.contains(&want) {
+        return Err(format!("`{name}` says {want:?}:\n{got}"));
+    }
+    Ok(())
+}
+
+#[then(regex = r#"^the window says "(.*)"$"#)]
+fn window_says(w: &mut UiWorld, want: String) -> StepResult {
+    let tree = w.window()?.tree();
+    find(&tree, &|n| n.name == want)
+        .map(drop)
+        .ok_or_else(|| format!("the window does not say {want:?}"))
 }
 
 #[then(regex = r#"^the file "([^"]+)" says "(.*)"$"#)]

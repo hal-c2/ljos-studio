@@ -89,6 +89,9 @@ pub(crate) struct Open {
     /// Clicks given to the running app: they change what it shows without a
     /// reload, so a window has to know to look again.
     pub clicks: u64,
+    /// The object and the state `preview_state` shows: a reload starts the
+    /// app again in its base state, so it is shown again.
+    pub shown: Option<(String, String)>,
 }
 
 pub(crate) struct Previews {
@@ -201,6 +204,17 @@ impl Previews {
         // Only now: a host that panics has not shown the write, and the lock
         // outlives the panic for the next reader to catch up.
         open.behind = false;
+        if let (Ok(Reload::Applied { .. }), Some((id, state))) = (&reload, &open.shown) {
+            // Out and in again: the app comes back in the state it was in,
+            // and setting that same state would not apply what the new text
+            // adds to it. One the new text no longer has is the app's to
+            // warn about.
+            for value in ["", state.as_str()] {
+                let _ = open.host.write(id, "state", value.into());
+            }
+            // Drawn after the reload's picture was asked for, as a click is.
+            open.clicks += 1;
+        }
 
         // Stamped once answered: however long the call took, the reload the
         // budget allows a second after this reaches the inspector more than
@@ -392,6 +406,7 @@ mod tests {
                 reloads,
                 behind,
                 clicks: 0,
+                shown: None,
             }),
             ..Previews::new(Arc::new(Still))
         };

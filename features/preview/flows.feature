@@ -116,6 +116,50 @@ Feature: The preview plays a prototype's flow
     Then the agent is refused with "invalid_argument"
     And the refusal's "/details/kind" is "not_a_block"
 
+  Scenario: A state is shown for the preview, through a reload, until cleared
+    When the agent calls the tool "preview_state" with:
+      """json
+      {"node": {"id": "root"}, "show": "details"}
+      """
+    Then the answer's "/variant" is "details"
+    When the agent calls the tool "property_set" with:
+      """json
+      {"doc": "Main.qml", "node": {"id": "root"}, "name": "objectName", "value": "page"}
+      """
+    And the agent calls the tool "preview_state" with:
+      """json
+      {"node": {"id": "root"}}
+      """
+    Then the answer's "/variant" is "details"
+    When the agent calls the tool "preview_state" with:
+      """json
+      {"node": {"id": "root"}, "show": ""}
+      """
+    Then the answer's "/variant" is ""
+
+  Scenario: The first change written into the shown state is drawn at once
+    Given the agent has called the tool "state_edit" with:
+      """json
+      {"doc": "Main.qml", "action": "add", "state": "empty"}
+      """
+    When the agent calls the tool "preview_state" with:
+      """json
+      {"node": {"id": "root"}, "show": "empty"}
+      """
+    And the agent calls the tool "state_edit" with:
+      """json
+      {"doc": "Main.qml", "action": "change", "state": "empty", "target": {"id": "title"}, "name": "text", "binding": "\"Recorded\""}
+      """
+    Then the preview shows "Recorded"
+
+  Scenario: A state the object does not have cannot be shown
+    When the agent calls the tool "preview_state" with:
+      """json
+      {"node": {"id": "root"}, "show": "nowhere"}
+      """
+    Then the agent is refused with "not_found"
+    And the refusal's "/details/kind" is "no_state"
+
   Scenario: A click alone plays the flow and reads nothing
     When the agent calls the tool "preview_state" with:
       """json

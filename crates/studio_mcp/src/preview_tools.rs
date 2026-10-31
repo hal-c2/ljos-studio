@@ -68,6 +68,9 @@ struct StateArgs {
     /// prototype plays without an `id` on the object whose state it reads.
     node: Option<Address>,
     doc: Option<String>,
+    /// Put `node` in this QML state of its own for the preview, through
+    /// reloads, until `""`; the file does not change.
+    show: Option<String>,
     /// Values to assign to a block's state (mocked previews only).
     set: Option<Map<String, Value>>,
     /// An object (with an `id`) to click first, after `set`, as a person
@@ -313,6 +316,7 @@ fn open(studio: &Mutex<Studio>, a: OpenArgs) -> Result<OpenOut, SurfaceError> {
             reloads: VecDeque::new(),
             behind: false,
             clicks: 0,
+            shown: None,
         });
     }
     Ok(OpenOut {
@@ -420,6 +424,28 @@ fn state(studio: &Mutex<Studio>, a: StateArgs) -> Result<StateOut, SurfaceError>
         if let Err(e) = open.host.click(&click) {
             return Err(preview_error(previews.failed(e)));
         }
+        open.clicks += 1;
+    }
+    if let Some(show) = a.show {
+        let known = show.is_empty()
+            || studio
+                .session
+                .variants(&doc, &&address)
+                .map_err(error)?
+                .states
+                .iter()
+                .any(|s| s.name == show);
+        if !known {
+            return Err(
+                SurfaceError::not_found(format!("`{id}` has no state `{show}`"))
+                    .with_details(json!({ "kind": "no_state" })),
+            );
+        }
+        if let Err(e) = open.host.write(&id, "state", Value::String(show.clone())) {
+            return Err(preview_error(previews.failed(e)));
+        }
+        open.shown = (!show.is_empty()).then(|| (id.clone(), show));
+        // It changes the picture without a reload, as a click does.
         open.clicks += 1;
     }
     let mut asked = names.clone();

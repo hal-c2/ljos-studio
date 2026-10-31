@@ -4,7 +4,9 @@
 //
 // Below them, its states (`state_edit`): one is picked to edit the values
 // it changes and the condition that turns it on, or to give it a
-// breakpoint, a width bound of the window.
+// breakpoint, a width bound of the window. While one is picked, the frame
+// shows it (`preview_state`) and what this panel sets goes into it, whichever
+// object is selected, until the person is done.
 //
 // Then the signals it has, with their arguments, which the flow panel
 // wires; and the roles of the data it sees, in a list's delegate: one is
@@ -37,6 +39,10 @@ Panel {
     }
 
     function set(name, text) {
+        if (picked !== "") {
+            record(name, text)
+            return
+        }
         const parsed = literal(text)
         if (!parsed.ok) {
             refusal.text = text + " is not a literal: bind it as an expression"
@@ -51,21 +57,84 @@ Panel {
         })
     }
 
-    // The state picked to edit; empty for none.
+    // The state picked to edit; empty for none. It belongs to the object
+    // selected when it was picked, and stays picked as the selection moves.
     property string picked: ""
+    property string pickedOn: ""
     readonly property var current: {
-        const all = workspace.states
+        const all = workspace.selected === pickedOn ? workspace.states : workspace.rootStates
         for (let i = 0; i < all.length; i++) {
             if (all[i].name === picked)
                 return all[i]
         }
         return null
     }
+    readonly property string selectedId: {
+        const found = layer(workspace.selected)
+        return found !== null ? found.id : ""
+    }
+    // Another document has its own states, and its own preview.
+    readonly property string pickedDoc: workspace.doc
+    onPickedDocChanged: {
+        picked = ""
+        pickedOn = ""
+    }
+
+    function layer(node) {
+        const all = workspace.layers
+        for (let i = 0; i < all.length; i++) {
+            if (all[i].node === node)
+                return all[i]
+        }
+        return null
+    }
+
+    // The frame shows what is being edited, by the object's id, which is how
+    // a running preview is read. A state with a `when` is the app's to turn
+    // on: forcing it would have a frame claim what its width does not do.
+    function pick(name, on) {
+        const was = pickedOn
+        const had = picked !== ""
+        picked = name
+        pickedOn = on
+        const conditioned = workspace.states.some(s => s.name === name && s.when !== undefined)
+        if (name !== "" && !conditioned)
+            show(on, name)
+        else if (had)
+            show(was, "")
+    }
+    function show(on, state) {
+        const object = layer(on)
+        if (workspace.previews && object !== null && object.id !== "")
+            workspace.dispatch("preview_state", {node: {node: on}, show: state})
+    }
+
+    // What a state changes is written with the object's id: there is no other
+    // way for a `PropertyChanges` to name it.
+    function record(name, text) {
+        if (selectedId === "") {
+            refusal.text = "A state names the object it changes: give this one an id"
+            return
+        }
+        change(selectedId, name, text)
+    }
+
+    // The value the picked state gives the selected object's property.
+    function inState(name, base) {
+        if (current === null)
+            return base
+        const changes = current.changes
+        for (let i = 0; i < changes.length; i++) {
+            if (changes[i].target === selectedId && changes[i].name === name)
+                return changes[i].value
+        }
+        return base
+    }
 
     function editState(args) {
         refusal.text = ""
         args.doc = workspace.doc
-        args.node = {node: workspace.selected}
+        args.node = {node: pickedOn !== "" && args.state === picked ? pickedOn : workspace.selected}
         workspace.dispatch("state_edit", args)
     }
 
@@ -112,6 +181,10 @@ Panel {
     }
 
     function bind(name, text) {
+        if (picked !== "") {
+            record(name, text)
+            return
+        }
         refusal.text = ""
         workspace.dispatch("binding_set", {
             doc: workspace.doc,
@@ -143,7 +216,7 @@ Panel {
                 }
                 TextField {
                     id: value
-                    text: row.modelData.value
+                    text: panel.inState(row.modelData.name, row.modelData.value)
                     Accessible.name: row.modelData.name
                     Layout.fillWidth: true
                     onAccepted: panel.set(row.modelData.name, text)
@@ -209,7 +282,7 @@ Panel {
                     checkable: true
                     checked: panel.picked === stateRow.modelData.name
                     Accessible.name: "State " + stateRow.modelData.name
-                    onClicked: panel.picked = checked ? stateRow.modelData.name : ""
+                    onClicked: panel.pick(checked ? stateRow.modelData.name : "", checked ? panel.workspace.selected : "")
                 }
                 TextField {
                     text: stateRow.modelData.name
@@ -219,18 +292,19 @@ Panel {
                         const was = stateRow.modelData.name
                         if (text === was || text === "")
                             return
-                        if (panel.picked === was)
-                            panel.picked = text
                         panel.editState({action: "rename", state: was, new_name: text})
+                        if (panel.picked === was)
+                            panel.pick(text, panel.pickedOn)
                     }
                 }
                 Button {
                     text: "Remove"
                     Accessible.name: "Remove state " + stateRow.modelData.name
                     onClicked: {
-                        if (panel.picked === stateRow.modelData.name)
-                            panel.picked = ""
-                        panel.editState({action: "remove", state: stateRow.modelData.name})
+                        const name = stateRow.modelData.name
+                        panel.editState({action: "remove", state: name})
+                        if (panel.picked === name)
+                            panel.pick("", "")
                     }
                 }
             }
@@ -259,6 +333,26 @@ Panel {
             }
         }
 
+        RowLayout {
+            visible: panel.picked !== ""
+            Layout.fillWidth: true
+            spacing: Spacing.xxs
+
+            Label {
+                text: "Editing state " + panel.picked
+                color: Colors.text
+                font.weight: Typography.bodyStrongWeight
+                Accessible.role: Accessible.StaticText
+                Accessible.name: text
+                Layout.fillWidth: true
+            }
+            Button {
+                text: "Done"
+                Accessible.name: "Done editing state"
+                onClicked: panel.pick("", "")
+            }
+        }
+
         ColumnLayout {
             visible: panel.current !== null
             Layout.fillWidth: true
@@ -283,6 +377,7 @@ Panel {
                         if (text !== "")
                             args.when = text
                         panel.editState(args)
+                        panel.show(panel.pickedOn, "")
                     }
                 }
             }
@@ -297,7 +392,10 @@ Panel {
                         required property string modelData
                         text: modelData
                         Accessible.name: "Breakpoint " + modelData
-                        onClicked: panel.editState({action: "when", state: panel.picked, breakpoint: modelData})
+                        onClicked: {
+                            panel.editState({action: "when", state: panel.picked, breakpoint: modelData})
+                            panel.show(panel.pickedOn, "")
+                        }
                     }
                 }
             }

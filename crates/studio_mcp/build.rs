@@ -24,7 +24,11 @@ fn main() {
         names.dedup();
         names.retain(|name| {
             module.type_named(name).is_some_and(|ty| {
-                ty.is_creatable && ty.is_built && !ty.is_singleton && !ty.is_value && !ty.is_unlisted
+                ty.is_creatable
+                    && ty.is_built
+                    && !ty.is_singleton
+                    && !ty.is_value
+                    && !ty.is_unlisted
             })
         });
         if !names.is_empty() {

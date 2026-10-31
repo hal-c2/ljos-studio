@@ -215,12 +215,24 @@
               "type": "var",
               "kind": "value",
               "list": false,
-              "readonly": false,
+              "readonly": true,
               "final": true,
               "required": false,
               "constant": false,
               "group": false,
-              "notify": null
+              "notify": "toolkitChanged"
+            },
+            {
+              "name": "rootStates",
+              "type": "var",
+              "kind": "value",
+              "list": false,
+              "readonly": true,
+              "final": true,
+              "required": false,
+              "constant": false,
+              "group": false,
+              "notify": "rootStatesChanged"
             },
             {
               "name": "done",

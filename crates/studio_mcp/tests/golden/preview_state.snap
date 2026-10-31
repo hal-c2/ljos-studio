@@ -124,6 +124,13 @@ expression: value
           "object",
           "null"
         ]
+      },
+      "show": {
+        "description": "Put `node` in this QML state of its own for the preview, through\nreloads, until `\"\"`; the file does not change.",
+        "type": [
+          "string",
+          "null"
+        ]
       }
     },
     "title": "StateArgs",
