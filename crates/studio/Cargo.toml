@@ -23,7 +23,11 @@ ljos_design.workspace = true
 ljos_design_qml.workspace = true
 anyhow.workspace = true
 clap.workspace = true
-tokio.workspace = true
+tokio = { workspace = true, features = ["signal"] }
+
+[target.'cfg(unix)'.dependencies]
+# Its safe `_exit`: the workspace forbids `unsafe`.
+signal-hook = { version = "0.3", default-features = false }
 
 # The shell Studio ships, compiled ahead of time against
 # crates/studio_blocks/ljostypes.json: the build script runs none of

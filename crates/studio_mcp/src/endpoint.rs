@@ -27,7 +27,9 @@ pub fn serve_agents(
     caps: CapSet,
     state: &Path,
 ) -> Result<HttpServer, HttpError> {
-    let mut config = HttpConfig::loopback(caps).token_file(state.join(TOKEN_FILE));
-    config.clean_up_on_signals = true;
+    let config = HttpConfig::loopback(caps).token_file(state.join(TOKEN_FILE));
+    // Not `clean_up_on_signals`: that ends the process at once, and the
+    // program has a preview to close first. It removes the token with the
+    // state directory.
     HttpServer::start(Arc::clone(server), config)
 }

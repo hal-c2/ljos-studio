@@ -116,6 +116,13 @@ impl Studio {
 
     /// Previews of this project run on hosts `hosts` makes in its
     /// directory; without, the preview tools say there is none.
+    /// Closes the preview when called, from any thread. A tool call waiting
+    /// on the session does not hold it up.
+    pub fn preview_closer(&self) -> impl FnOnce() + Send + 'static {
+        let previews = self.previews.clone();
+        move || preview::lock(&previews).open = None
+    }
+
     pub fn with_previews(mut self, hosts: preview::HostFactory) -> Self {
         self.hosts = Some(preview::Hosts::InDir(hosts));
         self
