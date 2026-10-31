@@ -206,7 +206,11 @@ fn walk(root: &Path) -> Result<(Vec<FileEntry>, Vec<LeftOut>), SurfaceError> {
             } else {
                 None
             };
-            if let Some(why) = own.or(target) {
+            // A pipe's reader waits for a writer, a device's has no end:
+            // the export would hold Studio until somebody wrote one.
+            let special = (!meta.is_dir() && !meta.is_file())
+                .then_some("not a regular file: a pipe, socket or device");
+            if let Some(why) = own.or(target).or(special) {
                 left_out.push(LeftOut {
                     path,
                     why: why.to_owned(),
@@ -435,27 +439,68 @@ fn leads_elsewhere(root: &Path, full: &Path) -> bool {
     false
 }
 
+/// Whether `dir` holds a bundle's own manifest: a file, not a link to
+/// one, that says it is a manifest. A file only named like one is
+/// somebody's, and the directory with it.
+fn holds_bundle(dir: &Path) -> bool {
+    let at = dir.join(MANIFEST);
+    fs::symlink_metadata(&at).is_ok_and(|m| m.file_type().is_file())
+        && fs::read_to_string(&at)
+            .ok()
+            .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
+            .is_some_and(|v| v.get("format").and_then(|f| f.as_str()) == Some(FORMAT))
+}
+
+/// Refuses an `out` that leads elsewhere now, or that holds something other
+/// than a bundle or nothing. Asked again just before `out` is removed, so
+/// a directory swapped in while the files were copied is not emptied.
+fn may_replace(root: &Path, out: &Path) -> Result<(), SurfaceError> {
+    if leads_elsewhere(root, out) {
+        return Err(SurfaceError::new(
+            ErrorCode::PathDenied,
+            format!(
+                "`{}` goes through a link now; bundles are written to the project's own `{BUILD}/`",
+                out.display()
+            ),
+        ));
+    }
+    let Ok(found) = fs::symlink_metadata(out) else {
+        return Ok(());
+    };
+    let empty = || fs::read_dir(out).is_ok_and(|mut d| d.next().is_none());
+    if !found.is_dir() || !(holds_bundle(out) || empty()) {
+        return Err(refused(
+            ErrorCode::InvalidArgument,
+            "exists",
+            format!(
+                "`{}` holds something other than a bundle; choose another `out`",
+                out.display()
+            ),
+        ));
+    }
+    Ok(())
+}
+
 /// Copies the files into a place beside `out` and swaps it in, so a
 /// bundle is never half one export and half another.
 fn write(root: &Path, out: &Path, manifest: &Manifest) -> Result<(), SurfaceError> {
-    if out.exists() {
-        let previous = out.join(MANIFEST).is_file();
-        let empty = fs::read_dir(out).is_ok_and(|mut d| d.next().is_none());
-        if !previous && !empty {
-            return Err(refused(
-                ErrorCode::InvalidArgument,
-                "exists",
-                format!(
-                    "`{}` holds something other than a bundle; choose another `out`",
-                    out.display()
-                ),
-            ));
-        }
-    }
+    write_with(root, out, manifest, || {})
+}
+
+/// [`write`]; `copied` runs once the files are copied and before `out` is
+/// replaced, where a test swaps a directory.
+fn write_with(
+    root: &Path,
+    out: &Path,
+    manifest: &Manifest,
+    copied: impl FnOnce(),
+) -> Result<(), SurfaceError> {
+    may_replace(root, out)?;
     let parent = out.parent().expect("below build/");
     let name = out.file_name().expect("a name").to_string_lossy();
     let staging: PathBuf = parent.join(format!(".{name}.partial"));
-    if staging.exists() {
+    // Not followed: a link left here is let go of, not emptied.
+    if fs::symlink_metadata(&staging).is_ok() {
         fs::remove_dir_all(&staging).map_err(|e| io(&staging, &e))?;
     }
     fs::create_dir_all(&staging).map_err(|e| io(&staging, &e))?;
@@ -465,13 +510,35 @@ fn write(root: &Path, out: &Path, manifest: &Manifest) -> Result<(), SurfaceErro
             fs::create_dir_all(dir).map_err(|e| io(dir, &e))?;
         }
         let from = root.join(path);
+        // As the walk found it: a file swapped for a link out of the
+        // project, or for a pipe, since then is not read.
+        let still = from.canonicalize().is_ok_and(|real| real.starts_with(root))
+            && fs::metadata(&from).is_ok_and(|m| m.is_file());
+        if !still {
+            return Err(refused(
+                ErrorCode::NotActionable,
+                "changed",
+                format!("`{path}` changed while the bundle was written; export again"),
+            ));
+        }
         fs::copy(&from, &to).map_err(|e| io(&from, &e))?;
     }
     let mut text = serde_json::to_string_pretty(manifest).expect("a manifest is JSON");
     text.push('\n');
     let at = staging.join(MANIFEST);
     fs::write(&at, text).map_err(|e| io(&at, &e))?;
-    if out.exists() {
+    copied();
+    // Path by path, so what is checked is what is there now: what is left
+    // between this and the removal is a window no path can close (see the
+    // DECISION in DESIGN.md's S6 risks).
+    may_replace(root, out)?;
+    if leads_elsewhere(root, &staging) {
+        return Err(SurfaceError::new(
+            ErrorCode::PathDenied,
+            format!("`{}` goes through a link now", staging.display()),
+        ));
+    }
+    if fs::symlink_metadata(out).is_ok() {
         fs::remove_dir_all(out).map_err(|e| io(out, &e))?;
     }
     fs::rename(&staging, out).map_err(|e| io(out, &e))
@@ -522,4 +589,77 @@ pub(crate) fn add(registry: ToolRegistry, studio: &Arc<Mutex<Studio>>) -> ToolRe
         }),
         typed(move |_, a: ExportArgs| export(&studio, a)),
     )
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use std::os::unix::fs::symlink;
+
+    use super::*;
+
+    fn manifest(files: &[&str]) -> Manifest {
+        Manifest {
+            format: FORMAT.to_owned(),
+            version: VERSION,
+            target: Target::Native,
+            entry: files[0].to_owned(),
+            run: Vec::new(),
+            theme: None,
+            blocks: Vec::new(),
+            files: files
+                .iter()
+                .map(|p| FileEntry {
+                    path: (*p).to_owned(),
+                    bytes: 0,
+                })
+                .collect(),
+            left_out: Vec::new(),
+        }
+    }
+
+    fn names(dir: &Path) -> Vec<String> {
+        let mut names: Vec<String> = fs::read_dir(dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        names.sort();
+        names
+    }
+
+    #[test]
+    fn a_build_directory_swapped_for_a_link_while_copying_is_not_emptied() {
+        let project = tempfile::tempdir().unwrap();
+        let root = project.path().canonicalize().unwrap();
+        fs::write(root.join("Shell.qml"), "Item {}\n").unwrap();
+        // Somebody's directory that looks like a bundle from its manifest.
+        let outside = tempfile::tempdir().unwrap();
+        let theirs = outside.path().join("native");
+        fs::create_dir(&theirs).unwrap();
+        fs::write(theirs.join(MANIFEST), r#"{"format": "ljos-bundle"}"#).unwrap();
+        fs::write(theirs.join("precious.txt"), "keep me").unwrap();
+        let out = root.join(BUILD).join("native");
+        let swapped = write_with(&root, &out, &manifest(&["Shell.qml"]), || {
+            fs::rename(root.join(BUILD), root.join("build.was")).unwrap();
+            symlink(outside.path(), root.join(BUILD)).unwrap();
+        });
+        let refused = swapped.unwrap_err();
+        assert_eq!(refused.code, ErrorCode::PathDenied, "{refused:?}");
+        assert_eq!(names(&theirs), [MANIFEST, "precious.txt"]);
+    }
+
+    #[test]
+    fn a_file_swapped_for_a_link_out_after_the_walk_is_not_copied() {
+        let project = tempfile::tempdir().unwrap();
+        let root = project.path().canonicalize().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        fs::write(outside.path().join("secret.txt"), "theirs").unwrap();
+        // What the walk saw was a file of the project.
+        let checked = manifest(&["Shell.qml"]);
+        symlink(outside.path().join("secret.txt"), root.join("Shell.qml")).unwrap();
+        let out = root.join(BUILD).join("native");
+        let refused = write(&root, &out, &checked).unwrap_err();
+        assert_eq!(refused.code, ErrorCode::NotActionable, "{refused:?}");
+        assert!(!out.exists());
+        assert!(!root.join(BUILD).join(".native.partial/Shell.qml").exists());
+    }
 }

@@ -125,7 +125,11 @@ rewrite the user's QML (`mutate`), start a preview that runs project code
   and confined to the open project; a path outside it is refused, and so
   is one a link leads out of. `export` leaves a link out of the project,
   or to anything it leaves out itself (mocks, the sidecar, build output),
-  out of the bundle, and refuses a build directory that is a link.
+  out of the bundle, and refuses a build directory that is a link. It
+  leaves out what is not a regular file (a pipe would hold it forever),
+  replaces only a directory that is empty or holds a manifest that is a
+  file saying `ljos-bundle`, and asks all of that again just before it
+  replaces one, and again of each file as it copies it.
 
 `studio --mcp` on stdio needs no token: its client started it.
 
@@ -775,6 +779,15 @@ in this session and not yet written are not merged into it; the refusal
 says so. DECISION: export leaves a link out of the project out of the
 bundle (named in `left_out`) rather than refusing the export, as it does
 for the mocks; an entry that is left out is refused (`entry_left_out`).
+DECISION: export works path by path, and checks again right before each
+step that removes or reads, rather than through directory handles
+(`openat`/`unlinkat`, or `cap-std`). Between the last check and the
+removal a process of the same user could still swap `build/` for a link
+and have a directory that holds a bundle's manifest removed. That process
+can already remove the directory itself, so the window only matters for a
+swap made by accident, such as a checkout. Directory handles would need a
+dependency on each platform, and the browser build has no directory to
+export. Handles are the next step if Studio ever exports for another user.
 
 Measured in a release build on the reference desktop:
 
