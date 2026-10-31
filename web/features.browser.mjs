@@ -81,6 +81,19 @@ export const WAITING = new Map([
   ],
 ]);
 
+// Every event of the preview's, and the reloads among them, as the native
+// runner's World reads them.
+async function reloads(w) {
+  const studio = await w.server();
+  const events = [];
+  for (;;) {
+    const page = (await studio.call("preview_events", { since: events.length })).ok?.events ?? [];
+    if (page.length === 0) break;
+    events.push(...page);
+  }
+  return { events, reported: events.filter((e) => e.kind === "reloaded" || e.kind === "reload_failed") };
+}
+
 // The steps this runner has and `web/features.mjs` has not: the native
 // runner's preview steps, which features.mjs lists as run here.
 const PREVIEW_STEPS = [
@@ -91,6 +104,8 @@ const PREVIEW_STEPS = [
     // is the text, as the native outline names a Text by its text. It is
     // the test's eye, not an outline given to the agent (ljos-web request 3).
     async action(w, s, text) {
+      // The reloads it was read after, for the step below.
+      w.reloadsRead = (await reloads(w)).reported.length;
       const shown = await w.page.evaluate(
         async ({ text, ms }) => {
           const frame = document.querySelector("iframe");
@@ -106,6 +121,21 @@ const PREVIEW_STEPS = [
         { text, ms: 1000 },
       );
       if (shown) throw new Error(`the preview shows: ${JSON.stringify(shown)}`);
+    },
+  },
+  {
+    kinds: ["then"],
+    pattern: /^Studio has reported the preview reloaded since it was read$/,
+    async action(w) {
+      const { events, reported } = await reloads(w);
+      const read = w.reloadsRead ?? 0;
+      const last = reported.at(-1);
+      if (reported.length > read && last.kind === "reloaded") return;
+      throw new Error(
+        reported.length > read
+          ? `the last reload Studio reported failed: ${JSON.stringify(last)}`
+          : `no reload since the preview was read (${read} then, ${reported.length} now); events: ${JSON.stringify(events)}`,
+      );
     },
   },
   {
