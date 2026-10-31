@@ -35,10 +35,11 @@ const BUILD: &str = "build";
 /// The project's mock modules (`preview_open`'s `mocked` state).
 const MOCKS: &str = "mocks";
 
-/// How many files a bundle may hold through links it cannot keep as links.
-/// Links that fan out and meet again copy a directory once per way down,
-/// which doubles with every level.
-const LINKED_FILES: usize = 10_000;
+/// How many files and directories a bundle may hold through links it
+/// cannot keep as links. Links that fan out and meet again copy a directory
+/// once per way down, which doubles with every level, whether or not the
+/// directories hold any files.
+const LINKED_ENTRIES: usize = 10_000;
 
 #[derive(Clone, Copy, Default, Debug, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
@@ -698,56 +699,78 @@ fn place_link(
 /// leads to, under its name, with the links in that directory copied the
 /// same way, and which of `files` each one is. Each `(path, to)` is copied
 /// once, and a link back into a directory being copied around it is not
-/// followed again. Past [`LINKED_FILES`] it is refused before anything is
-/// copied.
+/// followed again. Every link met and every file placed counts toward
+/// [`LINKED_ENTRIES`], so links that only lead to more links are bounded
+/// too; past it the copy is refused before anything is copied.
 fn through_links<'a>(
     files: &'a [FileEntry],
     links: &[LinkEntry],
     copied: &[&LinkEntry],
 ) -> Result<Vec<(String, &'a FileEntry)>, SurfaceError> {
-    struct Copy<'a, 'l> {
-        files: &'a [FileEntry],
-        links: &'l [LinkEntry],
+    struct Copy<'a, 'l, 'i> {
+        files: &'i [&'a FileEntry],
+        links: &'i [&'l LinkEntry],
         copying: Vec<&'l str>,
         done: BTreeSet<(String, &'l str)>,
         out: Vec<(String, &'a FileEntry)>,
+        entries: usize,
     }
-    impl<'l> Copy<'_, 'l> {
+    /// The entries of `sorted` below `to`: every path starting `to/` lies
+    /// between `to/` and `to0`, `0` being the byte after `/`.
+    fn below<'s, T>(sorted: &'s [T], to: &str, path: impl Fn(&T) -> &str) -> &'s [T] {
+        let (from, until) = (format!("{to}/"), format!("{to}0"));
+        let start = sorted.partition_point(|e| path(e) < from.as_str());
+        let end = sorted.partition_point(|e| path(e) < until.as_str());
+        &sorted[start..end]
+    }
+    impl<'l> Copy<'_, 'l, '_> {
+        fn count(&mut self) -> Result<(), SurfaceError> {
+            if self.entries == LINKED_ENTRIES {
+                return Err(refused(
+                    ErrorCode::Unsupported,
+                    "links_multiply",
+                    format!(
+                        "the project's links lead into the same directories along so many \
+                         ways that copying them, where the bundle cannot hold them as links, \
+                         would write more than {LINKED_ENTRIES} files and directories; link \
+                         each directory once"
+                    ),
+                ));
+            }
+            self.entries += 1;
+            Ok(())
+        }
         fn link(&mut self, path: String, to: &'l str) -> Result<(), SurfaceError> {
+            self.count()?;
             if self.copying.contains(&to) || !self.done.insert((path.clone(), to)) {
                 return Ok(());
             }
             self.copying.push(to);
-            let below = format!("{to}/");
-            for file in self.files.iter().filter(|f| f.path.starts_with(&below)) {
-                if self.out.len() == LINKED_FILES {
-                    return Err(refused(
-                        ErrorCode::Unsupported,
-                        "links_multiply",
-                        format!(
-                            "the project's links lead into the same directories along so many \
-                             ways that copying them, where the bundle cannot hold them as links, \
-                             would write more than {LINKED_FILES} files; link each directory once"
-                        ),
-                    ));
-                }
+            let skip = to.len() + 1;
+            let (files, links) = (self.files, self.links);
+            for &file in below(files, to, |f| &f.path) {
+                self.count()?;
                 self.out
-                    .push((format!("{path}/{}", &file.path[below.len()..]), file));
+                    .push((format!("{path}/{}", &file.path[skip..]), file));
             }
-            let links = self.links;
-            for inner in links.iter().filter(|l| l.path.starts_with(&below)) {
-                self.link(format!("{path}/{}", &inner.path[below.len()..]), &inner.to)?;
+            for inner in below(links, to, |l| &l.path) {
+                self.link(format!("{path}/{}", &inner.path[skip..]), &inner.to)?;
             }
             self.copying.pop();
             Ok(())
         }
     }
+    let mut files: Vec<&FileEntry> = files.iter().collect();
+    let mut links: Vec<&LinkEntry> = links.iter().collect();
+    files.sort_unstable_by(|a, b| a.path.cmp(&b.path));
+    links.sort_unstable_by(|a, b| a.path.cmp(&b.path));
     let mut copy = Copy {
-        files,
-        links,
+        files: &files,
+        links: &links,
         copying: Vec::new(),
         done: BTreeSet::new(),
         out: Vec::new(),
+        entries: 0,
     };
     for link in copied {
         copy.link(link.path.clone(), &link.to)?;
@@ -983,13 +1006,15 @@ mod tests {
         assert!(!out.join("zone/b/a/b").exists());
     }
 
-    /// `levels` directories under `levels/`, each with a `level.txt` and,
-    /// but the last, links `left` and `right` to the next.
-    fn diamond(root: &Path, levels: usize) {
+    /// `levels` directories under `levels/`, each with a `level.txt` if
+    /// `with_files` and, but the last, links `left` and `right` to the next.
+    fn diamond(root: &Path, levels: usize, with_files: bool) {
         for level in 0..levels {
             let dir = root.join("levels").join(level.to_string());
             fs::create_dir_all(&dir).unwrap();
-            fs::write(dir.join("level.txt"), format!("{level}\n")).unwrap();
+            if with_files {
+                fs::write(dir.join("level.txt"), format!("{level}\n")).unwrap();
+            }
             if level + 1 < levels {
                 for side in ["left", "right"] {
                     let next = root.join("levels").join((level + 1).to_string());
@@ -1003,7 +1028,25 @@ mod tests {
     fn a_diamond_of_links_too_large_to_copy_is_refused_before_anything_is_written() {
         let project = tempfile::tempdir().unwrap();
         let root = project.path().canonicalize().unwrap();
-        diamond(&root, 24);
+        diamond(&root, 24, true);
+        let out = root.join(BUILD).join("native");
+        let started = std::time::Instant::now();
+        let refusal = write_with(&root, &out, &walked(&root), refuse, || {}).unwrap_err();
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(2),
+            "{:?}",
+            started.elapsed()
+        );
+        assert_eq!(refusal.details.as_ref().unwrap()["kind"], "links_multiply");
+        assert!(!out.exists());
+        assert!(!root.join(BUILD).join(".native.partial").exists());
+    }
+
+    #[test]
+    fn a_diamond_of_links_to_directories_without_files_is_refused_before_anything_is_written() {
+        let project = tempfile::tempdir().unwrap();
+        let root = project.path().canonicalize().unwrap();
+        diamond(&root, 24, false);
         let out = root.join(BUILD).join("native");
         let started = std::time::Instant::now();
         let refusal = write_with(&root, &out, &walked(&root), refuse, || {}).unwrap_err();
@@ -1021,7 +1064,7 @@ mod tests {
     fn a_small_diamond_of_links_is_copied_once_per_way_down_and_counted() {
         let project = tempfile::tempdir().unwrap();
         let root = project.path().canonicalize().unwrap();
-        diamond(&root, 3);
+        diamond(&root, 3, true);
         let out = root.join(BUILD).join("native");
         let copied = write_with(&root, &out, &walked(&root), refuse, || {}).unwrap();
         // Level 1 by two ways, each holding level 2 by two more; level 2 by
