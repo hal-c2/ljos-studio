@@ -115,6 +115,11 @@ fn main() -> anyhow::Result<()> {
             .filter(|d| d.join("Shell.qml").is_file()),
     };
     let theme = args.theme.or_else(|| config.map(|c| c.join("theme.json")));
+    // A watched window watches where the theme file would be, and a first run
+    // has no such directory yet.
+    if let (Some(_), Some(dir)) = (&shell, theme.as_deref().and_then(Path::parent)) {
+        std::fs::create_dir_all(dir).with_context(|| format!("making {}", dir.display()))?;
+    }
     match shell {
         Some(shell) => watched_window(server, &shell, theme, &state),
         None => window(server, theme),
