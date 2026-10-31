@@ -19,12 +19,18 @@ Popup {
     // refused, or empty.
     property var answer: null
     property string refusal: ""
-    property bool busy: false
+    // How many calls have no answer yet. What is on screen is true of what
+    // the fields say only when none has.
+    property int waiting: 0
+    readonly property bool busy: waiting > 0
+    // The document to export. Kept here and not in the box: a new list of
+    // documents, which any tool's answer brings, sets the box's row anew.
+    property string chosen: ""
     // Whether the answer in view was a real export, not a dry run.
     readonly property bool wrote: answer !== null && answer.written
 
     readonly property string target: web.checked ? "web" : "native"
-    readonly property string entry: entries.currentIndex >= 0 ? entries.currentText : ""
+    readonly property string entry: workspace.documents.indexOf(chosen) >= 0 ? chosen : ""
 
     // Main.qml when the project has one, else the document shown, else the
     // first.
@@ -40,7 +46,7 @@ Popup {
     function run(dry) {
         if (entry === "")
             return
-        busy = true
+        waiting += 1
         const args = {entry: entry, target: target, dry_run: dry}
         if (out.text.trim() !== "")
             args.out = out.text.trim()
@@ -54,7 +60,7 @@ Popup {
     function show() {
         answer = null
         refusal = ""
-        entries.currentIndex = Math.max(0, workspace.documents.indexOf(defaultEntry()))
+        chosen = defaultEntry()
         open()
         check()
     }
@@ -73,7 +79,7 @@ Popup {
         if (a === null)
             return []
         const m = a.manifest
-        const rows = []
+        const rows = ["Entry " + m.entry]
         for (const f of m.files)
             rows.push("File " + f.path + " (" + size(f.bytes) + ")")
         for (const b of m.blocks)
@@ -101,8 +107,8 @@ Popup {
         if (a === null || !a.written)
             return ""
         if (a.manifest.run)
-            return "Start it with: " + a.manifest.run.join(" ") + "  (in " + a.out + ")"
-        return "Build the site with: mise run export:web:build " + a.out
+            return "Start it with: " + a.manifest.run.join(" ") + "  (in " + a.path + ")"
+        return "Build the site with: mise run export:web:build " + a.path
     }
 
     parent: Overlay.overlay
@@ -119,14 +125,14 @@ Popup {
         function onAnswered(tool, answer) {
             if (tool !== "export")
                 return
-            panel.busy = false
+            panel.waiting -= 1
             panel.refusal = ""
             panel.answer = answer
         }
         function onRefused(tool, error) {
             if (tool !== "export")
                 return
-            panel.busy = false
+            panel.waiting -= 1
             panel.answer = null
             panel.refusal = error.message
         }
@@ -188,9 +194,13 @@ Popup {
             ComboBox {
                 id: entries
                 model: panel.workspace.documents
+                currentIndex: panel.workspace.documents.indexOf(panel.chosen)
                 Accessible.name: "Entry document"
                 Layout.fillWidth: true
-                onActivated: panel.check()
+                onActivated: (index) => {
+                    panel.chosen = panel.workspace.documents[index]
+                    panel.check()
+                }
             }
         }
 
@@ -205,6 +215,9 @@ Popup {
                 placeholderText: "build/" + panel.target
                 Accessible.name: "Output directory"
                 Layout.fillWidth: true
+                // As typed, so "Write bundle" never writes somewhere the
+                // warning above it has not looked at.
+                onTextEdited: panel.check()
                 onAccepted: panel.check()
             }
         }
@@ -303,7 +316,7 @@ Popup {
                 Accessible.name: text
                 enabled: panel.wrote
                 onClicked: {
-                    clip.text = panel.answer.out
+                    clip.text = panel.answer.path
                     clip.selectAll()
                     clip.copy()
                 }
