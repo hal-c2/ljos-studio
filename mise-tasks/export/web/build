@@ -1,0 +1,55 @@
+#!/usr/bin/env bash
+#MISE description="A site from a Studio web export (build/web): compiled and bundled by an ljos-web checkout, into BUNDLE-site or OUT"
+#USAGE arg "<bundle>" help="A directory the tool export wrote with target web (it holds ljos-site.json)"
+#USAGE arg "[out]" help="Where the site goes; default BUNDLE-site. A site this task built there is replaced"
+set -euo pipefail
+# Studio's interim site builder (DESIGN.md S6): ljos-web compiles and
+# bundles; this only hands it the files the manifest lists. It downloads
+# nothing: it needs an ljos-web checkout with its packages installed, its
+# qmlc, and Qt 6's QML only when the site imports the controls.
+. "$(dirname "$0")/../../_lib/env.sh"
+[ $# -ge 1 ] || die "usage: mise run export:web:build <bundle> [out]"
+bundle="$(absolute "$1")"
+[ -f "$bundle/ljos-site.json" ] || die "$bundle holds no ljos-site.json: export with \"target\": \"web\" first"
+out="${2:-$bundle-site}"
+case "$out" in
+  /*) ;;
+  *) out="${MISE_ORIGINAL_CWD:-$PWD}/$out" ;;
+esac
+# A site this task built says so; anything else there is somebody's.
+stamp=".ljos-site-build"
+if [ -e "$out" ] && [ ! -f "$out/$stamp" ] && [ -n "$(ls -A "$out")" ]; then
+  die "$out holds something other than a site this task built; choose another out"
+fi
+
+find_ljos_web
+find_qmlc
+app="$(own_target)/export-web"
+rm -rf "$app"
+mkdir -p "$app/site" "$app/node_modules/@solidjs"
+cp "$studio_root"/web/site/{index.html,main.js,vite.config.js} "$app/"
+modules="$LJOS_WEB/examples/web/node_modules"
+for module in ljos-web solid-js vite @solidjs/web; do
+  ln -s "$(physical "$modules/$module")" "$app/node_modules/$module"
+done
+needs="$(node "$studio_root/web/site/bundle.mjs" "$bundle" "$app/site" "$modules/ljos-web/package.json")"
+for need in $needs; do
+  case "$need" in
+    qt) find_qt ;;
+    design) find_design_qml ;;
+  esac
+done
+pinned="$(node -e 'console.log(JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).ljos_web)' "$bundle/ljos-site.json")"
+at="$(git -C "$LJOS_WEB" rev-parse HEAD 2>/dev/null || true)"
+case "$at" in
+  "" | "$pinned") ;;
+  *) echo "note: the bundle was checked against ljos-web $pinned; building with $at" >&2 ;;
+esac
+export LJOS_QT_TYPES="${LJOS_QT_TYPES:-$LJOS_WEB/crates/ljos_web/types.txt}"
+(cd "$app" && VITE_CONFIG_NATIVE_IGNORE_WARNING=true node_modules/vite/bin/vite.js build --logLevel warn)
+rm -rf "$out"
+mkdir -p "$(dirname "$out")"
+cp -R "$app/dist" "$out"
+printf '%s\n' "$pinned" >"$out/$stamp"
+bytes="$(find "$out" -type f ! -name "$stamp" -exec cat {} + | wc -c | tr -d ' ')"
+echo "site: $out ($bytes bytes)"

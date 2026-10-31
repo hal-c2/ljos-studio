@@ -6,6 +6,7 @@ import { defineConfig } from "vite";
 import qml from "ljos-web/vite";
 
 const path = (relative) => fileURLToPath(new URL(relative, import.meta.url));
+const escaped = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 // Compiled QML asks for the stand-in of a native type (the file `qmlc` was
 // shown); the page is given the type's face instead. ljos-web will ask its
@@ -26,6 +27,15 @@ export default defineConfig({
     faces,
     qml({
       qmlc: process.env.QMLC ?? "qmlc",
+      // A project `serve.mjs` compiles is its own root: qmlc finds modules
+      // by every qmldir under its root, and the others there are not this
+      // project's. Only files under the directory `serve.mjs` names are
+      // projects; another path with `projects/<n>` in it is not.
+      args: (file) => {
+        const projects = process.env.STUDIO_PREVIEW_PROJECTS?.replaceAll("\\", "/");
+        const project = projects && new RegExp(`^(${escaped(projects)}/\\d+)/`).exec(file.replaceAll("\\", "/"));
+        return project ? ["--root", project[1]] : [];
+      },
       standins: [path("./standins"), ...(process.env.LJOS_DESIGN ? [process.env.LJOS_DESIGN] : [])],
     }),
   ],

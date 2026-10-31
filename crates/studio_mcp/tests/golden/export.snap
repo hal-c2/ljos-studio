@@ -9,7 +9,7 @@ expression: value
     "open_world": false,
     "read_only": false
   },
-  "description": "Write a bundle of the project that runs without Studio: its QML, theme, assets and own blocks, never mocks or `.studio/`, with a manifest (`ljos-bundle.json`) saying what it holds and how to start it (`ljos run`). `dry_run` writes nothing.",
+  "description": "Write a bundle of the project that runs without Studio: its QML, theme, assets and own modules, never mocks or `.studio/`. `native`: `ljos-bundle.json` says how `ljos run` starts it. `web`: `ljos-site.json` says what ljos-web builds a site from. `dry_run` writes nothing.",
   "inputSchema": {
     "$defs": {
       "Target": {
@@ -21,7 +21,7 @@ expression: value
           },
           {
             "const": "web",
-            "description": "A static site (not built yet: refused with the reason).",
+            "description": "A directory ljos-web builds a static site from.",
             "type": "string"
           }
         ]
@@ -126,7 +126,7 @@ expression: value
         "type": "object"
       },
       "Manifest": {
-        "description": "What a bundle holds; written beside it as `ljos-bundle.json`.",
+        "description": "What a bundle holds; written beside it as `ljos-bundle.json`, or for\nthe web as `ljos-site.json`.",
         "properties": {
           "blocks": {
             "description": "The project's own blocks, as `Module.Name`, and their files.",
@@ -148,6 +148,16 @@ expression: value
           "format": {
             "type": "string"
           },
+          "imports": {
+            "description": "The modules the site imports that are not the project's, sorted:\nwhat the builder takes from ljos-web (web).",
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
           "left_out": {
             "description": "What of the project is not in the bundle, and why.",
             "items": {
@@ -162,12 +172,32 @@ expression: value
             },
             "type": "array"
           },
+          "ljos_web": {
+            "description": "The ljos-web commit the imports were checked against (web).",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "modules": {
+            "description": "The project's own modules and their `qmldir`s (web).",
+            "items": {
+              "$ref": "#/$defs/ModuleDir"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
           "run": {
-            "description": "The command that starts it, run in the bundle's directory.",
+            "description": "The command that starts it, run in the bundle's directory (native).",
             "items": {
               "type": "string"
             },
-            "type": "array"
+            "type": [
+              "array",
+              "null"
+            ]
           },
           "target": {
             "$ref": "#/$defs/Target"
@@ -190,10 +220,24 @@ expression: value
           "version",
           "target",
           "entry",
-          "run",
           "blocks",
           "files",
           "left_out"
+        ],
+        "type": "object"
+      },
+      "ModuleDir": {
+        "properties": {
+          "module": {
+            "type": "string"
+          },
+          "qmldir": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "module",
+          "qmldir"
         ],
         "type": "object"
       },
@@ -206,7 +250,7 @@ expression: value
           },
           {
             "const": "web",
-            "description": "A static site (not built yet: refused with the reason).",
+            "description": "A directory ljos-web builds a static site from.",
             "type": "string"
           }
         ]

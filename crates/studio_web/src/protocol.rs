@@ -146,8 +146,14 @@ pub enum Answer {
     NoObject {
         id: String,
     },
-    /// The page cannot do what it was asked, with an error code of its own
-    /// (`unsupported` for a call this page does not do yet).
+    /// The page cannot answer this call until ljos-web can: which of the
+    /// numbered requests in DESIGN.md (S5) it waits on. A page never makes
+    /// up an answer in its place.
+    NotSupported {
+        message: String,
+        ljos_web_request: u32,
+    },
+    /// The page cannot do what it was asked, with an error code of its own.
     Refused {
         code: String,
         message: String,
@@ -166,6 +172,7 @@ impl Answer {
             Answer::Picked { .. } => "picked",
             Answer::NotStarted { .. } => "not_started",
             Answer::NoObject { .. } => "no_object",
+            Answer::NotSupported { .. } => "not_supported",
             Answer::Refused { .. } => "refused",
         }
     }

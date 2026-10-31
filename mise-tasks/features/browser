@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+#MISE description="The @preview scenarios in headless Chromium: the session in a worker, its preview compiled by ljos-web's qmlc and mounted in a frame (features/preview by default)"
+#MISE depends=["web:build"]
+#USAGE arg "[paths]" var=#true help="Feature files or directories"
+set -euo pipefail
+. "$(dirname "$0")/../_lib/env.sh"
+build_served_page
+find_playwright
+node "$studio_root/web/features.browser.mjs" "$app" "$@"

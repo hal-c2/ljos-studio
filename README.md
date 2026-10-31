@@ -54,7 +54,7 @@ set or a `../ljos-ui` checkout is beside this one, which they build from), and
 the `wasm-bindgen` CLI at the version Cargo.toml pins (`mise run web:build`
 and every web task after it). A task that needs one and lacks it says to run
 `mise run setup` and the command it would run. `mise run web:browser`,
-`web:shell` and `web:serve:check` drive headless Chromium, which also needs
+`web:shell`, `web:serve:check` and `features:browser` drive headless Chromium, which also needs
 `(cd ../ljos-web && pnpm --filter ljos-web-example-web exec playwright install chromium)`.
 
 ## Status
@@ -64,11 +64,14 @@ and every web task after it). A task that needs one and lacks it says to run
 - **S0–S4 built.** The lossless edit seam; headless Studio over MCP; previews
   in a child Ljós process; the canvas, layers, inspector, palette and code
   view; variants, breakpoints, slots, tokens, user shells and the self-reskin.
-- **S5 half built.** The session, its tools and the shell run in a browser,
-  with projects in browser storage and previews drawn by ljos-web in the page's
-  own pane. Studio's Canvas panel in a browser still says previews are off, and
-  the S1–S4 scenarios do not run there yet: both wait on requests to ljos-web
-  (DESIGN.md, S5).
+- **S5 built, as far as ljos-web goes.** The session, its tools and the
+  shell run in a browser, with projects in browser storage. The document
+  under edit is compiled by ljos-web's `qmlc` and mounted in a frame laid
+  over the Canvas panel. 21 of the 39 `@preview` scenarios run in Chromium
+  (`mise run features:browser`). The other 18 wait on numbered ljos-web
+  requests (screenshots, reading by id, themes, `Ljos.Models`, type
+  dumps); the preview refuses the calls it cannot answer as
+  `not_supported` (DESIGN.md, S5).
 - **S6 built, but for multiplayer.** Prototyping flows, list data, export
   bundles and review comments. Multiplayer research has not started.
 
@@ -78,6 +81,8 @@ as general pieces any tool can use.
 - [docs/DESIGN.md](docs/DESIGN.md): goals, modules and seams, data flow,
   testing, performance budget and milestones.
 - [docs/MCP.md](docs/MCP.md): the MCP tool surface.
+- [docs/MULTIPLAYER.md](docs/MULTIPLAYER.md): research on two writers
+  editing one document at once, with a recommendation and the seams it needs.
 
 ## Building
 

@@ -11,7 +11,7 @@ use std::collections::BTreeMap;
 use base64::Engine as _;
 use serde_json::{Map, Value};
 use studio_core::preview::{
-    Declared, LogLine, Picture, PreviewError, PreviewHost, PreviewSpec, Reload, Size,
+    Click, Declared, LogLine, Picture, PreviewError, PreviewHost, PreviewSpec, Reload, Size,
 };
 
 use crate::{
@@ -77,6 +77,13 @@ impl<P: Port> WebPreviewHost<P> {
         let call = request.name();
         match self.port.ask(&request) {
             Ok(Answer::Refused { code, message }) => Err(PreviewError::Refused { code, message }),
+            Ok(Answer::NotSupported {
+                message,
+                ljos_web_request,
+            }) => Err(PreviewError::NotSupported {
+                message,
+                ljos_web_request,
+            }),
             Ok(Answer::NoObject { id }) => Err(PreviewError::NoObject(id)),
             Ok(answer) => Ok(answer),
             Err(PortError::NoAnswer(message)) => {
@@ -131,6 +138,16 @@ fn unexpected(call: &str, answer: &Answer) -> PreviewError {
 impl<P: Port> PreviewHost for WebPreviewHost<P> {
     fn calls_per_second(&self) -> u32 {
         CALLS_PER_SECOND
+    }
+
+    // A click names its object by id, or lands at a point and is followed
+    // by a read of the root's state; ljos-web exposes neither (request 4,
+    // which a click at a point is folded into), so the page is not asked.
+    fn click(&mut self, _at: &Click) -> Result<(), PreviewError> {
+        Err(PreviewError::NotSupported {
+            message: "click: ljos-web keeps a component's ids private to its context".to_owned(),
+            ljos_web_request: 4,
+        })
     }
 
     fn open(&mut self, spec: &PreviewSpec) -> Result<(), PreviewError> {
@@ -342,9 +359,9 @@ pub(crate) mod tests {
                         .collect(),
                     next: 1,
                 },
-                Request::Write { .. } => Answer::Refused {
-                    code: "unsupported".into(),
+                Request::Write { .. } => Answer::NotSupported {
                     message: "this page cannot write properties".into(),
+                    ljos_web_request: 4,
                 },
                 Request::Resize { .. } | Request::Close => Answer::Done,
             })
@@ -449,7 +466,10 @@ pub(crate) mod tests {
         assert_eq!(host.logs(0).unwrap().1, 1);
         assert!(matches!(
             host.write("card", "width", json!(1)),
-            Err(PreviewError::Refused { code, .. }) if code == "unsupported"
+            Err(PreviewError::NotSupported {
+                ljos_web_request: 4,
+                ..
+            })
         ));
         assert!(matches!(
             host.resize(Size {
@@ -480,5 +500,27 @@ pub(crate) mod tests {
         assert!(matches!(host.alive(), Err(PreviewError::Ended(_))));
         assert_eq!(page.heard.lock().unwrap().len(), asked);
         assert!(matches!(host.alive(), Err(PreviewError::NotOpen)));
+    }
+
+    #[test]
+    fn a_call_the_page_cannot_do_yet_leaves_the_preview_alive() {
+        let (mut host, page, _) = host();
+        host.open(&spec()).unwrap();
+        let asked = page.heard.lock().unwrap().len();
+        for at in [Click::Id("card".into()), Click::Point { x: 4.0, y: 4.0 }] {
+            assert!(matches!(
+                host.click(&at),
+                Err(PreviewError::NotSupported {
+                    ljos_web_request: 4,
+                    ..
+                })
+            ));
+        }
+        assert_eq!(page.heard.lock().unwrap().len(), asked);
+        assert!(matches!(
+            host.write("card", "width", json!(1)),
+            Err(PreviewError::NotSupported { .. })
+        ));
+        assert!(host.alive().is_ok());
     }
 }

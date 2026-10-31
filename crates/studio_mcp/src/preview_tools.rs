@@ -161,6 +161,10 @@ pub(crate) fn preview_error(e: PreviewError) -> SurfaceError {
         PreviewError::NoObject(_) => kind(ErrorCode::NotFound, "no_object"),
         PreviewError::Refused { code, .. } => SurfaceError::new(ErrorCode::NotActionable, message)
             .with_details(json!({ "kind": "refused", "code": code })),
+        PreviewError::NotSupported {
+            ljos_web_request, ..
+        } => SurfaceError::new(ErrorCode::NotActionable, message)
+            .with_details(json!({ "kind": "not_supported", "ljos_web_request": ljos_web_request })),
         PreviewError::Transport(_) => kind(ErrorCode::Internal, "transport"),
     }
 }

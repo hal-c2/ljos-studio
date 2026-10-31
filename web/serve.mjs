@@ -7,7 +7,7 @@
 //
 //   node web/serve.mjs <the assembled app's directory> [port]
 
-import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createServer as createHttp } from "node:http";
 import { dirname, extname, join, normalize } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -39,11 +39,49 @@ const body = (req) =>
     req.on("error", reject);
   });
 
-export async function start({ app, port = 0 }) {
+// The files qmlc is shown for a project previewed with `aliases`
+// (`[{module, dir}]`): an aliased module's own files are the alias
+// directory's, as `ljos run --alias` imports them. qmlc finds a module by
+// every `qmldir` under its root, and of two declaring one module it takes
+// either (ljos-web request 17); Qt takes the one at the module's import
+// path, so a `qmldir` elsewhere declaring a module that one at its path
+// declares too is not shown (a project's `mocks/`).
+export function forQmlc(files, aliases = []) {
+  const shown = { ...files };
+  const direct = (path, dir) => path.startsWith(`${dir}/`) && !path.slice(dir.length + 1).includes("/");
+  for (const { module, dir } of aliases) {
+    const at = module.replaceAll(".", "/");
+    for (const path of Object.keys(shown)) if (direct(path, at)) delete shown[path];
+    for (const [path, text] of Object.entries(files)) if (direct(path, dir)) shown[`${at}/${path.slice(dir.length + 1)}`] = text;
+  }
+  const declared = (path) => /^\s*module\s+([\w.]+)/m.exec(shown[path])?.[1];
+  const qmldirs = Object.keys(shown).filter((p) => p === "qmldir" || p.endsWith("/qmldir"));
+  const atPath = new Set(qmldirs.filter((p) => declared(p) && p === `${declared(p).replaceAll(".", "/")}/qmldir`).map(declared));
+  for (const p of qmldirs) if (atPath.has(declared(p)) && p !== `${declared(p).replaceAll(".", "/")}/qmldir`) delete shown[p];
+  // A Ljós block's `# block Name Version File …` line declares its type
+  // to Ljós; qmlc reads only Qt's type lines, so it is shown one as well
+  // (ljos-web request 19).
+  for (const p of Object.keys(shown).filter((p) => p === "qmldir" || p.endsWith("/qmldir"))) {
+    const typed = new Set([...shown[p].matchAll(/^\s*(?:singleton\s+)?([A-Z]\w*)\s+\d/gm)].map((m) => m[1]));
+    const blocks = [...shown[p].matchAll(/^#\s*block\s+([A-Z]\w*)\s+(\d+(?:\.\d+)?)\s+(\S+\.qml)\b/gm)].filter((m) => !typed.has(m[1]));
+    if (blocks.length > 0) shown[p] = `${shown[p].replace(/\n?$/, "\n")}${blocks.map((m) => `${m[1]} ${m[2]} ${m[3]}`).join("\n")}\n`;
+  }
+  return shown;
+}
+
+// `record` keeps every error the compiler answers, for a runner that reads
+// them; a person's server, typing into a refused compile, keeps none.
+export async function start({ app, port = 0, record = false }) {
   process.env.VITE_CONFIG_NATIVE_IGNORE_WARNING = "true";
   // Vite and the plugin, from the checkout the app's `node_modules` links to.
   const { createServer: createVite } = await import(pathToFileURL(join(app, "node_modules/vite/dist/node/index.js")).href);
-  const projects = join(app, "projects");
+  // The real path, as Vite names files by theirs: what serves through a link
+  // is told apart and stripped from errors as what serves directly is.
+  const projects = join(realpathSync(app), "projects");
+  // The app's vite.config.js gives `--root` only to files under this
+  // directory, not to any path that has `projects/<n>` in it. Vite hands it
+  // real paths, so a checkout reached through a link is named by its real one.
+  process.env.STUDIO_PREVIEW_PROJECTS = projects;
   const vite = await createVite({
     configFile: join(app, "vite.config.js"),
     root: app,
@@ -60,10 +98,15 @@ export async function start({ app, port = 0 }) {
   });
 
   let compiles = 0;
-  const compile = async ({ files, entry }) => {
+  const compiled = [];
+  const compile = async ({ files, entry, aliases = [] }) => {
     if (typeof files !== "object" || !Object.keys(files).every(inside) || !inside(entry)) {
       return { status: 400, answer: { error: "a file's path must be relative, and inside the project" } };
     }
+    if (!Array.isArray(aliases) || !aliases.every((a) => /^\w+(\.\w+)*$/.test(a?.module) && inside(a?.dir))) {
+      return { status: 400, answer: { error: "an alias is a module name and a directory inside the project" } };
+    }
+    files = forQmlc(files, aliases);
     const n = ++compiles;
     const dir = join(projects, String(n));
     for (const [path, text] of Object.entries(files)) {
@@ -79,7 +122,9 @@ export async function start({ app, port = 0 }) {
         await vite.transformRequest(`/projects/${n}/${path}`);
       }
     } catch (e) {
-      return { status: 200, answer: { error: String(e?.message ?? e).split(dir + "/").join("") } };
+      const error = String(e?.message ?? e).split(dir + "/").join("");
+      if (record) compiled.push(error);
+      return { status: 200, answer: { error } };
     }
     return { status: 200, answer: { url: `/preview/projects/${n}/${entry}?import` } };
   };
@@ -122,6 +167,9 @@ export async function start({ app, port = 0 }) {
   port = server.address().port;
   return {
     url: `http://${HOST}:${port}/`,
+    // Every compile error answered, for a runner to tell why a frame is
+    // empty.
+    compiled,
     async stop() {
       server.close();
       await vite.close();
