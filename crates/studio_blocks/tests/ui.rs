@@ -1773,9 +1773,15 @@ fn sets_export_out(w: &mut UiWorld, out: String) -> StepResult {
     window.enter(&field, &out)
 }
 
-// No Return: what is typed is checked as it is typed.
+// No Return: what is typed is checked once typing pauses.
 #[when(regex = r#"^the person types the output directory "([^"]*)" in the export panel$"#)]
 fn types_export_out(w: &mut UiWorld, out: String) -> StepResult {
+    goes_on_typing_export_out(w, out)?;
+    export_typing_pauses(w)
+}
+
+#[when(regex = r#"^the person is typing the output directory "([^"]*)" in the export panel$"#)]
+fn goes_on_typing_export_out(w: &mut UiWorld, out: String) -> StepResult {
     let window = w.window()?;
     let field = window.node("Export panel", Some("textinput"), "Output directory")?;
     window.click_node(&field)?;
@@ -1785,6 +1791,43 @@ fn types_export_out(w: &mut UiWorld, out: String) -> StepResult {
         .map_err(drive_error)?;
     driver.commit(&out).map_err(drive_error)?;
     window.rest()
+}
+
+#[when("the person pauses typing in the export panel")]
+fn export_typing_pauses(w: &mut UiWorld) -> StepResult {
+    let window = w.window()?;
+    window.stage.drive().advance(300).map_err(drive_error)?;
+    window.rest()
+}
+
+#[then(regex = r#"^the export panel does not say "(.+)"$"#)]
+fn export_does_not_say(w: &mut UiWorld, pattern: String) -> StepResult {
+    let pattern = regex::Regex::new(&pattern).map_err(|e| e.to_string())?;
+    let window = w.window()?;
+    let tree = window.tree();
+    let panel = find(&tree, &|n| n.name == "Export panel" && n.role != "label")
+        .ok_or("no export panel in the window")?;
+    match find(panel, &|n| pattern.is_match(&n.name)) {
+        Some(n) => Err(format!("the export panel says {:?}", n.name)),
+        None => Ok(()),
+    }
+}
+
+#[when(regex = r#"^the file "([^"]+)" is deleted$"#)]
+fn file_deleted(w: &mut UiWorld, name: String) -> StepResult {
+    std::fs::remove_file(w.dir.path().join(name)).map_err(|e| e.to_string())
+}
+
+// Long names, so few enough files pass the size an answer may be.
+#[given(regex = r"^(\d+) files the bundle holds$")]
+fn bundle_files(w: &mut UiWorld, count: usize) -> StepResult {
+    let dir = w.dir.path().join("assets");
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    for n in 0..count {
+        let name = format!("an-asset-with-a-name-long-enough-to-count-{n:04}.svg");
+        std::fs::write(dir.join(name), "<svg/>").map_err(|e| e.to_string())?;
+    }
+    Ok(())
 }
 
 #[when("the person pastes into the output directory in the export panel")]

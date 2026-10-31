@@ -20,9 +20,9 @@ Popup {
     property var answer: null
     property string refusal: ""
     // How many calls have no answer yet. What is on screen is true of what
-    // the fields say only when none has.
+    // the fields say only when none has, and nothing is being typed.
     property int waiting: 0
-    readonly property bool busy: waiting > 0
+    readonly property bool busy: waiting > 0 || settle.running
     // The document to export. Kept here and not in the box: a new list of
     // documents, which any tool's answer brings, sets the box's row anew.
     property string chosen: ""
@@ -38,7 +38,7 @@ Popup {
         const docs = workspace.documents
         if (docs.indexOf("Main.qml") >= 0)
             return "Main.qml"
-        if (workspace.doc !== "")
+        if (docs.indexOf(workspace.doc) >= 0)
             return workspace.doc
         return docs.length > 0 ? docs[0] : ""
     }
@@ -102,13 +102,20 @@ Popup {
             + (a.files === 1 ? " file" : " files") + ", " + size(a.bytes) + ", to " + a.out
     }
 
+    // A word as a shell reads it, for a line the person pastes.
+    function quoted(word) {
+        if (/^[A-Za-z0-9_\/.:=+-]+$/.test(word))
+            return word
+        return "'" + word.replace(/'/g, "'\\''") + "'"
+    }
+
     // What to do with the bundle next.
     function next(a) {
         if (a === null || !a.written)
             return ""
         if (a.manifest.run)
-            return "Start it with: " + a.manifest.run.join(" ") + "  (in " + a.path + ")"
-        return "Build the site with: mise run export:web:build " + a.path
+            return "Start it with: " + a.manifest.run.map(quoted).join(" ") + "  (in " + a.path + ")"
+        return "Build the site with: mise run export:web:build " + quoted(a.path)
     }
 
     parent: Overlay.overlay
@@ -119,6 +126,15 @@ Popup {
     focus: true
     padding: Spacing.sm
     closePolicy: Popup.CloseOnEscape
+    onClosed: settle.stop()
+
+    // A directory half typed is no directory: it is checked when typing
+    // pauses, so each letter does not flash a refusal.
+    Timer {
+        id: settle
+        interval: 250
+        onTriggered: panel.check()
+    }
 
     Connections {
         target: panel.workspace
@@ -217,8 +233,11 @@ Popup {
                 Layout.fillWidth: true
                 // As typed, so "Write bundle" never writes somewhere the
                 // warning above it has not looked at.
-                onTextEdited: panel.check()
-                onAccepted: panel.check()
+                onTextEdited: settle.restart()
+                onAccepted: {
+                    settle.stop()
+                    panel.check()
+                }
             }
         }
 
@@ -239,6 +258,20 @@ Popup {
             objectName: "exportReplaces"
             text: panel.answer !== null && panel.answer.replaces && !panel.wrote
                 ? panel.answer.out + " already holds a bundle: exporting replaces it" : ""
+            visible: text !== ""
+            color: Colors.text
+            wrapMode: Text.Wrap
+            Accessible.role: Accessible.StaticText
+            Accessible.name: text
+            Layout.fillWidth: true
+        }
+
+        // An answer over the size an answer may be holds part of its lists.
+        Label {
+            objectName: "exportCut"
+            text: panel.answer !== null && panel.answer.truncated
+                ? "This list is cut short: the bundle holds all " + panel.answer.files
+                    + " files, and its manifest lists them and what is left out" : ""
             visible: text !== ""
             color: Colors.text
             wrapMode: Text.Wrap

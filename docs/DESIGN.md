@@ -1090,19 +1090,22 @@ contentful paint 60–72 ms in headless Chromium, the entry's text shown by
 `shell/Builtin/ExportPanel.qml` is a modal `Popup` that the toolbar's
 "Export" button and Ctrl+E open (Esc closes; Enter checks). It is the
 `export` call an agent makes: a target (native app, web site), an entry
-(`Main.qml`, else the document shown), an output directory (default
-`build/<target>`). Opening it, and each change, asks for a dry run, and the
+(`Main.qml`, else the document shown, else the first), an output directory
+(default `build/<target>`). Opening it, and each change, asks for a dry run
+(a typed directory once typing pauses; "Write bundle" waits for it), and the
 panel lists the files with sizes, blocks, theme, links, imports and
-`left_out` with reasons; "Write bundle" exports for real and shows the
-output, the manifest's `run` command (native) or `mise run
-export:web:build <out>` (web), and "Copy path". A refusal shows the tool's
-message. The panel keeps the last answer and refusal from `Workspace`'s
+`left_out` with reasons, and says so when the answer's size cap cut those
+lists short; "Write bundle" exports for real and shows the output, the
+manifest's `run` command (native) or `mise run export:web:build <path>` (web),
+and "Copy path", both with the answer's absolute `path`. A refusal shows the
+tool's message, in the panel only: its calls leave the window's error line be. The panel keeps the last answer and refusal from `Workspace`'s
 `answered`/`refused`; `Workspace` itself is unchanged except that the
 window's calls now carry `fs`. `features/ui/export.feature`.
 
 The tool's answer gained `replaces` (whether `out` already held a bundle),
-so the warning is the tool's word and not the panel's guess
-(`features/project/export.feature`, golden updated).
+and `path` (`out` as an absolute path), so the warning is the tool's word and
+not the panel's guess (`features/project/export.feature`, golden updated). A
+dry run refuses what the write would.
 
 DECISION: the "Export" button is a toolbar button named by `Export`; the
 real-export button is "Write bundle" so the two have distinct names.

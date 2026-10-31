@@ -484,6 +484,19 @@ Feature: A project is exported as a bundle that runs without Studio
         keep me
         """
 
+    Scenario: A dry run refuses what the write would, and writes nothing
+      Given the file "build/notes/todo.txt":
+        """
+        keep me
+        """
+      When the agent calls the tool "export" with:
+        """json
+        {"entry": "Shell.qml", "out": "build/notes", "dry_run": true}
+        """
+      Then the agent is refused with "invalid_argument"
+      And the refusal's "/details/kind" is "exists"
+      And the file "build/notes/ljos-bundle.json" does not exist
+
     Scenario: A file that is only named like a manifest does not make a bundle
       Given the file "build/notes/todo.txt":
         """

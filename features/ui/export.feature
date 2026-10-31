@@ -100,3 +100,30 @@ Feature: A person exports a native app or a web site from Studio's window
     When the person clicks the button "Copy path"
     And the person pastes into the output directory in the export panel
     Then the export panel's output directory reads "^/.*/build/native$"
+
+  Scenario: A directory half typed is not refused until typing pauses
+    Given the person has clicked the button "Export"
+    When the person is typing the output directory "bu" in the export panel
+    Then the export panel does not say "is not below the project's"
+    And the export panel's button "Write bundle" is disabled
+    When the person pauses typing in the export panel
+    Then the export panel says "`bu` is not below the project's `build/`"
+    And the export panel's button "Write bundle" is enabled
+    And the window shows no refusal
+
+  Scenario: The next step quotes a path with a space in it
+    Given the person has clicked the button "Export"
+    And the person has chosen "Web site" in the export panel
+    And the person has set the output directory to "build/my site" in the export panel
+    When the person clicks the button "Write bundle"
+    Then the export panel says "^Build the site with: mise run export:web:build '/.*/build/my site'$"
+
+  Scenario: A list the answer's size cuts short says so
+    Given 900 files the bundle holds
+    And the person has clicked the button "Export"
+    Then the export panel says "^Would write 90\d files"
+    And the export panel says "^This list is cut short: the bundle holds all 90\d files, and its manifest lists them and what is left out$"
+
+  Scenario: A short list says nothing about being cut
+    When the person clicks the button "Export"
+    Then the export panel does not say "cut short"
