@@ -189,12 +189,16 @@ fn watched_window(
             let engine = std::rc::Rc::clone(setup.engine());
             setup.on_reload(move |report| reported(&engine, report));
             let oracle = ljos::dev::EngineOracle::from_engine(setup.engine());
-            setup.watch_roots_with(
+            let made = setup.watch_roots_with(
                 &[&shell, &builtin],
                 &["Window"],
                 vec![("userShell".to_owned(), user_shell.as_str().into())],
                 oracle,
-            )
+            )?;
+            // A theme that does not load as the window opens sends no
+            // report, but Ljós holds its error.
+            studio_blocks::reload_settled(setup.engine());
+            Ok(made)
         })?;
     Ok(())
 }
