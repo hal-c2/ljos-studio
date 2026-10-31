@@ -418,10 +418,11 @@ fn plan(
     let (files, links, left_out) = walk(root)?;
     // A site is plain files: its builder and the hosts it goes to keep no
     // links, so a linked directory is in it as a copy under the link's name.
-    let (files, links) = if target == Target::Web {
-        (copied_under_links(files, &links)?, Vec::new())
+    let (files, links, copies) = if target == Target::Web {
+        let (files, copies) = copied_under_links(files, &links)?;
+        (files, Vec::new(), copies)
     } else {
-        (files, links)
+        (files, links, BTreeMap::new())
     };
     // The store has every file of the project; the bundle only what the
     // walk keeps, and a manifest that starts a file it does not hold
@@ -483,8 +484,13 @@ fn plan(
     if !native.is_empty() {
         return Err(SurfaceError::new(
             ErrorCode::Unsupported,
-            "the project has types written in Rust, which only the app's own program registers; \
-             `ljos run` cannot start it",
+            if target == Target::Web {
+                "the project has types written in Rust, which only the app's own program \
+                 registers; they have no face on the web yet (ljos-web request 33)"
+            } else {
+                "the project has types written in Rust, which only the app's own program \
+                 registers; `ljos run` cannot start it"
+            },
         )
         .with_details(json!({ "kind": "native_types", "files": native })));
     }
@@ -501,6 +507,26 @@ fn plan(
         let Some(module) = module_of(&text) else {
             continue;
         };
+        // A site's builder finds modules by the qmldirs below it, so a copy
+        // of a module's directory under a link's name would be a second
+        // directory claiming the same module, and which one an import
+        // reads would be the builder's guess.
+        if let Some(of) = copies.get(path.as_str()) {
+            return Err(SurfaceError::new(
+                ErrorCode::Unsupported,
+                format!(
+                    "`{path}` is `{of}` again through a link, so the site would hold module \
+                     {module} twice; import it by its name rather than through the link, or \
+                     leave the link out of the project"
+                ),
+            )
+            .with_details(json!({
+                "kind": "linked_module",
+                "module": module,
+                "qmldir": of,
+                "through": path,
+            })));
+        }
         let dir = path.rsplit_once('/').map_or("", |(dir, _)| dir);
         for (_, decl) in read_qmldir(&text).blocks {
             if let Some(file) = blocks::join(dir, &decl.file) {
@@ -577,21 +603,28 @@ fn plan(
 /// `files` and, under each link's name, the files of the directory it
 /// leads to: a site keeps no links, so it holds them as the native fallback
 /// writes them where no link can be made, and refused past the same bound.
+/// Also which file each copy is a copy of.
 fn copied_under_links(
     mut files: Vec<FileEntry>,
     links: &[LinkEntry],
-) -> Result<Vec<FileEntry>, SurfaceError> {
+) -> Result<(Vec<FileEntry>, BTreeMap<String, String>), SurfaceError> {
     let all: Vec<&LinkEntry> = links.iter().collect();
-    let mut through: Vec<FileEntry> = through_links(&files, links, &all)?
-        .into_iter()
-        .map(|(path, file)| FileEntry {
-            path,
-            bytes: file.bytes,
-        })
-        .collect();
+    let (mut through, copies): (Vec<FileEntry>, BTreeMap<String, String>) =
+        through_links(&files, links, &all)?
+            .into_iter()
+            .map(|(path, file)| {
+                (
+                    FileEntry {
+                        path: path.clone(),
+                        bytes: file.bytes,
+                    },
+                    (path, file.path.clone()),
+                )
+            })
+            .unzip();
     files.append(&mut through);
     files.sort_by(|a, b| a.path.cmp(&b.path));
-    Ok(files)
+    Ok((files, copies))
 }
 
 /// The modules a site imports from ljos-web, sorted; refused when a

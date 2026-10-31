@@ -1004,7 +1004,7 @@ are Rust types (requests 32, 33).
 | `entry` | the document the site mounts, a listed `.qml` |
 | `theme` | the `theme.json` beside the entry, when there is one (carried, not yet applied) |
 | `files` | every file of the bundle with its size, and nothing else is in it; plain paths below the bundle, never `mocks/`, `.studio/` or `ljostypes.json`; no links, so a directory the project links to is listed again under the link's name |
-| `modules` | each of the project's modules (`module`) and its `qmldir`, both listed; every component a qmldir names is listed |
+| `modules` | each of the project's modules (`module`) and its `qmldir`, both listed, each module once, and every listed qmldir that declares a module among them; every component a qmldir names is listed |
 | `imports` | every module a document imports that is not the project's, sorted: each one ljos-web at `ljos_web` provides |
 | `blocks`, `left_out` | as in the native manifest, for a person reading it |
 | `ljos_web` | the ljos-web commit the imports were checked against (`web/ljos-web.rev`) |
@@ -1023,7 +1023,12 @@ types in Rust, a commit that is not one, a link) and sees each refused.
 `no_web_face`, its `modules` and the `docs` that import them, for a module
 that is neither the project's own nor one ljos-web provides. That covers
 `Ljos.Blocks` shells, `Ljos.Models`, a module only an installed plugin
-gives, and a typo. Then `unsupported` with `links_multiply`, for links
+gives, and a typo. Before that, `unsupported` with `linked_module` (its
+`module`, its `qmldir` and the copy `through` the link), for a link to a
+directory that declares a module: the site would hold the module twice and
+its builder, which finds modules by their qmldirs, would pick one; natively
+it stays a link. `native_types` says for the web that types written in Rust
+have no face there (request 33). Then `unsupported` with `links_multiply`, for links
 that lead into the same directories along so many ways that the site would
 copy more than 10,000 files and directories through them, even directories
 that hold only more links.

@@ -159,6 +159,44 @@ fn a_module_without_its_qmldir() {
 }
 
 #[test]
+fn a_module_named_twice() {
+    refused(
+        |d| {
+            let mut m = manifest(d);
+            let again = m["modules"][0].clone();
+            m["modules"].as_array_mut().unwrap().push(again);
+            set_manifest(d, &m);
+        },
+        "twice",
+    );
+}
+
+#[test]
+fn a_listed_qmldir_whose_module_the_manifest_hides() {
+    refused(
+        |d| {
+            let text = "module App.Media\nPlayer 1.0 Player.qml\n";
+            fs::create_dir_all(d.join("media")).unwrap();
+            fs::write(d.join("media/qmldir"), text).unwrap();
+            fs::copy(d.join("App/Media/Player.qml"), d.join("media/Player.qml")).unwrap();
+            let mut m = manifest(d);
+            let files = m["files"].as_array_mut().unwrap();
+            for (path, bytes) in [
+                ("media/qmldir", text.len() as u64),
+                (
+                    "media/Player.qml",
+                    fs::metadata(d.join("media/Player.qml")).unwrap().len(),
+                ),
+            ] {
+                files.push(json!({"path": path, "bytes": bytes}));
+            }
+            set_manifest(d, &m);
+        },
+        "does not name it",
+    );
+}
+
+#[test]
 fn a_module_whose_qmldir_says_another() {
     refused(
         |d| {

@@ -177,7 +177,12 @@ pub fn build(dir: &Path, entry: &str) -> Result<Site, String> {
                 ));
             }
         }
-        own.insert(module.module.as_str());
+        if !own.insert(module.module.as_str()) {
+            return Err(format!(
+                "`{}` is in `modules` twice: two directories would claim it",
+                module.module
+            ));
+        }
     }
     for import in &m.imports {
         if !PROVIDED.contains(&import.as_str()) {
@@ -205,6 +210,22 @@ pub fn build(dir: &Path, entry: &str) -> Result<Site, String> {
             }
         }
         documents.insert((*path).to_owned(), resolved);
+    }
+    // The real builder finds modules by the qmldirs below the site, so a
+    // listed qmldir that declares a module `modules` does not name is a
+    // module the manifest hides.
+    let named: BTreeSet<&str> = m.modules.iter().map(|d| d.qmldir.as_str()).collect();
+    for qmldir in listed
+        .iter()
+        .filter(|p| p.rsplit('/').next() == Some("qmldir") && !named.contains(*p))
+    {
+        let text = fs::read_to_string(dir.join(qmldir)).map_err(|e| e.to_string())?;
+        if let Some(module) = text.lines().find_map(|l| l.strip_prefix("module ")) {
+            return Err(format!(
+                "`{qmldir}` declares module {} but `modules` does not name it",
+                module.trim()
+            ));
+        }
     }
     Ok(Site {
         entry: m.entry,

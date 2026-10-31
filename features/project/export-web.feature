@@ -273,6 +273,42 @@ Feature: A project is exported for ljos-web to build a site from
       And the refusal's "/details/kind" is "no_web_face"
       And the refusal's "/details/modules" is ["Ljos.Models"]
 
+    Scenario: A link to a module's directory is refused for the web, which would hold the module twice
+      Given the file "App/Media/qmldir":
+        """
+        module App.Media
+        Player 1.0 Player.qml
+        """
+      And the file "App/Media/Player.qml":
+        """qml
+        import QtQuick
+        Item {}
+        """
+      And "media" links to "App/Media" in the project
+      When the agent calls the tool "export" with:
+        """json
+        {"entry": "Shell.qml", "target": "web"}
+        """
+      Then the agent is refused with "unsupported"
+      And the refusal's "/details/kind" is "linked_module"
+      And the refusal's "/details/module" is "App.Media"
+      And the refusal's "/details/qmldir" is "App/Media/qmldir"
+      And the refusal's "/details/through" is "media/qmldir"
+      And the file "build/web/ljos-site.json" does not exist
+
+    Scenario: The same link still exports natively, as a link
+      Given the file "App/Media/qmldir":
+        """
+        module App.Media
+        Player 1.0 Player.qml
+        """
+      And "media" links to "App/Media" in the project
+      When the agent calls the tool "export" with:
+        """json
+        {"entry": "Shell.qml", "dry_run": true}
+        """
+      Then the answer's "/manifest/links" is [{"path": "media", "to": "App/Media"}]
+
     Scenario: Links that would copy the same directories along too many ways are refused
       Given a diamond of directory links 24 levels deep in "levels"
       When the agent calls the tool "export" with:
@@ -321,6 +357,7 @@ Feature: A project is exported for ljos-web to build a site from
       Then the agent is refused with "unsupported"
       And the refusal's "/details/kind" is "native_types"
       And the refusal's "/details/files" is ["native/ljostypes.json"]
+      And the refusal's message matches "no face on the web"
 
     Scenario: A module that only a mock provides has nothing to put on the web
       Given the file "mocks/App/Store/qmldir":
