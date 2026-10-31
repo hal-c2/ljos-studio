@@ -9,7 +9,13 @@ const TEXT: &str = include_str!(concat!(env!("OUT_DIR"), "/toolkit.txt"));
 
 /// Offered whatever the document imports: most objects come from these, and
 /// `node_insert` adds the import of the one placed.
-const ALWAYS: [&str; 4] = ["QtQuick", "QtQuick.Layouts", "QtQuick.Controls", "QtQml"];
+const ALWAYS: [&str; 5] = [
+    "QtQuick",
+    "QtQuick.Layouts",
+    "QtQuick.Controls",
+    "QtQml",
+    "QtQuick3D",
+];
 
 /// One module's types.
 #[derive(Clone, Debug, PartialEq, Serialize, JsonSchema)]
