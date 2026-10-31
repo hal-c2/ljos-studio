@@ -702,7 +702,7 @@ fn bundle_runs(w: &mut StudioWorld, out: String) -> StepResult {
 fn names_pinned_ljos_web(w: &mut StudioWorld, pointer: String) -> StepResult {
     // The pin's one place, read as the tasks and CI read it.
     let rev = std::fs::read_to_string(
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../web/ljos-web.rev"),
+        std::path::Path::new(&manifest_dir()).join("../../web/ljos-web.rev"),
     )
     .map_err(|e| e.to_string())?;
     let got = at(w.answer()?, &pointer)?;
@@ -1026,10 +1026,17 @@ fn token_file_private(w: &mut StudioWorld) -> StepResult {
         .ok_or_else(|| format!("mode {mode:o}, or another token in it"))
 }
 
+/// The crate's directory as cargo names it to the running test: the shared
+/// compile cache may hand a binary built in another clone of the
+/// repository, whose `env!` path is that clone's.
+fn manifest_dir() -> String {
+    std::env::var("CARGO_MANIFEST_DIR").unwrap_or_else(|_| env!("CARGO_MANIFEST_DIR").to_owned())
+}
+
 #[tokio::main]
 async fn main() {
-    let features = concat!(env!("CARGO_MANIFEST_DIR"), "/../../features");
-    let input = std::env::var("STUDIO_FEATURES").unwrap_or_else(|_| features.to_owned());
+    let features = format!("{}/../../features", manifest_dir());
+    let input = std::env::var("STUDIO_FEATURES").unwrap_or(features);
     StudioWorld::cucumber()
         // A preview is a whole application in a process of its own.
         .max_concurrent_scenarios(8)

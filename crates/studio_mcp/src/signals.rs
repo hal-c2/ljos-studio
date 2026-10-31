@@ -214,7 +214,7 @@ impl Types<'_> {
         if let Some(file) = self.qmldir_file(uri, name) {
             return self.file(&file, found, depth);
         }
-        match qt_types::module(uri).and_then(|m| m.type_named(name)) {
+        match qt_signals::module(uri).and_then(|m| m.type_named(name)) {
             Some(ty) => {
                 toolkit(ty, found);
                 Described::Whole
@@ -257,7 +257,7 @@ impl Types<'_> {
             if let Some(m) = &ty.base_module {
                 module = m.clone();
             }
-            return match qt_types::module(&module).and_then(|m| m.type_named(base)) {
+            return match qt_signals::module(&module).and_then(|m| m.type_named(base)) {
                 Some(base) => {
                     toolkit(base, found);
                     true
@@ -319,7 +319,7 @@ impl Types<'_> {
 }
 
 /// A toolkit type, from Ljós's table, and what it inherits.
-fn toolkit(ty: &'static qt_types::Type, found: &mut Found) {
+fn toolkit(ty: &'static qt_signals::Type, found: &mut Found) {
     let mut ty = Some(ty);
     for _ in 0..=DEPTH {
         let Some(t) = ty else { return };

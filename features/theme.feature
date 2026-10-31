@@ -7,9 +7,11 @@
 Feature: Tokens are read and set in the project's theme file
   `theme_set` with no value reads the tokens: every role of `Ljos.Design`
   with the module's own value and the theme file's, light and dark and
-  high contrast. With a token and a value it writes the theme file beside
-  the entry, creating it when it is missing, and leaves the rest of the
-  file as it was, byte for byte. Ljós's own theme reader and contrast
+  high contrast. With a token and a value it writes the theme file Ljós
+  reads for the entry, the nearest `theme.json` from the entry's directory
+  up to the project's, creating the project's own when there is none (the
+  one Ljós watches then), and leaves the rest of the file as it was, byte
+  for byte. Ljós's own theme reader and contrast
   checker judge the result, and a theme Ljós would refuse is refused with
   Ljós's message, so a theme Studio writes always loads. A write is an
   edit like any other: it has a generation, a dry run, a history entry
@@ -34,7 +36,7 @@ Feature: Tokens are read and set in the project's theme file
         """json
         {"doc": "app/Main.qml", "token": "Spacing.md"}
         """
-      Then the answer's "/file" is "app/theme.json"
+      Then the answer's "/file" is "theme.json"
       And the answer's "/exists" is false
       And the answer's "/tokens" has 1 entries
       And the answer's "/tokens/0/token" is "Spacing.md"
@@ -80,6 +82,55 @@ Feature: Tokens are read and set in the project's theme file
       Then the answer's "/tokens/0/theme" is 20
       And the answer's "/tokens/0/module" is 16
 
+    Scenario: A theme file nearer the project's root is the one Ljós reads
+      Given the file "theme.json":
+        """json
+        { "Spacing": { "md": 20 } }
+        """
+      When the agent calls the tool "theme_set" with:
+        """json
+        {"doc": "app/Main.qml", "token": "Spacing.md"}
+        """
+      Then the answer's "/file" is "theme.json"
+      And the answer's "/tokens/0/theme" is 20
+      When the agent calls the tool "theme_set" with:
+        """json
+        {"doc": "app/Main.qml", "token": "Spacing.md", "value": 24}
+        """
+      Then the file "theme.json" is:
+        """json
+        { "Spacing": { "md": 24 } }
+        """
+      And the file "app/theme.json" does not exist
+
+    Scenario: The nearest theme file wins over the project's own
+      Given the file "theme.json":
+        """json
+        { "Spacing": { "md": 20 } }
+        """
+      And the file "app/theme.json":
+        """json
+        { "Spacing": { "md": 12 } }
+        """
+      When the agent calls the tool "theme_set" with:
+        """json
+        {"doc": "app/Main.qml", "token": "Spacing.md"}
+        """
+      Then the answer's "/file" is "app/theme.json"
+      And the answer's "/tokens/0/theme" is 12
+      When the agent calls the tool "theme_set" with:
+        """json
+        {"doc": "app/Main.qml", "token": "Spacing.md", "value": 24}
+        """
+      Then the file "app/theme.json" is:
+        """json
+        { "Spacing": { "md": 24 } }
+        """
+      And the file "theme.json" is:
+        """json
+        { "Spacing": { "md": 20 } }
+        """
+
     Scenario: A token the module does not have is refused
       When the agent calls the tool "theme_set" with:
         """json
@@ -89,15 +140,16 @@ Feature: Tokens are read and set in the project's theme file
 
   Rule: A token and a value write the theme file
 
-    Scenario: The theme file is created beside the entry
+    Scenario: With no theme file the project's own is created, the one Ljós watches
       When the agent calls the tool "theme_set" with:
         """json
         {"doc": "app/Main.qml", "token": "Colors.accent", "value": "#9c4dc4"}
         """
-      Then the answer's "/doc" is "app/theme.json"
+      Then the answer's "/doc" is "theme.json"
       And the answer's "/generation" is 1
       And the answer's "/unchanged" is false
-      And the file "app/theme.json" is:
+      And the file "app/theme.json" does not exist
+      And the file "theme.json" is:
         """json
         {
           "Colors": {
@@ -244,7 +296,7 @@ Feature: Tokens are read and set in the project's theme file
           }
         }
         """
-      And the file "app/theme.json" does not exist
+      And the file "theme.json" does not exist
 
     Scenario: A write against an old generation is refused
       Given the file "app/theme.json":
@@ -270,7 +322,7 @@ Feature: Tokens are read and set in the project's theme file
         """json
         {"action": "undo"}
         """
-      Then the file "app/theme.json" does not exist
+      Then the file "theme.json" does not exist
 
     Scenario: Undo gives the theme file back byte for byte
       Given the file "app/theme.json":
@@ -290,3 +342,116 @@ Feature: Tokens are read and set in the project's theme file
         """json
         {"Colors": {"accent": "#9c4dc4"}}
         """
+
+    Scenario Outline: A document outside the project has no theme of the project's
+      Given the file "theme.json":
+        """json
+        {"Spacing": {"md": 8}}
+        """
+      When the agent calls the tool "theme_set" with:
+        """json
+        {"doc": "<doc>", "token": "Spacing.md", "value": 24}
+        """
+      Then the agent is refused with "path_denied"
+      When the agent calls the tool "theme_set" with:
+        """json
+        {"doc": "<doc>"}
+        """
+      Then the agent is refused with "path_denied"
+      And the file "theme.json" is:
+        """json
+        {"Spacing": {"md": 8}}
+        """
+
+      Examples:
+        | doc                   |
+        | ../elsewhere/Main.qml |
+        | /Main.qml             |
+        | /elsewhere/Main.qml   |
+        | app/../../Main.qml    |
+
+    Scenario: With no theme file, a document outside the project makes none
+      When the agent calls the tool "theme_set" with:
+        """json
+        {"doc": "../elsewhere/Main.qml", "token": "Spacing.md", "value": 24}
+        """
+      Then the agent is refused with "path_denied"
+      And the file "theme.json" does not exist
+
+    @disk
+    Scenario: A document through a link out of the project has no theme of the project's
+      Given the link "out" leads to a directory outside the project holding "Main.qml"
+      When the agent calls the tool "theme_set" with:
+        """json
+        {"doc": "out/Main.qml", "token": "Spacing.md", "value": 24}
+        """
+      Then the agent is refused with "path_denied"
+      And the file "theme.json" does not exist
+
+    @disk
+    Scenario: A document that is a link out of the project, at its top, has no theme of the project's
+      Given the file "theme.json":
+        """json
+        {"Spacing": {"md": 8}}
+        """
+      And the link "out" leads to a directory outside the project holding "Main.qml"
+      And the link "Out.qml" leads to "out/Main.qml"
+      When the agent calls the tool "theme_set" with:
+        """json
+        {"doc": "Out.qml", "token": "Spacing.md", "value": 24}
+        """
+      Then the agent is refused with "path_denied"
+      And the file "theme.json" is:
+        """json
+        {"Spacing": {"md": 8}}
+        """
+
+    @disk
+    Scenario: A document that is a link in the project has the theme of the file it leads to
+      Given the file "app/theme.json":
+        """json
+        {"Spacing": {"md": 8}}
+        """
+      And the link "Entry.qml" leads to "app/Main.qml"
+      When the agent calls the tool "theme_set" with:
+        """json
+        {"doc": "Entry.qml", "token": "Spacing.md", "value": 24}
+        """
+      Then the answer's "/file" is "app/theme.json"
+      And the file "theme.json" does not exist
+
+    @disk
+    Scenario: A theme file that is a link to another name is refused, never aimed at another theme
+      Given the file "shared/tokens.json":
+        """json
+        {"Spacing": {"md": 8}}
+        """
+      And the link "app/theme.json" leads to "shared/tokens.json"
+      When the agent calls the tool "theme_set" with:
+        """json
+        {"doc": "app/theme.json", "token": "Spacing.md", "value": 24}
+        """
+      Then the agent is refused with "path_denied"
+      And the file "theme.json" does not exist
+      And the file "shared/tokens.json" is:
+        """json
+        {"Spacing": {"md": 8}}
+        """
+
+    @disk
+    Scenario: A document that is a link out of the project, in a directory, has no theme either
+      Given the file "theme.json":
+        """json
+        {"Spacing": {"md": 8}}
+        """
+      And the link "app/out.qml" leads to the file "Main.qml" outside the project
+      When the agent calls the tool "theme_set" with:
+        """json
+        {"doc": "app/out.qml", "token": "Spacing.md", "value": 24}
+        """
+      Then the agent is refused with "path_denied"
+      And the file "theme.json" is:
+        """json
+        {"Spacing": {"md": 8}}
+        """
+      And the file "app/theme.json" does not exist

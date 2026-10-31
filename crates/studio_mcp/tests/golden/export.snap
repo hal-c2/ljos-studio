@@ -203,7 +203,7 @@ expression: value
             "$ref": "#/$defs/Target"
           },
           "theme": {
-            "description": "The theme file the app reads, beside its entry.",
+            "description": "The theme file the app reads: the nearest `theme.json` from its\nentry's directory up to the project's.",
             "type": [
               "string",
               "null"

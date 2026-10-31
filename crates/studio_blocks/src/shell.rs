@@ -106,8 +106,12 @@ mod tests {
     /// the copy a watched window compiles, and from a person's new shell.
     #[test]
     fn builtin_lists_every_file_of_the_shell() {
-        let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../../shell/Builtin");
-        let mut on_disk: Vec<String> = std::fs::read_dir(dir)
+        // Cargo names the crate's directory to the running test; the
+        // shared compile cache may hand a binary built in another clone.
+        let crate_dir = std::env::var("CARGO_MANIFEST_DIR")
+            .unwrap_or_else(|_| env!("CARGO_MANIFEST_DIR").to_owned());
+        let dir = format!("{crate_dir}/../../shell/Builtin");
+        let mut on_disk: Vec<String> = std::fs::read_dir(&dir)
             .unwrap()
             .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
             .collect();

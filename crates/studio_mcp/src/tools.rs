@@ -585,8 +585,8 @@ impl Variant {
 #[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct ThemeArgs {
-    /// A document whose theme it is: the `theme.json` beside it. The open
-    /// preview's when left out, else the project's own.
+    /// A document whose theme it is: the nearest `theme.json` up from it.
+    /// The open preview's when left out, else the project's own.
     doc: Option<String>,
     /// `Colors.accent`; a singleton (`Spacing`) reads its roles. Every role
     /// when left out.
@@ -654,19 +654,59 @@ struct ThemeOut {
     unchanged: Option<bool>,
 }
 
-/// The theme file of `doc`: `theme.json` beside it, `doc` itself when it
-/// is one, or the project's own when no document is named.
-pub(crate) fn theme_file(doc: &str) -> String {
-    if doc.is_empty() {
-        return studio_core::theme::FILE.to_owned();
-    }
+/// The theme file of `doc`: `doc` itself when it is one; else the one Ljós
+/// reads for an entry there (`ljos_design::theme::find`), the nearest
+/// `theme.json` from its directory up to the project's; else the project's
+/// own, where Ljós looks and watches when there is none, so a new one is
+/// made there. A `doc` outside the project is answered as itself, a path the
+/// store refuses: the file beside it can be the project's own when it sits
+/// directly under `/`, or is a link at the project's top.
+pub(crate) fn theme_file(store: &dyn studio_core::Store, doc: &str) -> String {
     let file = studio_core::theme::FILE;
+    if doc.is_empty() {
+        return file.to_owned();
+    }
     if doc == file || doc.ends_with(&format!("/{file}")) {
         return doc.to_owned();
     }
-    match doc.rsplit_once('/') {
-        Some((dir, _)) => format!("{dir}/{file}"),
-        None => file.to_owned(),
+    let beside = |dir: &str| match dir {
+        "" => file.to_owned(),
+        dir => format!("{dir}/{file}"),
+    };
+    let mut dir = doc.rsplit_once('/').map_or("", |(dir, _)| dir);
+    // `MemStore` confines nothing, so the path is judged here as well as by
+    // the store, which alone sees where a link leads.
+    let plain = std::path::Path::new(doc)
+        .components()
+        .all(|c| matches!(c, std::path::Component::Normal(_)));
+    if !plain || store.resolved(doc).is_err() {
+        return doc.to_owned();
+    }
+    loop {
+        if store.exists(&beside(dir)) {
+            return beside(dir);
+        }
+        match dir.rsplit_once('/') {
+            Some((up, _)) => dir = up,
+            None if !dir.is_empty() => dir = "",
+            None => break,
+        }
+    }
+    file.to_owned()
+}
+
+/// The theme file Ljós reads for `doc` when it runs it: it starts from the
+/// real file, so a link in the project has the theme of what it leads to. An
+/// export keeps the path as written ([`theme_file`]): a bundle lists a linked
+/// file as a real one under the link's name.
+pub(crate) fn running_theme_file(store: &dyn studio_core::Store, doc: &str) -> String {
+    // A theme file is itself under its own name, wherever a link takes it.
+    if doc.rsplit('/').next() == Some(studio_core::theme::FILE) {
+        return theme_file(store, doc);
+    }
+    match store.resolved(doc) {
+        Ok(real) => theme_file(store, &real),
+        Err(_) => theme_file(store, doc),
     }
 }
 
@@ -678,9 +718,7 @@ fn theme_set(studio: &Mutex<Studio>, a: ThemeArgs) -> Result<ThemeOut, SurfaceEr
             .as_ref()
             .map(|o| o.doc.clone())
     });
-    let file = doc
-        .as_deref()
-        .map_or_else(|| studio_core::theme::FILE.to_owned(), theme_file);
+    let file = running_theme_file(studio.session.store(), doc.as_deref().unwrap_or(""));
     let Some(value) = a.value else {
         let read = studio
             .session
@@ -1756,7 +1794,7 @@ fn edits(studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
             ToolDef::new::<ThemeArgs>(
                 "theme_set",
                 "Read the tokens of Ljos.Design, the module's value beside the theme file's; or set \
-                 one (`null` gives it back) in the `theme.json` beside the entry, made when missing, \
+                 one (`null` gives it back) in the theme file Ljós reads, the project's made when none, \
                  the rest kept byte for byte. A theme Ljós would refuse is refused with its message.",
             )
             .output::<ThemeOut>()
