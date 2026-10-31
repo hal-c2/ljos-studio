@@ -239,8 +239,15 @@ impl Host for SceneHost<'_> {
 /// period and a build of the shell, on a loaded machine.
 const PATIENCE: Duration = Duration::from_secs(30);
 
+/// The crate's directory as cargo names it to the running test: the shared
+/// compile cache may hand a binary built in another clone of the
+/// repository, whose `env!` path is that clone's.
+fn manifest_dir() -> String {
+    std::env::var("CARGO_MANIFEST_DIR").unwrap_or_else(|_| env!("CARGO_MANIFEST_DIR").to_owned())
+}
+
 fn shell() -> String {
-    concat!(env!("CARGO_MANIFEST_DIR"), "/../../shell").to_owned()
+    format!("{}/../../shell", manifest_dir())
 }
 
 impl Window {
@@ -1580,8 +1587,8 @@ fn has_pane(w: &mut UiWorld, name: String) -> StepResult {
 }
 
 fn main() {
-    let features = concat!(env!("CARGO_MANIFEST_DIR"), "/../../features/ui");
-    let input = std::env::var("STUDIO_FEATURES").unwrap_or_else(|_| features.to_owned());
+    let features = format!("{}/../../features/ui", manifest_dir());
+    let input = std::env::var("STUDIO_FEATURES").unwrap_or(features);
     // The Engine lives on one thread: one scenario at a time, on this one.
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()

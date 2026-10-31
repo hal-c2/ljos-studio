@@ -3,16 +3,17 @@
 //! second statement of a type and can drift from it. This holds the two to
 //! one: every member the dump has, the stand-in declares as the dump says.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use serde_json::Value;
 
-fn root() -> &'static Path {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .unwrap()
-        .parent()
-        .unwrap()
+/// The repository, from the crate's directory as cargo names it to the
+/// running test: the shared compile cache may hand a binary built in
+/// another clone, whose `env!` path is that clone's.
+fn root() -> PathBuf {
+    let crate_dir = std::env::var("CARGO_MANIFEST_DIR")
+        .unwrap_or_else(|_| env!("CARGO_MANIFEST_DIR").to_owned());
+    Path::new(&crate_dir).join("../..")
 }
 
 #[test]
