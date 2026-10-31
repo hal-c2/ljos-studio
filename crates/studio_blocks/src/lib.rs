@@ -362,7 +362,8 @@ enum Done {
     },
     Picture {
         generation: u64,
-        picture: Result<(u32, u32, Vec<u8>), String>,
+        /// Width, height, pixels, and what the pixels hash to.
+        picture: Result<(u32, u32, Vec<u8>, u64), String>,
     },
 }
 
@@ -490,7 +491,11 @@ fn run(server: &StudioServer, writes: &AtomicU64, doc: &str, job: Job) -> Done {
                         .into_iter()
                         .find(|i| i.mime == "image/png")
                         .ok_or_else(|| "the preview answered no PNG".to_owned())?;
-                    decode(&image.data)
+                    // Here, not where it lands: hashing a window's pixels is
+                    // milliseconds the engine's thread has no use for.
+                    let (w, h, rgba) = decode(&image.data)?;
+                    let pixels = hash_of(&rgba);
+                    Ok((w, h, rgba, pixels))
                 });
             Done::Picture {
                 generation,
@@ -584,8 +589,7 @@ fn finish(engine: &Engine, ws: ObjectId, done: Done) {
             let Some(queue) = queue_of(engine, ws) else {
                 return;
             };
-            let picture = picture.and_then(|(w, h, rgba)| {
-                let pixels = hash_of(&rgba);
+            let picture = picture.and_then(|(w, h, rgba, pixels)| {
                 let image = ImageHandle::from_straight(w, h, rgba).map_err(|e| e.to_string())?;
                 Ok((image, pixels))
             });

@@ -434,8 +434,8 @@ MouseArea {
         else if (ctrl && event.key === Qt.Key_D && has)
             workspace.dispatch("node_arrange", {action: "duplicate", doc: workspace.doc, nodes: selectedHandles()})
         else if (!ctrl && (event.key === Qt.Key_Delete || event.key === Qt.Key_Backspace)
-                 && workspace.selected !== "")
-            workspace.dispatch("node_remove", {doc: workspace.doc, node: {node: workspace.selected}})
+                 && has)
+            workspace.dispatch("node_arrange", {action: "remove", doc: workspace.doc, nodes: selectedHandles()})
         else
             event.accepted = false
     }

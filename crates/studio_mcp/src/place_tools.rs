@@ -40,6 +40,7 @@ enum Action {
     Copy,
     Paste,
     Duplicate,
+    Remove,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -47,7 +48,8 @@ enum Action {
 struct ArrangeArgs {
     action: Action,
     doc: String,
-    /// For all but `place` and `paste`.
+    /// For all but `place` and `paste`. A path needs `generation` where the
+    /// action writes.
     #[serde(default)]
     nodes: Vec<Address>,
     /// Needed when a node is named by path.
@@ -135,17 +137,21 @@ struct AlignArgs {
     nodes: Vec<Address>,
     align: Align,
     generation: Option<u64>,
+    dry_run: bool,
 }
 
 struct NodesArgs {
     doc: String,
     nodes: Vec<Address>,
     generation: Option<u64>,
+    dry_run: bool,
 }
 
 struct PasteArgs {
     doc: String,
     parent: Address,
+    generation: Option<u64>,
+    dry_run: bool,
 }
 
 fn refused(kind: &str, message: impl Into<String>) -> SurfaceError {
@@ -432,7 +438,7 @@ fn align(studio: &mut Studio, a: &AlignArgs) -> Result<ManyOut, SurfaceError> {
             )
         })
         .collect();
-    place_many(studio, &a.doc, a.generation, &places, "align", false)
+    place_many(studio, &a.doc, a.generation, &places, "align", a.dry_run)
 }
 
 /// Each of `nodes` as written, with the ids in it.
@@ -521,7 +527,7 @@ fn duplicate(studio: &mut Studio, a: &NodesArgs) -> Result<ManyOut, SurfaceError
     }
     let (outcome, mut nodes) = studio
         .session
-        .edit_many(&a.doc, a.generation, &ops, "duplicate", false)
+        .edit_many(&a.doc, a.generation, &ops, "duplicate", a.dry_run)
         .map_err(error)?;
     nodes.reverse();
     Ok(ManyOut {
@@ -551,11 +557,46 @@ fn paste(studio: &mut Studio, a: &PasteArgs) -> Result<ManyOut, SurfaceError> {
         .collect();
     let (outcome, nodes) = studio
         .session
-        .edit_many(&a.doc, None, &ops, "paste", false)
+        .edit_many(&a.doc, a.generation, &ops, "paste", a.dry_run)
         .map_err(error)?;
     Ok(ManyOut {
         edit: outcome.into(),
         nodes,
+    })
+}
+
+/// Every object of `a` gone in one step. Handles first: taking one out moves
+/// the paths of those after it.
+fn remove(studio: &mut Studio, a: &NodesArgs) -> Result<ManyOut, SurfaceError> {
+    let mut ops = Vec::new();
+    let mut nodes = Vec::new();
+    for address in &a.nodes {
+        let (handle, _) = studio.session.resolve(&a.doc, address).map_err(error)?;
+        ops.push(Op::Remove {
+            node: Address::Node(handle.clone()),
+        });
+        nodes.push(handle);
+    }
+    let (outcome, _) = studio
+        .session
+        .edit_many(&a.doc, a.generation, &ops, "remove", a.dry_run)
+        .map_err(error)?;
+    Ok(ManyOut {
+        edit: outcome.into(),
+        nodes,
+    })
+}
+
+/// The address of `arrange`'s objects a write would turn into handles before
+/// the session could ask for `generation`, so it is asked here.
+fn path_without_generation(a: &ArrangeArgs) -> Option<&str> {
+    if a.generation.is_some() || matches!(a.action, Action::Geometry | Action::Copy) {
+        return None;
+    }
+    let placed = a.places.iter().flatten().map(|p| &p.node);
+    a.nodes.iter().chain(placed).find_map(|address| match address {
+        Address::Path(path) => Some(path.as_str()),
+        _ => None,
     })
 }
 
@@ -564,6 +605,12 @@ fn needed<T>(field: Option<T>, name: &str, action: &str) -> Result<T, SurfaceErr
 }
 
 fn arrange(studio: &mut Studio, a: ArrangeArgs) -> Result<ArrangeOut, SurfaceError> {
+    if let Some(path) = path_without_generation(&a) {
+        return Err(SurfaceError::invalid_argument(format!(
+            "the path `{path}` names an object only in the generation it was read at: give \
+             `generation`"
+        )));
+    }
     let doc = a.doc;
     let generation = a.generation;
     let nodes = a.nodes;
@@ -615,6 +662,7 @@ fn arrange(studio: &mut Studio, a: ArrangeArgs) -> Result<ArrangeOut, SurfaceErr
                     nodes,
                     align: how,
                     generation,
+                    dry_run: a.dry_run,
                 },
             )
             .map(many)
@@ -629,17 +677,30 @@ fn arrange(studio: &mut Studio, a: ArrangeArgs) -> Result<ArrangeOut, SurfaceErr
         }
         Action::Paste => {
             let parent = needed(a.parent, "parent", "paste")?;
-            paste(studio, &PasteArgs { doc, parent }).map(many)
+            paste(
+                studio,
+                &PasteArgs {
+                    doc,
+                    parent,
+                    generation,
+                    dry_run: a.dry_run,
+                },
+            )
+            .map(many)
         }
-        Action::Duplicate => duplicate(
-            studio,
-            &NodesArgs {
+        Action::Duplicate | Action::Remove => {
+            let args = NodesArgs {
                 doc,
                 nodes,
                 generation,
-            },
-        )
-        .map(many),
+                dry_run: a.dry_run,
+            };
+            if matches!(a.action, Action::Remove) {
+                remove(studio, &args).map(many)
+            } else {
+                duplicate(studio, &args).map(many)
+            }
+        }
     }
 }
 
@@ -651,7 +712,7 @@ pub(crate) fn add(registry: ToolRegistry, studio: &Arc<Mutex<Studio>>) -> ToolRe
             "What a canvas gesture does; each edit one undo step, all or none. `geometry`: boxes, \
              drag rules, siblings. `place`: x/y/size, writing what governs each object (anchor \
              margins, Layout.preferred*); refused `arranged` or `anchored` where overridden. \
-             `align`, `copy`, `paste`, `duplicate`.",
+             `align`, `copy`, `paste`, `duplicate`, `remove`.",
         )
         .answers::<ArrangeOut>()
         .requires(Cap::Inspect)

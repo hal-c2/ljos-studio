@@ -304,3 +304,65 @@ Feature: Objects are placed by the tools a canvas drag drops through
       """
     Then the answer's "/selection" has 1 entries
     And the answer's "/selection/0/id" is "b"
+
+  # Each of these wrote the file whatever `dry_run` said.
+  Scenario: A dry run of duplicating writes nothing
+    Given the studio tools are connected
+    When the agent calls the tool "node_arrange" with:
+      """json
+      {"action": "duplicate", "doc": "Main.qml", "nodes": [{"id": "a"}], "dry_run": true}
+      """
+    Then the answer's "/text" contains "id: a1"
+    And the file "Main.qml" does not contain "a1"
+
+  Scenario: A dry run of pasting writes nothing
+    Given the studio tools are connected
+    When the agent calls the tool "node_arrange" with:
+      """json
+      {"action": "copy", "doc": "Main.qml", "nodes": [{"id": "a"}]}
+      """
+    And the agent calls the tool "node_arrange" with:
+      """json
+      {"action": "paste", "doc": "Main.qml", "parent": {"id": "root"}, "dry_run": true}
+      """
+    Then the answer's "/text" contains "id: a1"
+    And the file "Main.qml" does not contain "a1"
+
+  @preview
+  Scenario: A dry run of aligning writes nothing
+    Given the studio tools are connected with the capabilities "inspect, mutate, run"
+    And the agent has called the tool "preview_open" with:
+      """json
+      {"doc": "Main.qml", "size": {"width": 400, "height": 300}}
+      """
+    When the agent calls the tool "node_arrange" with:
+      """json
+      {"action": "align", "doc": "Main.qml", "nodes": [{"id": "a"}, {"id": "b"}], "align": "top", "dry_run": true}
+      """
+    Then the file "Main.qml" contains "id: b; x: 100; y: 30;"
+    And the history has 0 entries
+
+  Scenario: Taking out several objects is one undo step
+    Given the studio tools are connected
+    When the agent calls the tool "node_arrange" with:
+      """json
+      {"action": "remove", "doc": "Main.qml", "nodes": [{"id": "a"}, {"id": "b"}]}
+      """
+    Then the file "Main.qml" does not contain "id: a"
+    And the file "Main.qml" does not contain "id: b"
+    When the agent calls the tool "history" with:
+      """json
+      {"action": "undo"}
+      """
+    Then the file "Main.qml" contains "id: a"
+    And the file "Main.qml" contains "id: b"
+
+  # A path is true of the text it was read from: the rule every other edit
+  # keeps. Turned into a handle first, it named whatever was there now.
+  Scenario: A write naming an object by path needs the generation it was read at
+    Given the studio tools are connected
+    When the agent calls the tool "node_arrange" with:
+      """json
+      {"action": "remove", "doc": "Main.qml", "nodes": [{"path": "root/0"}]}
+      """
+    Then the agent is refused with "invalid_argument"
