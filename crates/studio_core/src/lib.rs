@@ -40,7 +40,7 @@ pub use slots::Mode;
 pub use states::{ChangeInfo, StateEdit, StateInfo, TransitionInfo, Variants};
 #[cfg(feature = "fs")]
 pub use store::FsStore;
-pub use store::{MemStore, Store, StoreError, inside, listed};
+pub use store::{MemStore, Store, StoreError, document_path, inside, listed};
 
 use address::{Tracked, find_by_key};
 use history::{History, Replayed};

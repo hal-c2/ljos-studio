@@ -2245,6 +2245,44 @@ fn export_does_not_say(w: &mut UiWorld, pattern: String) -> StepResult {
     }
 }
 
+#[when(regex = r#"^the file "([^"]+)" is written outside Studio:$"#)]
+fn written_outside(w: &mut UiWorld, name: String, step: &Step) -> StepResult {
+    the_file(w, name, step)
+}
+
+/// Lets the window run until `shown` holds for its documents panel. The
+/// report comes from another thread on the real clock.
+fn documents_until(
+    w: &mut UiWorld,
+    seconds: u64,
+    name: &str,
+    shown: bool,
+) -> StepResult {
+    let window = w.window()?;
+    for _ in 0..seconds * 20 {
+        if window.node("Documents", None, name).is_ok() == shown {
+            return Ok(());
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        window.stage.drive().advance(50).map_err(drive_error)?;
+        window.rest()?;
+    }
+    Err(format!(
+        "after {seconds} seconds the documents panel still {} {name:?}",
+        if shown { "lacks" } else { "lists" }
+    ))
+}
+
+#[then(regex = r#"^the documents panel lists "([^"]+)" within (\d+) seconds$"#)]
+fn documents_lists(w: &mut UiWorld, name: String, seconds: u64) -> StepResult {
+    documents_until(w, seconds, &name, true)
+}
+
+#[then(regex = r#"^the documents panel does not list "([^"]+)" within (\d+) seconds$"#)]
+fn documents_lists_not(w: &mut UiWorld, name: String, seconds: u64) -> StepResult {
+    documents_until(w, seconds, &name, false)
+}
+
 #[when(regex = r#"^the file "([^"]+)" is deleted$"#)]
 fn file_deleted(w: &mut UiWorld, name: String) -> StepResult {
     std::fs::remove_file(w.dir.path().join(name)).map_err(|e| e.to_string())

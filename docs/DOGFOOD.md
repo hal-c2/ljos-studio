@@ -248,7 +248,7 @@ view itself loses work.
 - **Where:** both.
 - **Fix:** watch the project directory as the preview already watches
   files. Owner: Studio, `studio_core` project.
-- **Open**: Studio does not watch the project directory.
+- **Fixed**: `studio_mcp` follows the project directory on kernel file events, one watch per directory a walk lists (so not `target` or `node_modules`). The session's own writes and files saved unchanged tell nobody, so the selection and edit budgets pay nothing. On no watch available it falls back to the next tool call, as before.
 
 #### D17. The first picture after a target switch is squeezed
 
