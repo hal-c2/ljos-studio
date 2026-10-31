@@ -215,6 +215,11 @@ refuses "a missing target names setup" "no wasm32-unknown-unknown for this Rust:
 stub rustup 'case "$1 $2" in "component list") printf "clippy-x86_64-unknown-linux-gnu\\nrustfmt-x86_64-unknown-linux-gnu\\n" ;; "target list") printf "wasm32-unknown-unknown\\n" ;; esac'
 call 'need_rust_parts components; need_rust_parts targets; echo fine'
 says "with them all there, nothing is said" "fine"
+stub rustup 'echo "error: toolchain 1.0.0 is not installed" >&2; exit 1'
+call 'need_rust_parts components'
+refuses "a toolchain rustup cannot list names setup" "rustup cannot list this Rust's components: run mise run setup"
+call 'need_rust_parts targets'
+refuses "and so for its targets" "rustup cannot list this Rust's targets: run mise run setup"
 unstub rustup
 
 # --- Paths from where the person asked ---------------------------------------

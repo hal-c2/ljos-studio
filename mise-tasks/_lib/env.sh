@@ -345,9 +345,11 @@ need_rust_parts() {
   command -v rustup >/dev/null || return 0
   local installed part
   if [ "$1" = components ]; then
-    installed="$(rustup component list --installed 2>/dev/null)"
+    installed="$(rustup component list --installed 2>/dev/null)" ||
+      die "rustup cannot list this Rust's ${1}: run mise run setup"
   else
-    installed="$(rustup target list --installed 2>/dev/null)"
+    installed="$(rustup target list --installed 2>/dev/null)" ||
+      die "rustup cannot list this Rust's ${1}: run mise run setup"
   fi
   for part in $(toolchain_list "$1"); do
     case "
