@@ -876,8 +876,7 @@ impl Window {
 
     /// Where the selected object's middle is in the window: the overlay's
     /// box in the document's pixels, from the frame's top left.
-    fn middle_of_selected(&self) -> anyhow::Result<ljos::item::kurbo::Point> {
-        let engine = &self.stage.engine;
+    fn middle_of_selected(&mut self) -> anyhow::Result<ljos::item::kurbo::Point> {
         let number = |value: &serde_json::Value| value.as_f64().unwrap_or(0.0);
         let frame = self.node_with("Canvas", "Desktop", |n| n.role != "label")?;
         let key = frame.key.ok_or(anyhow!("the frame has no key"))?;
@@ -886,25 +885,25 @@ impl Window {
             .drive()
             .aim_at_node(key)
             .map_err(|why| anyhow!("the frame is not shown: {why:?}"))?;
+        let engine = &self.stage.engine;
         let overlay = ljos_drive::find_below(engine, self.root, "overlay")
             .ok_or(anyhow!("the canvas has no overlay"))?;
         let zoom = engine.read_by_name(overlay, "zoom").to_number();
-        let read = |object, name| {
-            <serde_json::Value as QmlValue>::from_value(&engine.read_by_name(object, name))
-                .unwrap_or_default()
+        let preview = <serde_json::Value as QmlValue>::from_value(
+            &engine.read_by_name(self.workspace, "preview"),
+        )
+        .unwrap_or_default();
+        // The outline, not the overlay's `nodes`: a script's array does not
+        // read back as JSON here. It is in the overlay's scaled coordinates.
+        let outline = ljos_drive::find_below(engine, overlay, "selectionOutline")
+            .ok_or(anyhow!("the selected object has no outline"))?;
+        let along = |at: &str, size: &str| {
+            engine.read_by_name(outline, at).to_number()
+                + engine.read_by_name(outline, size).to_number() / 2.0
         };
-        let preview = read(self.workspace, "preview");
-        let nodes = read(overlay, "nodes");
-        let box_ = &nodes[0]["window"];
         Ok(ljos::item::kurbo::Point::new(
-            centre.x
-                + zoom
-                    * (number(&box_["x"]) + number(&box_["width"]) / 2.0
-                        - number(&preview["width"]) / 2.0),
-            centre.y
-                + zoom
-                    * (number(&box_["y"]) + number(&box_["height"]) / 2.0
-                        - number(&preview["height"]) / 2.0),
+            centre.x + along("x", "width") - zoom * number(&preview["width"]) / 2.0,
+            centre.y + along("y", "height") - zoom * number(&preview["height"]) / 2.0,
         ))
     }
 
