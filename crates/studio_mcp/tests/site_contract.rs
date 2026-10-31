@@ -331,18 +331,29 @@ fn a_link() {
     );
 }
 
-/// Studio's list of what ljos-web provides is the runtime package's
-/// exports at the pin, when an ljos-web checkout is at hand (`LJOS_WEB`).
+/// Studio's list of what ljos-web provides is the runtime package's exports
+/// at the pin, whatever the checkout has out, when one is at hand (`LJOS_WEB`).
+/// `mise run check:web-modules` always has one, and CI runs it.
 #[test]
 fn studio_knows_the_modules_ljos_web_exports() {
     let Ok(web) = std::env::var("LJOS_WEB") else {
         eprintln!("LJOS_WEB is not set: the list is not compared with a checkout");
         return;
     };
-    let package: Value = serde_json::from_str(
-        &fs::read_to_string(Path::new(&web).join("packages/runtime/package.json")).unwrap(),
-    )
-    .unwrap();
+    let crate_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
+    let pin = fs::read_to_string(Path::new(&crate_dir).join("../../web/ljos-web.rev")).unwrap();
+    let shown = std::process::Command::new("git")
+        .args(["-C", &web, "show"])
+        .arg(format!("{}:packages/runtime/package.json", pin.trim()))
+        .output()
+        .unwrap();
+    assert!(
+        shown.status.success(),
+        "{web} does not have the pin {}: {}",
+        pin.trim(),
+        String::from_utf8_lossy(&shown.stderr)
+    );
+    let package: Value = serde_json::from_slice(&shown.stdout).unwrap();
     let mut exported: Vec<String> = package["exports"]
         .as_object()
         .unwrap()

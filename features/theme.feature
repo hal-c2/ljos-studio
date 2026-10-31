@@ -103,6 +103,34 @@ Feature: Tokens are read and set in the project's theme file
         """
       And the file "app/theme.json" does not exist
 
+    Scenario: The nearest theme file wins over the project's own
+      Given the file "theme.json":
+        """json
+        { "Spacing": { "md": 20 } }
+        """
+      And the file "app/theme.json":
+        """json
+        { "Spacing": { "md": 12 } }
+        """
+      When the agent calls the tool "theme_set" with:
+        """json
+        {"doc": "app/Main.qml", "token": "Spacing.md"}
+        """
+      Then the answer's "/file" is "app/theme.json"
+      And the answer's "/tokens/0/theme" is 12
+      When the agent calls the tool "theme_set" with:
+        """json
+        {"doc": "app/Main.qml", "token": "Spacing.md", "value": 24}
+        """
+      Then the file "app/theme.json" is:
+        """json
+        { "Spacing": { "md": 24 } }
+        """
+      And the file "theme.json" is:
+        """json
+        { "Spacing": { "md": 20 } }
+        """
+
     Scenario: A token the module does not have is refused
       When the agent calls the tool "theme_set" with:
         """json
@@ -314,3 +342,98 @@ Feature: Tokens are read and set in the project's theme file
         """json
         {"Colors": {"accent": "#9c4dc4"}}
         """
+
+    Scenario Outline: A document outside the project has no theme of the project's
+      Given the file "theme.json":
+        """json
+        {"Spacing": {"md": 8}}
+        """
+      When the agent calls the tool "theme_set" with:
+        """json
+        {"doc": "<doc>", "token": "Spacing.md", "value": 24}
+        """
+      Then the agent is refused with "path_denied"
+      When the agent calls the tool "theme_set" with:
+        """json
+        {"doc": "<doc>"}
+        """
+      Then the agent is refused with "path_denied"
+      And the file "theme.json" is:
+        """json
+        {"Spacing": {"md": 8}}
+        """
+
+      Examples:
+        | doc                   |
+        | ../elsewhere/Main.qml |
+        | /Main.qml             |
+        | /elsewhere/Main.qml   |
+        | app/../../Main.qml    |
+
+    Scenario: With no theme file, a document outside the project makes none
+      When the agent calls the tool "theme_set" with:
+        """json
+        {"doc": "../elsewhere/Main.qml", "token": "Spacing.md", "value": 24}
+        """
+      Then the agent is refused with "path_denied"
+      And the file "theme.json" does not exist
+
+    @disk
+    Scenario: A document through a link out of the project has no theme of the project's
+      Given the link "out" leads to a directory outside the project holding "Main.qml"
+      When the agent calls the tool "theme_set" with:
+        """json
+        {"doc": "out/Main.qml", "token": "Spacing.md", "value": 24}
+        """
+      Then the agent is refused with "path_denied"
+      And the file "theme.json" does not exist
+
+    @disk
+    Scenario: A document that is a link out of the project, at its top, has no theme of the project's
+      Given the file "theme.json":
+        """json
+        {"Spacing": {"md": 8}}
+        """
+      And the link "out" leads to a directory outside the project holding "Main.qml"
+      And the link "Out.qml" leads to "out/Main.qml"
+      When the agent calls the tool "theme_set" with:
+        """json
+        {"doc": "Out.qml", "token": "Spacing.md", "value": 24}
+        """
+      Then the agent is refused with "path_denied"
+      And the file "theme.json" is:
+        """json
+        {"Spacing": {"md": 8}}
+        """
+
+    @disk
+    Scenario: A document that is a link in the project has the theme of the file it leads to
+      Given the file "app/theme.json":
+        """json
+        {"Spacing": {"md": 8}}
+        """
+      And the link "Entry.qml" leads to "app/Main.qml"
+      When the agent calls the tool "theme_set" with:
+        """json
+        {"doc": "Entry.qml", "token": "Spacing.md", "value": 24}
+        """
+      Then the answer's "/file" is "app/theme.json"
+      And the file "theme.json" does not exist
+
+    @disk
+    Scenario: A document that is a link out of the project, in a directory, has no theme either
+      Given the file "theme.json":
+        """json
+        {"Spacing": {"md": 8}}
+        """
+      And the link "app/out.qml" leads to the file "Main.qml" outside the project
+      When the agent calls the tool "theme_set" with:
+        """json
+        {"doc": "app/out.qml", "token": "Spacing.md", "value": 24}
+        """
+      Then the agent is refused with "path_denied"
+      And the file "theme.json" is:
+        """json
+        {"Spacing": {"md": 8}}
+        """
+      And the file "app/theme.json" does not exist

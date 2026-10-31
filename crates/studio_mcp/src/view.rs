@@ -168,7 +168,7 @@ pub struct View {
     pub preview: Option<Previewed>,
     /// The server can start previews.
     pub previews: bool,
-    /// The theme file beside `doc` (or the project's, with none open).
+    /// The theme file Ljós reads for `doc` (`tools::theme_file`).
     pub theme: String,
     /// Why the theme file is not read: Ljós would refuse it.
     pub theme_problem: String,
@@ -204,7 +204,7 @@ impl Studio {
         if let Some(p) = &mut view.preview {
             p.variant = self.variant(&p.doc, p.width).unwrap_or_default();
         }
-        view.theme = crate::tools::theme_file(self.session.store(), doc);
+        view.theme = crate::tools::running_theme_file(self.session.store(), doc);
         if let Ok(read) = self.session.tokens(&view.theme, None) {
             view.theme_problem = read.problem.unwrap_or_default();
             view.tokens = read.tokens.into_iter().map(row).collect();

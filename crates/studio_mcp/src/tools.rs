@@ -658,7 +658,9 @@ struct ThemeOut {
 /// reads for an entry there (`ljos_design::theme::find`), the nearest
 /// `theme.json` from its directory up to the project's; else the project's
 /// own, where Ljós looks and watches when there is none, so a new one is
-/// made there.
+/// made there. A `doc` outside the project is answered as itself, a path the
+/// store refuses: the file beside it can be the project's own when it sits
+/// directly under `/`, or is a link at the project's top.
 pub(crate) fn theme_file(store: &dyn studio_core::Store, doc: &str) -> String {
     let file = studio_core::theme::FILE;
     if doc.is_empty() {
@@ -672,6 +674,14 @@ pub(crate) fn theme_file(store: &dyn studio_core::Store, doc: &str) -> String {
         dir => format!("{dir}/{file}"),
     };
     let mut dir = doc.rsplit_once('/').map_or("", |(dir, _)| dir);
+    // `MemStore` confines nothing, so the path is judged here as well as by
+    // the store, which alone sees where a link leads.
+    let plain = std::path::Path::new(doc)
+        .components()
+        .all(|c| matches!(c, std::path::Component::Normal(_)));
+    if !plain || store.resolved(doc).is_err() {
+        return doc.to_owned();
+    }
     loop {
         if store.exists(&beside(dir)) {
             return beside(dir);
@@ -685,6 +695,17 @@ pub(crate) fn theme_file(store: &dyn studio_core::Store, doc: &str) -> String {
     file.to_owned()
 }
 
+/// The theme file Ljós reads for `doc` when it runs it: it starts from the
+/// real file, so a link in the project has the theme of what it leads to. An
+/// export keeps the path as written ([`theme_file`]): a bundle lists a linked
+/// file as a real one under the link's name.
+pub(crate) fn running_theme_file(store: &dyn studio_core::Store, doc: &str) -> String {
+    match store.resolved(doc) {
+        Ok(real) => theme_file(store, &real),
+        Err(_) => theme_file(store, doc),
+    }
+}
+
 fn theme_set(studio: &Mutex<Studio>, a: ThemeArgs) -> Result<ThemeOut, SurfaceError> {
     let mut studio = lock(studio);
     let doc = a.doc.or_else(|| {
@@ -693,7 +714,7 @@ fn theme_set(studio: &Mutex<Studio>, a: ThemeArgs) -> Result<ThemeOut, SurfaceEr
             .as_ref()
             .map(|o| o.doc.clone())
     });
-    let file = theme_file(studio.session.store(), doc.as_deref().unwrap_or(""));
+    let file = running_theme_file(studio.session.store(), doc.as_deref().unwrap_or(""));
     let Some(value) = a.value else {
         let read = studio
             .session

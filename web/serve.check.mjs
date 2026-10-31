@@ -6,7 +6,7 @@
 //
 //   PLAYWRIGHT=… node web/serve.check.mjs <the assembled app's directory> [screenshot.png]
 
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -19,6 +19,11 @@ console.log(`served at ${url}`);
 
 const browser = await chromium.launch({ headless: true });
 const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+// The resizes the preview's frame is asked for, counted where they arrive.
+await context.addInitScript(() => {
+  window.resizes = [];
+  addEventListener("message", (e) => e.data?.request?.call === "resize" && window.resizes.push(e.data.request.size));
+});
 const page = await context.newPage();
 const failures = [];
 const said = [];
@@ -124,8 +129,60 @@ const escape = await fetch(`${url}compile`, { method: "POST", body: JSON.stringi
 check("the server refuses a path out of the project", escape.status === 400, escape.status);
 
 check("the page logged no errors", said.length === 0, said);
+// A style change that moves nothing asks for no resize, however many there
+// are; a real change asks, and ends at the size the frame has.
+{
+  const inFrame = page.frames().find((f) => f !== page.mainFrame());
+  const asked = () => inFrame.evaluate(() => window.resizes);
+  const before = (await asked()).length;
+  await page.evaluate(async () => {
+    const app = document.getElementById("app");
+    for (let i = 0; i < 30; i++) {
+      app.style.setProperty("--tick", String(i));
+      await new Promise(requestAnimationFrame);
+    }
+  });
+  check("thirty style changes that move nothing ask for no resize", (await asked()).length === before, (await asked()).slice(before));
+  await page.setViewportSize({ width: 1200, height: 800 });
+  // Once the shell has laid out again and the frame has been told.
+  await page.waitForTimeout(500);
+  const want = await page.evaluate(() => {
+    const box = document.getElementById("frame").getBoundingClientRect();
+    return { width: Math.round(box.width), height: Math.round(box.height) };
+  });
+  const after = (await asked()).slice(before);
+  check("a new size is asked for, and the last is the frame's", JSON.stringify(after.at(-1)) === JSON.stringify(want), { after, want });
+}
 await browser.close();
 await stop();
+
+// A checkout reached through a link: each project is still its own root, and
+// what the compiler says still names files by the project's own paths.
+const linkDir = mkdtempSync(join(tmpdir(), "studio-serve-link-"));
+try {
+  const link = join(linkDir, "app");
+  symlinkSync(realpathSync(app), link);
+  const linked = await start({ app: link });
+  const compile = async (files) => {
+    const answer = await fetch(`${linked.url}compile`, { method: "POST", body: JSON.stringify({ files, entry: "Main.qml" }) });
+    return answer.json();
+  };
+  const main = "import QtQuick\nimport Parts\n\nPanel {}\n";
+  const first = await compile({
+    "Main.qml": main,
+    // Found from a directory of its own only when the project is qmlc's root.
+    "pages/Other.qml": main,
+    "Parts/qmldir": "module Parts\nPanel 1.0 Panel.qml\n",
+    "Parts/Panel.qml": "import QtQuick\n\nItem {}\n",
+  });
+  check("through a link, a project is its own root", first.url !== undefined, first);
+  const second = await compile({ "Main.qml": main });
+  check("through a link, the next project does not see that module", second.error?.includes("Panel") === true, second);
+  check("through a link, an error names the project's own path", second.error?.includes(realpathSync(app)) === false, second);
+  await linked.stop();
+} finally {
+  rmSync(linkDir, { recursive: true, force: true });
+}
 if (failures.length > 0) {
   console.log(`\n${failures.length} failed: ${failures.join("; ")}`);
   process.exitCode = 1;
