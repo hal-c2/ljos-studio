@@ -227,6 +227,23 @@ Feature: A project is exported as a bundle that runs without Studio
       And the answer's "/written" is false
       And the file "build/native/ljos-bundle.json" does not exist
 
+    Scenario: An answer says whether the bundle it writes replaces one already there
+      When the agent calls the tool "export" with:
+        """json
+        {"entry": "Shell.qml", "dry_run": true}
+        """
+      Then the answer's "/replaces" is false
+      When the agent calls the tool "export" with:
+        """json
+        {"entry": "Shell.qml"}
+        """
+      Then the answer's "/replaces" is false
+      When the agent calls the tool "export" with:
+        """json
+        {"entry": "Shell.qml", "dry_run": true}
+        """
+      Then the answer's "/replaces" is true
+
     Scenario: Exporting again replaces the last bundle
       Given the agent has called the tool "export" with:
         """json

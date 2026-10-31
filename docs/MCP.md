@@ -410,8 +410,9 @@ own beside it, and the list's text is unchanged.
 `export {entry, target?, out?, dry_run?}` (`fs`) writes a bundle of the
 project below its `build/` (`build/native` by default) and answers `out`,
 `files` and `bytes` (totals that stay true when a long manifest is cut
-short in the answer), the `manifest`, `written` (false for `dry_run`) and
-`ms`. The bundle holds every file
+short in the answer), the `manifest`, `written` (false for `dry_run`),
+`replaces` (whether `out` held a bundle before the call, which a real export
+swaps out) and `ms`. The bundle holds every file
 of the project except `.studio/`, the top-level `mocks/`, hidden files,
 `build/`, `target/`, `node_modules/` and unfinished writes, and beside them
 `ljos-bundle.json`:
