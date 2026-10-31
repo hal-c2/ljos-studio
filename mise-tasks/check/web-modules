@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+#MISE description="Studio's list of what ljos-web provides against the runtime package at web/ljos-web.rev; a pin bump that changes it fails here, not at a site's build"
+set -euo pipefail
+. "$(dirname "$0")/../_lib/env.sh"
+find_ljos_web
+export LJOS_WEB
+cargo test -q -p studio_mcp --test site_contract studio_knows_the_modules_ljos_web_exports
