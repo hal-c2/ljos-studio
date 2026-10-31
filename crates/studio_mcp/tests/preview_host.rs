@@ -180,6 +180,12 @@ struct Fixture {
 
 impl Fixture {
     fn new() -> Self {
+        Self::with(|_| {})
+    }
+
+    /// `arrange` changes the project before Studio opens it: after, Studio
+    /// hears of it as of any other program's change.
+    fn with(arrange: impl FnOnce(&std::path::Path)) -> Self {
         let dir = tempfile::tempdir().unwrap();
         let files = [
             (
@@ -206,6 +212,7 @@ impl Fixture {
             std::fs::create_dir_all(path.parent().unwrap()).unwrap();
             std::fs::write(path, text).unwrap();
         }
+        arrange(dir.path());
         let seen = Arc::new(Mutex::new(Seen::default()));
         let opened = Arc::new(Mutex::new(0));
         let mut studio = Studio::open(dir.path()).unwrap().with_previews(Arc::new({
@@ -762,20 +769,19 @@ fn a_refused_screenshot_leaves_the_preview_open() {
 }
 
 /// A project with three mock modules, for failures part way through them.
-fn three_mocks(f: &Fixture) {
+fn three_mocks(dir: &std::path::Path) {
     for module in ["A", "B", "C"] {
-        let path = f._dir.path().join("mocks").join(module);
+        let path = dir.join("mocks").join(module);
         std::fs::create_dir_all(&path).unwrap();
         std::fs::write(path.join("qmldir"), format!("module {module}\n")).unwrap();
     }
-    std::fs::remove_dir_all(f._dir.path().join("mocks/App")).unwrap();
+    std::fs::remove_dir_all(dir.join("mocks/App")).unwrap();
 }
 
 /// Review 4427296683.
 #[test]
 fn a_failure_on_the_second_of_three_aliases_keeps_the_record_true() {
-    let f = Fixture::new();
-    three_mocks(&f);
+    let f = Fixture::with(three_mocks);
     f.call("preview_open", json!({ "doc": "Shell.qml" }))
         .unwrap();
     f.calls();

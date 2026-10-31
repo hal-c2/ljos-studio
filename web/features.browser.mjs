@@ -54,6 +54,8 @@ const uncompiled = (request, type) => {
 };
 export const WAITING = new Map([
   ["Waiting on the preview says when its app wakes next", refused(25)],
+  // The page's outline names the objects, without their boxes or files.
+  ["The outline lists every item, with its box and where it is written", { request: 26, cause: said(/`\/outline` is .*without "Rectangle#card 10,20/s) }],
 ]);
 
 // Every event of the preview's, and the reloads among them, as the native

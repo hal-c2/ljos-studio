@@ -344,7 +344,7 @@ impl Studio {
         );
         if let Some(watch) = &watch {
             let own = watch.own_writes();
-            self.session.on_write(move |path| own(path));
+            self.session.on_writing(own);
         }
         self.project_watch = watch;
     }

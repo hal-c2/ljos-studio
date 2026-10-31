@@ -195,7 +195,7 @@ impl Previews {
 
     /// What `node_arrange` `hide` holds, on what a reload or a new app put back.
     pub(crate) fn write_hidden(&mut self) {
-        let Some(open) = &mut self.open else {
+        let Some(open) = self.open.as_mut().filter(|_| !self.hidden.is_empty()) else {
             return;
         };
         for id in &self.hidden {
