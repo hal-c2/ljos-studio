@@ -9,12 +9,12 @@ expression: value
     "open_world": false,
     "read_only": true
   },
-  "description": "Open a project directory below the workspace, or describe the open one. Opening starts a new session: earlier handles and history end.",
+  "description": "Open a project directory below the workspace (relative or absolute path), or describe the open one. Opening starts a new session: earlier handles and history end.",
   "inputSchema": {
     "additionalProperties": false,
     "properties": {
       "path": {
-        "description": "A directory below the workspace, `.` for the workspace itself. Left\nout, the open project is described without reopening it.",
+        "description": "A directory below the workspace, from it or absolute; `.` for the\nworkspace itself. Left\nout, the open project is described without reopening it.",
         "type": [
           "string",
           "null"

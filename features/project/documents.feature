@@ -39,6 +39,35 @@ Feature: An agent opens a project and reads and makes its documents
       """
     Then the agent is refused with "path_denied"
 
+  # Both spellings of a place below the workspace are the same project. The
+  # absolute one was refused as outside it, and an agent that carried on wrote
+  # into the project still open: the workspace's root.
+  @disk
+  Scenario: A project below the workspace opens by its absolute path
+    When the agent opens the project "parts" by its absolute path
+    Then the answer's "/documents" lists "Card.qml"
+    When the agent calls the tool "document_new" with:
+      """json
+      {"doc": "New.qml"}
+      """
+    Then the file "parts/New.qml" exists
+    And the file "New.qml" does not exist
+
+  @disk
+  Scenario: An absolute path outside the workspace is refused
+    When the agent calls the tool "project_open" with:
+      """json
+      {"path": "/"}
+      """
+    Then the agent is refused with "path_denied"
+
+  Scenario: A refused project says which one stays open
+    When the agent calls the tool "project_open" with:
+      """json
+      {"path": "../elsewhere"}
+      """
+    Then the refusal's "/details/project" is "."
+
   Scenario: A document's tree with its grouped properties as bindings
     When the agent calls the tool "document_tree" with:
       """json

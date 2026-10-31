@@ -25,7 +25,8 @@ const TREE_PAGE: usize = 200;
 #[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct ProjectOpenArgs {
-    /// A directory below the workspace, `.` for the workspace itself. Left
+    /// A directory below the workspace, from it or absolute; `.` for the
+    /// workspace itself. Left
     /// out, the open project is described without reopening it.
     path: Option<String>,
 }
@@ -1237,8 +1238,9 @@ fn edits(studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
         .with(
             ToolDef::new::<ProjectOpenArgs>(
                 "project_open",
-                "Open a project directory below the workspace, or describe the open one. Opening \
-                 starts a new session: earlier handles and history end.",
+                "Open a project directory below the workspace (relative or absolute path), or \
+                 describe the open one. Opening starts a new session: earlier handles and history \
+                 end.",
             )
             .output::<ProjectInfo>()
             .requires(Cap::Inspect),

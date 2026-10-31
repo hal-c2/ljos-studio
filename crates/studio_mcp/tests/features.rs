@@ -467,6 +467,13 @@ fn calls(w: &mut StudioWorld, tool: String) -> StepResult {
     w.call(&tool, Value::Object(Default::default()))
 }
 
+#[when(regex = r#"^the agent opens the project "([^"]+)" by its absolute path$"#)]
+fn opens_by_absolute_path(w: &mut StudioWorld, name: String) -> StepResult {
+    let path = w.dir.path().join(&name);
+    let path = path.to_str().ok_or("the path is not text")?.to_owned();
+    w.call("project_open", serde_json::json!({ "path": path }))
+}
+
 #[given(regex = r#"^the agent has called the tool "([^"]+)" with:$"#)]
 #[when(regex = r#"^the agent calls the tool "([^"]+)" with:$"#)]
 fn calls_with(w: &mut StudioWorld, tool: String, step: &Step) -> StepResult {
