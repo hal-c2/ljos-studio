@@ -91,6 +91,18 @@
               "notify": "selectedChanged"
             },
             {
+              "name": "chosen",
+              "type": "var",
+              "kind": "value",
+              "list": false,
+              "readonly": true,
+              "final": true,
+              "required": false,
+              "constant": false,
+              "group": false,
+              "notify": "chosenChanged"
+            },
+            {
               "name": "selection",
               "type": "var",
               "kind": "value",

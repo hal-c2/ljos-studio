@@ -110,6 +110,9 @@ pub struct Workspace {
     /// The handle of the selected object of `doc`; empty when none is.
     #[qml(readonly, notify)]
     pub selected: String,
+    /// The handles of every selected object of `doc`; `selected` is the first.
+    #[qml(readonly, notify)]
+    pub chosen: Json,
     /// The selected object's place in `text` (`start`, `end`, in the
     /// characters a script counts).
     #[qml(readonly, notify)]
@@ -194,6 +197,7 @@ impl Default for Workspace {
             text: String::new(),
             layers: none(),
             selected: String::new(),
+            chosen: json!([]),
             selection: json!({"start": 0, "end": 0}),
             inspector: none(),
             states: none(),
@@ -491,14 +495,21 @@ fn finish(engine: &Engine, ws: ObjectId, done: Done) {
                 rebase(engine, ws, &tool, &args, answer);
             }
             publish(engine, ws, view, seen);
+            // What the canvas reads for itself is no gesture of the person's:
+            // it neither clears the refusal of the drop before it nor raises one.
+            let gesture = !(tool == "node_arrange" && args["action"] == "geometry");
             match answer {
                 Ok(answer) => {
-                    let _ = cx.set(Workspace::ERROR, String::new());
+                    if gesture {
+                        let _ = cx.set(Workspace::ERROR, String::new());
+                    }
                     let _ = Workspace::emit_answered(&cx, tool, answer);
                 }
                 Err(error) => {
-                    let message = error["message"].as_str().unwrap_or_default().to_owned();
-                    let _ = cx.set(Workspace::ERROR, message);
+                    if gesture {
+                        let message = error["message"].as_str().unwrap_or_default().to_owned();
+                        let _ = cx.set(Workspace::ERROR, message);
+                    }
                     let _ = Workspace::emit_refused(&cx, tool, error);
                 }
             }
@@ -600,6 +611,7 @@ fn publish(engine: &Engine, ws: ObjectId, view: View, seen: u64) {
     let _ = cx.set(Workspace::TEXT, view.text);
     let _ = cx.set(Workspace::LAYERS, to_json(&view.layers));
     let _ = cx.set(Workspace::SELECTED, view.selected);
+    let _ = cx.set(Workspace::CHOSEN, to_json(&view.chosen));
     let _ = cx.set(Workspace::SELECTION, to_json(&view.selection));
     let _ = cx.set(Workspace::INSPECTOR, to_json(&view.inspector));
     let _ = cx.set(Workspace::STATES, to_json(&view.states));

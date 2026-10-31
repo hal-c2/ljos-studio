@@ -1073,11 +1073,22 @@ fn contributes(w: &mut UiWorld, text: String, slot: String) -> StepResult {
     window.enter(&field, &text)
 }
 
+#[given(regex = r#"^the person has pressed "([^"]+)"$"#)]
 #[when(regex = r#"^the person presses "([^"]+)"$"#)]
 fn presses(w: &mut UiWorld, chord: String) -> StepResult {
     let window = w.window()?;
     let chord = Chord::parse(&chord)?;
     window.stage.drive().chord(&chord, 0).map_err(drive_error)?;
+    window.rest()
+}
+
+#[when(regex = r#"^the person presses "([^"]+)" without waiting between them$"#)]
+fn presses_quickly(w: &mut UiWorld, chords: String) -> StepResult {
+    let window = w.window()?;
+    for chord in chords.split(", ") {
+        let chord = Chord::parse(chord)?;
+        window.stage.drive().chord(&chord, 0).map_err(drive_error)?;
+    }
     window.rest()
 }
 
@@ -1149,6 +1160,7 @@ fn chooses_target(w: &mut UiWorld, target: String) -> StepResult {
     window.click_node(&button)
 }
 
+#[given(regex = r#"^the person has clicked the frame "([^"]+)" at (\d+), (\d+)$"#)]
 #[when(regex = r#"^the person clicks the frame "([^"]+)" at (\d+), (\d+)$"#)]
 fn clicks_frame(w: &mut UiWorld, target: String, x: f64, y: f64) -> StepResult {
     let window = w.window()?;
@@ -1169,6 +1181,141 @@ fn clicks_frame(w: &mut UiWorld, target: String, x: f64, y: f64) -> StepResult {
         .click(at, MouseButtons::LEFT, 1)
         .map_err(drive_error)?;
     window.rest()
+}
+
+/// Where a point of the frame is in the window.
+fn frame_point(window: &Window, target: &str, x: f64, y: f64) -> Result<Point, String> {
+    let bounds = window
+        .bounds(&|role, name| role == "image" && name == target)
+        .ok_or_else(|| format!("the canvas has no frame {target:?} drawn"))?;
+    let zoom = bounds.width() / window.read_json("preview")["width"].as_f64().unwrap_or(1.0);
+    Ok(Point::new(bounds.x0 + x * zoom, bounds.y0 + y * zoom))
+}
+
+#[when(regex = r#"^the person drags in the frame "([^"]+)" from (\d+), (\d+) to (\d+), (\d+)$"#)]
+fn drags_in_frame(
+    w: &mut UiWorld,
+    target: String,
+    x0: f64,
+    y0: f64,
+    x1: f64,
+    y1: f64,
+) -> StepResult {
+    let window = w.window()?;
+    let from = frame_point(window, &target, x0, y0)?;
+    let to = frame_point(window, &target, x1, y1)?;
+    // A person's press reaches the geometry before the hand moves on; the
+    // pause is what a frame of a real drag gives it.
+    window
+        .stage
+        .drive()
+        .press(from, MouseButtons::LEFT)
+        .map_err(drive_error)?;
+    window.rest()?;
+    window.stage.drive().move_to(to).map_err(drive_error)?;
+    window
+        .stage
+        .drive()
+        .release(to, MouseButtons::LEFT)
+        .map_err(drive_error)?;
+    window.rest()
+}
+
+#[when(
+    regex = r#"^the person presses in the frame "([^"]+)" at (\d+), (\d+) and holds it at (\d+), (\d+)$"#
+)]
+fn holds_in_frame(
+    w: &mut UiWorld,
+    target: String,
+    x0: f64,
+    y0: f64,
+    x1: f64,
+    y1: f64,
+) -> StepResult {
+    let window = w.window()?;
+    let from = frame_point(window, &target, x0, y0)?;
+    let to = frame_point(window, &target, x1, y1)?;
+    window
+        .stage
+        .drive()
+        .press(from, MouseButtons::LEFT)
+        .map_err(drive_error)?;
+    window.rest()?;
+    window.stage.drive().move_to(to).map_err(drive_error)?;
+    window.rest()
+}
+
+fn overlay_part(window: &Window, name: &str) -> Result<ObjectId, String> {
+    let frame = window.frame("Desktop")?;
+    ljos_drive::find_below(window.engine(), frame, name)
+        .ok_or_else(|| format!("the canvas has no {name}"))
+}
+
+#[then(regex = r#"^the file "([^"]+)" says "(.*)"$"#)]
+fn file_says(w: &mut UiWorld, name: String, want: String) -> StepResult {
+    let got = std::fs::read_to_string(w.dir.path().join(&name)).map_err(|e| e.to_string())?;
+    got.contains(&want)
+        .then_some(())
+        .ok_or_else(|| format!("`{name}` does not say {want:?}:\n{got}"))
+}
+
+#[then(regex = r#"^the canvas outlines the selection at (\d+), (\d+) sized (\d+) by (\d+)$"#)]
+fn outline_at(w: &mut UiWorld, x: f64, y: f64, width: f64, height: f64) -> StepResult {
+    let window = w.window()?;
+    let outline = overlay_part(window, "selectionOutline")?;
+    let zoom = window
+        .engine()
+        .read_by_name(overlay_part(window, "overlay")?, "zoom")
+        .to_number();
+    let read = |name: &str| window.engine().read_by_name(outline, name).to_number() / zoom;
+    let got = (read("x"), read("y"), read("width"), read("height"));
+    let close = |a: f64, b: f64| (a - b).abs() < 0.5;
+    (close(got.0, x) && close(got.1, y) && close(got.2, width) && close(got.3, height))
+        .then_some(())
+        .ok_or_else(|| format!("the outline is at {got:?}"))
+}
+
+#[then(regex = r#"^the canvas shows (\d+) resize handles$"#)]
+fn handles_shown(w: &mut UiWorld, want: usize) -> StepResult {
+    let window = w.window()?;
+    let overlay = overlay_part(window, "overlay")?;
+    let got = window
+        .engine()
+        .read_by_name(overlay, "handlesShown")
+        .to_number() as usize;
+    (got == want)
+        .then_some(())
+        .ok_or_else(|| format!("{got} handles"))
+}
+
+#[then(regex = r#"^the canvas shows a ([xy]) guide at (\d+)$"#)]
+fn guide_at(w: &mut UiWorld, axis: String, at: f64) -> StepResult {
+    let window = w.window()?;
+    let guide = overlay_part(window, &format!("guide{}", axis.to_uppercase()))?;
+    let zoom = window
+        .engine()
+        .read_by_name(overlay_part(window, "overlay")?, "zoom")
+        .to_number();
+    let got = window.engine().read_by_name(guide, &axis).to_number() / zoom;
+    let visible = window.engine().read_by_name(guide, "visible").to_boolean();
+    (visible && (got - at).abs() < 0.5)
+        .then_some(())
+        .ok_or_else(|| format!("the guide is at {got}, visible {visible}"))
+}
+
+#[then(regex = r#"^the canvas says "(.+)"$"#)]
+fn canvas_says(w: &mut UiWorld, want: String) -> StepResult {
+    let window = w.window()?;
+    let hint =
+        ljos_drive::find_below(window.engine(), window.root, "canvasHint").ok_or("no hint")?;
+    let got = window
+        .engine()
+        .read_by_name(hint, "text")
+        .to_js_string()
+        .to_string();
+    (got == want)
+        .then_some(())
+        .ok_or_else(|| format!("the canvas says {got:?}"))
 }
 
 #[when(regex = r#"^nobody touches the window for (\d+) seconds?$"#)]

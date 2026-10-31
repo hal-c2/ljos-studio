@@ -14,6 +14,10 @@ pub const WINDOW: (&str, &str) = ("Window.qml", include_str!("../../../shell/Win
 /// Studio's own shell, by its path from `Builtin/`.
 pub const BUILTIN: &[(&str, &str)] = &[
     (
+        "CanvasOverlay.qml",
+        include_str!("../../../shell/Builtin/CanvasOverlay.qml"),
+    ),
+    (
         "CanvasPanel.qml",
         include_str!("../../../shell/Builtin/CanvasPanel.qml"),
     ),

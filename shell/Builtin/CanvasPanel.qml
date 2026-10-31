@@ -1,6 +1,8 @@
 // The document running on its target: a frame of the preview's size with
 // the preview's latest picture in it, and the state its breakpoint shows. Ctrl+wheel zooms; a click selects
-// the object drawn there, as `node_select` with a point does for an agent.
+// the object drawn there, as `node_select` with a point does for an agent,
+// and CanvasOverlay moves and resizes it. A new frame is fitted to the panel
+// until the person picks a zoom.
 // In play mode a click is the app's own: `preview_state` clicks the
 // running app there and reads the root's state, which the flow panel shows.
 import QtQuick
@@ -14,19 +16,34 @@ Panel {
     required property Workspace workspace
     title: "Canvas"
 
-    property real zoom: 1
+    // Until the person zooms, the frame fits: a desktop frame in a panel
+    // narrower than it would otherwise show only its corner.
+    property bool fitted: true
+    property real chosenZoom: 1
+    readonly property real fit: preview === null ? 1
+        : Math.min(1, (flick.width - 2 * Spacing.lg) / Math.max(1, preview.width),
+                   (flick.height - 2 * Spacing.lg - frameLabels) / Math.max(1, preview.height))
+    // The two lines above the frame.
+    readonly property real frameLabels: 2 * (Typography.captionSize * 1.5 + Spacing.xxs)
+    readonly property real zoom: fitted ? Math.max(0.125, fit) : chosenZoom
     property bool playing: false
+    property bool dragging: false
+    property string says: ""
     readonly property var preview: workspace.preview
 
     function zoomBy(notches) {
-        zoom = Math.min(8, Math.max(0.125, zoom * Math.pow(1.25, notches)))
+        chosenZoom = Math.min(8, Math.max(0.125, zoom * Math.pow(1.25, notches)))
+        fitted = false
     }
 
     Flickable {
         id: flick
         objectName: "canvas"
         anchors.fill: parent
+        // Below the buttons: the frame's own labels stay readable.
+        anchors.topMargin: tools.visible ? tools.height + Spacing.xs : 0
         clip: true
+        interactive: !panel.dragging
         contentWidth: frames.width + 2 * Spacing.lg
         contentHeight: frames.height + 2 * Spacing.lg
 
@@ -42,12 +59,15 @@ Panel {
             spacing: Spacing.xs
 
             // One frame per target the document runs on; a session runs
-            // one preview at a time.
+            // one preview at a time. A count, not the preview: `preview` is a
+            // new value at every publish, and a new model would build the
+            // frame again, taking the keyboard focus and a drag with it.
             Repeater {
-                model: panel.preview !== null ? [panel.preview] : []
+                model: panel.preview !== null ? 1 : 0
                 delegate: Column {
                     id: frame
-                    required property var modelData
+                    readonly property var modelData: panel.preview !== null ? panel.preview
+                        : ({target: "", width: 0, height: 0, variant: ""})
                     readonly property string name: modelData.target !== "" ? modelData.target : "Custom"
                     objectName: "frame " + name
                     spacing: Spacing.xxs
@@ -81,28 +101,15 @@ Panel {
                             anchors.fill: parent
                             workspace: panel.workspace
                         }
-                        TapHandler {
-                            onTapped: (point) => {
-                                const x = point.position.x / panel.zoom
-                                const y = point.position.y / panel.zoom
-                                if (panel.playing) {
-                                    // The app is clicked at the very point, as a person's
-                                    // pointer would be. The root's state says where the
-                                    // flow is, when the preview can find the root: by its
-                                    // `id`.
-                                    const layers = panel.workspace.layers
-                                    const args = {click_at: {x: x, y: y}}
-                                    if (layers.length > 0 && layers[0].id !== "")
-                                        args.node = {path: "root"}
-                                    panel.workspace.dispatch("preview_state", args)
-                                }
-                                else {
-                                    panel.workspace.dispatch("node_select", {
-                                        doc: panel.workspace.doc,
-                                        at: {x: Math.floor(x), y: Math.floor(y)}
-                                    })
-                                }
-                            }
+                        CanvasOverlay {
+                            objectName: "overlay"
+                            anchors.fill: parent
+                            workspace: panel.workspace
+                            zoom: panel.zoom
+                            playing: panel.playing
+                            onDraggingChanged: panel.dragging = dragging
+                            onSaysChanged: panel.says = says
+                            Component.onCompleted: refetch()
                         }
                     }
                 }
@@ -118,15 +125,91 @@ Panel {
         }
     }
 
-    // Over the canvas, not in it, so it stays put as the frames scroll.
-    Button {
-        x: flick.width - width - Spacing.xs
+    // Above the canvas, not in it, so it stays put as the frames scroll.
+    Flow {
+        id: tools
+        x: Spacing.xs
         y: Spacing.xs
+        width: flick.width - 2 * Spacing.xs
+        layoutDirection: Qt.RightToLeft
+        spacing: Spacing.xxs
         visible: panel.preview !== null
-        text: "Play"
-        checkable: true
-        checked: panel.playing
+
+        Button {
+            text: "Play"
+            checkable: true
+            checked: panel.playing
+            Accessible.name: text
+            onClicked: panel.playing = checked
+        }
+        Button {
+            text: "Fit"
+            Accessible.name: text
+            onClicked: panel.fitted = true
+        }
+        Button {
+            text: "100%"
+            Accessible.name: "Actual size"
+            onClicked: {
+                panel.chosenZoom = 1
+                panel.fitted = false
+            }
+        }
+        Repeater {
+            // A selection of two lines up; three or more can be evened out.
+            model: panel.workspace.chosen.length === 0 || panel.playing ? [] : [
+                {label: "Left", align: "left"}, {label: "Centre", align: "hcenter"},
+                {label: "Right", align: "right"}, {label: "Top", align: "top"},
+                {label: "Middle", align: "vcenter"}, {label: "Bottom", align: "bottom"},
+                {label: "Even across", align: "distribute_h", least: 3},
+                {label: "Even down", align: "distribute_v", least: 3}
+            ]
+            delegate: Button {
+                required property var modelData
+                text: modelData.label
+                Accessible.name: "Align " + modelData.label
+                visible: panel.workspace.chosen.length >= (modelData.least || 1)
+                onClicked: panel.workspace.dispatch("node_arrange", {
+                    action: "align",
+                    doc: panel.workspace.doc,
+                    nodes: panel.workspace.chosen.map(h => ({node: h})),
+                    align: modelData.align
+                })
+            }
+        }
+    }
+
+    Label {
+        objectName: "canvasHint"
+        x: Spacing.xs
+        y: parent.height - height - Spacing.xs
+        visible: text !== ""
+        text: panel.says
+        color: Colors.text
+        font.pixelSize: Typography.captionSize
+        Accessible.role: Accessible.StaticText
         Accessible.name: text
-        onClicked: panel.playing = checked
+    }
+
+    // Zoom is the panel's own: it changes no file and no agent needs it, since
+    // `preview_screenshot` takes a size.
+    Shortcut {
+        sequence: "Ctrl+0"
+        onActivated: panel.fitted = true
+    }
+    Shortcut {
+        sequence: "Ctrl+1"
+        onActivated: {
+            panel.chosenZoom = 1
+            panel.fitted = false
+        }
+    }
+    Shortcut {
+        sequences: ["Ctrl+=", "Ctrl++"]
+        onActivated: panel.zoomBy(1)
+    }
+    Shortcut {
+        sequence: "Ctrl+-"
+        onActivated: panel.zoomBy(-1)
     }
 }
