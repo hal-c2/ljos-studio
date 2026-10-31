@@ -835,7 +835,12 @@ impl Session {
         // at; an append has none to count.
         let counted = matches!(
             op,
-            Op::Insert { index: Some(_), .. } | Op::Move { index: Some(_), .. }
+            Op::Insert { index: Some(_), .. }
+                | Op::Move { index: Some(_), .. }
+                // A tap flow is the trigger's one `TapHandler`, which a child
+                // of the same parent may be.
+                | Op::Interaction { signal: None, .. }
+                | Op::RemoveInteraction { signal: None, .. }
         );
         // The newest change names what is there now.
         for entry in others.iter().rev() {
@@ -872,9 +877,6 @@ impl Session {
     /// need not be found in the text any more: an object another writer
     /// took out is still the one this edit meant.
     fn intent(&mut self, path: &str, op: &Op) -> Result<Vec<Touch>, Error> {
-        if let Some(edit) = self.flow_edit(path, op)? {
-            return self.intent(path, &edit);
-        }
         let handle = |s: &mut Self, address: &Address| -> Result<u64, Error> {
             let not_found = |a: String| Error::NotFound {
                 doc: path.to_owned(),
@@ -908,8 +910,17 @@ impl Session {
                 touched
             }
             Op::State { node, .. } => vec![(handle(self, node)?, Some(STATES.to_owned()))],
-            // Planned above: a flow touches what it writes.
-            Op::Interaction { .. } | Op::RemoveInteraction { .. } => Vec::new(),
+            // Not planned: planning reads the text as it is now, and would
+            // answer for what another writer did instead of naming them.
+            Op::Interaction {
+                trigger, signal, ..
+            }
+            | Op::RemoveInteraction { trigger, signal } => {
+                let member = signal
+                    .as_deref()
+                    .map_or(CHILDREN.to_owned(), flows::handler_name);
+                vec![(handle(self, trigger)?, Some(member))]
+            }
         })
     }
 

@@ -1024,7 +1024,11 @@ fn has_signal(
         return Ok(());
     }
     let mut studio = lock(studio);
-    let (handle, node) = studio.session.resolve(doc, trigger).map_err(error)?;
+    // An object that is gone is the edit's to answer for: it can say which
+    // writer took it out.
+    let Ok((handle, node)) = studio.session.resolve(doc, trigger) else {
+        return Ok(());
+    };
     let source = studio.session.text(doc).map_err(error)?.0.to_owned();
     let Some(signals) = crate::signals::of(studio.session.store(), doc, &source, &node) else {
         return Ok(());

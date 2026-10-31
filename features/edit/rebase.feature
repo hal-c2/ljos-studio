@@ -533,3 +533,59 @@ Feature: An edit made against an older generation is rebased by its handles
     Then the agent is refused with "stale_ref"
     And the refusal's "/details/kind" is "conflict"
 
+  Scenario: A flow on an object another writer took out is a conflict
+    Given a second agent named "Ada" has called the tool "node_remove" with:
+      """json
+      {"doc": "Main.qml", "generation": "$read", "node": {"id": "card"}}
+      """
+    When the agent calls the tool "state_edit" with:
+      """json
+      {"doc": "Main.qml", "generation": "$read", "action": "interaction", "trigger": {"node": "$card"}, "signal": "colorChanged", "state": ""}
+      """
+    Then the agent is refused with "stale_ref"
+    And the refusal's "/details/kind" is "conflict"
+    And the refusal's "/details/author" is "Ada"
+
+  Scenario: A flow on a handler another writer wrote is a conflict
+    Given a second agent named "Ada" has called the tool "binding_set" with:
+      """json
+      {"doc": "Main.qml", "generation": "$read", "node": {"id": "card"}, "name": "onColorChanged", "value": "console.log(1)"}
+      """
+    When the agent calls the tool "state_edit" with:
+      """json
+      {"doc": "Main.qml", "generation": "$read", "action": "interaction", "trigger": {"node": "$card"}, "signal": "colorChanged", "state": ""}
+      """
+    Then the agent is refused with "stale_ref"
+    And the refusal's "/details/kind" is "conflict"
+    And the refusal's "/details/author" is "Ada"
+
+  Scenario: A tap flow after another writer's tap flow on the object is a conflict
+    Given a second agent named "Ada" has called the tool "state_edit" with:
+      """json
+      {"doc": "Main.qml", "generation": "$read", "action": "interaction", "trigger": {"node": "$card"}, "state": ""}
+      """
+    When the agent calls the tool "state_edit" with:
+      """json
+      {"doc": "Main.qml", "generation": "$read", "action": "interaction", "trigger": {"node": "$card"}, "state": ""}
+      """
+    Then the agent is refused with "stale_ref"
+    And the refusal's "/details/kind" is "conflict"
+    And the refusal's "/details/author" is "Ada"
+
+  Scenario: Taking out a flow another writer already took out is a conflict
+    Given the agent has called the tool "state_edit" with:
+      """json
+      {"doc": "Main.qml", "action": "interaction", "trigger": {"node": "$card"}, "signal": "colorChanged", "state": ""}
+      """
+    And the agent keeps the answer's "/generation" as "flowed"
+    And a second agent named "Ada" has called the tool "state_edit" with:
+      """json
+      {"doc": "Main.qml", "generation": "$flowed", "action": "remove_interaction", "trigger": {"node": "$card"}, "signal": "colorChanged"}
+      """
+    When the agent calls the tool "state_edit" with:
+      """json
+      {"doc": "Main.qml", "generation": "$flowed", "action": "remove_interaction", "trigger": {"node": "$card"}, "signal": "colorChanged"}
+      """
+    Then the agent is refused with "stale_ref"
+    And the refusal's "/details/kind" is "conflict"
+    And the refusal's "/details/author" is "Ada"
