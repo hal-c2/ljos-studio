@@ -972,6 +972,7 @@ fn binds(w: &mut UiWorld, name: String, expression: String) -> StepResult {
     window.click_node(&button)
 }
 
+#[given(regex = r#"^the person has placed "([^"]+)" from the palette$"#)]
 #[when(regex = r#"^the person places "([^"]+)" from the palette$"#)]
 fn places(w: &mut UiWorld, name: String) -> StepResult {
     let window = w.window()?;
@@ -979,6 +980,7 @@ fn places(w: &mut UiWorld, name: String) -> StepResult {
     window.click_node(&button)
 }
 
+#[given(regex = r#"^the person has searched the palette for "([^"]*)"$"#)]
 #[when(regex = r#"^the person searches the palette for "([^"]*)"$"#)]
 fn searches_palette(w: &mut UiWorld, text: String) -> StepResult {
     let window = w.window()?;
