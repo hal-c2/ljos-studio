@@ -26,9 +26,6 @@ pub(crate) type Touch = (u64, Option<String>);
 /// both land, but a remove of the parent conflicts with either.
 pub(crate) const CHILDREN: &str = "<children>";
 
-/// What a flow wrote on its trigger.
-pub(crate) const INTERACTIONS: &str = "<interactions>";
-
 /// What a state edit touches on the state's owner.
 pub(crate) const STATES: &str = "states";
 

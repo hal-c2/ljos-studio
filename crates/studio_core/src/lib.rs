@@ -43,7 +43,7 @@ pub use store::{MemStore, Store, StoreError, inside, listed};
 
 use address::{Tracked, find_by_key};
 use history::{History, Replayed};
-use log::{CHILDREN, INTERACTIONS, Lease, Log, Logged, STATES, Touch, reaches};
+use log::{CHILDREN, Lease, Log, Logged, STATES, Touch, reaches};
 pub use log::{LEASE_LIFE_MS, LEASE_TTL_MS, LeaseView};
 
 /// Who wrote a change found in the file: nobody Studio knows.
@@ -872,6 +872,9 @@ impl Session {
     /// need not be found in the text any more: an object another writer
     /// took out is still the one this edit meant.
     fn intent(&mut self, path: &str, op: &Op) -> Result<Vec<Touch>, Error> {
+        if let Some(edit) = self.flow_edit(path, op)? {
+            return self.intent(path, &edit);
+        }
         let handle = |s: &mut Self, address: &Address| -> Result<u64, Error> {
             let not_found = |a: String| Error::NotFound {
                 doc: path.to_owned(),
@@ -905,9 +908,24 @@ impl Session {
                 touched
             }
             Op::State { node, .. } => vec![(handle(self, node)?, Some(STATES.to_owned()))],
-            Op::Interaction { trigger, .. } | Op::RemoveInteraction { trigger, .. } => {
-                vec![(handle(self, trigger)?, Some(INTERACTIONS.to_owned()))]
+            // Planned above: a flow touches what it writes.
+            Op::Interaction { .. } | Op::RemoveInteraction { .. } => Vec::new(),
+        })
+    }
+
+    /// The edit a flow is written as, the handler or `TapHandler` that
+    /// another writer's edit can meet; `None` for any other op.
+    fn flow_edit(&mut self, path: &str, op: &Op) -> Result<Option<Op>, Error> {
+        Ok(match op {
+            Op::Interaction {
+                trigger,
+                signal,
+                goal,
+            } => Some(self.plan_interaction(path, trigger, signal.as_deref(), goal)?),
+            Op::RemoveInteraction { trigger, signal } => {
+                Some(self.plan_remove_interaction(path, trigger, signal.as_deref())?)
             }
+            _ => None,
         })
     }
 
@@ -915,6 +933,9 @@ impl Session {
     /// intent, with an object it replaces, moves or takes out standing for
     /// all it holds, and a move or remove taking a child from its parent too.
     fn touches(&mut self, path: &str, op: &Op) -> Result<Vec<Touch>, Error> {
+        if let Some(edit) = self.flow_edit(path, op)? {
+            return self.touches(path, &edit);
+        }
         let intent = self.intent(path, op)?;
         let doc = self.doc(path)?;
         let mut out = Vec::with_capacity(intent.len());
@@ -967,6 +988,19 @@ impl Session {
             for (handle, node) in &tree {
                 if !(reaches(r, (node.start, node.end)) || holds(node)) {
                     continue;
+                }
+                // A range taking in a whole child changes the parent's
+                // children, as a remove of it does.
+                if !r.is_empty()
+                    && r.start <= node.start
+                    && node.end <= r.end
+                    && let Some((qml_edit::Step::Child(_), up)) = node.path.0.split_last()
+                    && let Some((parent, _)) = tree.iter().find(|(_, m)| m.path.0 == up)
+                {
+                    let touch = (number(parent), Some(CHILDREN.to_owned()));
+                    if !out.contains(&touch) {
+                        out.push(touch);
+                    }
                 }
                 let inner = tree.iter().any(|(_, m)| {
                     m.path.0.len() > node.path.0.len()

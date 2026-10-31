@@ -496,3 +496,40 @@ Feature: An edit made against an older generation is rebased by its handles
       """
     Then the answer's "/rebased_from" is 1
 
+  Scenario: Writing a handler conflicts with another writer's flow on it
+    Given a second agent named "Ada" has called the tool "state_edit" with:
+      """json
+      {"doc": "Main.qml", "generation": "$read", "action": "interaction", "trigger": {"id": "card"}, "signal": "colorChanged", "state": ""}
+      """
+    When the agent calls the tool "binding_set" with:
+      """json
+      {"doc": "Main.qml", "generation": "$read", "node": {"id": "card"}, "name": "onColorChanged", "value": "console.log(1)"}
+      """
+    Then the agent is refused with "stale_ref"
+    And the refusal's "/details/kind" is "conflict"
+    And the refusal's "/details/author" is "Ada"
+
+  Scenario: A child index read before another writer's tap flow is a conflict
+    Given a second agent named "Ada" has called the tool "state_edit" with:
+      """json
+      {"doc": "Main.qml", "generation": "$read", "action": "interaction", "trigger": {"id": "root"}, "state": ""}
+      """
+    When the agent calls the tool "node_insert" with:
+      """json
+      {"doc": "Main.qml", "generation": "$read", "parent": {"id": "root"}, "index": 1, "text": "Item { id: mine }"}
+      """
+    Then the agent is refused with "stale_ref"
+    And the refusal's "/details/kind" is "conflict"
+
+  Scenario: A child index read before a text edit that took out a child is a conflict
+    Given a second agent named "Ada" has called the tool "document_edit" with:
+      """json
+      {"doc": "Main.qml", "generation": "$read", "start": 56, "end": 92, "text": ""}
+      """
+    When the agent calls the tool "node_insert" with:
+      """json
+      {"doc": "Main.qml", "generation": "$read", "parent": {"id": "root"}, "index": 1, "text": "Item { id: mine }"}
+      """
+    Then the agent is refused with "stale_ref"
+    And the refusal's "/details/kind" is "conflict"
+
