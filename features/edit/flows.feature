@@ -156,7 +156,7 @@ Feature: An agent wires a prototype's flow
         """
       Then the answer's "/signals" has the entry:
         """json
-        {"name": "clicked", "arguments": [{"name": "mouse", "type": "QtObject"}]}
+        {"name": "clicked", "arguments": [{"name": "mouse", "type": "QtObject"}], "change": false}
         """
       And the answer's "/signals" has the entry:
         """json
@@ -197,7 +197,7 @@ Feature: An agent wires a prototype's flow
         """json
         {"doc": "Main.qml", "node": {"id": "picked"}}
         """
-      Then the answer's "/signals/0" is {"name": "chosen", "arguments": [{"name": "index", "type": "int"}]}
+      Then the answer's "/signals/0" is {"name": "chosen", "arguments": [{"name": "index", "type": "int"}], "change": false}
       And the answer's "/signals/1" is {"name": "titleChanged", "arguments": [], "change": true}
       And the answer's "/signals" has the entry:
         """json
@@ -237,7 +237,7 @@ Feature: An agent wires a prototype's flow
         """json
         {"doc": "Player.qml", "node": {"id": "player"}}
         """
-      Then the answer's "/signals/0" is {"name": "finished", "arguments": [{"name": "reason", "type": "string"}]}
+      Then the answer's "/signals/0" is {"name": "finished", "arguments": [{"name": "reason", "type": "string"}], "change": false}
       And the answer's "/signals/1" is {"name": "sourceChanged", "arguments": [], "change": true}
       And the answer's "/signals" has the entry:
         """json

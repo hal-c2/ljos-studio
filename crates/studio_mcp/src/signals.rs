@@ -25,7 +25,6 @@ pub struct Signal {
     pub arguments: Vec<Argument>,
     /// A property's change signal (`widthChanged`): every property has one,
     /// so a person picking what a tap does looks past them.
-    #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub change: bool,
 }
 
