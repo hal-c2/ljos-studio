@@ -159,6 +159,19 @@ Feature: A person wires and plays a prototype's flow in Studio's window
     Then the flow panel lists the flows "clicked area to details"
     And the history lists "clicked area to details"
 
+  Scenario: The flow panel still answers when the selection's signals change with its list open
+    Given the person has selected "Rectangle card" in the layers panel
+    And the person has opened the list of what to wire in the flow panel
+    When an agent calls the tool "document_edit" with:
+      """json
+      {"doc": "Main.qml", "generation": 1, "start": 316, "end": 316, "text": "        signal flipped()\n"}
+      """
+    Then the inspector lists the signals "flipped"
+    When the person picks the signal "flipped" to wire in the flow panel
+    And the person clicks the button "On flipped of selection go to details"
+    Then the flow panel lists the flows "flipped card to details"
+    And the history lists "flipped card to details"
+
   Scenario: A wire is taken out
     Given the person has selected "Rectangle card" in the layers panel
     And the person has clicked the button "Tap selection to go to details"
