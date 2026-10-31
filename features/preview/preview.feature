@@ -166,6 +166,42 @@ Feature: A shell under edit runs in a preview
         """
       Then the answer has a PNG picture at most 200 pixels on its longest side
 
+    Scenario: The outline lists every item, with its box and where it is written
+      Given the file "Card.qml":
+        """qml
+        import QtQuick
+
+        Item {
+            width: 200
+            height: 200
+            Rectangle {
+                id: card
+                x: 10
+                y: 20
+                width: 100
+                height: 40
+                Text { text: "A note" }
+            }
+            Rectangle {
+                id: unseen
+                visible: false
+                Text { id: inside; text: "Hidden" }
+            }
+        }
+        """
+      And the agent has called the tool "preview_open" with:
+        """json
+        {"doc": "Card.qml"}
+        """
+      When the agent calls the tool "preview_screenshot" with:
+        """json
+        {"format": "outline"}
+        """
+      Then the answer's "/outline" contains "Rectangle#card 10,20 100x40 Card.qml:6"
+      And the answer's "/outline" contains "A note"
+      And the answer's "/outline" does not contain "unseen"
+      And the answer's "/outline" does not contain "inside"
+
   Rule: Live and mocked state preview the same shell
 
     Scenario: Mock modules stand in for the app's blocks

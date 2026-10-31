@@ -749,6 +749,15 @@ fn answer_contains(w: &mut StudioWorld, pointer: String, text: String) -> StepRe
     }
 }
 
+#[then(regex = r#"^the answer's "(/[^"]*)" does not contain "([^"]*)"$"#)]
+fn answer_lacks(w: &mut StudioWorld, pointer: String, text: String) -> StepResult {
+    let got = at(w.answer()?, &pointer)?;
+    match got.as_str() {
+        Some(got) if !got.contains(&text) => Ok(()),
+        _ => Err(format!("`{pointer}` is {got}, with {text:?}")),
+    }
+}
+
 #[then(regex = r#"^the answer's "(/[^"]*)" lists "([^"]*)"$"#)]
 fn answer_lists(w: &mut StudioWorld, pointer: String, names: String) -> StepResult {
     let got = at(w.answer()?, &pointer)?;

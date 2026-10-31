@@ -399,6 +399,10 @@ const STEPS = [
     const got = at(w.ok(), pointer);
     if (got !== undefined) throw new Error(`\`${pointer}\` is ${JSON.stringify(got)}`);
   }),
+  step("then", /^the answer's "(\/[^"]*)" does not contain "([^"]*)"$/, (w, s, pointer, text) => {
+    const got = must(w.ok(), pointer);
+    if (typeof got !== "string" || got.includes(text)) throw new Error(`\`${pointer}\` is ${JSON.stringify(got)}, with ${JSON.stringify(text)}`);
+  }),
   step("then", /^the answer's "(\/[^"]*)" contains "([^"]*)"$/, (w, s, pointer, text) => {
     const got = must(w.ok(), pointer);
     if (typeof got !== "string" || !got.includes(text)) throw new Error(`\`${pointer}\` is ${JSON.stringify(got)}, without ${JSON.stringify(text)}`);
