@@ -221,6 +221,10 @@ Panel {
                 panel.adding = false
                 newComment.text = ""
             }
+            if (tool === "preview_state" && picker.waiting && answer.state !== undefined
+                    && answer.state[picker.name] !== undefined) {
+                picker.start(String(answer.state[picker.name]))
+            }
             if (panel.rowEditing && ["property_set", "binding_set", "state_edit"].includes(tool)) {
                 panel.rowEditing = false
                 newName.text = ""
@@ -255,47 +259,100 @@ Panel {
 
     // Hue, saturation and value, or the hex a person has from elsewhere.
     // Set when the hand lets go or Enter is pressed: a drag is one undo step.
+    // A colour an expression works out to is asked of the preview, so the
+    // sliders start from what is on the canvas; until it answers, or when
+    // it cannot, they stay still rather than start from black.
     Popup {
         id: picker
         property string name: ""
+        property string written: ""
+        property bool waiting: false
+        property bool known: false
         readonly property color chosen: Qt.hsva(hue.value, saturation.value, brightness.value, 1)
 
-        function show(name, written) {
-            picker.name = name
-            const start = Qt.color(panel.painted(written))
+        function start(colour) {
+            const start = Qt.color(colour)
             hue.value = Math.max(0, start.hsvHue)
             saturation.value = start.hsvSaturation
             brightness.value = start.hsvValue
-            hex.text = panel.painted(written) === "transparent" ? "" : panel.painted(written)
+            hex.text = colour
+            waiting = false
+            known = true
+        }
+        function show(name, written, at) {
+            picker.name = name
+            picker.written = written
+            // Beside the inspector, where it hides none of the rows.
+            x = -implicitWidth - Spacing.xs
+            y = at.mapToItem(panel, 0, 0).y
+            if (panel.painted(written) !== "transparent") {
+                start(panel.painted(written))
+            } else {
+                known = false
+                hex.text = ""
+                waiting = true
+                panel.workspace.dispatch("preview_state", {
+                    doc: panel.workspace.doc,
+                    node: {node: panel.workspace.selected},
+                    read: [name]
+                })
+            }
             open()
         }
         function take(text) {
             panel.set(name, JSON.stringify(text))
         }
 
+        onClosed: waiting = false
         padding: Spacing.xs
         ColumnLayout {
             spacing: Spacing.xxs
+            Label {
+                visible: panel.painted(picker.written) === "transparent"
+                text: "Worked out by " + picker.written + ": picking replaces it"
+                color: Colors.text
+                font.pixelSize: Typography.captionSize
+                Layout.maximumWidth: 200
+                wrapMode: Text.Wrap
+            }
             Rectangle {
                 Layout.fillWidth: true
                 Layout.preferredHeight: 32
                 color: picker.chosen
                 border.color: Colors.outline
             }
+            Label {
+                text: "Hue"
+                color: Colors.text
+                font.pixelSize: Typography.captionSize
+            }
             Slider {
                 id: hue
+                enabled: picker.known
                 Accessible.name: "Hue"
                 onPressedChanged: if (!pressed) picker.take(picker.chosen.toString())
                 onMoved: hex.text = picker.chosen.toString()
             }
+            Label {
+                text: "Saturation"
+                color: Colors.text
+                font.pixelSize: Typography.captionSize
+            }
             Slider {
                 id: saturation
+                enabled: picker.known
                 Accessible.name: "Saturation"
                 onPressedChanged: if (!pressed) picker.take(picker.chosen.toString())
                 onMoved: hex.text = picker.chosen.toString()
             }
+            Label {
+                text: "Brightness"
+                color: Colors.text
+                font.pixelSize: Typography.captionSize
+            }
             Slider {
                 id: brightness
+                enabled: picker.known
                 Accessible.name: "Brightness"
                 onPressedChanged: if (!pressed) picker.take(picker.chosen.toString())
                 onMoved: hex.text = picker.chosen.toString()
@@ -336,11 +393,10 @@ Panel {
                     Layout.preferredHeight: 24
                     padding: 0
                     Accessible.name: "Pick " + row.modelData.name
-                    onClicked: picker.show(row.modelData.name, value.text)
+                    onClicked: picker.show(row.modelData.name, value.text, this)
                     contentItem: Rectangle {
                         color: panel.painted(value.text)
                         border.color: Colors.outline
-                        radius: Shape.xs
                     }
                 }
                 TextField {

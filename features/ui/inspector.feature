@@ -16,6 +16,7 @@ Feature: The inspector shows colours and every declared property
           id: root
           property var stack
           property int count: 1
+          property color accentColor: Qt.rgba(0, 1, 0, 1)
           color: "#ff0000"
           width: 100
       }
@@ -37,3 +38,8 @@ Feature: The inspector shows colours and every declared property
     And the person enters "#00ff00" in the colour picker
     Then the file "Main.qml" says "#00ff00"
     And the file "Main.qml" does not say "#ff0000"
+
+  Scenario: The picker of a colour an expression works out starts from what the preview shows
+    When the person clicks the button "Pick accentColor"
+    Then the colour picker holds "#00ff00"
+    And the file "Main.qml" says "Qt.rgba(0, 1, 0, 1)"

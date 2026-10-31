@@ -72,6 +72,10 @@ struct StateArgs {
     /// Put `node` in this QML state of its own for the preview, through
     /// reloads, until `""`; the file does not change.
     show: Option<String>,
+    /// Properties of `node` to read into `state`, as the running app has
+    /// them: what an expression works out to.
+    #[serde(default)]
+    read: Vec<String>,
     /// Values to assign to a block's state (mocked previews only).
     set: Option<Map<String, Value>>,
     /// An object (with an `id`) to click first, after `set`, as a person
@@ -462,6 +466,8 @@ fn state(studio: &Mutex<Studio>, a: StateArgs) -> Result<StateOut, SurfaceError>
         // It changes the picture without a reload, as a click does.
         open.clicks += 1;
     }
+    let mut names = names;
+    names.extend(a.read);
     let mut asked = names.clone();
     // A block may publish a `state` of its own; the variant is QML's.
     let qml_state = "state".to_owned();
@@ -743,9 +749,10 @@ pub(crate) fn add(registry: ToolRegistry, studio: &Arc<Mutex<Studio>>) -> ToolRe
         .with(
             ToolDef::new::<StateArgs>(
                 "preview_state",
-                "Read an object in the preview: its QML state (`variant`) and a block's published \
-                 state, which `set` assigns when the block is mocked. `click` or `click_at` clicks \
-                 first, as a person does, so a flow plays. Objects are found by `id`.",
+                "Read an object in the preview: its QML state (`variant`), a block's published \
+                 state, which `set` assigns when the block is mocked, and any property named in \
+                 `read`. `click` or `click_at` clicks first, as a person does, so a flow plays. \
+                 Objects are found by `id`.",
             )
             .answers::<StateOut>()
             .requires(Cap::Run)

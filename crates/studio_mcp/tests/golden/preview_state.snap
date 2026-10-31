@@ -9,7 +9,7 @@ expression: value
     "open_world": false,
     "read_only": false
   },
-  "description": "Read an object in the preview: its QML state (`variant`) and a block's published state, which `set` assigns when the block is mocked. `click` or `click_at` clicks first, as a person does, so a flow plays. Objects are found by `id`.",
+  "description": "Read an object in the preview: its QML state (`variant`), a block's published state, which `set` assigns when the block is mocked, and any property named in `read`. `click` or `click_at` clicks first, as a person does, so a flow plays. Objects are found by `id`.",
   "inputSchema": {
     "$defs": {
       "Address": {
@@ -85,6 +85,14 @@ expression: value
           }
         ],
         "description": "The object to read; it needs an `id`. In the previewed document\nunless `doc` names another. Left out, the call only clicks: a\nprototype plays without an `id` on the object whose state it reads."
+      },
+      "read": {
+        "default": [],
+        "description": "Properties of `node` to read into `state`, as the running app has\nthem: what an expression works out to.",
+        "items": {
+          "type": "string"
+        },
+        "type": "array"
       },
       "set": {
         "additionalProperties": true,
