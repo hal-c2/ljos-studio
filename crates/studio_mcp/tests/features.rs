@@ -329,6 +329,22 @@ fn link_file_outside(w: &mut StudioWorld, name: String, file: String) -> StepRes
     Ok(())
 }
 
+#[given(regex = r#"^the named pipe "([^"]+)"$"#)]
+fn named_pipe(w: &mut StudioWorld, name: String) -> StepResult {
+    let at = w.dir.path().join(name);
+    if let Some(parent) = at.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    // A reader of it waits for a writer that never comes.
+    let made = std::process::Command::new("mkfifo")
+        .arg(&at)
+        .status()
+        .map_err(|e| format!("mkfifo: {e}"))?;
+    made.success()
+        .then_some(())
+        .ok_or_else(|| format!("mkfifo {}: {made}", at.display()))
+}
+
 #[then("nothing was written outside the project")]
 fn nothing_outside(w: &mut StudioWorld) -> StepResult {
     // Each place a link leads to holds the one file the scenario put there.

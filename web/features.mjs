@@ -462,6 +462,7 @@ const NATIVE_ONLY = new Map([
   ['then ^Studio has reported the preview reloaded since it was read$', "a preview is a page of its own (@preview)"],
   ["then ^the answer has a PNG picture at most (\\d+) pixels on its longest side$", "a picture is a preview's (@preview)"],
   ['given ^the link "([^"]+)" leads to "([^"]+)"$', "storage holds no links (@disk)"],
+  ['given ^the named pipe "([^"]+)"$', "storage holds no pipes (@disk)"],
   ['given ^the link "([^"]+)" leads to a directory outside the project holding "([^"]+)"$', "storage holds no links (@disk)"],
   ['given ^the link "([^"]+)" leads to the file "([^"]+)" outside the project$', "storage holds no links (@disk)"],
   ["then ^nothing was written outside the project$", "storage has no outside (@disk)"],

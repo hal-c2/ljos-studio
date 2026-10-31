@@ -214,6 +214,23 @@ Feature: A project is exported as a bundle that runs without Studio
         """
       Then the answer's "/manifest/files" is "$files"
 
+    Scenario: A named pipe is left out, not waited on
+      Given the named pipe "images/feed"
+      When the agent calls the tool "export" with:
+        """json
+        {"entry": "Shell.qml"}
+        """
+      Then the answer's "/written" is true
+      And the answer's "/manifest/left_out" is:
+        """json
+        [
+          {"path": ".studio", "why": "Studio's sidecar"},
+          {"path": "images/feed", "why": "not a regular file: a pipe, socket or device"},
+          {"path": "mocks", "why": "mock modules stand in for blocks in previews only"}
+        ]
+        """
+      And the file "build/native/images/logo.svg" exists
+
   Rule: What cannot be exported is refused with the reason
 
     Scenario: An export writes files and needs the capability to
@@ -362,3 +379,54 @@ Feature: A project is exported as a bundle that runs without Studio
         """
         keep me
         """
+
+    Scenario: A file that is only named like a manifest does not make a bundle
+      Given the file "build/notes/todo.txt":
+        """
+        keep me
+        """
+      And the file "build/notes/ljos-bundle.json":
+        """
+        my notes
+        """
+      When the agent calls the tool "export" with:
+        """json
+        {"entry": "Shell.qml", "out": "build/notes"}
+        """
+      Then the agent is refused with "invalid_argument"
+      And the refusal's "/details/kind" is "exists"
+      And the file "build/notes/todo.txt" is:
+        """
+        keep me
+        """
+
+    Scenario: A manifest that is a link does not make a bundle
+      Given the agent has called the tool "export" with:
+        """json
+        {"entry": "Shell.qml"}
+        """
+      And the file "build/notes/todo.txt":
+        """
+        keep me
+        """
+      And the link "build/notes/ljos-bundle.json" leads to "build/native/ljos-bundle.json"
+      When the agent calls the tool "export" with:
+        """json
+        {"entry": "Shell.qml", "out": "build/notes"}
+        """
+      Then the agent is refused with "invalid_argument"
+      And the refusal's "/details/kind" is "exists"
+      And the file "build/notes/todo.txt" is:
+        """
+        keep me
+        """
+
+    Scenario: A half-written bundle's place that is a link is let go of, not emptied
+      Given "build/.native.partial" links to a directory outside the project that holds the file "ljos-bundle.json"
+      When the agent calls the tool "export" with:
+        """json
+        {"entry": "Shell.qml"}
+        """
+      Then the answer's "/written" is true
+      And the file "build/native/ljos-bundle.json" exists
+      And the directory outside the project holds only "ljos-bundle.json"
