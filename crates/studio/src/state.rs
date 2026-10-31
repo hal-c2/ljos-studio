@@ -6,6 +6,11 @@
 //! removed by the next start: each run holds a lock on a file in its
 //! directory while it lives, and a directory whose lock can be taken has no
 //! run left. A lock, not the pid in the name, says so, as a pid is reused.
+//!
+//! The lock file is made and locked under another name and only then
+//! renamed into place, so another start's sweep never sees it unlocked:
+//! between making a file and locking it, that sweep could take the lock and
+//! remove the directory of a run that is starting.
 
 use std::{
     fs::File,
@@ -17,6 +22,8 @@ use studio_preview::private_dir;
 
 const PREFIX: &str = "ljos-studio-";
 const LOCK: &str = "running";
+/// The lock file before it is locked: no sweep looks at it.
+const MAKING: &str = "running.new";
 
 /// This run's state directory, removed when dropped.
 pub struct StateDir {
@@ -28,14 +35,23 @@ impl StateDir {
     /// Removes what ended runs left below `base`, then makes this run's
     /// directory there, this user's alone, and holds its lock.
     pub fn new(base: &Path) -> anyhow::Result<Self> {
+        Self::make(base, || {})
+    }
+
+    /// [`new`](Self::new); `unlocked` runs when the lock file is made and
+    /// not yet locked, where a test puts another start's sweep.
+    fn make(base: &Path, unlocked: impl FnOnce()) -> anyhow::Result<Self> {
         sweep(base);
         let path = base.join(format!("{PREFIX}{}", std::process::id()));
         private_dir(&path)?;
-        let lock_path = path.join(LOCK);
-        let lock =
-            File::create(&lock_path).with_context(|| format!("making {}", lock_path.display()))?;
+        let making = path.join(MAKING);
+        let lock = File::create(&making).with_context(|| format!("making {}", making.display()))?;
+        unlocked();
         lock.try_lock()
-            .with_context(|| format!("locking {}", lock_path.display()))?;
+            .with_context(|| format!("locking {}", making.display()))?;
+        let lock_path = path.join(LOCK);
+        std::fs::rename(&making, &lock_path)
+            .with_context(|| format!("naming {}", lock_path.display()))?;
         Ok(Self {
             path,
             lock: Some(lock),
@@ -58,7 +74,9 @@ impl Drop for StateDir {
 }
 
 /// Removes every `ljos-studio-*` directory below `base` whose run has
-/// ended. One with no lock file is left: its run may be making it now.
+/// ended. One with no lock file is left: its run may be making it now. So
+/// is one a run was killed in while it made its lock, which only a person
+/// can tell from one being made.
 fn sweep(base: &Path) {
     let Ok(entries) = std::fs::read_dir(base) else {
         return;
@@ -115,6 +133,20 @@ mod tests {
         std::fs::write(killed.join(LOCK), "").unwrap();
         std::fs::write(killed.join("preview.log"), "a log").unwrap();
         let state = StateDir::new(base.path()).unwrap();
+        assert_eq!(
+            names(base.path()),
+            vec![format!("ljos-studio-{}", std::process::id())]
+        );
+        drop(state);
+    }
+
+    #[test]
+    fn another_starts_sweep_leaves_a_run_that_is_making_its_lock() {
+        let base = tempfile::tempdir().unwrap();
+        let state = StateDir::make(base.path(), || sweep(base.path())).unwrap();
+        assert!(state.path().join(LOCK).is_file());
+        // Held: a sweep after the start leaves it too.
+        sweep(base.path());
         assert_eq!(
             names(base.path()),
             vec![format!("ljos-studio-{}", std::process::id())]
