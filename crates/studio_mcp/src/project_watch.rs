@@ -316,10 +316,10 @@ mod tests {
     fn a_file_saved_unchanged_tells_once() {
         let dir = tempfile::tempdir().unwrap();
         let (_watch, told) = watched(dir.path());
-        std::fs::write(dir.path().join("A.qml"), "Item {}\n").unwrap();
+        saved(dir.path(), "A.qml", "Item {}\n");
         waits_for("the first save", || told.load(Ordering::SeqCst) == 1);
-        std::fs::write(dir.path().join("A.qml"), "Item {}\n").unwrap();
-        std::fs::write(dir.path().join("B.qml"), "Item {}\n").unwrap();
+        saved(dir.path(), "A.qml", "Item {}\n");
+        saved(dir.path(), "B.qml", "Item {}\n");
         waits_for("the later file", || told.load(Ordering::SeqCst) == 2);
         assert_eq!(told.load(Ordering::SeqCst), 2);
     }

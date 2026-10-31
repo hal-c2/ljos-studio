@@ -14,6 +14,9 @@ import Studio
 Panel {
     id: panel
     required property Workspace workspace
+    // Whether the selection can be lined up; the overlay is a frame's, in a
+    // delegate the toolbar cannot name.
+    property bool hasBoxes: true
     title: "Canvas"
 
     // Until the person zooms, the frame fits: a desktop frame in a panel
@@ -133,7 +136,8 @@ Panel {
                             workspace: panel.workspace
                         }
                         CanvasOverlay {
-                            id: overlay
+                            onHasBoxesChanged: panel.hasBoxes = hasBoxes
+                            Component.onDestruction: panel.hasBoxes = true
                             objectName: "overlay"
                             anchors.fill: parent
                             workspace: panel.workspace
@@ -199,7 +203,7 @@ Panel {
         }
         Repeater {
             // A selection of two lines up; three or more can be evened out.
-            model: panel.workspace.chosen.length === 0 || panel.playing || !overlay.hasBoxes ? [] : [
+            model: panel.workspace.chosen.length === 0 || panel.playing || !panel.hasBoxes ? [] : [
                 {label: "Left", align: "left"}, {label: "Centre", align: "hcenter"},
                 {label: "Right", align: "right"}, {label: "Top", align: "top"},
                 {label: "Middle", align: "vcenter"}, {label: "Bottom", align: "bottom"},
