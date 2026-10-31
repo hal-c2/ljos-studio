@@ -2345,6 +2345,13 @@ fn layers_list(w: &mut UiWorld, want: String) -> StepResult {
         .ok_or_else(|| format!("the layers panel lists {shown:?}"))
 }
 
+#[then(regex = r#"^the layers panel names no object$"#)]
+fn names_no_object(w: &mut UiWorld) -> StepResult {
+    let tree = w.window()?.tree();
+    find(&tree, &|n| n.name.starts_with("Name of "))
+        .map_or(Ok(()), |n| Err(format!("the field {:?} is open", n.name)))
+}
+
 #[then(regex = r#"^the layers panel has "([^"]+)" selected$"#)]
 fn layer_selected(w: &mut UiWorld, label: String) -> StepResult {
     let window = w.window()?;

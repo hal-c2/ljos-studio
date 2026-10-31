@@ -112,10 +112,13 @@ Panel {
                 Accessible.name: modelData.label
                 highlighted: panel.workspace.chosen.indexOf(modelData.node) >= 0
                 opacity: modelData.hidden ? 0.5 : 1
-                onClicked: panel.workspace.dispatch("node_select", {
-                    doc: panel.workspace.doc,
-                    nodes: [{node: modelData.node}]
-                })
+                onClicked: {
+                    panel.naming = ""
+                    panel.workspace.dispatch("node_select", {
+                        doc: panel.workspace.doc,
+                        nodes: [{node: modelData.node}]
+                    })
+                }
                 onDoubleClicked: panel.naming = modelData.node
 
                 DragHandler {
@@ -135,6 +138,8 @@ Panel {
                     text: row.modelData.id
                     Accessible.name: "Name of " + row.modelData.label
                     onVisibleChanged: if (visible) forceActiveFocus()
+                    // Left open it covers its row, and clicks there would select nothing.
+                    onActiveFocusChanged: if (!activeFocus && panel.naming === row.modelData.node) panel.naming = ""
                     onAccepted: {
                         panel.naming = ""
                         if (text !== row.modelData.id) {
