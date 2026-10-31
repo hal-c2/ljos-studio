@@ -818,3 +818,46 @@ fn a_panic_telling_of_a_new_document_leaves_the_session_whole() {
     s.undo().unwrap();
     assert!(!s.store().exists("New.qml"));
 }
+
+#[test]
+fn a_theme_file_reached_through_a_link_is_one_document() {
+    // s1 holds a document under where it really is; a theme write through
+    // a link must not make a second copy that takes the first's writes for
+    // changes made outside Studio.
+    let dir = tempfile::tempdir().unwrap();
+    let store = store::FsStore::new(dir.path()).unwrap();
+    store
+        .write("app/theme.json", "{ \"Spacing\": { \"md\": 20 } }\n")
+        .unwrap();
+    std::os::unix::fs::symlink(
+        dir.path().join("app/theme.json"),
+        dir.path().join("theme.json"),
+    )
+    .unwrap();
+    let mut s = Session::open(Box::new(store));
+    let g = s.text("app/theme.json").unwrap().1;
+    let value = serde_json::json!(24);
+    let out = s
+        .set_token(
+            "theme.json",
+            Some(g),
+            "Spacing.md",
+            None,
+            Some(&value),
+            false,
+        )
+        .unwrap();
+    assert_eq!(out.doc, "app/theme.json");
+    let read = s.tokens("theme.json", Some("Spacing.md")).unwrap();
+    assert_eq!(read.file, "app/theme.json");
+    assert_eq!(read.generation, out.generation);
+    let (text, g) = s.text("app/theme.json").unwrap();
+    assert!(text.contains("24"), "{text}");
+    assert_eq!(g, out.generation);
+    s.undo().unwrap();
+    assert!(
+        std::fs::read_to_string(dir.path().join("app/theme.json"))
+            .unwrap()
+            .contains("20")
+    );
+}

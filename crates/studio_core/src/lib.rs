@@ -1018,6 +1018,7 @@ impl Session {
     /// The tokens of `Ljos.Design` (`filter`: one, or one singleton's) with
     /// the theme file's values.
     pub fn tokens(&mut self, file: &str, filter: Option<&str>) -> Result<Tokens, Error> {
+        let file = &self.canonical(file)?;
         let exists = self.store.exists(file) || self.docs.contains_key(file);
         let (theme, generation, problem) = if exists {
             let (text, generation) = self.text(file)?;
@@ -1055,6 +1056,7 @@ impl Session {
         value: Option<&serde_json::Value>,
         dry_run: bool,
     ) -> Result<Outcome, Error> {
+        let file = &self.canonical(file)?;
         let exists = self.store.exists(file) || self.docs.contains_key(file);
         let before = if exists {
             self.check_generation(file, generation)?;
