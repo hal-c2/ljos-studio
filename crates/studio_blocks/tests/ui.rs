@@ -204,15 +204,13 @@ fn told(engine: &Engine, reports: &[Report]) -> bool {
     let mut answered = false;
     for report in reports {
         match report {
-            Report::Failed { fault, .. } => {
-                studio_blocks::reloaded(engine, Some(fault.to_string()));
+            Report::Failed { .. }
+            | Report::Reloaded(_)
+            | Report::Cleared
+            | Report::Theme { .. } => {
+                studio_blocks::reload_settled(engine);
                 answered = true;
             }
-            Report::Reloaded(_) | Report::Cleared => {
-                studio_blocks::reloaded(engine, None);
-                answered = true;
-            }
-            Report::Theme { .. } => answered = true,
             _ => {}
         }
     }
@@ -1240,6 +1238,7 @@ fn opens_again(w: &mut UiWorld) -> StepResult {
     w.open_watched()
 }
 
+#[given("the window has taken the change")]
 #[when("the window takes the change")]
 fn takes_change(w: &mut UiWorld) -> StepResult {
     w.window()?.take_change()

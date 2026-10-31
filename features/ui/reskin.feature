@@ -58,6 +58,44 @@ Feature: A person reskins Studio from inside Studio
     And the window takes the change
     Then the window has no shell banner
 
+  Scenario: A theme that does not load says why, and mending it takes the banner away
+    Given the file "theme.json":
+      """
+      {"Colors": {"noSuchRole": "#ff0000"}}
+      """
+    When the window takes the change
+    Then the window shows the person's shell
+    And the shell banner says "theme\.json:1:\d+: .*noSuchRole"
+    Given the file "theme.json":
+      """
+      {"Colors": {"seedHue": 30}}
+      """
+    When the window takes the change
+    Then the window has no shell banner
+
+  Scenario: A shell edit that does not compile is still told after the theme loads
+    When the person replaces "id: shell" with "id: shell\n    NoSuchThing { }" in the code view
+    And the window takes the change
+    Then the shell banner says "Shell\.qml:\d+:\d+: .*NoSuchThing"
+    Given the file "theme.json":
+      """
+      {"Colors": {"seedHue": 30}}
+      """
+    When the window takes the change
+    Then the shell banner says "Shell\.qml:\d+:\d+: .*NoSuchThing"
+
+  Scenario: A theme still wrong is still told after the shell is mended
+    Given the file "theme.json":
+      """
+      {"Colors": {"noSuchRole": "#ff0000"}}
+      """
+    And the window has taken the change
+    When the person replaces "id: shell" with "id: shell\n    NoSuchThing { }" in the code view
+    And the window takes the change
+    And the person presses "Ctrl+Z"
+    And the window takes the change
+    Then the shell banner says "theme\.json:1:\d+: .*noSuchRole"
+
   Scenario: A watched window nobody touches does no work
     When nobody touches the window for 2 seconds
     Then Studio's window ran no frames

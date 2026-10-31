@@ -673,6 +673,15 @@ pub fn reloaded(engine: &Engine, error: Option<String>) {
     }
 }
 
+/// Tells every `Studio.ShellStatus` of `engine` the error Ljós holds as
+/// standing once a reload or a theme was taken, or that none stands.
+/// Ljós knows which: a theme that loads takes away its own error and not
+/// a shell's, and a shell that is mended leaves a theme that is still
+/// wrong told. Call it on the Engine's thread after each report.
+pub fn reload_settled(engine: &Engine) {
+    reloaded(engine, engine.last_reload_error().map(|f| f.to_string()));
+}
+
 /// The latest picture of the preview a workspace shows, scaled to the
 /// item.
 #[derive(Default, QmlObject)]
