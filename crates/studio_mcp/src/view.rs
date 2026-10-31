@@ -238,7 +238,7 @@ impl Studio {
         if let Some(p) = &mut view.preview {
             p.variant = self.variant(&p.doc, p.width).unwrap_or_default();
         }
-        view.theme = crate::tools::theme_file(self.session.store(), doc);
+        view.theme = crate::tools::running_theme_file(self.session.store(), doc);
         if let Ok(read) = self.session.tokens(&view.theme, None) {
             view.theme_problem = read.problem.unwrap_or_default();
             view.tokens = read.tokens.into_iter().map(row).collect();

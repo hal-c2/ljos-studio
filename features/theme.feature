@@ -407,6 +407,20 @@ Feature: Tokens are read and set in the project's theme file
         """
 
     @disk
+    Scenario: A document that is a link in the project has the theme of the file it leads to
+      Given the file "app/theme.json":
+        """json
+        {"Spacing": {"md": 8}}
+        """
+      And the link "Entry.qml" leads to "app/Main.qml"
+      When the agent calls the tool "theme_set" with:
+        """json
+        {"doc": "Entry.qml", "token": "Spacing.md", "value": 24}
+        """
+      Then the answer's "/file" is "app/theme.json"
+      And the file "theme.json" does not exist
+
+    @disk
     Scenario: A document that is a link out of the project, in a directory, has no theme either
       Given the file "theme.json":
         """json
