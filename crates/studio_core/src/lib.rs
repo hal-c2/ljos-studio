@@ -1086,6 +1086,7 @@ impl Session {
             (Some(_), Some(v)) => format!("set {token} {v}"),
         };
         let changes = diff(&before, &after);
+        let unchanged = exists && after == before;
         if dry_run {
             return Ok(Outcome {
                 doc: file.to_owned(),
@@ -1098,8 +1099,11 @@ impl Session {
                 history: None,
                 node: None,
                 text: Some(after),
-                unchanged: false,
+                unchanged,
             });
+        }
+        if unchanged {
+            return self.unchanged(file, None);
         }
         let entry = if exists {
             self.commit(file, before, after, None, label)?

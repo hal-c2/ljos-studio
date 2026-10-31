@@ -127,6 +127,25 @@ Feature: Tokens are read and set in the project's theme file
         }
         """
 
+    Scenario: A value the theme file already has is said so and leaves no entry
+      Given the file "app/theme.json":
+        """json
+        { "Colors": { "accent": "#9c4dc4" } }
+        """
+      When the agent calls the tool "theme_set" with:
+        """json
+        {"doc": "app/Main.qml", "token": "Colors.accent", "value": "#9c4dc4"}
+        """
+      Then the answer's "/unchanged" is true
+      And the answer's "/generation" is 1
+      And the answer's "/changes" has 0 entries
+      And the answer's "/history" is absent
+      When the agent calls the tool "history" with:
+        """json
+        {"action": "list"}
+        """
+      Then the answer's "/done" has 0 entries
+
     Scenario: A role and a section the file lacks are added in its layout
       Given the file "app/theme.json":
         """json
