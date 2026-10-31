@@ -73,7 +73,6 @@ expression: value
         "type": "string"
       },
       "replaces": {
-        "description": "Whether `out` held a bundle of either kind before this call, which\na real export replaces: what a person is told before they write it.",
         "type": "boolean"
       },
       "written": {
