@@ -433,11 +433,7 @@ fn a_host_that_answers_more_calls_reloads_more_of_a_burst() {
             .unwrap();
         f.calls();
         for i in 0..40 {
-            f.call(
-                "binding_set",
-                json!({ "doc": "Shell.qml", "node": { "path": "root/1" }, "name": "text", "value": format!("\"{i}\"") }),
-            )
-            .unwrap();
+            set_text(&f, i);
         }
         f.calls().len()
     };
