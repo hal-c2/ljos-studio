@@ -605,10 +605,10 @@ struct ThemeOut {
     history: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     text: Option<String>,
-    /// Written: the file already said this, so nothing was written and no
-    /// history entry made.
-    #[serde(skip_serializing_if = "std::ops::Not::not")]
-    unchanged: bool,
+    /// Written: whether the file already said this, so nothing was written
+    /// and no history entry made. In every write's answer; a read has none.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    unchanged: Option<bool>,
 }
 
 /// The theme file of `doc`: `theme.json` beside it, `doc` itself when it
@@ -663,7 +663,7 @@ fn theme_set(studio: &Mutex<Studio>, a: ThemeArgs) -> Result<ThemeOut, SurfaceEr
             changes: None,
             history: None,
             text: None,
-            unchanged: false,
+            unchanged: None,
         });
     };
     let token = a.token.ok_or_else(|| {
@@ -694,7 +694,7 @@ fn theme_set(studio: &Mutex<Studio>, a: ThemeArgs) -> Result<ThemeOut, SurfaceEr
         changes: Some(edit.changes),
         history: edit.history,
         text: edit.text,
-        unchanged: edit.unchanged,
+        unchanged: Some(edit.unchanged),
     })
 }
 

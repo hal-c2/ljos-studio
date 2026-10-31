@@ -188,14 +188,16 @@ expression: value
         ]
       },
       "unchanged": {
-        "description": "Written: the file already said this, so nothing was written and no\nhistory entry made.",
-        "type": "boolean"
+        "description": "Written: whether the file already said this, so nothing was written\nand no history entry made. In every write's answer; a read has none.",
+        "type": [
+          "boolean",
+          "null"
+        ]
       }
     },
     "required": [
       "file",
-      "generation",
-      "unchanged"
+      "generation"
     ],
     "title": "ThemeOut",
     "type": "object"

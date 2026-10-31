@@ -38,6 +38,7 @@ Feature: Tokens are read and set in the project's theme file
       And the answer's "/exists" is false
       And the answer's "/tokens" has 1 entries
       And the answer's "/tokens/0/token" is "Spacing.md"
+      And the answer's "/unchanged" is absent
       And the answer's "/tokens/0/kind" is "int"
       And the answer's "/tokens/0/module" is 16
       And the answer's "/tokens/0/theme" is absent
@@ -95,6 +96,7 @@ Feature: Tokens are read and set in the project's theme file
         """
       Then the answer's "/doc" is "app/theme.json"
       And the answer's "/generation" is 1
+      And the answer's "/unchanged" is false
       And the file "app/theme.json" is:
         """json
         {

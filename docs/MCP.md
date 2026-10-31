@@ -267,7 +267,8 @@ preview tools, as they did.
 - **Setting** (`token` and `value`): `value` is a colour string, a
   number or a curve's JSON; `null` gives the role back to the module. A
   colour string sets every variant; `variant` sets one. The answer is
-  an edit's (`doc`, `changes`, `generation`, `history`), the rest of the
+  an edit's (`doc`, `changes`, `generation`, `history`, `unchanged`,
+  which every write's answer has and a read's has not), the rest of the
   file is kept byte for byte, and `history` undoes it.
 - **Refusals**: `invalid_argument` with `details.kind` `theme` and Ljós's
   own `errors` (`file`, `line`, `column`, `message`) for a theme Ljós
