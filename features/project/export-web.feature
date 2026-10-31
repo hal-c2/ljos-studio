@@ -121,6 +121,32 @@ Feature: A project is exported for ljos-web to build a site from
         """
       Then a site builder held to the contract builds "build/web", starting at "Shell.qml"
 
+    Scenario: A directory a link leads to is in the site as plain files under the link's name
+      Given the file "zone/Badge.qml":
+        """qml
+        import QtQuick
+        Text { text: "From zone" }
+        """
+      And "alias" links to "zone" in the project
+      And the file "Linked.qml":
+        """qml
+        import QtQuick
+        import "alias"
+
+        Column {
+            Badge {}
+        }
+        """
+      When the agent calls the tool "export" with:
+        """json
+        {"entry": "Linked.qml", "target": "web"}
+        """
+      Then the answer's "/manifest/links" is absent
+      And the answer's "/manifest/files/4/path" is "alias/Badge.qml"
+      And the answer's "/manifest/files/7/path" is "zone/Badge.qml"
+      And a site builder held to the contract builds "build/web", starting at "Linked.qml"
+      And the file "build/web/alias/Badge.qml" exists
+
     Scenario: A dry run says what the site bundle would hold and writes nothing
       When the agent calls the tool "export" with:
         """json
@@ -246,6 +272,28 @@ Feature: A project is exported for ljos-web to build a site from
       Then the agent is refused with "unsupported"
       And the refusal's "/details/kind" is "no_web_face"
       And the refusal's "/details/modules" is ["Ljos.Models"]
+
+    Scenario: Links that would copy the same directories along too many ways are refused
+      Given a diamond of directory links 24 levels deep in "levels"
+      When the agent calls the tool "export" with:
+        """json
+        {"entry": "Shell.qml", "target": "web"}
+        """
+      Then it answered within 5 seconds
+      And the agent is refused with "unsupported"
+      And the refusal's "/details/kind" is "links_multiply"
+      And the file "build/web/ljos-site.json" does not exist
+
+    Scenario: Links that only lead to more links along too many ways are refused too
+      Given a diamond of directory links 24 levels deep in "levels" holding no files
+      When the agent calls the tool "export" with:
+        """json
+        {"entry": "Shell.qml", "target": "web"}
+        """
+      Then it answered within 2 seconds
+      And the agent is refused with "unsupported"
+      And the refusal's "/details/kind" is "links_multiply"
+      And the file "build/web/ljos-site.json" does not exist
 
     Scenario: The same project still exports natively
       Given the file "Pages/Data.qml":

@@ -416,6 +416,13 @@ fn plan(
         )));
     }
     let (files, links, left_out) = walk(root)?;
+    // A site is plain files: its builder and the hosts it goes to keep no
+    // links, so a linked directory is in it as a copy under the link's name.
+    let (files, links) = if target == Target::Web {
+        (copied_under_links(files, &links)?, Vec::new())
+    } else {
+        (files, links)
+    };
     // The store has every file of the project; the bundle only what the
     // walk keeps, and a manifest that starts a file it does not hold
     // would not start.
@@ -565,6 +572,26 @@ fn plan(
         ljos_web: web.then(|| LJOS_WEB.to_owned()),
     };
     Ok(manifest)
+}
+
+/// `files` and, under each link's name, the files of the directory it
+/// leads to: a site keeps no links, so it holds them as the native fallback
+/// writes them where no link can be made, and refused past the same bound.
+fn copied_under_links(
+    mut files: Vec<FileEntry>,
+    links: &[LinkEntry],
+) -> Result<Vec<FileEntry>, SurfaceError> {
+    let all: Vec<&LinkEntry> = links.iter().collect();
+    let mut through: Vec<FileEntry> = through_links(&files, links, &all)?
+        .into_iter()
+        .map(|(path, file)| FileEntry {
+            path,
+            bytes: file.bytes,
+        })
+        .collect();
+    files.append(&mut through);
+    files.sort_by(|a, b| a.path.cmp(&b.path));
+    Ok(files)
 }
 
 /// The modules a site imports from ljos-web, sorted; refused when a

@@ -1003,7 +1003,7 @@ are Rust types (requests 32, 33).
 | `format`, `version`, `target` | `"ljos-site"`, `1`, `"web"`; a builder refuses anything else |
 | `entry` | the document the site mounts, a listed `.qml` |
 | `theme` | the `theme.json` beside the entry, when there is one (carried, not yet applied) |
-| `files` | every file of the bundle with its size, and nothing else is in it; plain paths below the bundle, never `mocks/`, `.studio/` or `ljostypes.json` |
+| `files` | every file of the bundle with its size, and nothing else is in it; plain paths below the bundle, never `mocks/`, `.studio/` or `ljostypes.json`; no links, so a directory the project links to is listed again under the link's name |
 | `modules` | each of the project's modules (`module`) and its `qmldir`, both listed; every component a qmldir names is listed |
 | `imports` | every module a document imports that is not the project's, sorted: each one ljos-web at `ljos_web` provides |
 | `blocks`, `left_out` | as in the native manifest, for a person reading it |
@@ -1023,7 +1023,10 @@ types in Rust, a commit that is not one, a link) and sees each refused.
 `no_web_face`, its `modules` and the `docs` that import them, for a module
 that is neither the project's own nor one ljos-web provides. That covers
 `Ljos.Blocks` shells, `Ljos.Models`, a module only an installed plugin
-gives, and a typo.
+gives, and a typo. Then `unsupported` with `links_multiply`, for links
+that lead into the same directories along so many ways that the site would
+copy more than 10,000 files and directories through them, even directories
+that hold only more links.
 
 DECISION: the web export reuses the native one's walk and checks, and adds
 to its manifest rather than forking it; `run` is native's alone, and
@@ -1038,7 +1041,14 @@ when `LJOS_WEB` names a checkout, and the build task compares the manifest's
 imports with the checkout it builds with. Request 34 would let Studio read
 it instead. DECISION: a path import (`import "parts"`) is not checked: its
 files are the project's and in the bundle, or outside it and missing from
-the native bundle alike. DECISION: Studio's window has no export UI, so the
+the native bundle alike. DECISION: a site holds no links, as its
+builder and the hosts it goes on keep none: a link to a directory the bundle
+holds is a copy of that directory's files under the link's name, as a native
+bundle has where the system makes no links, so `import "alias"` resolves on
+the page too. Links that fan out and meet again would copy a directory once
+per way down, which doubles with every level, so past 10,000 entries reached
+through links (each link followed and each file placed) the export is
+refused rather than written. DECISION: Studio's window has no export UI, so the
 web target has none either. DECISION: Studio's interim builder is a task
 (`export:web:build`) over ljos-web's own compiler and plugin, not code in a
 crate, so it is gone when request 30 lands; it copies only the listed files,

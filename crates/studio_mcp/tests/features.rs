@@ -391,16 +391,21 @@ fn links_in(w: &mut StudioWorld, link: String, target: String) -> StepResult {
 }
 
 /// `levels` directories below `under`, `0` to `levels - 1`, each holding one
-/// file and, but the last, two links `left` and `right` to the next: a
-/// diamond at every level, so every way down through the links is another
-/// copy of all below.
-#[given(regex = r#"^a diamond of directory links (\d+) levels deep in "([^"]+)"$"#)]
-fn diamond(w: &mut StudioWorld, levels: usize, under: String) -> StepResult {
+/// file (unless "holding no files") and, but the last, two links `left` and
+/// `right` to the next: a diamond at every level, so every way down through
+/// the links is another copy of all below.
+#[given(
+    regex = r#"^a diamond of directory links (\d+) levels deep in "([^"]+)"( holding no files)?$"#
+)]
+fn diamond(w: &mut StudioWorld, levels: usize, under: String, empty: String) -> StepResult {
     let under = w.dir.path().join(under);
     for level in 0..levels {
         let dir = under.join(level.to_string());
         std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-        std::fs::write(dir.join("level.txt"), format!("{level}\n")).map_err(|e| e.to_string())?;
+        if empty.is_empty() {
+            std::fs::write(dir.join("level.txt"), format!("{level}\n"))
+                .map_err(|e| e.to_string())?;
+        }
         if level + 1 == levels {
             continue;
         }
