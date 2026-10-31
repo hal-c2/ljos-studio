@@ -1101,7 +1101,11 @@ fn picture_colour(w: &mut StudioWorld, some: String, colour: String) -> StepResu
         .map_err(|e| e.to_string())?;
     let mut pixels = vec![0; reader.output_buffer_size().ok_or("too large")?];
     let info = reader.next_frame(&mut pixels).map_err(|e| e.to_string())?;
-    let (at, others) = if colour == "red" { (0, [1, 2]) } else { (1, [0, 2]) };
+    let (at, others) = if colour == "red" {
+        (0, [1, 2])
+    } else {
+        (1, [0, 2])
+    };
     // Lighting shades a colour, so what counts is one channel well above the
     // others, not any exact value.
     let found = pixels[..info.buffer_size()]
