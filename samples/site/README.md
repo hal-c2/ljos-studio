@@ -23,6 +23,11 @@ samples/site`), open `Main.qml` and choose Desktop, Tablet or Phone: the
 canvas shows the state that size gets. Run it on its own with
 `ljos run samples/site/Main.qml`. For the web, export it with the tool
 `export` (`"entry": "Main.qml", "target": "web"`) and build the bundle with
-`mise run export:web:build samples/site/build/web`. That export has not been
-run through to a site yet, and the phone and tablet layouts are still to be
-confirmed (docs/DOGFOOD.md, Not done).
+`mise run export:web:build samples/site/build/web`.
+
+An agent built this site over MCP in a new, empty project on 2026-10-31: 40
+calls, none refused, ending in the `export` above. `export:web:build` made a
+site of 456 784 bytes, and headless Chromium showed it with no errors at 390 x
+844 (one column, the nav links folded away), 800 x 1100 (two columns) and 1280 x
+800 (three columns): `docs/dogfood/site-web-*.png`. `mise run export:web:check`,
+which checks its own project and not this one, passed the same day.

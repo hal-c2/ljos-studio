@@ -37,3 +37,11 @@ Feature: A web export becomes a site any static server serves
   Scenario: The site holds nothing of Studio's
     Then no file of the site names "mocks/" or ".studio"
     And the page does not show "Playing", which only the mock module says
+
+  # A window sizes the root it shows, so a breakpoint state turns on by the
+  # window's width. A page is that window; the root kept its declared size, and
+  # a phone saw the corner of a desktop page.
+  Scenario: The entry's root takes the page's size
+    When the site is opened from a static server, below a path of its own
+    And the page is made 390 by 844 pixels
+    Then the entry's root is 390 by 844 pixels
