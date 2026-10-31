@@ -839,3 +839,39 @@ Feature: An edit made against an older generation is rebased by its handles
     Then the agent is refused with "stale_ref"
     And the refusal's "/details/kind" is "conflict"
     And the refusal's "/details/author" is "Ada"
+
+  Scenario: Redo brings back an inserted object's handle in a document holding a TapHandler
+    Given the agent has called the tool "node_insert" with:
+      """json
+      {"doc": "Main.qml", "parent": {"id": "card"}, "text": "TapHandler { }"}
+      """
+    And the agent has called the tool "node_insert" with:
+      """json
+      {"doc": "Main.qml", "parent": {"id": "root"}, "text": "Item { id: mine }"}
+      """
+    And the agent keeps the answer's "/node" as "mine"
+    And the agent has called the tool "history" with:
+      """json
+      {"action": "undo"}
+      """
+    And the agent has called the tool "history" with:
+      """json
+      {"action": "redo"}
+      """
+    When the agent calls the tool "property_set" with:
+      """json
+      {"doc": "Main.qml", "node": {"node": "$mine"}, "name": "width", "value": 10}
+      """
+    Then the file "Main.qml" is:
+      """qml
+      import QtQuick
+
+      Item {
+          id: root
+          width: 200
+
+          Rectangle { id: card; color: "red"; TapHandler { id: tapHandler1 } }
+          Text { id: label; text: "hello" }
+          Item { id: mine; width: 10 }
+      }
+      """

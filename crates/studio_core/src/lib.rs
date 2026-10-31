@@ -1796,7 +1796,7 @@ impl Session {
     /// `before`'s any more. Read from the text on both sides, as how a
     /// handler got there has too many forms to name.
     fn with_taps(
-        &mut self,
+        &self,
         path: &str,
         before: &flows::Taps,
         touched: Option<Vec<Touch>>,
