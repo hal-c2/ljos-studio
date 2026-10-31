@@ -47,6 +47,8 @@ struct StudioWorld {
     endpoint: Option<HttpServer>,
     /// What it answered last: status and body.
     reply: Option<(u16, String)>,
+    /// How many reloads Studio had reported when the preview was last read.
+    reloads_read: usize,
 }
 
 impl std::fmt::Debug for StudioWorld {
@@ -73,6 +75,7 @@ impl StudioWorld {
             kept: HashMap::new(),
             endpoint: None,
             reply: None,
+            reloads_read: 0,
         }
     }
 
@@ -141,6 +144,37 @@ impl StudioWorld {
             .as_str()
             .map(str::to_owned)
             .ok_or_else(|| format!("no outline in {}", reply.structured))
+    }
+
+    /// Every event of the open preview, all pages; leaves the last answer be.
+    fn preview_events(&mut self) -> Result<Vec<Value>, String> {
+        let caps = self.caps;
+        let server = self.server()?;
+        let mut events = Vec::new();
+        loop {
+            let reply = server
+                .call(
+                    "preview_events",
+                    &CallCtx::new(caps),
+                    json!({ "since": events.len() }),
+                )
+                .map_err(|e| format!("the preview's events were refused: {}", e.to_value()))?;
+            let page = reply.structured["events"]
+                .as_array()
+                .ok_or_else(|| format!("no events in {}", reply.structured))?;
+            if page.is_empty() {
+                return Ok(events);
+            }
+            events.extend(page.iter().cloned());
+        }
+    }
+
+    /// The reloads Studio reported, and every event as one line each: what
+    /// a step that read the preview says when it was not what it wanted.
+    fn reloads(events: &[Value]) -> (usize, String) {
+        let reloads = events.iter().filter(|e| is_reload(e)).count();
+        let lines: Vec<String> = events.iter().map(Value::to_string).collect();
+        (reloads, lines.join("\n"))
     }
 
     fn answer(&self) -> Result<&Value, String> {
@@ -611,13 +645,47 @@ fn offered(w: &mut StudioWorld, names: String) -> StepResult {
         .ok_or_else(|| format!("offered {got:?}"))
 }
 
+/// A reload Studio reported, applied or not.
+fn is_reload(event: &Value) -> bool {
+    matches!(event["kind"].as_str(), Some("reloaded" | "reload_failed"))
+}
+
 #[then(regex = r#"^the preview shows "([^"]*)"$"#)]
 fn preview_shows(w: &mut StudioWorld, text: String) -> StepResult {
+    // Read first: what a burst of writes left out is reloaded before the
+    // events answer, so the outline is read after every reload they name.
+    let events = w.preview_events()?;
     let outline = w.preview_outline()?;
+    let (reloads, lines) = StudioWorld::reloads(&events);
+    w.reloads_read = reloads;
     outline
         .contains(&format!("\"{text}\""))
         .then_some(())
-        .ok_or_else(|| format!("the preview shows:\n{outline}"))
+        .ok_or_else(|| {
+            format!("the preview shows:\n{outline}\nafter these events of Studio's:\n{lines}")
+        })
+}
+
+// What a write is waited on by: the reload Studio reports for it, which it
+// asks of the preview before the write's answer. Not a time.
+#[then(regex = r"^Studio has reported the preview reloaded since it was read$")]
+fn reloaded_since_read(w: &mut StudioWorld) -> StepResult {
+    let events = w.preview_events()?;
+    let (reloads, lines) = StudioWorld::reloads(&events);
+    let read = w.reloads_read;
+    let last = events.iter().rev().find(|e| is_reload(e));
+    match last {
+        Some(event) if reloads > read && event["kind"] == "reloaded" => Ok(()),
+        Some(event) if reloads > read => Err(format!(
+            "the last reload Studio reported failed: {event}\nevents:\n{lines}"
+        )),
+        _ => Err(format!(
+            "no reload since the preview was read ({read} then, {reloads} now; the last at \
+             generation {}); events:\n{lines}",
+            last.and_then(|e| e["generation"].as_u64())
+                .map_or_else(|| "none".to_owned(), |g| g.to_string())
+        )),
+    }
 }
 
 #[then(regex = r#"^the answer has a PNG picture at most (\d+) pixels on its longest side$"#)]
