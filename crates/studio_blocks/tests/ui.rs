@@ -125,6 +125,9 @@ impl UiWorld {
                 }),
             )
             .map_err(|e| format!("the shell cannot be watched: {e}"))?;
+            // As `studio` does once the window is made: a theme that did
+            // not load as it opened sent no report.
+            studio_blocks::reload_settled(engine);
             let root = session.root().ok_or("the watched shell made no window")?;
             Ok((
                 root,

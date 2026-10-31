@@ -73,6 +73,15 @@ Feature: A person reskins Studio from inside Studio
     When the window takes the change
     Then the window has no shell banner
 
+  Scenario: A theme that does not load when the window opens is told at once
+    Given the file "theme.json":
+      """
+      {"Colors": {"noSuchRole": "#ff0000"}}
+      """
+    When Studio's window opens again
+    Then the window shows the person's shell
+    And the shell banner says "theme\.json:1:\d+: .*noSuchRole"
+
   Scenario: A shell edit that does not compile is still told after the theme loads
     When the person replaces "id: shell" with "id: shell\n    NoSuchThing { }" in the code view
     And the window takes the change
