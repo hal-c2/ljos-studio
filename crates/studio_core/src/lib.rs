@@ -4,8 +4,10 @@
 //! Every way of changing a design goes through [`Session`]: the canvas, the
 //! code view and an agent's MCP call alike. So an agent's edit shows on the
 //! canvas, a person can undo it, and two writers never silently overwrite
-//! each other: an edit names the document generation it was made against
-//! and a stale one is refused.
+//! each other: an edit names the document generation it was made against,
+//! and one made against an older generation is moved past what others
+//! wrote since (by the handles it names, or by its byte ranges) or refused
+//! as a conflict that says who changed what.
 //!
 //! The file is the document (DESIGN.md goal 1). Edits are `qml_edit`'s
 //! lossless splices, history entries are the changed ranges and their
@@ -14,6 +16,7 @@
 mod address;
 pub mod flows;
 mod history;
+mod log;
 pub mod models;
 pub mod outline;
 pub mod preview;
@@ -39,7 +42,12 @@ pub use store::FsStore;
 pub use store::{MemStore, Store, StoreError, inside, listed};
 
 use address::{Tracked, find_by_key};
-use history::History;
+use history::{History, Replayed};
+use log::{CHILDREN, INTERACTIONS, Lease, Log, Logged, STATES, Touch, reaches};
+pub use log::{LEASE_LIFE_MS, LEASE_TTL_MS, LeaseView};
+
+/// Who wrote a change found in the file: nobody Studio knows.
+pub const OUTSIDE: &str = "outside Studio";
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -100,6 +108,48 @@ pub enum Error {
          look at the comments and try again"
     )]
     ReviewChanged,
+    /// Another writer changed what this edit changes after the generation
+    /// it was made at. Boxed: its seven fields would make every `Result`
+    /// of the session carry them.
+    #[error("{0}")]
+    Conflict(Box<Conflict>),
+    /// `handle` and all it holds are leased to `holder` until `until_ms`
+    /// on the session's clock.
+    #[error(
+        "{handle} in `{doc}` is held by {holder} for a few seconds more: work elsewhere, or try \
+         again once they let go"
+    )]
+    Leased {
+        doc: String,
+        handle: String,
+        holder: String,
+        until_ms: u64,
+    },
+    #[error(
+        "{holder} has held objects for five minutes, the longest a lease lives: release them \
+         (`node_select` with no nodes) and plan again"
+    )]
+    LeaseSpent { holder: String },
+}
+
+/// What an `Error::Conflict` names: `handle`'s binding `name`, or the
+/// object itself when `name` is `None`, changed by `author` at
+/// `generation` (`label`). `now` is the binding's value now, `None` when it
+/// or its object is gone.
+#[derive(Debug, thiserror::Error)]
+#[error(
+    "{author} changed {what} in `{doc}` at generation {generation} ({label}) after the \
+     generation this edit was made at: read it again and decide",
+    what = match name { Some(n) => format!("`{n}` of {handle}"), None => handle.clone() }
+)]
+pub struct Conflict {
+    pub doc: String,
+    pub handle: String,
+    pub name: Option<String>,
+    pub author: String,
+    pub label: String,
+    pub generation: u64,
+    pub now: Option<String>,
 }
 
 /// A literal a property can be set to.
@@ -264,6 +314,9 @@ pub struct Outcome {
     /// The document already said this: nothing was written and no history
     /// entry made.
     pub unchanged: bool,
+    /// The generation the edit was made against, when the document had
+    /// moved on since and the edit was moved past what was written.
+    pub rebased: Option<u64>,
 }
 
 /// The tokens [`Session::tokens`] read.
@@ -347,6 +400,16 @@ pub struct Session {
     /// were on their objects then: a redo makes the document again, and
     /// they go back on their objects.
     unmade: BTreeMap<String, Vec<String>>,
+    /// What was written to each held document lately, for rebasing an
+    /// edit made against an older generation.
+    logs: BTreeMap<String, Log>,
+    leases: Vec<Lease>,
+    /// Holders whose leases ran their whole life: they release before they
+    /// hold again.
+    spent: Vec<String>,
+    /// Who is calling, and when, as [`Session::act_as`] last said.
+    author: String,
+    now_ms: u64,
 }
 
 /// A comment with the handle of its object, when it has one.
@@ -355,6 +418,9 @@ pub struct CommentView {
     pub comment: Comment,
     pub node: Option<String>,
 }
+
+/// The author of the window's own gestures.
+pub const PERSON: &str = "person";
 
 /// What [`Session::on_write`] is given.
 type OnWrite = Box<dyn FnMut(&str) + Send>;
@@ -392,7 +458,50 @@ impl Session {
             on_write: Vec::new(),
             review: None,
             unmade: BTreeMap::new(),
+            logs: BTreeMap::new(),
+            leases: Vec::new(),
+            spent: Vec::new(),
+            author: PERSON.to_owned(),
+            now_ms: 0,
         }
+    }
+
+    /// Says who makes the calls that follow and when (milliseconds on a
+    /// clock that only goes forward). Their edits are theirs in the history
+    /// and the log, their leases are renewed, and others' leases that
+    /// lapsed by `now_ms` are let go: nothing watches the clock (rule 6),
+    /// so a lease ends when somebody next calls.
+    pub fn act_as(&mut self, author: &str, now_ms: u64) {
+        self.tick(now_ms);
+        let now = self.now_ms;
+        author.clone_into(&mut self.author);
+        for lease in self.leases.iter_mut().filter(|l| l.holder == author) {
+            lease.renew(now);
+        }
+    }
+
+    /// Moves the session's clock to `now_ms` (never back), and lets the
+    /// leases that ran out by then go: what a window reads without calling.
+    pub fn tick(&mut self, now_ms: u64) {
+        self.now_ms = self.now_ms.max(now_ms);
+        let now = self.now_ms;
+        for lease in self.leases.iter().filter(|l| l.until_ms <= now) {
+            if lease.spent() && !self.spent.contains(&lease.holder) {
+                self.spent.push(lease.holder.clone());
+            }
+        }
+        self.leases.retain(|l| l.until_ms > now);
+    }
+
+    /// The session's clock, as [`Session::act_as`] and [`Session::tick`]
+    /// last set it.
+    pub fn now_ms(&self) -> u64 {
+        self.now_ms
+    }
+
+    /// Who [`Session::act_as`] last said is calling.
+    pub fn author(&self) -> &str {
+        &self.author
     }
 
     /// Calls `f` with the path of each file the session writes or removes
@@ -497,6 +606,10 @@ impl Session {
             self.retired.insert(path.to_owned(), doc.generation);
         }
         self.selection.retain(|(d, _)| d != path);
+        // The log's offsets and the leases' handles are of the text that
+        // went with it.
+        self.logs.remove(path);
+        self.leases.retain(|l| l.doc != path);
     }
 
     pub fn text(&mut self, path: &str) -> Result<(&str, u64), Error> {
@@ -678,13 +791,250 @@ impl Session {
         }
     }
 
+    /// Whether an edit made against `given` can be applied now: `None` when
+    /// it was made against the current generation (or names none), the
+    /// generation it was made against when it is moved past what others
+    /// wrote since. Only an edit whose objects are named by handle or `id`
+    /// is moved; one by path is stale, as is one older than the log or past
+    /// a change found in the file, whose ranges are a guess.
+    fn rebase(&mut self, path: &str, given: Option<u64>, op: &Op) -> Result<Option<u64>, Error> {
+        self.sync(path)?;
+        let current = self.doc(path)?.generation;
+        let Some(given) = given.filter(|g| *g != current) else {
+            return Ok(None);
+        };
+        let stale = || Error::Stale {
+            doc: path.to_owned(),
+            given,
+            current,
+        };
+        if op.addresses().iter().any(|a| matches!(a, Address::Path(_))) {
+            return Err(stale());
+        }
+        let author = self.author.clone();
+        let others: Vec<Logged> = self
+            .logs
+            .get(path)
+            .and_then(|log| log.since(given, current))
+            .ok_or_else(stale)?
+            .into_iter()
+            .filter(|e| e.author != author)
+            .cloned()
+            .collect();
+        if others.iter().any(|e| e.outside || e.touched.is_none()) {
+            return Err(stale());
+        }
+        let intent = self.intent(path, op)?;
+        let doc = self.doc(path)?;
+        // The newest change names what is there now.
+        for entry in others.iter().rev() {
+            for (h, name) in &intent {
+                let hit = entry.touched.iter().flatten().find(|(a, m)| {
+                    (m.is_none() && within(doc, *h, *a))
+                        || (name.is_none() && within(doc, *a, *h))
+                        // Two writers' children of one parent both land.
+                        || (a == h && m == name && name.as_deref() != Some(CHILDREN))
+                });
+                if hit.is_some() {
+                    let now = name.as_ref().and_then(|n| {
+                        let at = doc.tracked.iter().find(|t| t.handle == *h)?.path.as_ref()?;
+                        let node = doc.nodes.as_ref()?.iter().find(|x| x.path == *at)?;
+                        Some(node.bindings.iter().find(|b| b.name == *n)?.value.clone())
+                    });
+                    return Err(Error::Conflict(Box::new(Conflict {
+                        doc: path.to_owned(),
+                        handle: format!("n{h}"),
+                        name: name.clone(),
+                        author: entry.author.clone(),
+                        label: entry.label.clone(),
+                        generation: entry.generation,
+                        now,
+                    })));
+                }
+            }
+        }
+        Ok(Some(given))
+    }
+
+    /// What `op` means to change, by the handles its addresses name, which
+    /// need not be found in the text any more: an object another writer
+    /// took out is still the one this edit meant.
+    fn intent(&mut self, path: &str, op: &Op) -> Result<Vec<Touch>, Error> {
+        let handle = |s: &mut Self, address: &Address| -> Result<u64, Error> {
+            let not_found = |a: String| Error::NotFound {
+                doc: path.to_owned(),
+                address: a,
+            };
+            match address {
+                Address::Node(h) => h
+                    .strip_prefix('n')
+                    .and_then(|n| n.parse().ok())
+                    .ok_or_else(|| not_found(h.clone())),
+                _ => Ok(number(&s.resolve_now(path, address)?.0)),
+            }
+        };
+        Ok(match op {
+            Op::Insert { parent, .. } | Op::Contribute { parent, .. } => {
+                vec![(handle(self, parent)?, Some(CHILDREN.to_owned()))]
+            }
+            Op::Move { node, parent, .. } => vec![
+                (handle(self, node)?, None),
+                (handle(self, parent)?, Some(CHILDREN.to_owned())),
+            ],
+            Op::Remove { node } | Op::RemoveContribution { node } => {
+                vec![(handle(self, node)?, None)]
+            }
+            Op::SetBinding { node, name, .. } | Op::RemoveBinding { node, name } => {
+                vec![(handle(self, node)?, Some(name.clone()))]
+            }
+            Op::State { node, .. } => vec![(handle(self, node)?, Some(STATES.to_owned()))],
+            Op::Interaction { trigger, .. } | Op::RemoveInteraction { trigger, .. } => {
+                vec![(handle(self, trigger)?, Some(INTERACTIONS.to_owned()))]
+            }
+        })
+    }
+
+    /// What `op` changes in the text it is about to be applied to: its
+    /// intent, with an object it replaces, moves or takes out standing for
+    /// all it holds, and a move taking a child from its old parent too.
+    fn touches(&mut self, path: &str, op: &Op) -> Result<Vec<Touch>, Error> {
+        let intent = self.intent(path, op)?;
+        let doc = self.doc(path)?;
+        let mut out = Vec::with_capacity(intent.len());
+        for (h, name) in intent {
+            if name.is_none() {
+                let at = doc
+                    .tracked
+                    .iter()
+                    .find(|t| t.handle == h)
+                    .and_then(|t| t.path.clone());
+                if let (Op::Move { .. }, Some(at)) = (op, &at)
+                    && let Some(parent) = at.0.split_last().map(|(_, p)| p)
+                    && let Some(t) = doc
+                        .tracked
+                        .iter()
+                        .find(|t| t.path.as_ref().is_some_and(|p| p.0 == parent))
+                {
+                    out.push((t.handle, Some(CHILDREN.to_owned())));
+                }
+                out.extend(
+                    doc.tracked
+                        .iter()
+                        .filter(|t| t.handle != h && within(doc, t.handle, h))
+                        .map(|t| (t.handle, None)),
+                );
+            }
+            out.push((h, name));
+        }
+        Ok(out)
+    }
+
+    /// What a change of the text touches, on the text before it: in each
+    /// innermost object a range reaches, the binding holding it, or the
+    /// object itself when no binding does. `None` when the text does not
+    /// parse and names no objects.
+    fn text_touches(&mut self, path: &str, changes: &[Change]) -> Option<Vec<Touch>> {
+        let (tree, _) = self.tree_now(path).ok()?;
+        let mut out: Vec<Touch> = Vec::new();
+        for change in changes {
+            let r = &change.range;
+            let holds = |n: &Node| {
+                n.start <= r.start
+                    && r.end <= n.end
+                    && !(r.is_empty() && (r.start == n.start || r.start == n.end))
+            };
+            for (handle, node) in &tree {
+                if !(reaches(r, (node.start, node.end)) || holds(node)) {
+                    continue;
+                }
+                let inner = tree.iter().any(|(_, m)| {
+                    m.path.0.len() > node.path.0.len()
+                        && m.path.0.starts_with(&node.path.0)
+                        && holds(m)
+                });
+                if inner {
+                    continue;
+                }
+                let name = node
+                    .bindings
+                    .iter()
+                    .find(|b| b.start <= r.start && r.end <= b.end)
+                    .map(|b| b.name.clone());
+                let touch = (number(handle), name);
+                if !out.contains(&touch) {
+                    out.push(touch);
+                }
+            }
+        }
+        Some(out)
+    }
+
+    /// Refuses a write by the caller to objects another writer holds: any
+    /// of `handles`, or anything they hold.
+    fn check_leased(
+        &self,
+        path: &str,
+        handles: impl IntoIterator<Item = u64>,
+    ) -> Result<(), Error> {
+        let Some(doc) = self.docs.get(path) else {
+            return Ok(());
+        };
+        for h in handles {
+            if let Some(lease) = self.others_leases(path).find(|l| within(doc, h, l.handle)) {
+                return Err(self.leased(lease));
+            }
+        }
+        Ok(())
+    }
+
+    /// Refuses a change of the text by the caller that reaches into an
+    /// object another writer holds.
+    fn check_leased_ranges(&self, path: &str, changes: &[Change]) -> Result<(), Error> {
+        let Some(doc) = self.docs.get(path) else {
+            return Ok(());
+        };
+        for lease in self.others_leases(path) {
+            let span = doc
+                .tracked
+                .iter()
+                .find(|t| t.handle == lease.handle)
+                .and_then(|t| t.span);
+            if let Some(span) = span
+                && changes.iter().any(|c| reaches(&c.range, span))
+            {
+                return Err(self.leased(lease));
+            }
+        }
+        Ok(())
+    }
+
+    fn others_leases<'s>(&'s self, path: &'s str) -> impl Iterator<Item = &'s Lease> + 's {
+        self.leases
+            .iter()
+            .filter(move |l| l.doc == path && l.holder != self.author && l.until_ms > self.now_ms)
+    }
+
+    fn leased(&self, lease: &Lease) -> Error {
+        Error::Leased {
+            doc: lease.doc.clone(),
+            handle: format!("n{}", lease.handle),
+            holder: lease.holder.clone(),
+            until_ms: lease.until_ms,
+        }
+    }
+
     /// Applies a structural edit. An edit that names an object by path needs
     /// the `generation` the path was read at: a path is true of one text,
     /// and the only address that would name another object without notice.
     ///
+    /// An edit made against an older generation that names its objects by
+    /// handle or `id` is applied to the text as it is now, unless another
+    /// writer changed what it changes in between ([`Error::Conflict`]).
+    ///
     /// # Errors
-    /// A path without a `generation`, a stale `generation`, an address that
-    /// names nothing, a document that does not parse, or the edit's own
+    /// A path without a `generation`, a stale `generation` the log cannot
+    /// rebase from, a conflict, an object another writer holds, an address
+    /// that names nothing, a document that does not parse, or the edit's own
     /// refusal; nothing changes then.
     pub fn edit(
         &mut self,
@@ -705,10 +1055,12 @@ impl Session {
                  `generation`"
             )));
         }
-        self.check_generation(path, generation)?;
+        let rebased = self.rebase(path, generation, op)?;
         let before = self.doc(path)?.text.clone();
         let (text, change, focus) = self.plan(path, &before, op)?;
         let changes = diff(&before, &text);
+        let touched = self.touches(path, op)?;
+        self.check_leased(path, touched.iter().map(|(h, _)| *h))?;
         if dry_run {
             return Ok(Outcome {
                 doc: path.to_owned(),
@@ -718,6 +1070,7 @@ impl Session {
                 history: None,
                 node: None,
                 text: Some(text),
+                rebased,
             });
         }
         if text == before {
@@ -735,7 +1088,7 @@ impl Session {
             } => self.interaction_label(path, trigger, signal.as_deref(), goal),
             _ => op.label(),
         };
-        let entry = self.commit(path, before, text, Some(change), label)?;
+        let entry = self.commit(path, before, text, Some(change), label, Some(touched))?;
         let node = match focus {
             Some(at) => Some(self.handle_at(path, &at)?),
             None => None,
@@ -748,6 +1101,7 @@ impl Session {
             node,
             text: None,
             unchanged: false,
+            rebased,
         })
     }
 
@@ -968,6 +1322,11 @@ impl Session {
     /// `None`) with `text`. The result need not parse; while it does not,
     /// structural edits wait and handles keep their objects for when it
     /// does.
+    ///
+    /// A `range` of an older generation is moved past what was written
+    /// since. One that overlaps another's change is a conflict, and one that
+    /// would leave a text that parses not parsing is refused: either alone
+    /// was meant, the two together were not.
     pub fn replace_text(
         &mut self,
         path: &str,
@@ -977,9 +1336,22 @@ impl Session {
         dry_run: bool,
     ) -> Result<Outcome, Error> {
         let path = &self.canonical(path)?;
-        self.check_generation(path, generation)?;
+        self.sync(path)?;
         let before = self.doc(path)?.text.clone();
-        let range = range.unwrap_or(0..before.len());
+        let current = self.doc(path)?.generation;
+        let rebased = generation.filter(|g| *g != current);
+        let range = match (rebased, range) {
+            (None, range) => range.unwrap_or(0..before.len()),
+            // All of an older text is not a range of this one.
+            (Some(given), None) => {
+                return Err(Error::Stale {
+                    doc: path.to_owned(),
+                    given,
+                    current,
+                });
+            }
+            (Some(given), Some(range)) => self.rebase_range(path, given, range, text)?,
+        };
         if range.start > range.end
             || range.end > before.len()
             || !before.is_char_boundary(range.start)
@@ -997,7 +1369,17 @@ impl Session {
                 replacement: text.to_owned(),
             }],
         );
+        if let Some(given) = rebased
+            && self.doc(path)?.nodes.is_some()
+            && outline::outline(&after).is_none()
+        {
+            return Err(Error::Invalid(format!(
+                "moved past what was written to `{path}` since generation {given}, this edit \
+                 would no longer parse: read the text again"
+            )));
+        }
         let changes = diff(&before, &after);
+        self.check_leased_ranges(path, &changes)?;
         if dry_run {
             return Ok(Outcome {
                 doc: path.to_owned(),
@@ -1007,12 +1389,14 @@ impl Session {
                 history: None,
                 node: None,
                 text: Some(after),
+                rebased,
             });
         }
         if after == before {
             return self.unchanged(path, None);
         }
-        let entry = self.commit(path, before, after, None, "edit text".to_owned())?;
+        let touched = self.text_touches(path, &changes);
+        let entry = self.commit(path, before, after, None, "edit text".to_owned(), touched)?;
         Ok(Outcome {
             doc: path.to_owned(),
             generation: self.doc(path)?.generation,
@@ -1021,7 +1405,47 @@ impl Session {
             node: None,
             text: None,
             unchanged: false,
+            rebased,
         })
+    }
+
+    /// `range` of generation `given`, moved past every change since. One
+    /// that overlaps another writer's change is a conflict naming it; one
+    /// that overlaps the caller's own is stale, since the caller has only
+    /// to read what it wrote.
+    fn rebase_range(
+        &mut self,
+        path: &str,
+        given: u64,
+        range: std::ops::Range<usize>,
+        text: &str,
+    ) -> Result<std::ops::Range<usize>, Error> {
+        let current = self.doc(path)?.generation;
+        let stale = || Error::Stale {
+            doc: path.to_owned(),
+            given,
+            current,
+        };
+        let since = self
+            .logs
+            .get(path)
+            .and_then(|log| log.since(given, current))
+            .ok_or_else(stale)?;
+        let mut change = Change {
+            range,
+            replacement: text.to_owned(),
+        };
+        for entry in since {
+            if entry.outside {
+                return Err(stale());
+            }
+            change = match qml_edit::transform(&change, &entry.changes) {
+                Ok(moved) => moved,
+                Err(_) if entry.author == self.author => return Err(stale()),
+                Err(_) => return Err(conflict(path, entry, None)),
+            };
+        }
+        Ok(change.range)
     }
 
     /// A new document with `text`.
@@ -1050,6 +1474,7 @@ impl Session {
                 node: None,
                 text: Some(text.to_owned()),
                 unchanged: false,
+                rebased: None,
             });
         }
         let past = self.retired.get(path).copied().unwrap_or(0);
@@ -1073,6 +1498,11 @@ impl Session {
             handles_before: Vec::new(),
             handles_after: Vec::new(),
             change: None,
+            author: self.author.clone(),
+            outside: false,
+            generation,
+            side: side(text),
+            exact: true,
         });
         self.wrote(path);
         Ok(Outcome {
@@ -1086,6 +1516,7 @@ impl Session {
             node: None,
             text: None,
             unchanged: false,
+            rebased: None,
         })
     }
 
@@ -1100,6 +1531,7 @@ impl Session {
             node,
             text: None,
             unchanged: true,
+            rebased: None,
         })
     }
 
@@ -1176,6 +1608,9 @@ impl Session {
             (Some(_), Some(v)) => format!("set {token} {v}"),
         };
         let changes = diff(&before, &after);
+        if exists {
+            self.check_leased_ranges(file, &changes)?;
+        }
         let unchanged = exists && after == before;
         if dry_run {
             return Ok(Outcome {
@@ -1190,17 +1625,20 @@ impl Session {
                 node: None,
                 text: Some(after),
                 unchanged,
+                rebased: None,
             });
         }
         if unchanged {
             return self.unchanged(file, None);
         }
         let entry = if exists {
-            self.commit(file, before, after, None, label)?
+            // A theme names no objects: nothing is rebased past it by handle.
+            self.commit(file, before, after, None, label, None)?
         } else {
             let past = self.retired.get(file).copied().unwrap_or(0);
             let doc = Document::new(after.clone(), past);
             self.store.write(file, &after)?;
+            let generation = doc.generation;
             self.docs.insert(file.to_owned(), doc);
             let entry = self.history.push(Entry {
                 id: 0,
@@ -1215,6 +1653,11 @@ impl Session {
                 handles_before: Vec::new(),
                 handles_after: Vec::new(),
                 change: None,
+                author: self.author.clone(),
+                outside: false,
+                generation,
+                side: side(&after),
+                exact: true,
             });
             self.wrote(file);
             entry
@@ -1227,6 +1670,7 @@ impl Session {
             node: None,
             text: None,
             unchanged: false,
+            rebased: None,
         })
     }
 
@@ -1240,13 +1684,15 @@ impl Session {
         after: String,
         change: Option<PathChange>,
         label: String,
+        touched: Option<Vec<Touch>>,
     ) -> Result<u64, Error> {
         // Comments follow handles: theirs must be known before the handles
         // move.
         self.look_up(path);
-        let (next, entry) = self.step(path, before, after.clone(), change, label)?;
+        let (next, entry) = self.step(path, before, after.clone(), change, label, false)?;
         self.store.write(path, &after)?;
         *self.doc(path)? = next;
+        self.log(&entry, touched);
         let id = self.history.push(entry);
         self.reanchor(path);
         self.wrote(path);
@@ -1254,7 +1700,7 @@ impl Session {
     }
 
     /// Takes `after` as the document's text, which the file already has:
-    /// moves the handles and records the entry.
+    /// moves the handles and records the entry, a change found in the file.
     fn record(
         &mut self,
         path: &str,
@@ -1264,11 +1710,27 @@ impl Session {
         label: String,
     ) -> Result<u64, Error> {
         self.look_up(path);
-        let (next, entry) = self.step(path, before, after, change, label)?;
+        let (next, entry) = self.step(path, before, after, change, label, true)?;
         *self.doc(path)? = next;
+        self.log(&entry, None);
         let id = self.history.push(entry);
         self.reanchor(path);
         Ok(id)
+    }
+
+    /// Puts a new history entry's edit in its document's log.
+    fn log(&mut self, entry: &Entry, touched: Option<Vec<Touch>>) {
+        self.logs
+            .entry(entry.doc.clone())
+            .or_default()
+            .push(Logged {
+                generation: entry.generation,
+                author: entry.author.clone(),
+                label: entry.label.clone(),
+                changes: entry.forward.clone(),
+                touched,
+                outside: entry.outside,
+            });
     }
 
     /// The document as it is after the edit, and the edit's entry, worked
@@ -1280,7 +1742,9 @@ impl Session {
         after: String,
         change: Option<PathChange>,
         label: String,
+        outside: bool,
     ) -> Result<(Document, Entry), Error> {
+        let author = if outside { OUTSIDE } else { &self.author }.to_owned();
         let doc = self.doc(path)?;
         let handles_before = doc.tracked.clone();
         let mut next = doc.clone();
@@ -1296,12 +1760,17 @@ impl Session {
             id: 0,
             doc: path.to_owned(),
             label,
+            author,
+            outside,
+            generation: next.generation,
+            side: side(&after),
             forward,
             inverse: diff(&after, &before),
             created: false,
             handles_before,
             handles_after: next.tracked.clone(),
             change,
+            exact: true,
         };
         Ok((next, entry))
     }
@@ -1317,13 +1786,28 @@ impl Session {
             })
     }
 
-    /// Undoes the last edit; its document gets the bytes it had before. The
-    /// history moves only once the file has: one that could not be written
-    /// can be tried again.
+    /// Undoes the caller's last edit, or a change found in the file, which
+    /// is nobody's and so everybody's: its document gets the bytes it had
+    /// before, moved past what others wrote since. The history moves only
+    /// once the file has: one that could not be written can be tried again.
+    ///
+    /// # Errors
+    /// Nothing to undo, a [`Error::Conflict`] with a later change of the
+    /// same bytes, an object another writer holds, or the store's refusal.
     pub fn undo(&mut self) -> Result<EntrySummary, Error> {
+        let author = self.author.clone();
+        self.undo_by(Some(&author))
+    }
+
+    /// Undoes the newest edit, whoever made it.
+    pub fn undo_newest(&mut self) -> Result<EntrySummary, Error> {
+        self.undo_by(None)
+    }
+
+    fn undo_by(&mut self, author: Option<&str>) -> Result<EntrySummary, Error> {
         // A change made outside Studio goes on top here and is what is
         // undone: the entry below it has offsets on a text the file left.
-        while let Some(doc) = self.history.peek_undo().map(|e| e.doc.clone()) {
+        while let Some(doc) = self.history.peek_undo(author).map(|e| e.doc.clone()) {
             match self.sync(&doc) {
                 Ok(()) => break,
                 Err(Error::Store(StoreError::Missing(_))) => self.history.forget(&doc),
@@ -1332,20 +1816,32 @@ impl Session {
         }
         let entry = self
             .history
-            .peek_undo()
+            .peek_undo(author)
             .cloned()
             .ok_or(Error::NothingTo("undo"))?;
         // It moves only once it has happened: a write that failed leaves it
         // to be tried again, and the lists still say where the file is.
-        self.replay(&entry, false)?;
-        self.history.commit_undo();
+        let (generation, side, rebased) = self.replay(&entry, false)?;
+        self.history
+            .commit_undo(entry.id, generation, side, rebased);
         self.wrote(&entry.doc);
         Ok(entry.summary())
     }
 
+    /// Redoes what the caller last undid.
     pub fn redo(&mut self) -> Result<EntrySummary, Error> {
+        let author = self.author.clone();
+        self.redo_by(Some(&author))
+    }
+
+    /// Redoes what was last undone, whoever undid it.
+    pub fn redo_newest(&mut self) -> Result<EntrySummary, Error> {
+        self.redo_by(None)
+    }
+
+    fn redo_by(&mut self, author: Option<&str>) -> Result<EntrySummary, Error> {
         // A change found here ends what could be redone, like any edit.
-        while let Some(top) = self.history.peek_redo() {
+        while let Some(top) = self.history.peek_redo(author) {
             let doc = top.doc.clone();
             if top.created {
                 if self.store.exists(&doc) {
@@ -1361,25 +1857,47 @@ impl Session {
         }
         let entry = self
             .history
-            .peek_redo()
+            .peek_redo(author)
             .cloned()
             .ok_or(Error::NothingTo("redo"))?;
-        // It moves only once it has happened: a write that failed leaves it
-        // to be tried again, and the lists still say where the file is.
-        self.replay(&entry, true)?;
-        self.history.commit_redo();
+        let (generation, side, rebased) = self.replay(&entry, true)?;
+        self.history
+            .commit_redo(entry.id, generation, side, rebased);
         self.wrote(&entry.doc);
         Ok(entry.summary())
     }
 
     /// Brings the file and the document to that side of `entry`, for the
-    /// caller to move the history and tell who watches.
-    fn replay(&mut self, entry: &Entry, forward: bool) -> Result<(), Error> {
+    /// caller to move the history and tell who watches: the generation and
+    /// the hash of the text it left, and what the entry is now when it was
+    /// moved past others' edits to get there.
+    fn replay(
+        &mut self,
+        entry: &Entry,
+        forward: bool,
+    ) -> Result<(u64, u64, Option<Replayed>), Error> {
         let path = entry.doc.clone();
         if self.store.exists(&path) {
             self.look_up(&path);
         }
         if entry.created && !forward {
+            let doc = self.doc(&path)?;
+            let (generation, len) = (doc.generation, doc.text.len());
+            if side(&doc.text) != entry.side {
+                // Taking the document away takes what others wrote with it.
+                let latest = self.logs.get(&path).and_then(|l| l.latest()).cloned();
+                return Err(match latest {
+                    Some(e) => conflict(&path, &e, None),
+                    None => Error::Invalid(format!("`{path}` changed since it was made")),
+                });
+            }
+            self.check_leased_ranges(
+                &path,
+                &[Change {
+                    range: 0..len,
+                    replacement: String::new(),
+                }],
+            )?;
             self.store.remove(&path)?;
             self.retire(&path);
             let on_it: Vec<String> = self.review.as_ref().map_or_else(Vec::new, |r| {
@@ -1391,18 +1909,143 @@ impl Session {
             });
             self.unmade.insert(path.clone(), on_it);
             self.reanchor(&path);
-            return Ok(());
+            return Ok((generation, side(""), None));
         }
         if entry.created && forward {
             let text = qml_edit::splice("", &entry.forward);
             let past = self.retired.get(&path).copied().unwrap_or(0);
             let mut doc = Document::new(text.clone(), past);
             doc.tracked = entry.handles_after.clone();
+            let generation = doc.generation;
             self.store.write(&path, &text)?;
             self.docs.insert(path.clone(), doc);
             self.remade(&path);
-            return Ok(());
+            return Ok((generation, side(&text), None));
         }
+        let label = format!("{} {}", if forward { "redo" } else { "undo" }, entry.label);
+        let changes = if forward {
+            &entry.forward
+        } else {
+            &entry.inverse
+        };
+        let (current, generation) = {
+            let doc = self.doc(&path)?;
+            (doc.text.clone(), doc.generation)
+        };
+        if side(&current) == entry.side {
+            self.check_leased_ranges(&path, changes)?;
+            if entry.exact {
+                let touched =
+                    self.text_touches(&path, &diff(&current, &qml_edit::splice(&current, changes)));
+                return self.replay_exact(entry, forward, label, touched);
+            }
+            let changes = changes.clone();
+            return self.replay_text(&path, &current, &changes, label, forward, false);
+        }
+        // Others wrote since: the entry's changes are moved past theirs.
+        let since: Vec<Logged> = self
+            .logs
+            .get(&path)
+            .and_then(|l| l.since(entry.generation, generation))
+            .ok_or_else(|| {
+                Error::Invalid(format!(
+                    "too much was written to `{path}` since `{}` to move it past: do it by hand",
+                    entry.label
+                ))
+            })?
+            .into_iter()
+            .cloned()
+            .collect();
+        let mut moved = changes.clone();
+        for e in &since {
+            if e.outside {
+                return Err(conflict(&path, e, None));
+            }
+            moved = qml_edit::transform_all(&moved, &e.changes)
+                .map_err(|_| conflict(&path, e, None))?;
+        }
+        self.check_leased_ranges(&path, &moved)?;
+        self.replay_text(&path, &current, &moved, label, forward, true)
+    }
+
+    /// Applies an entry's changes, made on `current` or moved onto it, as a
+    /// change of the text: handles are found again by bytes and key.
+    fn replay_text(
+        &mut self,
+        path: &str,
+        current: &str,
+        changes: &[Change],
+        label: String,
+        forward: bool,
+        rebased: bool,
+    ) -> Result<(u64, u64, Option<Replayed>), Error> {
+        let text = qml_edit::splice(current, changes);
+        if rebased && self.doc(path)?.nodes.is_some() && outline::outline(&text).is_none() {
+            return Err(Error::Invalid(format!(
+                "moved past what was written to `{path}` since, `{label}` would leave it not \
+                 parsing: do it by hand"
+            )));
+        }
+        let made = diff(current, &text);
+        let back = diff(&text, current);
+        let touched = self.text_touches(path, &made);
+        let doc = self.doc(path)?;
+        let mut next = doc.clone();
+        for change in &made {
+            for t in &mut next.tracked {
+                t.shift(change);
+            }
+        }
+        next.set_text(text.clone());
+        remap(&mut next, None);
+        let generation = next.generation;
+        self.store.write(path, &text)?;
+        *self.doc(path)? = next;
+        self.reanchor(path);
+        self.log_replay(path, generation, label, made.clone(), touched);
+        let replayed = if forward {
+            Replayed {
+                forward: made,
+                inverse: back,
+            }
+        } else {
+            Replayed {
+                forward: back,
+                inverse: made,
+            }
+        };
+        Ok((generation, side(&text), Some(replayed)))
+    }
+
+    fn log_replay(
+        &mut self,
+        path: &str,
+        generation: u64,
+        label: String,
+        changes: Vec<Change>,
+        touched: Option<Vec<Touch>>,
+    ) {
+        let author = self.author.clone();
+        self.logs.entry(path.to_owned()).or_default().push(Logged {
+            generation,
+            author,
+            label,
+            changes,
+            touched,
+            outside: false,
+        });
+    }
+
+    /// The entry's changes on the text it left, with the handles as they
+    /// were on its other side.
+    fn replay_exact(
+        &mut self,
+        entry: &Entry,
+        forward: bool,
+        label: String,
+        touched: Option<Vec<Touch>>,
+    ) -> Result<(u64, u64, Option<Replayed>), Error> {
+        let path = entry.doc.clone();
         let doc = self.doc(&path)?;
         let changes = if forward {
             &entry.forward
@@ -1453,10 +2096,13 @@ impl Session {
         }
         next.tracked = tracked;
         place(&mut next, leads);
+        let generation = next.generation;
+        let made = diff(&doc.text, &text);
         self.store.write(&path, &text)?;
         *self.doc(&path)? = next;
         self.reanchor(&path);
-        Ok(())
+        self.log_replay(&path, generation, label, made, touched);
+        Ok((generation, side(&text), None))
     }
 
     /// The comments an undo orphaned with `doc`, back on their objects
@@ -1720,6 +2366,7 @@ impl Session {
         self.sync(doc)?;
         self.look_up(doc);
         let (handle, node) = self.resolve_now(doc, address)?;
+        self.check_leased(doc, [number(&handle)])?;
         let review = self.review();
         if let Some(why) = &review.unreadable {
             return Err(Error::ReviewUnreadable(why.clone()));
@@ -1793,6 +2440,9 @@ impl Session {
             .map(|c| c.doc.clone())
             .ok_or_else(|| Error::NoComment(id.to_owned()))?;
         self.look_up_now(&doc);
+        if let Some(h) = self.review().bound.get(id).copied() {
+            self.check_leased(&doc, [h])?;
+        }
         let comment = self.review().get_mut(id).expect("found above");
         let before = comment.clone();
         f(comment);
@@ -1810,6 +2460,108 @@ impl Session {
 
     pub fn history(&self) -> (Vec<EntrySummary>, Vec<EntrySummary>) {
         self.history.list()
+    }
+
+    /// What `author`'s undo and redo would take, in [`Session::history`]'s
+    /// order.
+    pub fn history_by(&self, author: &str) -> (Vec<EntrySummary>, Vec<EntrySummary>) {
+        self.history.list_by(author)
+    }
+
+    /// Leases the objects `handles` of `path` name, and all they hold, to
+    /// the caller in place of what it held: another writer's edit of them
+    /// is refused until the caller stops calling for [`LEASE_TTL_MS`], or
+    /// [`LEASE_LIFE_MS`] went by. An object the caller already held keeps
+    /// the time it was first held.
+    ///
+    /// # Errors
+    /// An object another writer holds, or holds inside of, or a caller
+    /// whose leases ran their life and who has not released since.
+    pub fn hold(&mut self, path: &str, handles: &[String]) -> Result<(), Error> {
+        if self.spent.contains(&self.author) {
+            return Err(Error::LeaseSpent {
+                holder: self.author.clone(),
+            });
+        }
+        let path = &self.canonical(path)?;
+        self.doc(path)?;
+        let doc = &self.docs[path];
+        let wanted: Vec<u64> = handles.iter().map(|h| number(h)).collect();
+        for h in &wanted {
+            if let Some(lease) = self
+                .others_leases(path)
+                .find(|l| within(doc, *h, l.handle) || within(doc, l.handle, *h))
+            {
+                return Err(self.leased(lease));
+            }
+        }
+        let now = self.now_ms;
+        let author = self.author.clone();
+        let mut kept: Vec<Lease> = Vec::new();
+        self.leases.retain(|l| {
+            if l.holder != author {
+                return true;
+            }
+            if l.doc == *path && wanted.contains(&l.handle) {
+                kept.push(l.clone());
+            }
+            false
+        });
+        for h in wanted {
+            let mut lease = kept
+                .iter()
+                .find(|l| l.handle == h)
+                .cloned()
+                .unwrap_or(Lease {
+                    doc: path.clone(),
+                    handle: h,
+                    holder: author.clone(),
+                    since_ms: now,
+                    until_ms: now,
+                });
+            lease.renew(now);
+            self.leases.push(lease);
+        }
+        Ok(())
+    }
+
+    /// Lets go of everything the caller holds; one whose leases ran their
+    /// life may hold again.
+    pub fn release(&mut self) {
+        let author = self.author.clone();
+        self.leases.retain(|l| l.holder != author);
+        self.spent.retain(|h| *h != author);
+    }
+
+    /// The leases in force, every writer's.
+    pub fn leases(&self) -> Vec<LeaseView> {
+        self.leases
+            .iter()
+            .filter(|l| l.until_ms > self.now_ms)
+            .map(|l| LeaseView {
+                doc: l.doc.clone(),
+                handle: format!("n{}", l.handle),
+                holder: l.holder.clone(),
+                until_ms: l.until_ms,
+            })
+            .collect()
+    }
+
+    /// The handles of `path` the caller holds.
+    pub fn held(&self, path: &str) -> Vec<String> {
+        self.leases
+            .iter()
+            .filter(|l| l.doc == path && l.holder == self.author && l.until_ms > self.now_ms)
+            .map(|l| format!("n{}", l.handle))
+            .collect()
+    }
+
+    /// The bytes each document's log holds and its number of entries, for
+    /// measuring what rebasing costs.
+    pub fn log_size(&self) -> (usize, usize) {
+        self.logs
+            .values()
+            .fold((0, 0), |(b, n), l| (b + l.bytes(), n + l.len()))
     }
 
     /// Sets the selection; every address must name an object.
@@ -1836,6 +2588,54 @@ impl Session {
         self.selection = kept.clone();
         kept
     }
+}
+
+/// The refusal of an edit `entry` of the log stands in the way of.
+fn conflict(doc: &str, entry: &Logged, now: Option<String>) -> Error {
+    let (handle, name) = match entry.touched.as_deref() {
+        Some([(h, name)]) => (format!("n{h}"), name.clone()),
+        _ => (String::new(), None),
+    };
+    Error::Conflict(Box::new(Conflict {
+        doc: doc.to_owned(),
+        handle,
+        name,
+        author: entry.author.clone(),
+        label: entry.label.clone(),
+        generation: entry.generation,
+        now,
+    }))
+}
+
+/// The number of a handle the session gave out (`n12`).
+fn number(handle: &str) -> u64 {
+    handle[1..].parse().expect("handles are n and a number")
+}
+
+/// Whether the object `inner` is `outer` or one it holds, by where their
+/// handles point now; a handle whose object is gone is only itself.
+fn within(doc: &Document, inner: u64, outer: u64) -> bool {
+    if inner == outer {
+        return true;
+    }
+    let at = |h: u64| {
+        doc.tracked
+            .iter()
+            .find(|t| t.handle == h)
+            .and_then(|t| t.path.as_ref())
+    };
+    match (at(inner), at(outer)) {
+        (Some(i), Some(o)) => i.0.len() > o.0.len() && i.0.starts_with(&o.0),
+        _ => false,
+    }
+}
+
+/// A hash of a text, to know a history entry's side of it again.
+fn side(text: &str) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::hash::DefaultHasher::new();
+    text.hash(&mut h);
+    h.finish()
 }
 
 /// Where a comment on `node` is.
