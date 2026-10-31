@@ -16,7 +16,9 @@
 //!   file until the window is drawn in it; and what the watched window
 //!   costs while nobody touches it, in CPU time;
 //! - a drag across the canvas's frame, each pointer move timed until the
-//!   window is at rest (its frame's work, before the GPU draws it). The
+//!   window is at rest: the engine's work for the frame (events, bindings,
+//!   layout, the scene's update), in microseconds; the stage has no
+//!   painter, so egui's tessellation and the GPU are not in it. The
 //!   canvas has no gesture that drags a node, so this is the frame cost of
 //!   what a drag over the frame does today: it pans the canvas.
 //!
@@ -171,7 +173,7 @@ fn main() -> anyhow::Result<()> {
 
     std::thread::sleep(Duration::from_secs(1));
     let mut moves = window.drag_frames(DRAG_MOVES)?;
-    report(
+    report_us(
         "drag across the canvas's frame, per pointer move",
         &mut moves,
     );
@@ -218,7 +220,7 @@ fn sample(dir: &Path, doc: &str, layer: &str, field: &str, rounds: usize) -> any
     );
     std::thread::sleep(Duration::from_secs(1));
     let mut moves = window.drag_frames(DRAG_MOVES)?;
-    report(
+    report_us(
         &format!("{doc}: drag across the canvas's frame, per pointer move"),
         &mut moves,
     );
@@ -466,6 +468,19 @@ fn report(what: &str, samples: &mut [Duration]) {
         ms(at(0.5)),
         ms(at(0.95)),
         ms(samples[samples.len() - 1]),
+        samples.len()
+    );
+}
+
+/// [`report`] in microseconds, for work well under a millisecond.
+fn report_us(what: &str, samples: &mut [Duration]) {
+    samples.sort();
+    let at = |p: f64| samples[((samples.len() - 1) as f64 * p).round() as usize];
+    println!(
+        "{what}: p50 {} us, p95 {} us, max {} us over {}",
+        at(0.5).as_micros(),
+        at(0.95).as_micros(),
+        samples[samples.len() - 1].as_micros(),
         samples.len()
     );
 }
