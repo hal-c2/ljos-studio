@@ -75,11 +75,13 @@ export async function start({ app, port = 0, record = false }) {
   process.env.VITE_CONFIG_NATIVE_IGNORE_WARNING = "true";
   // Vite and the plugin, from the checkout the app's `node_modules` links to.
   const { createServer: createVite } = await import(pathToFileURL(join(app, "node_modules/vite/dist/node/index.js")).href);
-  const projects = join(app, "projects");
+  // The real path, as Vite names files by theirs: what serves through a link
+  // is told apart and stripped from errors as what serves directly is.
+  const projects = join(realpathSync(app), "projects");
   // The app's vite.config.js gives `--root` only to files under this
   // directory, not to any path that has `projects/<n>` in it. Vite hands it
   // real paths, so a checkout reached through a link is named by its real one.
-  process.env.STUDIO_PREVIEW_PROJECTS = join(realpathSync(app), "projects");
+  process.env.STUDIO_PREVIEW_PROJECTS = projects;
   const vite = await createVite({
     configFile: join(app, "vite.config.js"),
     root: app,
