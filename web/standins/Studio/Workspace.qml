@@ -27,6 +27,7 @@ QtObject {
     readonly property string theme
     readonly property var tokens
     readonly property var comments
+    readonly property var leases
 
     signal answered(string tool, var answer)
     signal refused(string tool, var error)
