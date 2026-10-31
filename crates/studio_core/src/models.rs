@@ -124,14 +124,18 @@ fn resolve_url(doc: &str, url: &str) -> Option<String> {
     Some(parts.join("/"))
 }
 
-/// The relative URL a binding writes: a string, or a string the file
-/// resolves against itself (`Qt.resolvedUrl("…")`), which is the same URL.
-fn url_written(value: &str) -> Option<String> {
-    let inner = value
+/// The relative URL a binding writes, and whether it is written as
+/// `Qt.resolvedUrl("…")`, which resolves against the file it is written in
+/// wherever the object is made; a plain string resolves against the file
+/// whose context the binding runs in.
+fn url_written(value: &str) -> Option<(String, bool)> {
+    match value
         .strip_prefix("Qt.resolvedUrl(")
         .and_then(|v| v.strip_suffix(')'))
-        .map_or(value, str::trim);
-    literal_string(inner)
+    {
+        Some(inner) => Some((literal_string(inner.trim())?, true)),
+        None => Some((literal_string(value)?, false)),
+    }
 }
 
 /// `to`, a project path, as a URL relative to the QML file `doc`.
@@ -163,7 +167,7 @@ impl Session {
             return Ok(Some(read(&tree, &node, path)));
         }
         if short(&node.ty) == JSON_LIST_MODEL {
-            return Ok(self.read_json(&node, path));
+            return Ok(self.read_json(&node, path, None));
         }
         if VIEWS.contains(&short(&node.ty)) {
             return self.model_of(path, &tree, &node);
@@ -262,7 +266,7 @@ impl Session {
                 return Ok(Some(read(tree, value, path)));
             }
             if short(&value.ty) == JSON_LIST_MODEL {
-                return Ok(self.read_json(value, path));
+                return Ok(self.read_json(value, path, None));
             }
             let Some(doc) = self.type_document(path, &value.ty)? else {
                 return Ok(None);
@@ -274,7 +278,9 @@ impl Session {
             };
             return Ok(match other.first() {
                 Some((_, root)) if short(&root.ty) == LIST_MODEL => Some(read(&other, root, &doc)),
-                Some((_, root)) if short(&root.ty) == JSON_LIST_MODEL => self.read_json(root, &doc),
+                Some((_, root)) if short(&root.ty) == JSON_LIST_MODEL => {
+                    self.read_json(root, &doc, Some(path))
+                }
                 _ => None,
             });
         }
@@ -287,7 +293,7 @@ impl Session {
         };
         Ok(match short(&model.ty) {
             LIST_MODEL => Some(read(tree, model, path)),
-            JSON_LIST_MODEL => self.read_json(model, path),
+            JSON_LIST_MODEL => self.read_json(model, path, None),
             _ => None,
         })
     }
@@ -297,9 +303,20 @@ impl Session {
     /// may have saved since. `None` when it names no file of the project
     /// (`json` text, a URL, a binding) or the file is not an array of
     /// records, whose roles are then not known.
-    fn read_json(&self, model: &Node, doc: &str) -> Option<Model> {
+    ///
+    /// A plain string on `doc`'s root object resolves, as Ljós and Qt read
+    /// it, against the file that makes the object: `user`, when the model
+    /// is reached through it. Without one each user may read another file,
+    /// so the source names none.
+    fn read_json(&self, model: &Node, doc: &str, user: Option<&str>) -> Option<Model> {
         let binding = model.bindings.iter().find(|b| b.name == "source")?;
-        let source = resolve_url(doc, &url_written(binding.value.trim())?)?;
+        let (url, resolved) = url_written(binding.value.trim())?;
+        let against = if resolved || !model.path.0.is_empty() {
+            doc
+        } else {
+            user?
+        };
+        let source = resolve_url(against, &url)?;
         let text = self.store().read(&source).ok()?;
         let records = records(&text).ok()?;
         let mut roles: Vec<String> = Vec::new();

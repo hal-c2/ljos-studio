@@ -874,13 +874,15 @@ has ten, which pushed the graph out of the panel); the pick is kept by
 name, so it holds across an edit while the selection still has the
 signal, and an edit that changes the selection's signals with the box
 open leaves the panel answering (`features/ui/flows.feature`).
-DECISION: `document_new`
-writes the source as `Qt.resolvedUrl("…")`, which resolves against the
-file it is written in; in 2582cba2 a plain relative `source` resolves
-against the document the model is created from, so a data module's model
-used by a screen elsewhere would read nothing (a Ljós request). Studio
-reads either form as relative to the model's own file, which is what both
-mean once Ljós resolves them alike.
+DECISION: `document_new` writes the source as `Qt.resolvedUrl("…")`,
+which resolves against the file it is written in wherever the model is
+made. A plain relative `source` follows Ljós's rule (pinned at f5111666,
+as qml6 reads it): on a document's root object it resolves against the
+file that uses the document, on any other object against its own file.
+Studio reads a plain one on a root through the list that uses the
+document, against that list's file; inspected alone it names no file,
+since each user may read another (`features/edit/models.feature`). A
+`source` an instance sets in the using file is not read.
 
 Measured in a release build of Studio on the reference desktop, which
 other builds kept at a load average near 7.5; only a debug `ljos` was
