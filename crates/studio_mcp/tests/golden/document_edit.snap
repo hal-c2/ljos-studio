@@ -77,6 +77,12 @@ expression: value
           "null"
         ]
       },
+      "rebased_from": {
+        "type": [
+          "integer",
+          "null"
+        ]
+      },
       "text": {
         "type": [
           "string",

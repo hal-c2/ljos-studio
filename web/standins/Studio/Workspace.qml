@@ -27,10 +27,19 @@ QtObject {
     readonly property string theme
     readonly property var tokens
     readonly property var comments
+    readonly property var leases
+    readonly property bool settling
+    readonly property bool blank
+    readonly property var chosen
+    readonly property var toolkit
+    readonly property var rootStates
 
     signal answered(string tool, var answer)
     signal refused(string tool, var error)
 
     function dispatch(tool: string, args: var) {
+    }
+
+    function lookAgain() {
     }
 }

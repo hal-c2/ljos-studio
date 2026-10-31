@@ -9,7 +9,7 @@ expression: value
     "open_world": false,
     "read_only": false
   },
-  "description": "What a canvas gesture does; each edit one undo step, all or none. `geometry`: boxes, drag rules, siblings. `place`: x/y/size, writing what governs each object (anchor margins, Layout.preferred*); refused `arranged` or `anchored` where overridden. `align`, `copy`, `paste`, `duplicate`.",
+  "description": "What a canvas gesture does; each edit one undo step, all or none. `geometry`: boxes, drag rules, siblings. `place`: x/y/size, writing what governs each object (anchor margins, Layout.preferred*); refused `arranged` or `anchored` where overridden. `align`, `copy`, `paste`, `duplicate`, `remove`.",
   "inputSchema": {
     "$defs": {
       "Action": {
@@ -19,7 +19,8 @@ expression: value
           "align",
           "copy",
           "paste",
-          "duplicate"
+          "duplicate",
+          "remove"
         ],
         "type": "string"
       },
@@ -122,7 +123,7 @@ expression: value
       },
       "nodes": {
         "default": [],
-        "description": "For all but `place` and `paste`.",
+        "description": "For all but `place` and `paste`. A path needs `generation` where the\naction writes.",
         "items": {
           "$ref": "#/$defs/Address"
         },
@@ -191,6 +192,12 @@ expression: value
         "type": "array"
       },
       "parent": {},
+      "rebased_from": {
+        "type": [
+          "integer",
+          "null"
+        ]
+      },
       "siblings": {
         "type": "array"
       },

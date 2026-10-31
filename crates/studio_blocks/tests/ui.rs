@@ -774,6 +774,7 @@ fn selects_layer(w: &mut UiWorld, label: String) -> StepResult {
     }
 }
 
+#[given(regex = r#"^the person has set "([^"]+)" to "(.*)" in the inspector$"#)]
 #[when(regex = r#"^the person sets "([^"]+)" to "(.*)" in the inspector$"#)]
 fn sets(w: &mut UiWorld, name: String, value: String) -> StepResult {
     let value = unescape(&value);
@@ -1296,15 +1297,27 @@ fn tabs_and_types(w: &mut UiWorld, new: String) -> StepResult {
 #[given(regex = r#"^an agent has called the tool "([^"]+)" with:$"#)]
 #[when(regex = r#"^an agent calls the tool "([^"]+)" with:$"#)]
 fn agent_calls(w: &mut UiWorld, tool: String, step: &Step) -> StepResult {
+    call_as(w, None, &tool, step)
+}
+
+#[given(regex = r#"^an agent named "([^"]+)" has called the tool "([^"]+)" with:$"#)]
+#[when(regex = r#"^an agent named "([^"]+)" calls the tool "([^"]+)" with:$"#)]
+fn named_agent_calls(w: &mut UiWorld, name: String, tool: String, step: &Step) -> StepResult {
+    call_as(w, Some(name), &tool, step)
+}
+
+/// An agent's call beside the window's: `client` is the name it gave
+/// itself, none for one that gave none.
+fn call_as(w: &mut UiWorld, client: Option<String>, tool: &str, step: &Step) -> StepResult {
     let args: Json = serde_json::from_str(&docstring(step)?).map_err(|e| e.to_string())?;
     let window = w.window()?;
+    let ctx = CallCtx {
+        caps: CapSet::of([Cap::Inspect, Cap::Mutate]),
+        client,
+    };
     window
         .server
-        .call(
-            &tool,
-            &CallCtx::new(CapSet::of([Cap::Inspect, Cap::Mutate])),
-            args,
-        )
+        .call(tool, &ctx, args)
         .map_err(|e| format!("the agent was refused: {}", e.to_value()))?;
     window.rest()
 }
@@ -1695,6 +1708,8 @@ fn inspector_shows_comment(w: &mut UiWorld, kind: String, text: String) -> StepR
 }
 
 /// The layers' comment counts: what the panel shows beside the rows.
+/// What the layers panel says of its layers beside their names: how many
+/// comments are on one, who holds one.
 fn comment_counts(window: &Window) -> Result<Vec<String>, String> {
     let tree = window.tree();
     let list = find(&tree, &|n| n.name == "Layers" && n.role == "list")
@@ -1702,7 +1717,10 @@ fn comment_counts(window: &Window) -> Result<Vec<String>, String> {
     let mut counts = Vec::new();
     collect(list, &mut |n| {
         // Static text reads as a label.
-        if n.key.is_some() && n.role == "label" && n.name.contains(" comment") {
+        if n.key.is_some()
+            && n.role == "label"
+            && (n.name.contains(" comment") || n.name.contains(" held by "))
+        {
             counts.push(n.name.clone());
         }
     });
@@ -1755,6 +1773,15 @@ fn file_absent(w: &mut UiWorld, name: String) -> StepResult {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
         Err(e) => Err(format!("`{name}`: {e}")),
     }
+}
+
+#[then("the history lists nothing")]
+fn history_lists_nothing(w: &mut UiWorld) -> StepResult {
+    let done = w.window()?.read_json("done");
+    done.as_array()
+        .is_some_and(Vec::is_empty)
+        .then_some(())
+        .ok_or_else(|| format!("the history lists {done}"))
 }
 
 #[then(regex = r#"^the history lists "([^"]+)"$"#)]

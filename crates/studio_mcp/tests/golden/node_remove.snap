@@ -39,7 +39,7 @@ expression: value
         "type": "boolean"
       },
       "generation": {
-        "description": "The generation read; refused if the document moved on. Needed when\nan address is a `path`, which is true of one generation only.",
+        "description": "The generation read. By handle or `id`, the edit is moved past what\nothers wrote since, or refused as a conflict; by `path`, which is true\nof one generation only, it is refused if the document moved on, so\na `path` needs it.",
         "type": [
           "integer",
           "null"
@@ -77,6 +77,12 @@ expression: value
       "node": {
         "type": [
           "string",
+          "null"
+        ]
+      },
+      "rebased_from": {
+        "type": [
+          "integer",
           "null"
         ]
       },

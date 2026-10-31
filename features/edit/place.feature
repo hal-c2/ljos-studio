@@ -366,3 +366,80 @@ Feature: Objects are placed by the tools a canvas drag drops through
       {"action": "remove", "doc": "Main.qml", "nodes": [{"path": "root/0"}]}
       """
     Then the agent is refused with "invalid_argument"
+    Given the agent has called the tool "node_arrange" with:
+      """json
+      {"action": "remove", "doc": "Main.qml", "nodes": [{"id": "b"}]}
+      """
+    When the agent calls the tool "node_arrange" with:
+      """json
+      {"action": "remove", "doc": "Main.qml", "generation": 1, "nodes": [{"path": "root/0"}]}
+      """
+    Then the agent is refused with "stale_ref"
+    And the refusal's "/details/kind" is "stale_generation"
+    And the file "Main.qml" contains "id: a"
+
+  # What the canvas drops goes through the same log as every other edit:
+  # another writer's edit, a lease and an undo all see it.
+  Scenario: A write against an older generation is rebased past another object's edit
+    Given the studio tools are connected
+    And a second agent named "Ada" has called the tool "property_set" with:
+      """json
+      {"doc": "Main.qml", "node": {"id": "b"}, "name": "z", "value": 1}
+      """
+    When the agent calls the tool "node_arrange" with:
+      """json
+      {"action": "remove", "doc": "Main.qml", "generation": 1, "nodes": [{"id": "a"}]}
+      """
+    Then the answer's "/rebased_from" is 1
+    And the answer's "/generation" is 3
+    And the file "Main.qml" does not contain "id: a"
+    And the file "Main.qml" contains "z: 1"
+
+  Scenario: A write against an older generation conflicts with an edit of the same object
+    Given the studio tools are connected
+    And a second agent named "Ada" has called the tool "property_set" with:
+      """json
+      {"doc": "Main.qml", "node": {"id": "a"}, "name": "z", "value": 1}
+      """
+    When the agent calls the tool "node_arrange" with:
+      """json
+      {"action": "remove", "doc": "Main.qml", "generation": 1, "nodes": [{"id": "a"}]}
+      """
+    Then the agent is refused with "stale_ref"
+    And the refusal's "/details/kind" is "conflict"
+    And the refusal's "/details/author" is "Ada"
+    And the file "Main.qml" contains "id: a"
+
+  Scenario: A write reaching an object another writer holds is refused and changes nothing
+    Given the studio tools are connected
+    And a second agent named "Ada" has called the tool "node_select" with:
+      """json
+      {"doc": "Main.qml", "nodes": [{"id": "b"}], "hold": true}
+      """
+    When the agent calls the tool "node_arrange" with:
+      """json
+      {"action": "remove", "doc": "Main.qml", "nodes": [{"id": "a"}, {"id": "b"}]}
+      """
+    Then the agent is refused with "busy"
+    And the refusal's "/details/kind" is "leased"
+    And the refusal's "/details/holder" is "Ada"
+    And the file "Main.qml" contains "id: a"
+    And the file "Main.qml" contains "id: b"
+
+  Scenario: Undo takes back this writer's arranging, past another writer's edit
+    Given the studio tools are connected
+    And the agent has called the tool "node_arrange" with:
+      """json
+      {"action": "remove", "doc": "Main.qml", "nodes": [{"id": "a"}]}
+      """
+    And a second agent named "Ada" has called the tool "property_set" with:
+      """json
+      {"doc": "Main.qml", "node": {"id": "b"}, "name": "z", "value": 1}
+      """
+    When the agent calls the tool "history" with:
+      """json
+      {"action": "undo"}
+      """
+    Then the answer's "/entry/label" is "remove"
+    And the file "Main.qml" contains "id: a"
+    And the file "Main.qml" contains "z: 1"

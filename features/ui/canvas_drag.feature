@@ -86,6 +86,18 @@ Feature: Objects are moved and resized on the canvas
     When the person presses "Ctrl+D"
     Then the file "Main.qml" says "id: a1; x: 36; y: 36;"
 
+  Scenario: Delete takes out every selected object in one undo step
+    Given an agent has called the tool "node_select" with:
+      """json
+      {"doc": "Main.qml", "nodes": [{"id": "a"}, {"id": "b"}]}
+      """
+    When the person presses "Delete"
+    Then the file "Main.qml" does not say "id: a;"
+    And the file "Main.qml" does not say "id: b;"
+    When the person presses "Ctrl+Z"
+    Then the file "Main.qml" says "id: a;"
+    And the file "Main.qml" says "id: b;"
+
   Scenario: Align buttons line up a multiple selection
     Given an agent has called the tool "node_select" with:
       """json

@@ -23,7 +23,10 @@ use ljos_mcp_core::{
     CallCtx, Cap, CapSet, McpSurface, SurfaceError, ToolImage, glue::http::HttpServer,
 };
 use serde_json::{Value, json};
-use studio_mcp::{Studio, StudioServer, endpoint};
+use studio_mcp::{
+    Studio, StudioServer, endpoint,
+    timer::{ThreadTimer, Timer},
+};
 use studio_preview::NativeHost;
 
 #[path = "support/schema.rs"]
@@ -55,6 +58,48 @@ struct StudioWorld {
     took: std::time::Duration,
     /// Why Studio could not serve agents, when it could not.
     not_served: Option<String>,
+    /// The time leases are kept by, which `seconds pass` moves on.
+    clock: Arc<Clock>,
+}
+
+/// The real time, and as much more as the scenario says passed: a lease
+/// that must lapse after five seconds, or live five minutes, is not waited
+/// for. Wake-ups (the reload budget's) still come at real times.
+#[derive(Debug, Default)]
+struct Clock {
+    real: ThreadTimer,
+    passed: std::sync::Mutex<std::time::Duration>,
+}
+
+impl Clock {
+    fn pass(&self, by: std::time::Duration) {
+        *self
+            .passed
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) += by;
+    }
+}
+
+impl Timer for Clock {
+    fn now(&self) -> std::time::Duration {
+        self.real.now()
+            + *self
+                .passed
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    fn wall(&self) -> std::time::Duration {
+        self.real.wall()
+    }
+
+    fn after(&self, delay: std::time::Duration, then: Box<dyn FnOnce() + Send>) {
+        self.real.after(delay, then);
+    }
+
+    fn wait(&self, delay: std::time::Duration) -> bool {
+        self.real.wait(delay)
+    }
 }
 
 impl std::fmt::Debug for StudioWorld {
@@ -84,6 +129,7 @@ impl StudioWorld {
             reloads_read: 0,
             took: std::time::Duration::ZERO,
             not_served: None,
+            clock: Arc::default(),
         }
     }
 
@@ -101,7 +147,8 @@ impl StudioWorld {
             // A directory for the host to make, as the program names one: a
             // temporary directory itself is as open as the umask leaves it.
             let state = self.state.path().join("preview");
-            let studio = Studio::open(self.dir.path())
+            let clock: Arc<dyn Timer> = self.clock.clone();
+            let studio = Studio::open_with_timer(self.dir.path(), clock)
                 .map_err(|e| e.to_string())?
                 .with_previews(Arc::new(move |dir| {
                     Box::new(NativeHost::new(dir, NativeHost::default_program(), &state))
@@ -112,10 +159,16 @@ impl StudioWorld {
     }
 
     fn call(&mut self, tool: &str, args: Value) -> StepResult {
+        self.call_as(None, tool, args)
+    }
+
+    /// A call by the client that named itself `client`; `None` is the
+    /// scenario's own agent, which gave no name.
+    fn call_as(&mut self, client: Option<String>, tool: &str, args: Value) -> StepResult {
         let caps = self.caps;
         let server = self.server()?;
         let started = std::time::Instant::now();
-        let out = server.call(tool, &CallCtx::new(caps), args);
+        let out = server.call(tool, &CallCtx { caps, client }, args);
         let took = started.elapsed();
         let (out, images) = match out {
             Ok(reply) => (Ok(reply.structured), reply.images),
@@ -486,6 +539,46 @@ fn calls_with(w: &mut StudioWorld, tool: String, step: &Step) -> StepResult {
     Ok(())
 }
 
+#[given(regex = r#"^a second agent named "([^"]+)" has called the tool "([^"]+)" with:$"#)]
+#[when(regex = r#"^a second agent named "([^"]+)" calls the tool "([^"]+)" with:$"#)]
+fn second_calls_with(w: &mut StudioWorld, name: String, tool: String, step: &Step) -> StepResult {
+    let args = w.arguments(&docstring(step)?)?;
+    w.call_as(Some(name), &tool, args)?;
+    if step.ty == StepType::Given {
+        w.answer()?;
+    }
+    Ok(())
+}
+
+#[when(regex = r"^(\d+) seconds pass with no call$")]
+fn seconds_pass(w: &mut StudioWorld, seconds: u64) -> StepResult {
+    w.clock.pass(std::time::Duration::from_secs(seconds));
+    Ok(())
+}
+
+#[when(
+    regex = r#"^"([^"]+)" calls the tool "([^"]+)" on "([^"]+)" every (\d+) seconds for (\d+) seconds$"#
+)]
+fn calls_every(
+    w: &mut StudioWorld,
+    name: String,
+    tool: String,
+    doc: String,
+    every: u64,
+    total: u64,
+) -> StepResult {
+    let mut passed = 0;
+    while passed < total {
+        let by = every.min(total - passed);
+        w.clock.pass(std::time::Duration::from_secs(by));
+        passed += by;
+        w.call_as(Some(name.clone()), &tool, json!({ "doc": doc }))?;
+        w.answer()
+            .map_err(|e| format!("{passed} seconds in, {name}'s call: {e}"))?;
+    }
+    Ok(())
+}
+
 #[when(regex = r#"^a person types in the code view of "([^"]+)", replacing "(.*)" with "(.*)"$"#)]
 fn person_types(w: &mut StudioWorld, doc: String, old: String, new: String) -> StepResult {
     let server = w.server()?;
@@ -499,6 +592,9 @@ fn person_types(w: &mut StudioWorld, doc: String, old: String, new: String) -> S
         .find(&old)
         .ok_or_else(|| format!("`{old}` is not in {doc}"))?;
     let range = start..start + old.len();
+    // The window's writer, whoever called last.
+    let now = studio.session.now_ms();
+    studio.session.act_as(studio_mcp::PERSON, now);
     studio
         .session
         .replace_text(&doc, Some(generation), Some(range), &unquote(&new), false)
@@ -578,6 +674,15 @@ fn answer_absent(w: &mut StudioWorld, pointer: String) -> StepResult {
     match w.answer()?.pointer(&pointer) {
         None => Ok(()),
         Some(v) => Err(format!("`{pointer}` is {v}")),
+    }
+}
+
+#[then(regex = r#"^the answer's "(/[^"]*)" contains "([^"]*)"$"#)]
+fn answer_contains(w: &mut StudioWorld, pointer: String, text: String) -> StepResult {
+    let got = at(w.answer()?, &pointer)?;
+    match got.as_str() {
+        Some(got) if got.contains(&text) => Ok(()),
+        _ => Err(format!("`{pointer}` is {got}, without {text:?}")),
     }
 }
 

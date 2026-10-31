@@ -235,6 +235,18 @@
               "notify": "rootStatesChanged"
             },
             {
+              "name": "leases",
+              "type": "var",
+              "kind": "value",
+              "list": false,
+              "readonly": true,
+              "final": true,
+              "required": false,
+              "constant": false,
+              "group": false,
+              "notify": "leasesChanged"
+            },
+            {
               "name": "done",
               "type": "var",
               "kind": "value",

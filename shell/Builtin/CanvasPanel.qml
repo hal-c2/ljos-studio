@@ -30,6 +30,24 @@ Panel {
     property bool dragging: false
     property string says: ""
     readonly property var preview: workspace.preview
+    // Who holds what of the document shown: the frame says so, as the
+    // picture cannot mark an object it does not know the place of.
+    readonly property string held: {
+        const out = []
+        const leases = workspace.leases
+        const layers = workspace.layers
+        for (let i = 0; i < leases.length; ++i) {
+            if (leases[i].doc !== workspace.doc)
+                continue
+            let name = leases[i].node
+            for (let j = 0; j < layers.length; ++j) {
+                if (layers[j].node === leases[i].node)
+                    name = layers[j].label
+            }
+            out.push(name + " held by " + leases[i].holder)
+        }
+        return out.join(", ")
+    }
 
     function zoomBy(notches) {
         chosenZoom = Math.min(8, Math.max(0.125, zoom * Math.pow(1.25, notches)))
@@ -77,6 +95,15 @@ Panel {
                         text: frame.name + " · " + frame.modelData.width + " × " + frame.modelData.height
                         color: Colors.text
                         font.pixelSize: Typography.captionSize
+                    }
+                    Label {
+                        objectName: "frameHeld"
+                        visible: panel.held !== ""
+                        text: panel.held
+                        color: Colors.text
+                        font.pixelSize: Typography.captionSize
+                        Accessible.role: Accessible.StaticText
+                        Accessible.name: text
                     }
                     // The state the frame's breakpoint turns on, as the
                     // file's `when` says.

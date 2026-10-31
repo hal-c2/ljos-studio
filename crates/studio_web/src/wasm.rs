@@ -204,8 +204,9 @@ impl StudioCore {
             .ok_or_else(|| JsError::new(CLOSED))
     }
 
-    /// A tool's answer or refusal, as JSON (see [`Face::call`]).
-    pub fn call(&self, tool: &str, args: &str) -> String {
+    /// A tool's answer or refusal, as JSON (see [`Face::call`]); `client`
+    /// is the caller's name, left out for one that gave none.
+    pub fn call(&self, tool: &str, args: &str, client: Option<String>) -> String {
         let Some(face) = self.face.borrow().clone() else {
             return serde_json::json!({"error": {
                 "code": "unavailable",
@@ -215,7 +216,7 @@ impl StudioCore {
             .to_string();
         };
         let out = match serde_json::from_str(args) {
-            Ok(args) => face.call(tool, args),
+            Ok(args) => face.call_as(tool, args, client),
             Err(e) => serde_json::json!({"error": {
                 "code": "invalid_argument",
                 "message": format!("the arguments are not JSON: {e}"),

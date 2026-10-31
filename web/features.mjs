@@ -25,7 +25,9 @@ import { memoryBackend } from "./store.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = join(here, "..");
-const SKIPPED_TAGS = ["preview", "ui", "disk"];
+// @clock scenarios move the session's clock on by minutes, which only the
+// native runner's timer does (`seconds pass with no call`).
+const SKIPPED_TAGS = ["preview", "ui", "disk", "clock"];
 const DEFAULT = ["features/tools.feature", "features/theme.feature", "features/edit", "features/project", "features/web"];
 
 // --- Gherkin --------------------------------------------------------------
@@ -268,10 +270,12 @@ export class World {
     return this.studio;
   }
 
-  async call(tool, args) {
+  // `client` is the name a second agent gave itself; the scenario's own
+  // agent gave none.
+  async call(tool, args, client = undefined) {
     const studio = await this.server();
     try {
-      this.answer = await studio.call(tool, args);
+      this.answer = await studio.call(tool, args, client);
     } catch (e) {
       // Storage refused what the call wrote: that is the call's answer.
       if (!e.refusal) throw e;
@@ -322,6 +326,10 @@ async function callsWith(w, s, tool) {
   // A `Given` sets the scene: a refusal there is the scenario's mistake.
   if (s.kind === "Given") w.ok();
 }
+async function secondCallsWith(w, s, name, tool) {
+  await w.call(tool, w.substitute(json(docstring(s))), name);
+  if (s.kind === "Given") w.ok();
+}
 const keeps = (w, s, pointer, name) => void w.kept.set(name, must(w.ok(), pointer));
 
 const STEPS = [
@@ -348,6 +356,8 @@ const STEPS = [
   step("when", /^the agent calls the tool "([^"]+)"$/, calls),
   step("given", /^the agent has called the tool "([^"]+)" with:$/, callsWith),
   step("when", /^the agent calls the tool "([^"]+)" with:$/, callsWith),
+  step("given", /^a second agent named "([^"]+)" has called the tool "([^"]+)" with:$/, secondCallsWith),
+  step("when", /^a second agent named "([^"]+)" calls the tool "([^"]+)" with:$/, secondCallsWith),
   step("when", /^a person types in the code view of "([^"]+)", replacing "(.*)" with "(.*)"$/, async (w, s, doc, old, now) => {
     const studio = await w.server();
     const { text, generation } = studio.text(doc);
@@ -388,6 +398,10 @@ const STEPS = [
   step("then", /^the answer's "(\/[^"]*)" is absent$/, (w, s, pointer) => {
     const got = at(w.ok(), pointer);
     if (got !== undefined) throw new Error(`\`${pointer}\` is ${JSON.stringify(got)}`);
+  }),
+  step("then", /^the answer's "(\/[^"]*)" contains "([^"]*)"$/, (w, s, pointer, text) => {
+    const got = must(w.ok(), pointer);
+    if (typeof got !== "string" || !got.includes(text)) throw new Error(`\`${pointer}\` is ${JSON.stringify(got)}, without ${JSON.stringify(text)}`);
   }),
   step("then", /^the answer's "(\/[^"]*)" lists "([^"]*)"$/, (w, s, pointer, names) => {
     const got = must(w.ok(), pointer);
@@ -513,6 +527,8 @@ const NATIVE_ONLY = new Map([
   ['given ^"([^"]+)" links to a directory outside the project that holds the file "([^"]+)"$', "storage holds no links (@disk)"],
   ['given ^"([^"]+)" links to "([^"]+)" in the project$', "storage holds no links (@disk)"],
   ['given ^a diamond of directory links (\\d+) levels deep in "([^"]+)"( holding no files)?$', "storage holds no links (@disk)"],
+  ["when ^(\\d+) seconds pass with no call$", "the session's clock is moved on by the native runner's timer (@clock)"],
+  ['when ^"([^"]+)" calls the tool "([^"]+)" on "([^"]+)" every (\\d+) seconds for (\\d+) seconds$', "the session's clock is moved on by the native runner's timer (@clock)"],
   ["then ^it answered within (\\d+) seconds?$", "a call's time is measured on the native side, where the disk is"],
   ['then ^the bundle "([^"]+)", copied out of the project, runs headless and shows what the preview shows$', "a bundle runs as a native process (@preview)"],
   ['then ^the directory outside the project holds only "([^"]*)"$', "storage holds no links (@disk)"],

@@ -1,6 +1,7 @@
 // The open document's objects in order, indented by depth. Selecting one
 // is `node_select`, as an agent selects. A layer with open review comments
-// says how many.
+// says how many, and one another writer holds says who: the person's edit
+// of it is refused until they let go.
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
@@ -77,17 +78,30 @@ Panel {
                     })
                 }
 
-                Label {
+                Row {
                     anchors.right: parent.right
                     anchors.rightMargin: Spacing.xs
                     anchors.verticalCenter: parent.verticalCenter
-                    visible: row.modelData.comments > 0
-                    text: String(row.modelData.comments)
-                    color: Colors.text
-                    Accessible.role: Accessible.StaticText
-                    Accessible.name: row.modelData.comments
-                                     + (row.modelData.comments === 1 ? " comment on " : " comments on ")
-                                     + row.modelData.label
+                    spacing: Spacing.xs
+
+                    Label {
+                        objectName: "held"
+                        visible: row.modelData.held !== ""
+                        text: "held by " + row.modelData.held
+                        color: Colors.text
+                        font.pixelSize: Typography.captionSize
+                        Accessible.role: Accessible.StaticText
+                        Accessible.name: row.modelData.label + " held by " + row.modelData.held
+                    }
+                    Label {
+                        visible: row.modelData.comments > 0
+                        text: String(row.modelData.comments)
+                        color: Colors.text
+                        Accessible.role: Accessible.StaticText
+                        Accessible.name: row.modelData.comments
+                                         + (row.modelData.comments === 1 ? " comment on " : " comments on ")
+                                         + row.modelData.label
+                    }
                 }
             }
         }

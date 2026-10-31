@@ -587,17 +587,40 @@ fn remove(studio: &mut Studio, a: &NodesArgs) -> Result<ManyOut, SurfaceError> {
     })
 }
 
-/// The address of `arrange`'s objects a write would turn into handles before
-/// the session could ask for `generation`, so it is asked here.
-fn path_without_generation(a: &ArrangeArgs) -> Option<&str> {
-    if a.generation.is_some() || matches!(a.action, Action::Geometry | Action::Copy) {
-        return None;
+/// A write turns addresses into handles before the session sees them, so the
+/// session's rule for a path is kept here: it is true of the text it was read
+/// from, and is refused on the generation alone, never rebased.
+fn check_paths(studio: &mut Studio, a: &ArrangeArgs) -> Result<(), SurfaceError> {
+    if matches!(a.action, Action::Geometry | Action::Copy) {
+        return Ok(());
     }
     let placed = a.places.iter().flatten().map(|p| &p.node);
-    a.nodes.iter().chain(placed).find_map(|address| match address {
-        Address::Path(path) => Some(path.as_str()),
-        _ => None,
-    })
+    let path = a
+        .nodes
+        .iter()
+        .chain(placed)
+        .find_map(|address| match address {
+            Address::Path(path) => Some(path),
+            _ => None,
+        });
+    let Some(path) = path else {
+        return Ok(());
+    };
+    let Some(given) = a.generation else {
+        return Err(SurfaceError::invalid_argument(format!(
+            "the path `{path}` names an object only in the generation it was read at: give \
+             `generation`"
+        )));
+    };
+    let current = studio.session.generation(&a.doc).map_err(error)?;
+    if given != current {
+        return Err(error(studio_core::Error::Stale {
+            doc: a.doc.clone(),
+            given,
+            current,
+        }));
+    }
+    Ok(())
 }
 
 fn needed<T>(field: Option<T>, name: &str, action: &str) -> Result<T, SurfaceError> {
@@ -605,12 +628,7 @@ fn needed<T>(field: Option<T>, name: &str, action: &str) -> Result<T, SurfaceErr
 }
 
 fn arrange(studio: &mut Studio, a: ArrangeArgs) -> Result<ArrangeOut, SurfaceError> {
-    if let Some(path) = path_without_generation(&a) {
-        return Err(SurfaceError::invalid_argument(format!(
-            "the path `{path}` names an object only in the generation it was read at: give \
-             `generation`"
-        )));
-    }
+    check_paths(studio, &a)?;
     let doc = a.doc;
     let generation = a.generation;
     let nodes = a.nodes;
