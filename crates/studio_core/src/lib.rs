@@ -212,6 +212,11 @@ impl Op {
             | Op::State { node, .. }
             | Op::RemoveContribution { node } => vec![node],
             Op::Contribute { parent, .. } => vec![parent],
+            Op::Interaction { trigger, goal, .. } => match goal {
+                Goal::State { owner, .. } => std::iter::once(trigger).chain(owner).collect(),
+                Goal::Open { navigator, .. } => vec![trigger, navigator],
+            },
+            Op::RemoveInteraction { trigger, .. } => vec![trigger],
         }
     }
 
