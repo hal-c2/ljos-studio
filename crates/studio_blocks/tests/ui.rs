@@ -1132,6 +1132,26 @@ fn replaces_in_code(w: &mut UiWorld, old: String, new: String) -> StepResult {
     window.rest()
 }
 
+// Focus without a click: a click would drop a text selection by itself, and
+// the object the layers panel chose would seem safe from the next key.
+#[when(regex = r#"^the person tabs to the code view and types "(.*)"$"#)]
+fn tabs_and_types(w: &mut UiWorld, new: String) -> StepResult {
+    let new = unescape(&new);
+    let window = w.window()?;
+    let code = window.code()?;
+    let item = window
+        .stage
+        .scene
+        .accessible_item(code.key.ok_or("the code view has no key")?)
+        .ok_or("the code view is not an item")?;
+    let engine = window.engine().clone();
+    engine
+        .invoke_by_name(item, "forceActiveFocus", &[])
+        .map_err(|e| e.to_string())?;
+    window.stage.drive().commit(&new).map_err(drive_error)?;
+    window.rest()
+}
+
 #[given(regex = r#"^an agent has called the tool "([^"]+)" with:$"#)]
 #[when(regex = r#"^an agent calls the tool "([^"]+)" with:$"#)]
 fn agent_calls(w: &mut UiWorld, tool: String, step: &Step) -> StepResult {
@@ -1451,6 +1471,22 @@ fn code_selects(w: &mut UiWorld, want: String) -> StepResult {
     (code.selected == want)
         .then_some(())
         .ok_or_else(|| format!("the code view selects {:?}", code.selected))
+}
+
+#[then(regex = r#"^the code view marks "(.*)"$"#)]
+fn code_marks(w: &mut UiWorld, want: String) -> StepResult {
+    let want = unescape(&want);
+    let window = w.window()?;
+    let band = ljos_drive::find_below(window.engine(), window.root, "codeBand")
+        .ok_or("the code view has no band")?;
+    let engine = window.engine();
+    if engine.read_by_name(band, "visible") != Value::Bool(true) {
+        return Err("the band is not shown".to_owned());
+    }
+    let marks = engine.read_by_name(band, "marks");
+    (marks == Value::from(want.as_str()))
+        .then_some(())
+        .ok_or_else(|| format!("the code view marks {marks:?}"))
 }
 
 #[then(regex = r#"^the inspector shows "([^"]+)" as "(.*)"$"#)]

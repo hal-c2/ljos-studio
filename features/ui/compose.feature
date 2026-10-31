@@ -52,7 +52,14 @@ Feature: A person composes a shell in Studio's window
     Given the person has opened "Main.qml" in the documents list
     When the person selects "Rectangle" in the layers panel
     Then the inspector shows "color" as "\"red\""
-    And the code view selects "Rectangle { color: \"red\" }"
+    And the code view marks "Rectangle { color: \"red\" }"
+    And the code view selects ""
+
+  Scenario: Typing after selecting a layer does not replace the object
+    Given the person has opened "Main.qml" in the documents list
+    And the person has selected "Rectangle" in the layers panel
+    When the person tabs to the code view and types "Image {}"
+    Then the file "Main.qml" says "Image {}Rectangle { color:"
 
   Scenario: The inspector sets a property, and undo gives back the bytes
     Given the person has opened "Main.qml" in the documents list
