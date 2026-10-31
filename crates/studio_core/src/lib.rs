@@ -1381,6 +1381,32 @@ impl Session {
                 let (_, parent_node) = self.resolve_now(path, parent)?;
                 let (tree, _) = self.tree_now(path)?;
                 let count = child_count(&tree, &parent_node.path);
+                if let Some(name) = member_name(text) {
+                    if index.is_some() || import.is_some() {
+                        return Err(Error::Invalid(
+                            "a member goes after the object's others, and imports nothing: \
+                             leave `index` and `import` out"
+                                .to_owned(),
+                        ));
+                    }
+                    if has_member(&parent_node, name) {
+                        return Err(Error::Invalid(format!(
+                            "{} already has a member `{name}`",
+                            parent_node.ty
+                        )));
+                    }
+                    let out = qml_edit::apply(
+                        before,
+                        &qml_edit::Edit::InsertObject {
+                            parent: parent_node.path.clone(),
+                            index: count,
+                            text: text.trim().to_owned(),
+                        },
+                    )
+                    .map_err(|e| Error::Invalid(format!("that member does not fit: {e}")))?
+                    .text;
+                    return Ok((out, PathChange::Same, Some(parent_node.path.clone())));
+                }
                 let index = index.unwrap_or(count);
                 let mut text = text.trim().to_owned();
                 let imported = match import {
@@ -3225,6 +3251,50 @@ pub fn diff(before: &str, after: &str) -> Vec<Change> {
         range: start..b.len() - tail,
         replacement: after[start..a.len() - tail].to_owned(),
     }]
+}
+
+/// The name of the member `text` declares (a function, a signal, a property
+/// or a signal handler); `None` for an object, which starts with its type.
+fn member_name(text: &str) -> Option<&str> {
+    let ident = |s: &str| {
+        let end = s
+            .find(|c: char| !c.is_alphanumeric() && c != '_')
+            .unwrap_or(s.len());
+        (end > 0).then_some(end)
+    };
+    let text = text.trim();
+    let mut words = text.split_whitespace();
+    let mut first = words.next()?;
+    while matches!(first, "readonly" | "required" | "default") {
+        first = words.next()?;
+    }
+    let after = |word: &str, skip_type: bool| {
+        let at = text.find(word)? + word.len();
+        let mut rest = text[at..].trim_start();
+        if skip_type {
+            rest = rest[rest.find(char::is_whitespace)?..].trim_start();
+        }
+        Some(&rest[..ident(rest)?])
+    };
+    match first {
+        "function" => after("function", false),
+        "signal" => after("signal", false),
+        "property" => after("property", true),
+        _ => {
+            let end = ident(text)?;
+            let handler = text.starts_with("on")
+                && text[2..].starts_with(|c: char| c.is_ascii_uppercase())
+                && text[end..].trim_start().starts_with(':');
+            handler.then(|| &text[..end])
+        }
+    }
+}
+
+fn has_member(object: &outline::Node, name: &str) -> bool {
+    object.functions.iter().any(|f| f == name)
+        || object.properties.iter().any(|p| p == name)
+        || object.signals.iter().any(|s| s.name == name)
+        || object.bindings.iter().any(|b| b.name == name)
 }
 
 /// `text` (an object) with `id: <name>` as its first member, unless it has

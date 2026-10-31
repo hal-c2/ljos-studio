@@ -34,6 +34,9 @@ pub struct Node {
     /// signal, `nameChanged`.
     #[serde(skip)]
     pub properties: Vec<String>,
+    /// The functions it declares.
+    #[serde(skip)]
+    pub functions: Vec<String>,
     /// Its place as hot reload names it ([`ljos_ir::ObjectKey`]'s steps): the
     /// most stable step at each level from the root.
     #[serde(skip)]
@@ -172,6 +175,14 @@ fn walk(
             .iter()
             .filter_map(|m| match m {
                 QmlMember::Property(p) => Some(p.name.name.to_string()),
+                _ => None,
+            })
+            .collect(),
+        functions: object
+            .members
+            .iter()
+            .filter_map(|m| match m {
+                QmlMember::Function(f) => f.name().map(|n| n.to_string()),
                 _ => None,
             })
             .collect(),

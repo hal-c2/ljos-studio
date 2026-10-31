@@ -278,7 +278,7 @@ view itself loses work.
   refused; the agent wrote those in `document_new`'s text instead.
 - **Fix:** accept members in `node_insert`, or a `member_insert` tool.
   Owner: Studio, `studio_core`.
-- **Open**: `node_insert` still cannot add a function or a signal handler.
+- **Fixed**: `node_insert` takes one member as its `text`; a name the object already has is refused (`features/edit/members.feature`).
 
 #### D20. `JsonListModel` is read-only
 

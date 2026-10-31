@@ -9,7 +9,7 @@ expression: value
     "open_world": false,
     "read_only": false
   },
-  "description": "Insert one object written in QML, or a `block` from `blocks_list`, as a child at an index. It gets an id unless it has one; `import` (a block's module) is added once. Returns the new object's handle.",
+  "description": "Insert one object written in QML, or a `block` from `blocks_list`, as a child at an index, or one member (function, signal, property, handler) of `parent`. An object gets an id unless it has one; `import` is added once. Returns the handle.",
   "inputSchema": {
     "$defs": {
       "Address": {
@@ -77,7 +77,7 @@ expression: value
         "$ref": "#/$defs/Address"
       },
       "text": {
-        "description": "One object in QML (`Rectangle { color: \"red\" }`). With `block`, it may\nbe left out for the bare block, or set its inputs.",
+        "description": "One object in QML (`Rectangle { color: \"red\" }`), or one member:\n`function f() {}`, `signal s()`, `property int n`, `onClicked: f()`.\nWith `block`, it may be left out for the bare block, or set its inputs.",
         "type": [
           "string",
           "null"
