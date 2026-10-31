@@ -942,3 +942,45 @@ fn a_sidecar_that_is_not_text_is_never_written_over() {
     ));
     assert_eq!(std::fs::read(dir.path().join(review::FILE)).unwrap(), bytes);
 }
+
+#[test]
+fn typing_joins_until_a_pause_and_undoes_and_redoes_as_one() {
+    use std::time::Duration;
+    let mut s = session_of("Item {}");
+    let at = Duration::from_millis;
+    let first = s.type_text("Main.qml", 1, Some(0..0), "a", at(0)).unwrap();
+    let joined = s
+        .type_text("Main.qml", 2, Some(1..1), "b", at(900))
+        .unwrap();
+    assert_eq!(joined.history, first.history);
+    // The pause counts from the last character, not the first.
+    let joined = s
+        .type_text("Main.qml", 3, Some(2..2), "c", at(1800))
+        .unwrap();
+    assert_eq!(joined.history, first.history);
+    let apart = s
+        .type_text("Main.qml", 4, Some(3..3), "d", at(2800))
+        .unwrap();
+    assert_ne!(apart.history, first.history);
+
+    s.undo().unwrap();
+    assert_eq!(s.text("Main.qml").unwrap().0, "abcItem {}");
+    s.undo().unwrap();
+    assert_eq!(s.text("Main.qml").unwrap().0, "Item {}");
+    s.redo().unwrap();
+    assert_eq!(s.text("Main.qml").unwrap().0, "abcItem {}");
+}
+
+#[test]
+fn typing_after_an_undo_does_not_join_what_is_left() {
+    use std::time::Duration;
+    let mut s = session_of("Item {}");
+    let at = Duration::from_millis;
+    s.type_text("Main.qml", 1, Some(0..0), "a", at(0)).unwrap();
+    s.undo().unwrap();
+    let generation = s.generation("Main.qml").unwrap();
+    s.type_text("Main.qml", generation, Some(0..0), "b", at(1))
+        .unwrap();
+    s.undo().unwrap();
+    assert_eq!(s.text("Main.qml").unwrap().0, "Item {}");
+}

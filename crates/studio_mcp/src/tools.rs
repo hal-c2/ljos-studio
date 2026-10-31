@@ -134,6 +134,10 @@ struct EditTextArgs {
     start: Option<usize>,
     end: Option<usize>,
     text: String,
+    /// A person's typing: a character joins the last one in one undo step,
+    /// until a pause of a second or a new word.
+    #[serde(default)]
+    typing: bool,
     #[serde(default)]
     dry_run: bool,
 }
@@ -1393,10 +1397,14 @@ fn edits(studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
                         }
                     };
                     let mut studio = lock(&studio);
-                    studio
-                        .session
-                        .replace_text(&a.doc, Some(a.generation), range, &a.text, a.dry_run)
-                        .map(EditOut::from)
+                    let now = studio.timer.now();
+                    let session = &mut studio.session;
+                    if a.typing && !a.dry_run {
+                        session.type_text(&a.doc, a.generation, range, &a.text, now)
+                    } else {
+                        session.replace_text(&a.doc, Some(a.generation), range, &a.text, a.dry_run)
+                    }
+                    .map(EditOut::from)
                         .map_err(error)
                 }
             }),

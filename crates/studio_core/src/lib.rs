@@ -329,6 +329,20 @@ fn problem(text: &str) -> String {
     }
 }
 
+/// A pause this long ends a step of typing.
+const TYPING_PAUSE: std::time::Duration = std::time::Duration::from_secs(1);
+/// The most one character takes.
+const MAX_CHAR_BYTES: usize = 4;
+
+/// The step the last character typed went into.
+#[derive(Debug)]
+struct Typed {
+    doc: String,
+    entry: u64,
+    at: std::time::Duration,
+    ended_word: bool,
+}
+
 /// A project open in Studio.
 pub struct Session {
     store: Box<dyn Store>,
@@ -338,6 +352,7 @@ pub struct Session {
     next_handle: u64,
     /// The last generation of documents no longer held.
     retired: BTreeMap<String, u64>,
+    typed: Option<Typed>,
     /// Told the path of every file the session wrote or removed, after it
     /// did: what shows the project (a preview) follows edits through it
     /// rather than by watching the files.
@@ -390,6 +405,7 @@ impl Session {
             selection: Vec::new(),
             next_handle: 1,
             retired: BTreeMap::new(),
+            typed: None,
             on_write: Vec::new(),
             review: None,
             unmade: BTreeMap::new(),
@@ -1146,6 +1162,66 @@ impl Session {
             text: None,
             unchanged: false,
         })
+    }
+
+    /// [`replace_text`](Self::replace_text) from a person typing. One
+    /// character typed or removed joins the step before it, as a text editor
+    /// does, unless a second has passed or it starts a new word; 26 characters
+    /// are not 26 undos. A paste is a step of its own. `now` is any clock's.
+    pub fn type_text(
+        &mut self,
+        path: &str,
+        generation: u64,
+        range: Option<std::ops::Range<usize>>,
+        text: &str,
+        now: std::time::Duration,
+    ) -> Result<Outcome, Error> {
+        let top = self.history.peek_undo().map(|e| e.id);
+        let mut out = self.replace_text(path, Some(generation), range, text, false)?;
+        let Some(entry) = out.history else {
+            return Ok(out);
+        };
+        let [change] = out.changes.as_slice() else {
+            self.typed = None;
+            return Ok(out);
+        };
+        let typed = change.replacement.chars().next();
+        if change.replacement.chars().count() > 1 || change.range.len() > MAX_CHAR_BYTES {
+            self.typed = None;
+            return Ok(out);
+        }
+        let joins = self.typed.as_ref().is_some_and(|last| {
+            last.doc == out.doc
+                && Some(last.entry) == top
+                && now.saturating_sub(last.at) < TYPING_PAUSE
+                && !(last.ended_word && typed.is_some_and(|c| !c.is_whitespace()))
+        });
+        if joins {
+            out.history = Some(self.join_last(&out.doc)?);
+        }
+        self.typed = Some(Typed {
+            doc: out.doc.clone(),
+            entry: out.history.unwrap_or(entry),
+            at: now,
+            ended_word: typed.is_some_and(char::is_whitespace),
+        });
+        Ok(out)
+    }
+
+    /// Makes the last entry and the one before it, both of `path`, one.
+    fn join_last(&mut self, path: &str) -> Result<u64, Error> {
+        let after = self.doc(path)?.text.clone();
+        let (last, earlier) = self.history.pop_and_top();
+        let (Some(last), Some(earlier)) = (last, earlier) else {
+            return Err(Error::NothingTo("join"));
+        };
+        let before_last = qml_edit::splice(&after, &last.inverse);
+        let first = qml_edit::splice(&before_last, &earlier.inverse);
+        earlier.forward = diff(&first, &after);
+        earlier.inverse = diff(&after, &first);
+        // Already every handle on the text this leaves.
+        earlier.handles_after = last.handles_after;
+        Ok(earlier.id)
     }
 
     /// A new document with `text`.

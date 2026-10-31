@@ -38,6 +38,11 @@ expression: value
       },
       "text": {
         "type": "string"
+      },
+      "typing": {
+        "default": false,
+        "description": "A person's typing: a character joins the last one in one undo step,\nuntil a pause of a second or a new word.",
+        "type": "boolean"
       }
     },
     "required": [

@@ -92,7 +92,8 @@ Panel {
                 panel.workspace.dispatch("document_edit", {
                     doc: panel.workspace.doc,
                     generation: panel.workspace.generation,
-                    text: text
+                    text: text,
+                    typing: true
                 })
                 band.marks = ""
             }

@@ -71,6 +71,12 @@ impl History {
         self.done.iter_mut().rev().find(|e| e.doc == doc)
     }
 
+    /// The last done entry, taken off, and the one it leaves on top.
+    pub fn pop_and_top(&mut self) -> (Option<Entry>, Option<&mut Entry>) {
+        let last = self.done.pop();
+        (last, self.done.last_mut())
+    }
+
     pub fn peek_undo(&self) -> Option<&Entry> {
         self.done.last()
     }
