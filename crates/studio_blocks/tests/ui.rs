@@ -16,6 +16,9 @@ use ljos_drive::{Chord, DriveError, Stage, Wheel};
 use ljos_mcp_core::{CallCtx, Cap, CapSet};
 use ljos_runtime::SystemClock;
 use serde_json::Value as Json;
+use studio_core::preview::{
+    Declared, LogLine, Picture, PreviewError, PreviewHost, PreviewSpec, Reload, Size,
+};
 use studio_mcp::{Studio, StudioServer};
 use studio_preview::NativeHost;
 
@@ -34,6 +37,65 @@ struct UiWorld {
     window: Option<Window>,
     /// How many different pictures the frame had drawn when last looked at.
     looked: u64,
+    /// The previews say nothing of where their objects are, as a web host.
+    no_places: bool,
+}
+
+/// A preview that answers everything but `placed`, whose default refuses.
+struct NoPlaces(NativeHost);
+
+impl PreviewHost for NoPlaces {
+    fn open(&mut self, spec: &PreviewSpec) -> Result<(), PreviewError> {
+        self.0.open(spec)
+    }
+
+    fn reload(&mut self) -> Result<Reload, PreviewError> {
+        self.0.reload()
+    }
+
+    fn alias(&mut self, module: &str, dir: Option<&str>) -> Result<Reload, PreviewError> {
+        self.0.alias(module, dir)
+    }
+
+    fn resize(&mut self, size: Size) -> Result<(), PreviewError> {
+        self.0.resize(size)
+    }
+
+    fn screenshot(&mut self, max_side: u32) -> Result<Picture, PreviewError> {
+        self.0.screenshot(max_side)
+    }
+
+    fn outline(&mut self) -> Result<String, PreviewError> {
+        self.0.outline()
+    }
+
+    fn read(
+        &mut self,
+        id: &str,
+        names: &[String],
+    ) -> Result<serde_json::Map<String, Json>, PreviewError> {
+        self.0.read(id, names)
+    }
+
+    fn write(&mut self, id: &str, name: &str, value: Json) -> Result<(), PreviewError> {
+        self.0.write(id, name, value)
+    }
+
+    fn logs(&mut self, since: u64) -> Result<(Vec<LogLine>, u64), PreviewError> {
+        self.0.logs(since)
+    }
+
+    fn pick(&mut self, x: f64, y: f64) -> Result<Option<Declared>, PreviewError> {
+        self.0.pick(x, y)
+    }
+
+    fn alive(&mut self) -> Result<(), PreviewError> {
+        self.0.alive()
+    }
+
+    fn close(&mut self) {
+        self.0.close();
+    }
 }
 
 struct Window {
@@ -74,6 +136,7 @@ impl UiWorld {
             state: tempfile::tempdir().expect("a temporary directory"),
             window: None,
             looked: 0,
+            no_places: false,
         }
     }
 
@@ -150,10 +213,16 @@ impl UiWorld {
         // A directory for the host to make, as the program names one: a
         // temporary directory itself is as open as the umask leaves it.
         let state = self.state.path().join("preview");
+        let no_places = self.no_places;
         let studio = Studio::open(self.dir.path())
             .map_err(|e| e.to_string())?
             .with_previews(Arc::new(move |dir| {
-                Box::new(NativeHost::new(dir, NativeHost::default_program(), &state))
+                let host = NativeHost::new(dir, NativeHost::default_program(), &state);
+                if no_places {
+                    Box::new(NoPlaces(host))
+                } else {
+                    Box::new(host)
+                }
             }));
         let server = Arc::new(StudioServer::new(studio));
         let engine = ljos::engine();
@@ -1794,6 +1863,11 @@ fn ran_no_frames(w: &mut UiWorld) -> StepResult {
     (idle.shown == 0)
         .then_some(())
         .ok_or_else(|| format!("the window showed {} new frames", idle.shown))
+}
+
+#[given("the preview does not say where its objects are")]
+fn no_places(w: &mut UiWorld) {
+    w.no_places = true;
 }
 
 #[given("Studio's window runs the person's shell, a copy of its own")]

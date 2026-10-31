@@ -470,6 +470,7 @@ MouseArea {
             } else if (tool === "node_move") {
                 overlay.refetch()
             } else if (tool === "node_arrange") {
+                overlay.reread = false
                 if (answer.edit === undefined && answer.generation === undefined) {
                     if (answer.copied !== undefined || overlay.writing)
                         return
@@ -497,10 +498,16 @@ MouseArea {
                 // back to what the preview says.
                 overlay.writing = false
                 overlay.ghost = null
-                if (overlay.nodes.length > 0 && error.details !== undefined && error.details.kind === "no_preview") {
+                // Read again once only: when the read is what is refused
+                // (a preview gone, or one that cannot say), asking on would
+                // keep an idle window busy for ever.
+                const refusedTwice = overlay.reread
+                overlay.reread = !refusedTwice
+                if (refusedTwice || (error.details !== undefined && error.details.kind === "no_preview")) {
                     overlay.nodes = []
                     overlay.parentBox = null
                     overlay.siblings = []
+                    overlay.reread = false
                 } else {
                     overlay.refetch()
                 }
@@ -511,6 +518,7 @@ MouseArea {
     // the file as it was: its boxes would take the outline back. They count
     // again once the presses and reloads have stopped.
     property bool writing: false
+    property bool reread: false
     Timer {
         id: settled
         interval: 300

@@ -5437,6 +5437,7 @@ dependencies = [
  "regex",
  "serde",
  "serde_json",
+ "studio_core",
  "studio_mcp",
  "studio_preview",
  "tempfile",

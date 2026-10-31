@@ -52,3 +52,14 @@ Feature: The panels say what they hold and start clean
     And Studio's window shows the project
     When nobody touches the window for 2 seconds
     Then Studio's window ran no frames
+
+  # Going back to the preview after a refusal must not ask for ever when the
+  # refused call is the reading itself.
+  @preview
+  Scenario: A preview that cannot say where objects are leaves the window at rest
+    Given the preview does not say where its objects are
+    And Studio's window shows the project
+    And the person has opened "Main.qml" in the documents list
+    And the person has selected "Text label" in the layers panel
+    When nobody touches the window for 2 seconds
+    Then Studio's window ran no frames

@@ -692,7 +692,10 @@ fn publish(engine: &Engine, ws: ObjectId, view: View, seen: u64) {
         }),
         _ => Json::Null,
     };
-    let size = view.preview.as_ref().map_or((0, 0), |p| (p.width, p.height));
+    let size = view
+        .preview
+        .as_ref()
+        .map_or((0, 0), |p| (p.width, p.height));
     let resized = queue_of(engine, ws)
         .is_some_and(|q| std::mem::replace(&mut q.borrow_mut().size, size) != size);
     let wanted = view

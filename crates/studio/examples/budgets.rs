@@ -15,18 +15,16 @@
 //!   throws until the built-in one is shown; a save of Studio's own theme
 //!   file until the window is drawn in it; and what the watched window
 //!   costs while nobody touches it, in CPU time;
-//! - a drag across the canvas's frame, each pointer move timed until the
-//!   window is at rest: the engine's work for the frame (events, bindings,
-//!   layout, the scene's update), in microseconds; the stage has no
-//!   painter, so egui's tessellation and the GPU are not in it. The
-//!   canvas has no gesture that drags a node, so this is the frame cost of
-//!   what a drag over the frame does today: it pans the canvas.
+//! - a drag of a node on the canvas's frame, each pointer move timed until
+//!   the window is at rest: the engine's work for the frame (events,
+//!   bindings, layout, the scene's update), in microseconds; the stage has
+//!   no painter, so egui's tessellation and the GPU are not in it.
 //!
-//! `budgets sample DIR DOC LAYER FIELD [ROUNDS]` measures a project of
+//! `budgets sample DIR DOC LAYER FIELD [ROUNDS] [DRAG_LAYER]` measures a project of
 //! your own instead of the made-up one: cold start on DIR (which has a
 //! `Main.qml`), DOC opened, the layer labelled LAYER selected, ROUNDS
 //! inspector edits of its numeric FIELD to a new picture, one per 250 ms,
-//! and the drag.
+//! and, when named, the drag of DRAG_LAYER.
 //!
 //! The window's clock is a test clock, so a frame costs only its work; the
 //! tool calls, the preview's reload and the picture's fetch and decode run
@@ -53,7 +51,7 @@ use ljos_dev::{DevSession, Host, Report};
 use ljos_drive::{Chord, Stage};
 use ljos_runtime::SystemClock;
 use studio_core::preview::{
-    Declared, LogLine, Picture, PreviewError, PreviewHost, PreviewSpec, Reload, Size,
+    Declared, LogLine, Picture, Placed, PreviewError, PreviewHost, PreviewSpec, Reload, Size,
 };
 use studio_mcp::{Studio, StudioServer};
 use studio_preview::NativeHost;
@@ -82,13 +80,14 @@ fn main() -> anyhow::Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args.first().map(String::as_str) == Some("sample") {
         let [_, dir, doc, layer, field, rest @ ..] = args.as_slice() else {
-            bail!("usage: budgets sample DIR DOC LAYER FIELD [ROUNDS]");
+            bail!("usage: budgets sample DIR DOC LAYER FIELD [ROUNDS] [DRAG_LAYER]");
         };
         let rounds = match rest.first() {
             Some(n) => n.parse().context("ROUNDS is a number")?,
             None => 20,
         };
-        return sample(Path::new(dir), doc, layer, field, rounds);
+        let drag = rest.get(1).map(String::as_str);
+        return sample(Path::new(dir), doc, layer, field, rounds, drag);
     }
     let rounds: usize = match std::env::args().nth(1) {
         Some(n) => n.parse().context("ROUNDS is a number")?,
@@ -172,9 +171,9 @@ fn main() -> anyhow::Result<()> {
     );
 
     std::thread::sleep(Duration::from_secs(1));
-    let mut moves = window.drag_frames(DRAG_MOVES)?;
+    let mut moves = window.drag_frames("Rectangle card0", DRAG_MOVES)?;
     report_us(
-        "drag across the canvas's frame, per pointer move",
+        "drag of a node on the canvas's frame, per pointer move",
         &mut moves,
     );
     Ok(())
@@ -184,7 +183,14 @@ fn main() -> anyhow::Result<()> {
 const DRAG_MOVES: usize = 240;
 
 /// `budgets sample`: the numbers on a project of the person's own.
-fn sample(dir: &Path, doc: &str, layer: &str, field: &str, rounds: usize) -> anyhow::Result<()> {
+fn sample(
+    dir: &Path,
+    doc: &str,
+    layer: &str,
+    field: &str,
+    rounds: usize,
+    drag: Option<&str>,
+) -> anyhow::Result<()> {
     if std::env::var_os("LJOS").is_none() {
         bail!("budgets sample needs LJOS, the `ljos` program the preview runs");
     }
@@ -218,10 +224,13 @@ fn sample(dir: &Path, doc: &str, layer: &str, field: &str, rounds: usize) -> any
         ),
         edits,
     );
+    let Some(drag) = drag else {
+        return Ok(());
+    };
     std::thread::sleep(Duration::from_secs(1));
-    let mut moves = window.drag_frames(DRAG_MOVES)?;
+    let mut moves = window.drag_frames(drag, DRAG_MOVES)?;
     report_us(
-        &format!("{doc}: drag across the canvas's frame, per pointer move"),
+        &format!("{doc}: drag of {drag}, per pointer move"),
         &mut moves,
     );
     Ok(())
@@ -669,6 +678,10 @@ impl PreviewHost for Timed {
         self.host.pick(x, y)
     }
 
+    fn placed(&mut self, ids: &[String], types: &[String]) -> Result<Vec<Placed>, PreviewError> {
+        self.host.placed(ids, types)
+    }
+
     fn alive(&mut self) -> Result<(), PreviewError> {
         self.host.alive()
     }
@@ -827,20 +840,22 @@ impl Window {
 
     /// A drag of `moves` pointer moves over the canvas's Desktop frame,
     /// each timed from the event until the window is at rest.
-    fn drag_frames(&mut self, moves: usize) -> anyhow::Result<Vec<Duration>> {
-        let frame = self.node_with("Canvas", "Desktop", |n| n.role != "label")?;
-        let key = frame.key.ok_or(anyhow!("the frame has no key"))?;
+    /// Drags the object of the layer `label` from its middle; the drop is
+    /// the edit. Not timed: only the moves are the frames the budget means.
+    fn drag_frames(&mut self, label: &str, moves: usize) -> anyhow::Result<Vec<Duration>> {
+        let row = self.layer(label)?;
+        self.click(&row)?;
+        let start = self.middle_of_selected()?;
+        let before = std::fs::read_to_string(&self.document)?;
         let mut driver = self.stage.drive();
-        let start = driver
-            .aim_at_node(key)
-            .map_err(|why| anyhow!("the frame is not pressed: {why:?}"))?;
         driver.press(start, MouseButtons::LEFT)?;
+        driver.settle()?;
+        driver.finish_promised()?;
         let mut samples = Vec::with_capacity(moves);
         let mut at = start;
         for i in 0..moves {
             // Out and back along a diagonal, 4 px a move, as a hand drags.
-            let leg = (i / 50) % 2;
-            let by = if leg == 0 { -4.0 } else { 4.0 };
+            let by = if (i / 50) % 2 == 0 { 4.0 } else { -4.0 };
             at.x += by;
             at.y += by / 2.0;
             let started = Instant::now();
@@ -851,14 +866,46 @@ impl Window {
         }
         driver.release(at, MouseButtons::LEFT)?;
         driver.settle()?;
+        driver.finish_promised()?;
         // A drag that moved nothing would time an idle window.
-        let end = driver
-            .aim_at_node(key)
-            .map_err(|why| anyhow!("the frame is gone after the drag: {why:?}"))?;
-        if end == start {
-            bail!("the drag did not pan the canvas's frame");
+        if std::fs::read_to_string(&self.document)? == before {
+            bail!("the drag of {label:?} wrote nothing");
         }
         Ok(samples)
+    }
+
+    /// Where the selected object's middle is in the window: the overlay's
+    /// box in the document's pixels, from the frame's top left.
+    fn middle_of_selected(&self) -> anyhow::Result<ljos::item::kurbo::Point> {
+        let engine = &self.stage.engine;
+        let number = |value: &serde_json::Value| value.as_f64().unwrap_or(0.0);
+        let frame = self.node_with("Canvas", "Desktop", |n| n.role != "label")?;
+        let key = frame.key.ok_or(anyhow!("the frame has no key"))?;
+        let centre = self
+            .stage
+            .drive()
+            .aim_at_node(key)
+            .map_err(|why| anyhow!("the frame is not shown: {why:?}"))?;
+        let overlay = ljos_drive::find_below(engine, self.root, "overlay")
+            .ok_or(anyhow!("the canvas has no overlay"))?;
+        let zoom = engine.read_by_name(overlay, "zoom").to_number();
+        let read = |object, name| {
+            <serde_json::Value as QmlValue>::from_value(&engine.read_by_name(object, name))
+                .unwrap_or_default()
+        };
+        let preview = read(self.workspace, "preview");
+        let nodes = read(overlay, "nodes");
+        let box_ = &nodes[0]["window"];
+        Ok(ljos::item::kurbo::Point::new(
+            centre.x
+                + zoom
+                    * (number(&box_["x"]) + number(&box_["width"]) / 2.0
+                        - number(&preview["width"]) / 2.0),
+            centre.y
+                + zoom
+                    * (number(&box_["y"]) + number(&box_["height"]) / 2.0
+                        - number(&preview["height"]) / 2.0),
+        ))
     }
 
     /// [`Window::edits`] of `field` that alternate a step either side of
