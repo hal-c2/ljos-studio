@@ -332,8 +332,8 @@ view itself loses work.
 - **Where:** window (environment).
 - **Happened:** with wgpu in the headless sway sandbox the window stays
   black; `LJOS_PAINTER=cpu` draws.
-- **Fix:** none in Studio; noted for anyone driving it off-screen.
-- **Open**: An environment matter; the sandbox uses `LJOS_PAINTER=gl`.
+- **Fixed** by the pin at Ljós e318dad: the default painter draws in the
+  sandbox with no `LJOS_PAINTER`, driven and looked at on 2026-10-31.
 
 ## What worked
 

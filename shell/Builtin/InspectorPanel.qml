@@ -300,7 +300,8 @@ Panel {
             open()
         }
         function take(text) {
-            panel.set(name, JSON.stringify(text))
+            written = JSON.stringify(text)
+            panel.set(name, written)
         }
 
         onClosed: waiting = false
