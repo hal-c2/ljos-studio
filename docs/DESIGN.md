@@ -906,6 +906,19 @@ browser's `node_inspect` reads a toolkit type's signals from, adds
 an agent and a person see the same signals in either; a smaller table
 for the browser is a Ljós request (the signals alone, not every member).
 
+**Requests to ljos-web** (numbered in the list S5 began, at bf49026):
+
+21. `JsonListModel` (`Ljos.Models`) in the web runtime, reading its
+    `source` and again when the file changes, so a browser preview of a
+    list that reads a JSON file shows its rows; bf49026 has no
+    `Ljos.Models`.
+22. Stand-ins made from the project's type dumps (`ljostypes.json`) in the
+    web preview, as `ljos run --types` makes them natively, so a project
+    with types written in Rust previews in a browser too.
+
+A click at a point (`app_click`'s `at`) is folded into request 4, which
+becomes read, write and click: by object or at a point.
+
 #### As built: running it
 
 `mise run studio` is the window; `mise run web:serve` is the same shell in a
