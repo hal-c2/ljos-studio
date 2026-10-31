@@ -86,6 +86,9 @@ pub(crate) struct Open {
     pub reloads: VecDeque<Duration>,
     /// A write was not reloaded: the next reading asks for it.
     pub behind: bool,
+    /// Clicks given to the running app: they change what it shows without a
+    /// reload, so a window has to know to look again.
+    pub clicks: u64,
 }
 
 pub(crate) struct Previews {
@@ -388,6 +391,7 @@ mod tests {
                 mocked: Vec::new(),
                 reloads,
                 behind,
+                clicks: 0,
             }),
             ..Previews::new(Arc::new(Still))
         };

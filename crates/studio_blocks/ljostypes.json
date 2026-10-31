@@ -31,6 +31,18 @@
               "notify": "documentsChanged"
             },
             {
+              "name": "settling",
+              "type": "bool",
+              "kind": "value",
+              "list": false,
+              "readonly": true,
+              "final": true,
+              "required": false,
+              "constant": false,
+              "group": false,
+              "notify": "settlingChanged"
+            },
+            {
               "name": "blank",
               "type": "bool",
               "kind": "value",
@@ -348,6 +360,11 @@
                   "type": "var"
                 }
               ],
+              "returnType": "void"
+            },
+            {
+              "name": "lookAgain",
+              "parameters": [],
               "returnType": "void"
             }
           ],

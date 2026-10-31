@@ -21,6 +21,7 @@ pub mod shell;
 
 use std::cell::RefCell;
 use std::collections::VecDeque;
+use std::hash::Hasher;
 use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -93,6 +94,10 @@ pub struct Workspace {
     /// The project's documents, as paths from its root.
     #[qml(readonly, notify)]
     pub documents: Json,
+    /// The preview's picture may be out of date after a click: the shell
+    /// calls `lookAgain` every so often until this is false.
+    #[qml(readonly, notify)]
+    pub settling: bool,
     /// The project's directory has nothing in it yet.
     #[qml(readonly, notify)]
     pub blank: bool,
@@ -195,6 +200,7 @@ impl Default for Workspace {
         let none = || Json::Array(Vec::new());
         Self {
             documents: none(),
+            settling: false,
             blank: false,
             doc: String::new(),
             generation: 0.0,
@@ -243,6 +249,23 @@ impl Workspace {
         Ok(())
     }
 
+    /// Fetches the preview's picture again while `settling`.
+    #[qml(invokable, name = "lookAgain")]
+    fn look_again(cx: &Cx) -> Result<(), EngineError> {
+        let Some(queue) = queue_of(cx.engine, cx.this) else {
+            return Ok(());
+        };
+        let generation = {
+            let q = queue.borrow();
+            let waiting = q.jobs.iter().any(|j| matches!(j, Job::Picture { .. }));
+            (q.settling.is_some() && !waiting).then_some(q.fetched)
+        };
+        if let Some(generation) = generation {
+            enqueue(cx.engine, cx.this, Job::Picture { generation });
+        }
+        Ok(())
+    }
+
     #[qml(on_complete)]
     fn completed(cx: &Cx) -> Result<(), EngineError> {
         let context = cx.engine.extension::<Context>();
@@ -273,6 +296,30 @@ struct Queue {
     image: Option<ImageHandle>,
     /// The generation `image` shows.
     picture: u64,
+    /// What `image`'s pixels hash to, so a look that finds the same picture
+    /// draws nothing.
+    pixels: u64,
+    /// How many different pictures have been drawn.
+    shots: u64,
+    /// The preview's clicks already looked at.
+    clicks: u64,
+    settling: Option<Settling>,
+}
+
+/// Looking again after a click. Nothing tells Studio when the app has come to
+/// rest (Ljós request 3), so the picture is fetched until it stops changing,
+/// a bounded number of times: a click on an app that animates for ever must
+/// not cost a screenshot for ever.
+struct Settling {
+    looks_left: u32,
+    same: u32,
+}
+
+impl Settling {
+    /// A click may take a frame or two to show, so one unchanged picture does
+    /// not mean it is over.
+    const SAME: u32 = 3;
+    const LOOKS: u32 = 30;
 }
 
 #[derive(Clone)]
@@ -526,18 +573,31 @@ fn finish(engine: &Engine, ws: ObjectId, done: Done) {
             let Some(queue) = queue_of(engine, ws) else {
                 return;
             };
-            match picture.and_then(|(w, h, rgba)| {
-                ImageHandle::from_straight(w, h, rgba).map_err(|e| e.to_string())
-            }) {
-                Ok(image) => {
+            let picture = picture.and_then(|(w, h, rgba)| {
+                let pixels = hash_of(&rgba);
+                let image = ImageHandle::from_straight(w, h, rgba).map_err(|e| e.to_string())?;
+                Ok((image, pixels))
+            });
+            let failed = picture.is_err();
+            let mut changed = false;
+            match picture {
+                Ok((image, pixels)) => {
                     {
                         let mut q = queue.borrow_mut();
-                        q.image = Some(image);
-                        q.picture = generation;
+                        changed = q.pixels != pixels || q.picture != generation;
+                        if changed {
+                            q.image = Some(image);
+                            q.picture = generation;
+                            q.pixels = pixels;
+                            q.shots += 1;
+                        }
                     }
                     let mut preview = engine.get(ws, Workspace::PREVIEW).unwrap_or_default();
-                    if let Some(fields) = preview.as_object_mut() {
+                    if let Some(fields) = preview.as_object_mut()
+                        && changed
+                    {
                         fields.insert("picture".to_owned(), json!(generation));
+                        fields.insert("shots".to_owned(), json!(queue.borrow().shots));
                         let _ = cx.set(Workspace::PREVIEW, preview);
                     }
                 }
@@ -545,8 +605,24 @@ fn finish(engine: &Engine, ws: ObjectId, done: Done) {
                     let _ = cx.set(Workspace::ERROR, format!("no picture of the preview: {e}"));
                 }
             }
+            let mut q = queue.borrow_mut();
+            if let Some(settling) = &mut q.settling {
+                settling.same = if changed { 0 } else { settling.same + 1 };
+                settling.looks_left = settling.looks_left.saturating_sub(1);
+                if failed || settling.same >= Settling::SAME || settling.looks_left == 0 {
+                    q.settling = None;
+                    drop(q);
+                    let _ = cx.set(Workspace::SETTLING, false);
+                }
+            }
         }
     }
+}
+
+fn hash_of(bytes: &[u8]) -> u64 {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    hasher.write(bytes);
+    hasher.finish()
 }
 
 /// A person types on in the code view while their last edit is on its way:
@@ -587,10 +663,10 @@ fn publish(engine: &Engine, ws: ObjectId, view: View, seen: u64) {
     if engine.get(ws, Workspace::DOC).unwrap_or_default() != view.doc {
         return;
     }
-    let (picture, fetched) = {
+    let (picture, fetched, shots) = {
         let mut q = queue.borrow_mut();
         q.published = q.published.max(seen);
-        (q.picture, q.fetched)
+        (q.picture, q.fetched, q.shots)
     };
     let preview = match &view.preview {
         Some(p) if p.doc == view.doc => json!({
@@ -601,6 +677,7 @@ fn publish(engine: &Engine, ws: ObjectId, view: View, seen: u64) {
             "state": p.state,
             "variant": p.variant,
             "picture": picture,
+            "shots": shots,
         }),
         _ => Json::Null,
     };
@@ -632,6 +709,28 @@ fn publish(engine: &Engine, ws: ObjectId, view: View, seen: u64) {
     let _ = cx.set(Workspace::PREVIEWS, view.previews);
     let _ = cx.set(Workspace::THEME, view.theme);
     let _ = cx.set(Workspace::TOKENS, to_json(&view.tokens));
+    // A click changes what the app shows and no generation says so. A new
+    // preview counts from nothing again, which is no click.
+    let clicks = view
+        .preview
+        .as_ref()
+        .filter(|p| p.doc == view.doc)
+        .map_or(0, |p| p.clicks);
+    let clicked = {
+        let mut q = queue.borrow_mut();
+        let clicked = clicks > q.clicks;
+        q.clicks = clicks;
+        if clicked {
+            q.settling = Some(Settling {
+                looks_left: Settling::LOOKS,
+                same: 0,
+            });
+        }
+        clicked
+    };
+    if clicked {
+        let _ = cx.set(Workspace::SETTLING, true);
+    }
     // A picture is fetched once for each generation the preview applies.
     if let Some(generation) = wanted {
         let queued = queue

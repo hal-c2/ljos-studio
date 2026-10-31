@@ -106,6 +106,8 @@ pub struct Previewed {
     /// What the preview shows: 1 when it started, one more for each reload
     /// it applied.
     pub generation: u64,
+    /// Clicks the running app has been given since it started.
+    pub clicks: u64,
     /// `live` or `mocked`.
     pub state: String,
     /// The root's state whose `when` is the breakpoint of the preview's
@@ -463,6 +465,7 @@ fn preview_of(previews: &preview::Previews) -> Option<Previewed> {
         width: open.size.width,
         height: open.size.height,
         generation,
+        clicks: open.clicks,
         state: match open.state {
             preview::State::Live => "live",
             preview::State::Mocked => "mocked",

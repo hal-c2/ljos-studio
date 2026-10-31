@@ -125,6 +125,15 @@ Panel {
         }
     }
 
+    // Only after a click, and it stops by itself: an idle window asks for no
+    // pictures.
+    Timer {
+        interval: 100
+        repeat: true
+        running: panel.workspace.settling
+        onTriggered: panel.workspace.lookAgain()
+    }
+
     // Above the canvas, not in it, so it stays put as the frames scroll.
     Flow {
         id: tools

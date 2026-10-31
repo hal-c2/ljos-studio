@@ -32,6 +32,8 @@ struct UiWorld {
     /// project the preview watches.
     state: tempfile::TempDir,
     window: Option<Window>,
+    /// How many different pictures the frame had drawn when last looked at.
+    looked: u64,
 }
 
 struct Window {
@@ -71,6 +73,7 @@ impl UiWorld {
             dir: tempfile::tempdir().expect("a temporary directory"),
             state: tempfile::tempdir().expect("a temporary directory"),
             window: None,
+            looked: 0,
         }
     }
 
@@ -1495,7 +1498,11 @@ fn documents_says_why(w: &mut UiWorld) -> StepResult {
     let window = w.window()?;
     let label = ljos_drive::find_below(window.engine(), window.root, "newDocumentRefusal")
         .ok_or("the documents panel has no place for a refusal")?;
-    let text = window.engine().read_by_name(label, "text").to_js_string().to_string();
+    let text = window
+        .engine()
+        .read_by_name(label, "text")
+        .to_js_string()
+        .to_string();
     (!text.is_empty())
         .then_some(())
         .ok_or_else(|| "the documents panel says nothing".to_owned())
@@ -1660,6 +1667,33 @@ fn picture_drawn(window: &Window, target: &str) -> Result<u64, String> {
 #[then(regex = r#"^the frame "([^"]+)" shows a picture of the preview$"#)]
 fn frame_shows_picture(w: &mut UiWorld, target: String) -> StepResult {
     picture_drawn(w.window()?, &target).map(drop)
+}
+
+#[given(regex = r#"^the person has looked at the frame "([^"]+)"$"#)]
+fn looks_at_frame(w: &mut UiWorld, target: String) -> StepResult {
+    let window = w.window()?;
+    picture_drawn(window, &target)?;
+    let shots = window.read_json("preview")["shots"].as_u64().unwrap_or(0);
+    w.looked = shots;
+    Ok(())
+}
+
+#[then(regex = r#"^the frame "([^"]+)" has drawn a different picture since$"#)]
+fn frame_drew_another(w: &mut UiWorld, target: String) -> StepResult {
+    let looked = w.looked;
+    let window = w.window()?;
+    // The app is another process on the real clock, the window's timers on
+    // the driver's: both have to move. Studio stops looking by itself.
+    while window.read("settling") == Value::Bool(true) {
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        window.stage.drive().advance(100).map_err(drive_error)?;
+        window.rest()?;
+    }
+    picture_drawn(window, &target)?;
+    let preview = window.read_json("preview");
+    (preview["shots"].as_u64().unwrap_or(0) > looked)
+        .then_some(())
+        .ok_or_else(|| format!("the frame still draws the picture it had; {preview}"))
 }
 
 #[then(regex = r#"^the frame "([^"]+)" shows the preview's generation (\d+)$"#)]

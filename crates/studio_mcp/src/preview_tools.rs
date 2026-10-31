@@ -312,6 +312,7 @@ fn open(studio: &Mutex<Studio>, a: OpenArgs) -> Result<OpenOut, SurfaceError> {
             mocked: aliases.clone(),
             reloads: VecDeque::new(),
             behind: false,
+            clicks: 0,
         });
     }
     Ok(OpenOut {
@@ -361,6 +362,7 @@ fn state(studio: &Mutex<Studio>, a: StateArgs) -> Result<StateOut, SurfaceError>
         if let Err(e) = open.host.click(&click) {
             return Err(preview_error(previews.failed(e)));
         }
+        open.clicks += 1;
         return Ok(StateOut {
             block: None,
             id: None,
@@ -414,10 +416,11 @@ fn state(studio: &Mutex<Studio>, a: StateArgs) -> Result<StateOut, SurfaceError>
             }
         }
     }
-    if let Some(click) = click
-        && let Err(e) = open.host.click(&click)
-    {
-        return Err(preview_error(previews.failed(e)));
+    if let Some(click) = click {
+        if let Err(e) = open.host.click(&click) {
+            return Err(preview_error(previews.failed(e)));
+        }
+        open.clicks += 1;
     }
     let mut asked = names.clone();
     // A block may publish a `state` of its own; the variant is QML's.
