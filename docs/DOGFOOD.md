@@ -360,6 +360,8 @@ showed the change 23-32 ms after the save in those edits, so the fetch is the
 first thing to remeasure with a release `ljos`. One site edit took 563 ms, 303
 of it in the file rename, which is probably load.
 
+The MCP counts are from the logs' own runs, not the 13:27 round: notes 11:29, site 13:28, `tools/list` 11:19. Call counts and bytes do not depend on load, but a run before the rebase may differ.
+
 | MCP, as an agent | Calls | Request bytes | Answer bytes |
 |---|---|---|---|
 | `samples/notes` | 34 | 17 409 | 37 421 (19 006 of it one raw screenshot) |
@@ -370,6 +372,8 @@ of it in the file rename, which is probably load.
 
 - The site's export for the web and what `mise run export:web:check` runs:
   the only `export` call was refused (D23), so no site was built or checked.
+- The window findings were not walked again on the rebased build; they come
+  from the earlier run's sessions and screenshots.
 - The agent's site build was not repeated in a clean project.
 - The site at phone and tablet was not confirmed. A standalone `ljos run` at
   390 x 844 stayed black (D21), and an earlier phone frame in the canvas showed
