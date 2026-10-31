@@ -2118,6 +2118,31 @@ fn file_says_all(w: &mut UiWorld, name: String, step: &Step) -> StepResult {
         .ok_or_else(|| format!("`{name}` says:\n{got}"))
 }
 
+#[then(regex = r#"^the inspector has the button "([^"]+)"$"#)]
+fn inspector_has_button(w: &mut UiWorld, name: String) -> StepResult {
+    let tree = w.window()?.tree();
+    find(&tree, &|n| n.name == name && n.role == "button")
+        .map(|_| ())
+        .ok_or_else(|| format!("no button {name:?}; the window holds {}", names(&tree)))
+}
+
+#[then(regex = r#"^the inspector has no button "([^"]+)"$"#)]
+fn inspector_has_no_button(w: &mut UiWorld, name: String) -> StepResult {
+    let tree = w.window()?.tree();
+    find(&tree, &|n| n.name == name && n.role == "button")
+        .map_or(Ok(()), |_| Err(format!("a button {name:?}")))
+}
+
+#[when(regex = r#"^the person enters "([^"]+)" in the colour picker$"#)]
+fn enters_colour(w: &mut UiWorld, value: String) -> StepResult {
+    let window = w.window()?;
+    let tree = window.tree();
+    let field = find(&tree, &|n| n.name == "Colour" && n.key.is_some())
+        .cloned()
+        .ok_or_else(|| format!("no colour field; the window holds {}", names(&tree)))?;
+    window.enter(&field, &value)
+}
+
 #[then(regex = r#"^the layers panel lists "([^"]*)"$"#)]
 fn layers_list(w: &mut UiWorld, want: String) -> StepResult {
     let window = w.window()?;

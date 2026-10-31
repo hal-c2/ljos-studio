@@ -1,6 +1,7 @@
-// The selected object's bindings as written. A value is set as a literal
-// (`property_set`); "Bind" sets it as an expression (`binding_set`). The
-// last row adds a property not yet bound.
+// The selected object's bindings as written, and the properties it declares
+// without a value. A value is set as a literal (`property_set`); "Bind" sets
+// it as an expression (`binding_set`). The last row adds a property not yet
+// bound. A colour has a swatch, which opens a picker.
 //
 // Below them, its states (`state_edit`): one is picked to edit the values
 // it changes and the condition that turns it on, or to give it a
@@ -69,6 +70,18 @@ Panel {
     // The picked state's old name while its rename is unanswered: the pick
     // goes back to it if the rename is refused.
     property string renamedPicked: ""
+
+    // Whether a row holds a colour, by its name or by what is written.
+    function isColour(name, value) {
+        return /(^|\.)[a-z]*[cC]olor$/.test(name) || /^"#[0-9a-fA-F]{3,8}"$/.test(value)
+    }
+
+    // What a swatch paints: what is written, when that is a colour by itself.
+    // An expression (`Colors.text`) is not read here, so it paints nothing.
+    function painted(value) {
+        const text = value.replace(/"/g, "")
+        return /^(#[0-9a-fA-F]{3,8}|[a-z]+)$/.test(text) && value.charAt(0) === "\"" ? text : "transparent"
+    }
 
     function set(name, text) {
         if (picked !== "") {
@@ -240,6 +253,63 @@ Panel {
         })
     }
 
+    // Hue, saturation and value, or the hex a person has from elsewhere.
+    // Set when the hand lets go or Enter is pressed: a drag is one undo step.
+    Popup {
+        id: picker
+        property string name: ""
+        readonly property color chosen: Qt.hsva(hue.value, saturation.value, brightness.value, 1)
+
+        function show(name, written) {
+            picker.name = name
+            const start = Qt.color(panel.painted(written))
+            hue.value = Math.max(0, start.hsvHue)
+            saturation.value = start.hsvSaturation
+            brightness.value = start.hsvValue
+            hex.text = panel.painted(written) === "transparent" ? "" : panel.painted(written)
+            open()
+        }
+        function take(text) {
+            panel.set(name, JSON.stringify(text))
+        }
+
+        padding: Spacing.xs
+        ColumnLayout {
+            spacing: Spacing.xxs
+            Rectangle {
+                Layout.fillWidth: true
+                Layout.preferredHeight: 32
+                color: picker.chosen
+                border.color: Colors.outline
+            }
+            Slider {
+                id: hue
+                Accessible.name: "Hue"
+                onPressedChanged: if (!pressed) picker.take(picker.chosen.toString())
+                onMoved: hex.text = picker.chosen.toString()
+            }
+            Slider {
+                id: saturation
+                Accessible.name: "Saturation"
+                onPressedChanged: if (!pressed) picker.take(picker.chosen.toString())
+                onMoved: hex.text = picker.chosen.toString()
+            }
+            Slider {
+                id: brightness
+                Accessible.name: "Brightness"
+                onPressedChanged: if (!pressed) picker.take(picker.chosen.toString())
+                onMoved: hex.text = picker.chosen.toString()
+            }
+            TextField {
+                id: hex
+                Layout.fillWidth: true
+                placeholderText: "#rrggbb"
+                Accessible.name: "Colour"
+                onAccepted: picker.take(text)
+            }
+        }
+    }
+
     ColumnLayout {
         anchors.fill: parent
         anchors.margins: Spacing.xs
@@ -257,14 +327,29 @@ Panel {
                 Label {
                     text: row.modelData.name
                     color: Colors.text
-                    Layout.preferredWidth: 96
+                    Layout.preferredWidth: 72
                     elide: Text.ElideRight
+                }
+                Button {
+                    visible: panel.isColour(row.modelData.name, value.text)
+                    Layout.preferredWidth: 24
+                    Layout.preferredHeight: 24
+                    padding: 0
+                    Accessible.name: "Pick " + row.modelData.name
+                    onClicked: picker.show(row.modelData.name, value.text)
+                    contentItem: Rectangle {
+                        color: panel.painted(value.text)
+                        border.color: Colors.outline
+                        radius: Shape.xs
+                    }
                 }
                 TextField {
                     id: value
                     text: panel.inState(row.modelData.name, row.modelData.value)
+                    placeholderText: "no value"
                     Accessible.name: row.modelData.name
                     Layout.fillWidth: true
+                    Layout.minimumWidth: 96
                     onAccepted: panel.set(row.modelData.name, text)
                     // The rows are not made anew for a list that reads the
                     // same, and what is typed in one is not the next object's,
