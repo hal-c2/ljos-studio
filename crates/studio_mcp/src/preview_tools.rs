@@ -566,6 +566,35 @@ pub(crate) fn pick(
     Ok(Some((declared.file, handle)))
 }
 
+/// What the host says of the objects with `ids` and of unnamed ones of
+/// `types`; `None` when no preview of `doc` is open or it runs older text
+/// than the session's, whose lines would name other objects.
+pub(crate) fn placed(
+    studio: &mut Studio,
+    doc: &str,
+    ids: &[String],
+    types: &[String],
+) -> Result<Option<Vec<studio_core::preview::Placed>>, SurfaceError> {
+    let previews = studio.previews.clone();
+    let mut previews = preview::caught_up(&previews);
+    let behind = previews.events.iter().rev().find_map(|e| match e {
+        PreviewEvent::Opened { .. } | PreviewEvent::Reloaded { .. } => Some(false),
+        PreviewEvent::ReloadFailed { .. } => Some(true),
+        _ => None,
+    });
+    if behind == Some(true) {
+        return Ok(None);
+    }
+    match previews.open.as_mut().filter(|o| o.doc == doc) {
+        Some(open) => open
+            .host
+            .placed(ids, types)
+            .map(Some)
+            .map_err(preview_error),
+        None => Ok(None),
+    }
+}
+
 fn events(studio: &Mutex<Studio>, a: EventsArgs) -> EventsOut {
     let studio = lock(studio);
     // What a burst of writes left out is reloaded first, so its outcome

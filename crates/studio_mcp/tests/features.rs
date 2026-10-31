@@ -629,6 +629,35 @@ fn file_is(w: &mut StudioWorld, name: String, step: &Step) -> StepResult {
         .ok_or_else(|| format!("`{name}` is:\n{got}\nnot:\n{want}"))
 }
 
+#[then(regex = r"^the history has (\d+) entr(?:y|ies)$")]
+fn history_has(w: &mut StudioWorld, want: usize) -> StepResult {
+    w.call("history", serde_json::json!({ "action": "list" }))?;
+    let answer = w.answer()?;
+    let got = answer["done"].as_array().map_or(0, Vec::len);
+    (got == want)
+        .then_some(())
+        .ok_or_else(|| format!("the history has {got} entries, not {want}: {answer}"))
+}
+
+#[then(regex = r#"^the file "([^"]+)" contains "(.*)"$"#)]
+fn file_contains(w: &mut StudioWorld, name: String, want: String) -> StepResult {
+    let want = want.replace("\\\"", "\"");
+    let got =
+        std::fs::read_to_string(w.dir.path().join(&name)).map_err(|e| format!("`{name}`: {e}"))?;
+    got.contains(&want)
+        .then_some(())
+        .ok_or_else(|| format!("`{name}` does not contain {want:?}:\n{got}"))
+}
+
+#[then(regex = r#"^the file "([^"]+)" does not contain "(.*)"$"#)]
+fn file_lacks(w: &mut StudioWorld, name: String, want: String) -> StepResult {
+    let got =
+        std::fs::read_to_string(w.dir.path().join(&name)).map_err(|e| format!("`{name}`: {e}"))?;
+    (!got.contains(&want))
+        .then_some(())
+        .ok_or_else(|| format!("`{name}` contains {want:?}:\n{got}"))
+}
+
 #[then(regex = r#"^the file "([^"]+)" does not exist$"#)]
 fn file_absent(w: &mut StudioWorld, name: String) -> StepResult {
     (!w.dir.path().join(&name).exists())

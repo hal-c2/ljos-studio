@@ -77,6 +77,11 @@ expression: value
     },
     "additionalProperties": false,
     "properties": {
+      "add": {
+        "default": false,
+        "description": "Toggle these in the selection instead of replacing it.",
+        "type": "boolean"
+      },
       "at": {
         "anyOf": [
           {

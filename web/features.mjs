@@ -415,6 +415,20 @@ const STEPS = [
     if (got === undefined) throw new Error(`\`${name}\` does not exist`);
     if (got !== want) throw new Error(`\`${name}\` is:\n${got}\nnot:\n${want}`);
   }),
+  step("then", /^the file "([^"]+)" contains "(.*)"$/, (w, s, name, want) => {
+    const got = w.backend.files.get(name);
+    if (got === undefined) throw new Error(`\`${name}\` does not exist`);
+    if (!got.includes(want.replaceAll('\\"', '"'))) throw new Error(`\`${name}\` does not contain ${want}:\n${got}`);
+  }),
+  step("then", /^the file "([^"]+)" does not contain "(.*)"$/, (w, s, name, want) => {
+    const got = w.backend.files.get(name) ?? "";
+    if (got.includes(want.replaceAll('\\"', '"'))) throw new Error(`\`${name}\` contains ${want}:\n${got}`);
+  }),
+  step("then", /^the history has (\d+) entr(?:y|ies)$/, async (w, s, want) => {
+    await w.call("history", { action: "list" });
+    const got = (w.answer.ok?.done ?? []).length;
+    if (got !== Number(want)) throw new Error(`the history has ${got} entries, not ${want}`);
+  }),
   step("then", /^the file "([^"]+)" exists$/, (w, s, name) => {
     if (!w.backend.files.has(name)) throw new Error(`\`${name}\` does not exist`);
   }),

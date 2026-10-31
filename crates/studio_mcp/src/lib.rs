@@ -10,6 +10,7 @@ mod blocks;
 #[cfg(feature = "http")]
 pub mod endpoint;
 pub mod export;
+mod place_tools;
 pub mod preview;
 mod preview_tools;
 mod review;
@@ -48,6 +49,9 @@ pub struct Studio {
     hosts: Option<preview::Hosts>,
     watchers: Watchers,
     timer: Arc<dyn Timer>,
+    /// What `node_arrange` `copy` holds. Studio's own, not the system's: an agent has no
+    /// system clipboard, and a tool must mean the same to both.
+    clipboard: Vec<place_tools::Copied>,
 }
 
 /// Told that what a window shows may have changed. Called with the
@@ -102,6 +106,7 @@ impl Studio {
             hosts: None,
             watchers: Watchers::default(),
             timer,
+            clipboard: Vec::new(),
         };
         studio.follow();
         studio

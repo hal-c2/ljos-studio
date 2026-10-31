@@ -145,7 +145,7 @@ struct ChangeOut {
 }
 
 #[derive(Serialize, JsonSchema)]
-struct EditOut {
+pub(crate) struct EditOut {
     doc: String,
     /// The document's generation now; pass it with the next edit.
     generation: u64,
@@ -235,6 +235,9 @@ struct SelectArgs {
     /// logical pixels. Selects the object declared where the preview's
     /// topmost object there is declared; nothing there clears it.
     at: Option<Point>,
+    /// Toggle these in the selection instead of replacing it.
+    #[serde(default)]
+    add: bool,
 }
 
 #[derive(Clone, Copy, Deserialize, JsonSchema)]
@@ -792,7 +795,7 @@ fn info(studio: &Studio) -> ProjectInfo {
     }
 }
 
-const MUTATE: ToolAnnotations = ToolAnnotations {
+pub(crate) const MUTATE: ToolAnnotations = ToolAnnotations {
     read_only: false,
     destructive: false,
     idempotent: false,
@@ -1222,7 +1225,8 @@ fn edit(
 }
 
 pub(crate) fn registry(studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
-    let registry = crate::preview_tools::add(edits(studio), studio);
+    let registry = crate::place_tools::add(edits(studio), studio);
+    let registry = crate::preview_tools::add(registry, studio);
     crate::review::add(crate::export::add(registry, studio), studio)
 }
 
@@ -1475,16 +1479,30 @@ fn edits(studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
                             ));
                         }
                         Some(at) => match crate::preview_tools::pick(&mut studio, &a.doc, at.x, at.y)? {
+                            Some((doc, handle)) if a.add => {
+                                studio
+                                    .session
+                                    .toggle_selected(&doc, &[Address::Node(handle)])
+                                    .map_err(error)?;
+                            }
                             Some((doc, handle)) => {
                                 studio
                                     .session
                                     .select(&doc, &[Address::Node(handle)])
                                     .map_err(error)?;
                             }
+                            // A shift-click that misses keeps what is selected.
+                            None if a.add => {}
                             None => {
                                 studio.session.select(&a.doc, &[]).map_err(error)?;
                             }
                         },
+                        None if a.add => {
+                            studio
+                                .session
+                                .toggle_selected(&a.doc, &a.nodes)
+                                .map_err(error)?;
+                        }
                         None => {
                             studio.session.select(&a.doc, &a.nodes).map_err(error)?;
                         }

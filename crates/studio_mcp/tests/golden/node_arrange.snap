@@ -1,0 +1,456 @@
+---
+source: crates/studio_mcp/tests/golden_tools.rs
+expression: value
+---
+{
+  "annotations": {
+    "destructive": false,
+    "idempotent": false,
+    "open_world": false,
+    "read_only": false
+  },
+  "description": "What a canvas gesture does; each edit one undo step, all or none. `geometry`: boxes, drag rules, siblings. `place`: x/y/size, writing what governs each object (anchor margins, Layout.preferred*); refused `arranged` or `anchored` where overridden. `align`, `copy`, `paste`, `duplicate`.",
+  "inputSchema": {
+    "$defs": {
+      "Action": {
+        "enum": [
+          "geometry",
+          "place",
+          "align",
+          "copy",
+          "paste",
+          "duplicate"
+        ],
+        "type": "string"
+      },
+      "Address": {
+        "description": "How a caller names an object.",
+        "oneOf": [
+          {
+            "additionalProperties": false,
+            "description": "A handle the session gave out (`n7`); stable for the session.",
+            "properties": {
+              "node": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "node"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "description": "The object's `id` in the document.",
+            "properties": {
+              "id": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "description": "A path as `document_tree` prints it (`root/0/contentItem:`), true of\nthe current text only.",
+            "properties": {
+              "path": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "path"
+            ],
+            "type": "object"
+          }
+        ]
+      },
+      "Align": {
+        "description": "How `node_arrange` `align` lines objects up.",
+        "enum": [
+          "left",
+          "hcenter",
+          "right",
+          "top",
+          "vcenter",
+          "bottom",
+          "distribute_h",
+          "distribute_v"
+        ],
+        "type": "string"
+      },
+      "PlaceOne": {
+        "additionalProperties": false,
+        "properties": {
+          "height": {
+            "format": "double",
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "node": {
+            "$ref": "#/$defs/Address"
+          },
+          "width": {
+            "format": "double",
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "x": {
+            "description": "In the parent's coordinates. What is left out stays.",
+            "format": "double",
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "y": {
+            "format": "double",
+            "type": [
+              "number",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "node"
+        ],
+        "type": "object"
+      }
+    },
+    "additionalProperties": false,
+    "properties": {
+      "action": {
+        "$ref": "#/$defs/Action"
+      },
+      "align": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/Align"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "description": "For `align`: left, hcenter, right, top, vcenter, bottom, distribute_h,\ndistribute_v. One object lines up with its parent."
+      },
+      "doc": {
+        "type": "string"
+      },
+      "dry_run": {
+        "default": false,
+        "type": "boolean"
+      },
+      "generation": {
+        "description": "Needed when a node is named by path.",
+        "format": "uint64",
+        "minimum": 0,
+        "type": [
+          "integer",
+          "null"
+        ]
+      },
+      "nodes": {
+        "default": [],
+        "description": "For all but `place` and `paste`.",
+        "items": {
+          "$ref": "#/$defs/Address"
+        },
+        "type": "array"
+      },
+      "parent": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/Address"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "description": "For `paste`, into any document. Ids it has are renamed."
+      },
+      "places": {
+        "description": "For `place`.",
+        "items": {
+          "$ref": "#/$defs/PlaceOne"
+        },
+        "type": [
+          "array",
+          "null"
+        ]
+      }
+    },
+    "required": [
+      "action",
+      "doc"
+    ],
+    "title": "ArrangeArgs",
+    "type": "object"
+  },
+  "max_result_bytes": 40960,
+  "name": "node_arrange",
+  "outputSchema": {
+    "$defs": {
+      "ChangeOut": {
+        "properties": {
+          "end": {
+            "format": "uint",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "start": {
+            "description": "Byte range of the text before the edit.",
+            "format": "uint",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "text": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "start",
+          "end",
+          "text"
+        ],
+        "type": "object"
+      },
+      "Drag": {
+        "description": "What a drag does to an object, said before it is dragged.",
+        "properties": {
+          "move": {
+            "$ref": "#/$defs/Moving"
+          },
+          "resize": {
+            "$ref": "#/$defs/Resizing"
+          },
+          "says": {
+            "description": "A sentence for the person dragging: empty when it is plain x and y.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "move",
+          "resize",
+          "says"
+        ],
+        "type": "object"
+      },
+      "Moving": {
+        "description": "What moving an object writes.",
+        "oneOf": [
+          {
+            "const": "position",
+            "description": "`x` and `y`.",
+            "type": "string"
+          },
+          {
+            "const": "margins",
+            "description": "The anchors' margins or centre offsets.",
+            "type": "string"
+          },
+          {
+            "const": "reorder",
+            "description": "A layout places it: a drag changes its order among its siblings\n(`node_move`), never its x or y.",
+            "type": "string"
+          },
+          {
+            "const": "none",
+            "description": "It cannot be moved by hand.",
+            "type": "string"
+          }
+        ]
+      },
+      "NodeGeometry": {
+        "properties": {
+          "drag": {
+            "$ref": "#/$defs/Drag"
+          },
+          "local": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/Rect"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "In the parent's coordinates; absent when the preview has no such\nobject (a `Loader` not loaded, a state that hides it)."
+          },
+          "node": {
+            "type": "string"
+          },
+          "window": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/Rect"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "node",
+          "drag"
+        ],
+        "type": "object"
+      },
+      "Rect": {
+        "description": "A box in logical pixels.",
+        "properties": {
+          "height": {
+            "format": "double",
+            "type": "number"
+          },
+          "width": {
+            "format": "double",
+            "type": "number"
+          },
+          "x": {
+            "format": "double",
+            "type": "number"
+          },
+          "y": {
+            "format": "double",
+            "type": "number"
+          }
+        },
+        "required": [
+          "x",
+          "y",
+          "width",
+          "height"
+        ],
+        "type": "object"
+      },
+      "Resizing": {
+        "description": "What resizing an object writes.",
+        "oneOf": [
+          {
+            "const": "size",
+            "description": "`width` and `height`, or margins on an axis anchored at both ends.",
+            "type": "string"
+          },
+          {
+            "const": "preferred",
+            "description": "`Layout.preferredWidth` and `Layout.preferredHeight`.",
+            "type": "string"
+          },
+          {
+            "const": "none",
+            "description": "It cannot be resized by hand.",
+            "type": "string"
+          }
+        ]
+      },
+      "Sibling": {
+        "properties": {
+          "node": {
+            "type": "string"
+          },
+          "window": {
+            "$ref": "#/$defs/Rect"
+          }
+        },
+        "required": [
+          "node",
+          "window"
+        ],
+        "type": "object"
+      }
+    },
+    "properties": {
+      "boxes": {
+        "description": "`geometry`: each object asked for.",
+        "items": {
+          "$ref": "#/$defs/NodeGeometry"
+        },
+        "type": "array"
+      },
+      "changes": {
+        "items": {
+          "$ref": "#/$defs/ChangeOut"
+        },
+        "type": "array"
+      },
+      "copied": {
+        "description": "`copy`: each object as written.",
+        "items": {
+          "type": "string"
+        },
+        "type": "array"
+      },
+      "doc": {
+        "type": "string"
+      },
+      "generation": {
+        "description": "The document's generation now; pass it with the next edit.",
+        "format": "uint64",
+        "minimum": 0,
+        "type": "integer"
+      },
+      "history": {
+        "description": "The history entry; absent for a dry run or an unchanged document.",
+        "format": "uint64",
+        "minimum": 0,
+        "type": [
+          "integer",
+          "null"
+        ]
+      },
+      "node": {
+        "description": "The handle of the object put or moved.",
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "nodes": {
+        "description": "The objects placed or put, in the order asked for.",
+        "items": {
+          "type": "string"
+        },
+        "type": "array"
+      },
+      "parent": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/Rect"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "description": "`geometry`: the first object's parent, in window coordinates."
+      },
+      "siblings": {
+        "description": "`geometry`: the parent's other children, for guides.",
+        "items": {
+          "$ref": "#/$defs/Sibling"
+        },
+        "type": "array"
+      },
+      "text": {
+        "description": "The text the edit would give, for a dry run.",
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "unchanged": {
+        "description": "The document already said this: nothing was written and no history\nentry made.",
+        "type": "boolean"
+      }
+    },
+    "title": "ArrangeOut",
+    "type": "object"
+  },
+  "required_cap": "inspect"
+}

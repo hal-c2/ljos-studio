@@ -150,6 +150,8 @@ pub struct View {
     pub layers: Vec<Layer>,
     /// The handle of the selected object in `doc`; empty when none is.
     pub selected: String,
+    /// Every selected object in `doc`, `selected` first.
+    pub chosen: Vec<String>,
     pub selection: Span,
     pub inspector: Vec<Shown>,
     /// The selected object's states.
@@ -292,12 +294,14 @@ impl Studio {
                 layer.comments += 1;
             }
         }
-        let selected = self
+        view.chosen = self
             .session
             .selection()
             .into_iter()
-            .find(|(d, _)| d == doc)
-            .map(|(_, handle)| handle);
+            .filter(|(d, _)| d == doc)
+            .map(|(_, handle)| handle)
+            .collect();
+        let selected = view.chosen.first().cloned();
         if let Some(handle) = selected
             && let Ok((handle, node)) = self.session.resolve(doc, &Address::Node(handle))
         {

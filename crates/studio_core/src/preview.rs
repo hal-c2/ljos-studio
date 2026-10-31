@@ -187,6 +187,19 @@ pub struct Declared {
     pub column: u32,
 }
 
+/// An object of the running preview: where it is and where it was declared.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Placed {
+    /// In its parent's coordinates.
+    pub local: crate::place::Rect,
+    /// In the window's.
+    pub window: crate::place::Rect,
+    /// None for an object no file declares.
+    pub declared: Option<Declared>,
+    /// Its type and those it derives from.
+    pub types: Vec<String>,
+}
+
 /// What a click in the preview is aimed at.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Click {
@@ -288,6 +301,17 @@ pub trait PreviewHost: Send {
     /// is declared: the topmost object there that has a declaration.
     /// `None` when nothing is there.
     fn pick(&mut self, x: f64, y: f64) -> Result<Option<Declared>, PreviewError>;
+
+    /// The objects with one of `ids` and, among objects without an id, those
+    /// of one of `types`, in scene order. Copies of a delegate are each
+    /// listed. A host that cannot tell refuses.
+    fn placed(&mut self, ids: &[String], types: &[String]) -> Result<Vec<Placed>, PreviewError> {
+        let _ = (ids, types);
+        Err(PreviewError::Refused {
+            code: "unsupported".to_owned(),
+            message: "this preview does not say where its objects are".to_owned(),
+        })
+    }
 
     /// Clicks as a person does, with the primary button: the app's own
     /// handlers answer it. A host that takes no input refuses.

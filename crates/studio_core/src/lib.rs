@@ -16,6 +16,7 @@ pub mod flows;
 mod history;
 pub mod models;
 pub mod outline;
+pub mod place;
 pub mod preview;
 pub mod review;
 pub mod slots;
@@ -30,7 +31,7 @@ pub use flows::{Goal, Interaction};
 pub use history::{Entry, EntrySummary};
 pub use models::Model;
 pub use outline::{Binding, DeclaredSignal, Import, Node};
-pub use qml_edit::{Change, Error as EditError, NodePath};
+pub use qml_edit::{Change, Error as EditError, NodePath, Step};
 pub use review::{Anchor, Comment, Note};
 pub use slots::Mode;
 pub use states::{ChangeInfo, StateEdit, StateInfo, TransitionInfo, Variants};
@@ -749,6 +750,124 @@ impl Session {
             text: None,
             unchanged: false,
         })
+    }
+
+    /// Applies several structural edits as one: one write, so one reload, and
+    /// one history entry, so one undo. Later edits see what earlier ones did;
+    /// the handles of the objects they put or moved are answered in order.
+    ///
+    /// # Errors
+    /// As [`edit`](Self::edit), for any of them; nothing changes then.
+    pub fn edit_many(
+        &mut self,
+        path: &str,
+        generation: Option<u64>,
+        ops: &[Op],
+        label: &str,
+        dry_run: bool,
+    ) -> Result<(Outcome, Vec<String>), Error> {
+        let path = &self.canonical(path)?;
+        if generation.is_none()
+            && let Some(Address::Path(p)) = ops
+                .iter()
+                .flat_map(Op::addresses)
+                .find(|a| matches!(a, Address::Path(_)))
+        {
+            return Err(Error::Invalid(format!(
+                "the path `{p}` names an object only in the generation it was read at: give \
+                 `generation`"
+            )));
+        }
+        self.check_generation(path, generation)?;
+        // Comments follow handles: theirs must be known before the handles
+        // move.
+        self.look_up(path);
+        let saved = self.doc(path)?.clone();
+        let mut nodes = Vec::new();
+        for op in ops {
+            let applied = self.apply_unwritten(path, op, label);
+            match applied {
+                Ok(Some(node)) => nodes.push(node),
+                Ok(None) => {}
+                Err(e) => {
+                    *self.doc(path)? = saved;
+                    return Err(e);
+                }
+            }
+        }
+        let after = self.doc(path)?.text.clone();
+        let before = saved.text.clone();
+        let changes = diff(&before, &after);
+        if dry_run {
+            *self.doc(path)? = saved;
+            return Ok((
+                Outcome {
+                    doc: path.to_owned(),
+                    generation: self.doc(path)?.generation,
+                    unchanged: after == before,
+                    changes,
+                    history: None,
+                    node: None,
+                    text: Some(after),
+                },
+                Vec::new(),
+            ));
+        }
+        if after == before {
+            *self.doc(path)? = saved;
+            let outcome = self.unchanged(path, None)?;
+            return Ok((outcome, nodes));
+        }
+        if let Err(e) = self.store.write(path, &after) {
+            *self.doc(path)? = saved;
+            return Err(e.into());
+        }
+        let handles_after = self.doc(path)?.tracked.clone();
+        let entry = Entry {
+            id: 0,
+            doc: path.to_owned(),
+            label: label.to_owned(),
+            forward: changes.clone(),
+            inverse: diff(&after, &before),
+            created: false,
+            handles_before: saved.tracked,
+            handles_after,
+            change: None,
+        };
+        let id = self.history.push(entry);
+        self.reanchor(path);
+        self.wrote(path);
+        Ok((
+            Outcome {
+                doc: path.to_owned(),
+                generation: self.doc(path)?.generation,
+                changes,
+                history: Some(id),
+                node: nodes.first().cloned(),
+                text: None,
+                unchanged: false,
+            },
+            nodes,
+        ))
+    }
+
+    /// One edit of [`edit_many`](Self::edit_many), on the held text alone.
+    fn apply_unwritten(
+        &mut self,
+        path: &str,
+        op: &Op,
+        label: &str,
+    ) -> Result<Option<String>, Error> {
+        let current = self.doc(path)?.text.clone();
+        let (text, change, focus) = self.plan(path, &current, op)?;
+        if text != current {
+            let (next, _) = self.step(path, current, text, Some(change), label.to_owned())?;
+            *self.doc(path)? = next;
+        }
+        match focus {
+            Some(at) => self.handle_at(path, &at).map(Some),
+            None => Ok(None),
+        }
     }
 
     /// The new text, what it does to paths, and where the object it put or
@@ -1818,6 +1937,36 @@ impl Session {
         let mut handles = Vec::new();
         for address in addresses {
             handles.push(self.resolve(path, address)?.0);
+        }
+        self.selection = handles
+            .iter()
+            .map(|h| (path.to_owned(), h.clone()))
+            .collect();
+        Ok(handles)
+    }
+
+    /// Adds each of `addresses` to the selection, or takes it out if it is
+    /// in: what a shift-click does. A selection is of one document, as its
+    /// box and its one undo step are: another document's is left behind.
+    pub fn toggle_selected(
+        &mut self,
+        path: &str,
+        addresses: &[Address],
+    ) -> Result<Vec<String>, Error> {
+        let path = &self.canonical(path)?;
+        let mut handles: Vec<String> = std::mem::take(&mut self.selection)
+            .into_iter()
+            .filter(|(doc, _)| doc == path)
+            .map(|(_, handle)| handle)
+            .collect();
+        for address in addresses {
+            let handle = self.resolve(path, address)?.0;
+            match handles.iter().position(|h| *h == handle) {
+                Some(at) => {
+                    handles.remove(at);
+                }
+                None => handles.push(handle),
+            }
         }
         self.selection = handles
             .iter()
