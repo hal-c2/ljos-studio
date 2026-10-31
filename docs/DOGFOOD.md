@@ -241,7 +241,7 @@ view itself loses work.
 - **Evidence:** `docs/dogfood/inspector-text.png`.
 - **Fix:** a swatch with a picker, a wider field, clear the row after Set,
   rows for declared properties. Owner: Studio, Inspector block.
-- **Partly fixed** (dff6a44): The property row empties once used. Remains: swatches and declared rows.
+- **Fixed**: a colour row has a swatch that opens a picker (hue, saturation, value, hex; one undo step per drag); the field is wider; a property declared without a value has a row. The swatch of a colour written as an expression paints nothing, since only what is written is read here.
 
 #### D16. A file made outside Studio shows only after the next tool call
 

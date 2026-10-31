@@ -410,6 +410,16 @@ impl Studio {
                     value: b.value.clone(),
                 })
                 .collect();
+            // Declared without a value (`property var stack`): nothing is
+            // written to show, and a row is how it gets one.
+            for name in &node.properties {
+                if !node.bindings.iter().any(|b| &b.name == name) {
+                    view.inspector.push(Shown {
+                        name: name.clone(),
+                        value: String::new(),
+                    });
+                }
+            }
             if let Ok(variants) = self.session.variants(doc, &Address::Node(handle.clone())) {
                 view.states = variants.states;
             }
