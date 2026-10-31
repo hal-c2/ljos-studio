@@ -46,6 +46,10 @@ pub enum PortError {
 /// One request to the page and its answer.
 pub trait Port: Send {
     fn ask(&mut self, request: &Request) -> Result<Answer, PortError>;
+    /// Why the page is gone, if it is, from what this side already knows
+    /// (a closed channel, a removed frame): never a request, so asking is
+    /// free when the preview has ended.
+    fn gone(&self) -> Option<String>;
 }
 
 /// A preview page, given the project's files over a [`Port`].
@@ -241,6 +245,19 @@ impl<P: Port> PreviewHost for WebPreviewHost<P> {
         }
     }
 
+    fn alive(&mut self) -> Result<(), PreviewError> {
+        if self.sent.is_none() {
+            return Err(PreviewError::NotOpen);
+        }
+        match self.port.gone() {
+            Some(message) => {
+                self.sent = None;
+                Err(PreviewError::Ended(message))
+            }
+            None => Ok(()),
+        }
+    }
+
     fn close(&mut self) {
         if self.sent.take().is_some() {
             // The page may already be gone; closed is closed either way.
@@ -331,6 +348,13 @@ pub(crate) mod tests {
                 },
                 Request::Resize { .. } | Request::Close => Answer::Done,
             })
+        }
+
+        fn gone(&self) -> Option<String> {
+            self.gone
+                .lock()
+                .unwrap()
+                .then(|| "the frame was removed".to_owned())
         }
     }
 
@@ -442,5 +466,18 @@ pub(crate) mod tests {
         *page.gone.lock().unwrap() = true;
         assert!(matches!(host.outline(), Err(PreviewError::Ended(_))));
         assert!(matches!(host.outline(), Err(PreviewError::NotOpen)));
+    }
+
+    #[test]
+    fn a_page_that_is_gone_is_told_without_asking_it() {
+        let (mut host, page, _) = host();
+        assert!(matches!(host.alive(), Err(PreviewError::NotOpen)));
+        host.open(&spec()).unwrap();
+        assert!(host.alive().is_ok());
+        let asked = page.heard.lock().unwrap().len();
+        *page.gone.lock().unwrap() = true;
+        assert!(matches!(host.alive(), Err(PreviewError::Ended(_))));
+        assert_eq!(page.heard.lock().unwrap().len(), asked);
+        assert!(matches!(host.alive(), Err(PreviewError::NotOpen)));
     }
 }

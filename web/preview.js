@@ -17,8 +17,9 @@ const GONE = 2;
 // State, length and the id of the request answered (Int32 each). The id
 // is written last and is what the worker waits on: a late answer to a
 // request that timed out can land after the worker has asked again, and
-// it is not the new request's.
-const HEADER = 12;
+// it is not the new request's. The fourth word is set once the frame is
+// gone, so the worker can tell without asking (`ask.gone()`).
+const HEADER = 16;
 
 // A buffer for one answer at a time; a screenshot is the largest, base64.
 export function answerBuffer(bytes = 32 << 20) {
@@ -26,12 +27,14 @@ export function answerBuffer(bytes = 32 << 20) {
 }
 
 // In the worker: the `ask(requestJson) -> answerJson` StudioCore is given.
+// Its `gone()` says whether the page thread stopped the relay, from the
+// shared buffer, so a preview that ended is known without a request.
 // `post` sends to the page thread (the worker's `postMessage`).
 export function workerAsk(buffer, post, { timeoutMs = 10_000 } = {}) {
-  const header = new Int32Array(buffer, 0, 3);
+  const header = new Int32Array(buffer, 0, 4);
   const body = new Uint8Array(buffer, HEADER);
   let next = 0;
-  return (requestJson) => {
+  const ask = (requestJson) => {
     const id = ++next;
     post({ [TAG]: VERSION, id, request: JSON.parse(requestJson) });
     const until = performance.now() + timeoutMs;
@@ -46,13 +49,15 @@ export function workerAsk(buffer, post, { timeoutMs = 10_000 } = {}) {
     if (state === GONE) throw new Error(`gone: ${text}`);
     return text;
   };
+  ask.gone = () => Atomics.load(header, 3) !== 0;
+  return ask;
 }
 
 // On the page thread: carries the worker's requests to `frame` and the
 // frame's answers back into `buffer`. Returns `stop()`, for when the frame
 // is removed: a request after that is answered "gone".
 export function relay({ worker, frame, buffer, window: w = globalThis }) {
-  const header = new Int32Array(buffer, 0, 3);
+  const header = new Int32Array(buffer, 0, 4);
   const body = new Uint8Array(buffer, HEADER);
   let waiting = null;
   let gone = null;
@@ -85,6 +90,7 @@ export function relay({ worker, frame, buffer, window: w = globalThis }) {
   w.addEventListener("message", fromFrame);
   return function stop(reason = "the preview frame was removed") {
     gone = reason;
+    Atomics.store(header, 3, 1);
     w.removeEventListener("message", fromFrame);
     if (waiting !== null) answer(GONE, gone);
   };

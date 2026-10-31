@@ -86,6 +86,19 @@ impl Port for JsPort {
         serde_json::from_str(&answer)
             .map_err(|e| PortError::NoAnswer(format!("the page's answer is not one: {e}")))
     }
+    fn gone(&self) -> Option<String> {
+        let Some(ask) = ASK.with_borrow(|asks| asks.get(&self.0).cloned()) else {
+            return Some("this page has no preview".to_owned());
+        };
+        // `workerAsk`'s function reads the relay's gone word; a page's own
+        // function without one is taken at its word until it throws.
+        let gone = js_sys::Reflect::get(&ask, &JsValue::from_str("gone"))
+            .ok()
+            .and_then(|f| f.dyn_into::<js_sys::Function>().ok())?;
+        gone.call0(&JsValue::NULL)
+            .is_ok_and(|g| g.is_truthy())
+            .then(|| "gone: the preview frame was removed".to_owned())
+    }
 }
 
 fn js_message(e: &JsValue) -> String {

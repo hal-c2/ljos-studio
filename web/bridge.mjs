@@ -23,6 +23,8 @@ if (!isMainThread) {
     }
     parentPort.postMessage({ asked: request, ...out });
   }
+  const before = ask.gone();
+  parentPort.once("message", () => parentPort.postMessage({ gone: { before, after: ask.gone() } }));
 } else {
   const buffer = answerBuffer(1 << 10);
   const thread = new Worker(fileURLToPath(import.meta.url), { workerData: { buffer } });
@@ -31,7 +33,7 @@ if (!isMainThread) {
   const toFrame = [];
   frameWindow.postMessage = (m) => toFrame.push(m);
   const fakeWorker = new EventTarget();
-  relay({ worker: fakeWorker, frame: { contentWindow: frameWindow }, buffer, window: page });
+  const stop = relay({ worker: fakeWorker, frame: { contentWindow: frameWindow }, buffer, window: page });
   const deliver = (target, data, source) => {
     const event = new Event("message");
     Object.assign(event, { data, source });
@@ -60,10 +62,15 @@ if (!isMainThread) {
       }
     });
   });
+  // Stopped, the relay tells the worker through the buffer: nothing asks.
+  stop();
+  thread.postMessage("stopped");
+  const gone = await new Promise((told) => thread.on("message", (m) => m.gone && told(m.gone)));
   await thread.terminate();
   check("a request the frame does not answer in time times out", /did not answer/.test(results[0].error ?? ""), results[0]);
   check("the next request gets its own answer, not the late one", results[1].answer === JSON.stringify("two"), results[1]);
   check("both requests reached the frame", toFrame.map((m) => m.id).join() === "1,2", toFrame);
+  check("a stopped relay is gone to the worker without a request", !gone.before && gone.after && toFrame.length === 2, gone);
   for (const { what, ok, detail } of checks) console.log(`${ok ? "✔" : "✘"} ${what}${ok ? "" : `: ${JSON.stringify(detail)}`}`);
   if (checks.some((c) => !c.ok)) process.exitCode = 1;
 }
