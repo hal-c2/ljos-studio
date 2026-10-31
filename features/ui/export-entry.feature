@@ -46,3 +46,24 @@ Feature: The export panel writes the entry it says
     And the person has clicked the button "Export"
     When the person clicks the button "Write bundle"
     Then the export panel says "^Start it with: ljos run Third.qml --project"
+
+  Scenario: A shown document that is gone from disk gives way to the first listed
+    Given the file "Second.qml":
+      """qml
+      import QtQuick
+
+      Item {}
+      """
+    And the file "Third.qml":
+      """qml
+      import QtQuick
+
+      Item {}
+      """
+    And Studio's window shows the project
+    And the person has opened "Third.qml" in the documents list
+    When the file "Third.qml" is deleted
+    And the person clicks the button "Export"
+    And the person clicks the button "Close"
+    And the person clicks the button "Export"
+    Then the export panel says "^Entry Second.qml$"

@@ -1016,6 +1016,8 @@ fn export(studio: &Mutex<Studio>, a: ExportArgs) -> Result<ExportOut, SurfaceErr
     let replaces = holds_bundle(&path);
     let path = path.to_string_lossy().into_owned();
     let copied = if a.dry_run {
+        // What the write would refuse, the dry run says first.
+        may_replace(&root, &root.join(&out))?;
         Copied::default()
     } else {
         write(&root, &root.join(&out), &manifest)?
