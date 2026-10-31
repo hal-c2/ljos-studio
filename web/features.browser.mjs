@@ -32,17 +32,26 @@ const ISOLATED = {
 const ANSWER_MS = 120000;
 
 // Scenario → the ljos-web request (DESIGN.md S5) it waits on, and how its
-// failure says so: by default a `not_supported` refusal naming the request.
-// A scenario that could pass without what it waits on has a `probe`: a
-// step run after the step `after`, whose failure is the wait.
-const refused = (request) => ({ request, cause: new RegExp(`"kind":"not_supported","ljos_web_request":${request}\\b`) });
+// failure says so: `cause(message, compiled)` is given the failed step's
+// message and what the compiler refused during the scenario. By default the
+// cause is a `not_supported` refusal naming the request. A scenario that
+// could pass without what it waits on has a `probe`: a step run after the
+// step `after`, whose failure is the wait.
+const said = (pattern) => (message) => pattern.test(message);
+const refused = (request) => ({ request, cause: said(new RegExp(`"kind":"not_supported","ljos_web_request":${request}\\b`)) });
 // A type ljos-web cannot compile yet is not refused up front: its compile
-// error stops the open, or, when it comes after the open, the frame draws
-// nothing.
-const uncompiled = (request, type) => ({
-  request,
-  cause: new RegExp(`\`${type}\` is not a type of anything the file imports|^the preview shows: \\[\\]$`),
-});
+// error stops the open, or, when it comes after the open, the reload is
+// refused and the frame draws nothing. An empty frame is the wait only when
+// the compiler refused the type in this scenario; one that draws nothing
+// for another cause fails.
+const uncompiled = (request, type) => {
+  const missing = `\`${type}\` is not a type of anything the file imports`;
+  return {
+    request,
+    cause: (message, compiled) =>
+      message.includes(missing) || (message === "the preview shows: []" && compiled.some((e) => e.includes(missing))),
+  };
+};
 export const WAITING = new Map([
   ["The preview starts in the base state", refused(4)],
   ["A click on the trigger goes to the state", refused(4)],
@@ -66,7 +75,7 @@ export const WAITING = new Map([
   // ljos-web's `Ljos.Design` is the module's QML; it reads no theme file
   // beside the entry, so a token set is not drawn (request 20). Nothing
   // refuses it: the page cannot tell, so the failure is the drawn text.
-  ["A token set shows in the preview and is reported as a reload", { request: 20, cause: /^the preview shows: \["gap 16"\]$/ }],
+  ["A token set shows in the preview and is reported as a reload", { request: 20, cause: said(/^the preview shows: \["gap 16"\]$/) }],
   // Its last step expects the module's value, which a preview that never
   // drew the token shows too: it would pass having shown nothing. So the
   // token is looked for once it is set (`probe`), as the scenario above
@@ -75,7 +84,7 @@ export const WAITING = new Map([
     "Undo of a token shows the module's value again",
     {
       request: 20,
-      cause: /^the preview shows: \["gap 16"\]$/,
+      cause: said(/^the preview shows: \["gap 16"\]$/),
       probe: { after: 'the agent has called the tool "theme_set" with:', then: 'the preview shows "gap 20"' },
     },
   ],
@@ -239,6 +248,11 @@ export class BrowserWorld extends World {
 
   async call(tool, args) {
     await super.call(tool, args);
+    await this.sync();
+  }
+
+  // `backend.files` as the worker's storage holds them after a change.
+  async sync() {
     const { result } = await this.ask({ files: true });
     this.backend.files.clear();
     for (const [path, text] of Object.entries(result)) this.backend.files.set(path, text);
@@ -255,7 +269,9 @@ async function codeView(w, s) {
   const { result } = await w.ask({ text: doc });
   const start = result.text.indexOf(old);
   if (start < 0) throw new Error(`\`${old}\` is not in ${doc}`);
-  await w.ask({ replaceText: [doc, result.generation, start, start + old.length, now] });
+  const typed = await w.ask({ replaceText: [doc, result.generation, start, start + old.length, now] });
+  if (typed.refusal) throw Object.assign(new Error(typed.failure), { refusal: typed.refusal });
+  await w.sync();
   return true;
 }
 
@@ -280,7 +296,7 @@ function drift() {
 // Chromium with Studio's page and `serve.mjs` behind one origin.
 export async function launch(app) {
   const { chromium } = await import(process.env.PLAYWRIGHT ?? "playwright");
-  const served = await start({ app });
+  const served = await start({ app, record: true });
   const browser = await chromium.launch({ headless: true });
   const context = await browser.newContext({ ignoreHTTPSErrors: true });
   await context.route(`${ORIGIN}/**`, async (route) => {
@@ -296,6 +312,8 @@ export async function launch(app) {
     return route.fulfill({ status: 200, headers: { "content-type": TYPES[extname(url.pathname)] ?? "application/octet-stream", ...ISOLATED }, body });
   });
   return {
+    // What the compiler refused, in order, since the server started.
+    compiled: served.compiled,
     async page() {
       const page = await context.newPage();
       await page.goto(`${ORIGIN}/index.html`);
@@ -329,6 +347,7 @@ async function main([app, ...paths]) {
       let kind = "Given";
       let failed = null;
       const began = performance.now();
+      const compiledFrom = chromium.compiled.length;
       // A name two features share is keyed with its file.
       const key = WAITING.has(`${name}: ${scenario.name}`) ? `${name}: ${scenario.name}` : scenario.name;
       const probe = WAITING.get(key)?.probe;
@@ -356,7 +375,7 @@ async function main([app, ...paths]) {
       let verdict;
       if (waits === undefined) verdict = failed ? `${failed.at}\n      ${failed.message.replaceAll("\n", "\n      ")}` : null;
       else if (!failed) verdict = `passes: ljos-web request ${waits.request} is answered; take it out of WAITING`;
-      else if (!waits.cause.test(failed.message))
+      else if (!waits.cause(failed.message, chromium.compiled.slice(compiledFrom)))
         verdict = `listed as waiting on ljos-web request ${waits.request}, and failed otherwise: ${failed.at}\n      ${failed.message}`;
       if (verdict) {
         counts.failed += 1;

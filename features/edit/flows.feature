@@ -301,6 +301,65 @@ Feature: An agent wires a prototype's flow
         """
       Then the answer's "/generation" is 2
 
+    # A dump without `baseModule` names its base in the dump's own module,
+    # where nothing describes `Item`: what Player inherits is not known, so
+    # Player is a type described only in part, and refuses nothing.
+    Scenario: A dumped type whose base is described nowhere lists no signals and refuses none
+      Given the file "native/ljostypes.json":
+        """json
+        {"format": 2, "modules": [{"uri": "App.Media", "versions": ["1.0"], "types": [
+          {"name": "Player", "since": "1.0", "base": "Item",
+           "creatable": true, "defaultProperty": null, "attached": null,
+           "properties": [], "signals": [{"name": "finished", "parameters": []}],
+           "methods": []}]}]}
+        """
+      And the file "Media.qml":
+        """qml
+        import QtQuick
+        import App.Media
+
+        Item {
+            id: root
+            states: [
+                State {
+                    name: "wide"
+                }
+            ]
+
+            Player {
+                id: player
+            }
+        }
+        """
+      When the agent calls the tool "node_inspect" with:
+        """json
+        {"doc": "Media.qml", "node": {"id": "player"}}
+        """
+      Then the answer's "/signals" is absent
+      When the agent calls the tool "state_edit" with:
+        """json
+        {"doc": "Media.qml", "action": "interaction", "trigger": {"id": "player"}, "signal": "widthChanged", "state": "wide"}
+        """
+      Then the file "Media.qml" is:
+        """qml
+        import QtQuick
+        import App.Media
+
+        Item {
+            id: root
+            states: [
+                State {
+                    name: "wide"
+                }
+            ]
+
+            Player {
+                id: player
+                onWidthChanged: root.state = "wide"
+            }
+        }
+        """
+
   Rule: A tap opens a document
 
     Scenario: A Loader shows the document

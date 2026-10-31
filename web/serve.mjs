@@ -7,7 +7,7 @@
 //
 //   node web/serve.mjs <the assembled app's directory> [port]
 
-import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createServer as createHttp } from "node:http";
 import { dirname, extname, join, normalize } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -69,11 +69,17 @@ export function forQmlc(files, aliases = []) {
   return shown;
 }
 
-export async function start({ app, port = 0 }) {
+// `record` keeps every error the compiler answers, for a runner that reads
+// them; a person's server, typing into a refused compile, keeps none.
+export async function start({ app, port = 0, record = false }) {
   process.env.VITE_CONFIG_NATIVE_IGNORE_WARNING = "true";
   // Vite and the plugin, from the checkout the app's `node_modules` links to.
   const { createServer: createVite } = await import(pathToFileURL(join(app, "node_modules/vite/dist/node/index.js")).href);
   const projects = join(app, "projects");
+  // The app's vite.config.js gives `--root` only to files under this
+  // directory, not to any path that has `projects/<n>` in it. Vite hands it
+  // real paths, so a checkout reached through a link is named by its real one.
+  process.env.STUDIO_PREVIEW_PROJECTS = join(realpathSync(app), "projects");
   const vite = await createVite({
     configFile: join(app, "vite.config.js"),
     root: app,
@@ -90,6 +96,7 @@ export async function start({ app, port = 0 }) {
   });
 
   let compiles = 0;
+  const compiled = [];
   const compile = async ({ files, entry, aliases = [] }) => {
     if (typeof files !== "object" || !Object.keys(files).every(inside) || !inside(entry)) {
       return { status: 400, answer: { error: "a file's path must be relative, and inside the project" } };
@@ -113,7 +120,9 @@ export async function start({ app, port = 0 }) {
         await vite.transformRequest(`/projects/${n}/${path}`);
       }
     } catch (e) {
-      return { status: 200, answer: { error: String(e?.message ?? e).split(dir + "/").join("") } };
+      const error = String(e?.message ?? e).split(dir + "/").join("");
+      if (record) compiled.push(error);
+      return { status: 200, answer: { error } };
     }
     return { status: 200, answer: { url: `/preview/projects/${n}/${entry}?import` } };
   };
@@ -156,6 +165,9 @@ export async function start({ app, port = 0 }) {
   port = server.address().port;
   return {
     url: `http://${HOST}:${port}/`,
+    // Every compile error answered, for a runner to tell why a frame is
+    // empty.
+    compiled,
     async stop() {
       server.close();
       await vite.close();
