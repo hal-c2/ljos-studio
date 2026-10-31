@@ -421,7 +421,7 @@ Feature: Tokens are read and set in the project's theme file
       And the file "theme.json" does not exist
 
     @disk
-    Scenario: A theme file that is a link is the theme named, not one found from where it leads
+    Scenario: A theme file that is a link to another name is refused, never aimed at another theme
       Given the file "shared/tokens.json":
         """json
         {"Spacing": {"md": 8}}
@@ -431,8 +431,12 @@ Feature: Tokens are read and set in the project's theme file
         """json
         {"doc": "app/theme.json", "token": "Spacing.md", "value": 24}
         """
-      Then the answer's "/file" is "app/theme.json"
+      Then the agent is refused with "path_denied"
       And the file "theme.json" does not exist
+      And the file "shared/tokens.json" is:
+        """json
+        {"Spacing": {"md": 8}}
+        """
 
     @disk
     Scenario: A document that is a link out of the project, in a directory, has no theme either
