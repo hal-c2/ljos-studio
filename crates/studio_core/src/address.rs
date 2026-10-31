@@ -23,7 +23,7 @@ use serde::{Deserialize, Serialize};
 use crate::outline::Node;
 
 /// How a caller names an object.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Address {
     /// A handle the session gave out (`n7`); stable for the session.
@@ -33,6 +33,28 @@ pub enum Address {
     /// A path as `document_tree` prints it (`root/0/contentItem:`), true of
     /// the current text only.
     Path(String),
+}
+
+// Written out: a dozen tools take an address and a `oneOf` of three objects
+// costs each of them a kilobyte of the list.
+impl schemars::JsonSchema for Address {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "Address".into()
+    }
+
+    fn json_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        schemars::json_schema!({
+            "description": "One of: `node`, a handle the session gave out (`n7`), stable for the session; `id`, the object's `id`; `path`, as `document_tree` prints it (`root/0/contentItem:`), true of the current text only.",
+            "type": "object",
+            "properties": {
+                "node": {"type": "string"},
+                "id": {"type": "string"},
+                "path": {"type": "string"}
+            },
+            "minProperties": 1,
+            "maxProperties": 1
+        })
+    }
 }
 
 /// What an edit Studio made did to paths.

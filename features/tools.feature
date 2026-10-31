@@ -28,6 +28,10 @@ Feature: Studio's tools and who may use them
     Given the studio tools are connected with the capabilities "inspect, mutate, fs"
     Then the agent is offered the tools "project_open, document_tree, document_text, document_new, document_edit, node_find, node_select, node_inspect, blocks_list, node_insert, node_move, node_remove, property_set, binding_set, state_edit, slot_contribute, history, theme_set, node_arrange, preview_screenshot, preview_events, export, review"
 
+  Scenario: The list of tools fits one answer
+    Given the studio tools are connected with the capabilities "inspect, mutate, fs, run"
+    Then the list of tools is at most 40960 bytes
+
   Scenario: A reader cannot change a document
     Given the file "Main.qml":
       """qml

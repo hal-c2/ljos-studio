@@ -13,51 +13,23 @@ expression: value
   "inputSchema": {
     "$defs": {
       "Address": {
-        "description": "How a caller names an object.",
-        "oneOf": [
-          {
-            "additionalProperties": false,
-            "description": "A handle the session gave out (`n7`); stable for the session.",
-            "properties": {
-              "node": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "node"
-            ],
-            "type": "object"
+        "description": "One of: `node`, a handle the session gave out (`n7`), stable for the session; `id`, the object's `id`; `path`, as `document_tree` prints it (`root/0/contentItem:`), true of the current text only.",
+        "maxProperties": 1,
+        "minProperties": 1,
+        "properties": {
+          "id": {
+            "type": "string"
           },
-          {
-            "additionalProperties": false,
-            "description": "The object's `id` in the document.",
-            "properties": {
-              "id": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "id"
-            ],
-            "type": "object"
+          "node": {
+            "type": "string"
           },
-          {
-            "additionalProperties": false,
-            "description": "A path as `document_tree` prints it (`root/0/contentItem:`), true of\nthe current text only.",
-            "properties": {
-              "path": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "path"
-            ],
-            "type": "object"
+          "path": {
+            "type": "string"
           }
-        ]
+        },
+        "type": "object"
       }
     },
-    "additionalProperties": false,
     "properties": {
       "doc": {
         "type": "string"
@@ -68,8 +40,6 @@ expression: value
       },
       "generation": {
         "description": "The generation read; refused if the document moved on. Needed when\nan address is a `path`, which is true of one generation only.",
-        "format": "uint64",
-        "minimum": 0,
         "type": [
           "integer",
           "null"
@@ -83,79 +53,40 @@ expression: value
       "doc",
       "node"
     ],
-    "title": "RemoveArgs",
     "type": "object"
   },
   "max_result_bytes": 40960,
   "name": "node_remove",
   "outputSchema": {
-    "$defs": {
-      "ChangeOut": {
-        "properties": {
-          "end": {
-            "format": "uint",
-            "minimum": 0,
-            "type": "integer"
-          },
-          "start": {
-            "description": "Byte range of the text before the edit.",
-            "format": "uint",
-            "minimum": 0,
-            "type": "integer"
-          },
-          "text": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "start",
-          "end",
-          "text"
-        ],
-        "type": "object"
-      }
-    },
     "properties": {
       "changes": {
-        "items": {
-          "$ref": "#/$defs/ChangeOut"
-        },
         "type": "array"
       },
       "doc": {
         "type": "string"
       },
       "generation": {
-        "description": "The document's generation now; pass it with the next edit.",
-        "format": "uint64",
-        "minimum": 0,
         "type": "integer"
       },
       "history": {
-        "description": "The history entry; absent for a dry run or an unchanged document.",
-        "format": "uint64",
-        "minimum": 0,
         "type": [
           "integer",
           "null"
         ]
       },
       "node": {
-        "description": "The handle of the object put or moved.",
         "type": [
           "string",
           "null"
         ]
       },
       "text": {
-        "description": "The text the edit would give, for a dry run.",
         "type": [
           "string",
           "null"
         ]
       },
       "unchanged": {
-        "description": "The document already said this: nothing was written and no history\nentry made.",
         "type": "boolean"
       }
     },
@@ -165,7 +96,6 @@ expression: value
       "changes",
       "unchanged"
     ],
-    "title": "EditOut",
     "type": "object"
   },
   "required_cap": "mutate"

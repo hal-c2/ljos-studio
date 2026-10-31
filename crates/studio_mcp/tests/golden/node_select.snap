@@ -13,58 +13,28 @@ expression: value
   "inputSchema": {
     "$defs": {
       "Address": {
-        "description": "How a caller names an object.",
-        "oneOf": [
-          {
-            "additionalProperties": false,
-            "description": "A handle the session gave out (`n7`); stable for the session.",
-            "properties": {
-              "node": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "node"
-            ],
-            "type": "object"
+        "description": "One of: `node`, a handle the session gave out (`n7`), stable for the session; `id`, the object's `id`; `path`, as `document_tree` prints it (`root/0/contentItem:`), true of the current text only.",
+        "maxProperties": 1,
+        "minProperties": 1,
+        "properties": {
+          "id": {
+            "type": "string"
           },
-          {
-            "additionalProperties": false,
-            "description": "The object's `id` in the document.",
-            "properties": {
-              "id": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "id"
-            ],
-            "type": "object"
+          "node": {
+            "type": "string"
           },
-          {
-            "additionalProperties": false,
-            "description": "A path as `document_tree` prints it (`root/0/contentItem:`), true of\nthe current text only.",
-            "properties": {
-              "path": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "path"
-            ],
-            "type": "object"
+          "path": {
+            "type": "string"
           }
-        ]
+        },
+        "type": "object"
       },
       "Point": {
-        "additionalProperties": false,
         "properties": {
           "x": {
-            "format": "double",
             "type": "number"
           },
           "y": {
-            "format": "double",
             "type": "number"
           }
         },
@@ -75,7 +45,6 @@ expression: value
         "type": "object"
       }
     },
-    "additionalProperties": false,
     "properties": {
       "add": {
         "default": false,
@@ -108,55 +77,19 @@ expression: value
     "required": [
       "doc"
     ],
-    "title": "SelectArgs",
     "type": "object"
   },
   "max_result_bytes": 40960,
   "name": "node_select",
   "outputSchema": {
-    "$defs": {
-      "Found": {
-        "properties": {
-          "doc": {
-            "type": "string"
-          },
-          "id": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "node": {
-            "type": "string"
-          },
-          "path": {
-            "type": "string"
-          },
-          "type": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "doc",
-          "node",
-          "path",
-          "type"
-        ],
-        "type": "object"
-      }
-    },
     "properties": {
       "selection": {
-        "items": {
-          "$ref": "#/$defs/Found"
-        },
         "type": "array"
       }
     },
     "required": [
       "selection"
     ],
-    "title": "Selection",
     "type": "object"
   },
   "required_cap": "inspect"

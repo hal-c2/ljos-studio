@@ -11,14 +11,11 @@ expression: value
   },
   "description": "A document's text or a byte range of it, with its generation and whether it parses.",
   "inputSchema": {
-    "additionalProperties": false,
     "properties": {
       "doc": {
         "type": "string"
       },
       "end": {
-        "format": "uint",
-        "minimum": 0,
         "type": [
           "integer",
           "null"
@@ -26,8 +23,6 @@ expression: value
       },
       "start": {
         "description": "Byte offsets; the whole text when left out.",
-        "format": "uint",
-        "minimum": 0,
         "type": [
           "integer",
           "null"
@@ -37,7 +32,6 @@ expression: value
     "required": [
       "doc"
     ],
-    "title": "TextArgs",
     "type": "object"
   },
   "max_result_bytes": 40960,
@@ -48,22 +42,15 @@ expression: value
         "type": "string"
       },
       "end": {
-        "format": "uint",
-        "minimum": 0,
         "type": "integer"
       },
       "generation": {
-        "format": "uint64",
-        "minimum": 0,
         "type": "integer"
       },
       "parses": {
-        "description": "Whether the whole document parses; structural edits wait until it does.",
         "type": "boolean"
       },
       "start": {
-        "format": "uint",
-        "minimum": 0,
         "type": "integer"
       },
       "text": {
@@ -78,7 +65,6 @@ expression: value
       "text",
       "parses"
     ],
-    "title": "Text",
     "type": "object"
   },
   "required_cap": "inspect"

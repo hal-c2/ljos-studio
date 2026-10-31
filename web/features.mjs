@@ -465,6 +465,10 @@ const STEPS = [
     const got = (await w.server()).tools().map((t) => t.name);
     if (!equal(got, list(names))) throw new Error(`offered ${JSON.stringify(got)}`);
   }),
+  step("then", /^the list of tools is at most (\d+) bytes$/, async (w, s, cap) => {
+    const bytes = JSON.stringify({ tools: (await w.server()).tools() }).length;
+    if (bytes > Number(cap)) throw new Error(`the list is ${bytes} bytes`);
+  }),
   // Browser storage's own (`@web`): the native store is a directory.
   step("given", /^storage refuses to keep "([^"]+)"$/, (w, s, name) => {
     const write = w.backend.write;

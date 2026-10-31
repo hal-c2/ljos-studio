@@ -49,7 +49,7 @@ documents: export), `run` (start previews). They are granted at launch with
 | 17 | `history` | List, undo or redo edits (each with its inverse changes) | inspect to list; mutate to undo or redo |
 | 18 | `theme_set` | Read the tokens (`Ljos.Design` roles and the theme file, light and dark), or set one; the preview reloads live | mutate |
 | 19 | `preview_open` | Start a preview of a shell on a target (desktop, tablet, phone) or size with live or mocked state; on the open one, change size or state in place | run |
-| 20 | `preview_state` | Read an object's state and a block's published state in the preview; set it when the block is mocked; click first | run |
+| 20 | `preview_state` | Read an object's state and a block's published state in the preview; set it when the block is mocked; hold an object in a state of its own (`show`); click first | run |
 | 21 | `preview_screenshot` | A PNG of the preview (≤ 1280 px), or its outline as text | inspect |
 | 22 | `preview_events` | Since a cursor: opened, reloaded (with ms), reload failed, logs, ended | inspect |
 | 23 | `export` | Write a bundle that `ljos run` starts (`native`) or that ljos-web builds a site from (`web`): the project's QML, theme, assets and own modules with a manifest, never mocks or `.studio/` | fs |

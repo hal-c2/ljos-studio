@@ -4,6 +4,7 @@
 
 use std::sync::{Arc, Mutex};
 
+use crate::schema::Answers;
 use ljos_mcp_core::{
     CallCtx, Cap, SurfaceError, ToolAnnotations, ToolDef, ToolRegistry, denied, typed,
 };
@@ -179,7 +180,7 @@ pub(crate) fn add(registry: ToolRegistry, studio: &Arc<Mutex<Studio>>) -> ToolRe
              the QML: add, reply, resolve, reopen, or list by doc and node. A comment follows its \
              object through edits; one whose object is removed stays, orphaned, at its last place.",
         )
-        .output::<ReviewOut>()
+        .answers::<ReviewOut>()
         .requires(Cap::Inspect)
         .annotated(ToolAnnotations {
             read_only: false,

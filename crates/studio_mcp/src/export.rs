@@ -23,6 +23,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 
+use crate::schema::Answers;
 use ljos_blocks::read_qmldir;
 use ljos_mcp_core::{Cap, ErrorCode, SurfaceError, ToolAnnotations, ToolDef, ToolRegistry, typed};
 use schemars::JsonSchema;
@@ -1031,7 +1032,7 @@ pub(crate) fn add(registry: ToolRegistry, studio: &Arc<Mutex<Studio>>) -> ToolRe
              `ljos run` starts it. `web`: `ljos-site.json` says what ljos-web builds a site \
              from. `dry_run` writes nothing.",
         )
-        .output::<ExportOut>()
+        .answers::<ExportOut>()
         .requires(Cap::Fs)
         .annotated(ToolAnnotations {
             read_only: false,

@@ -14,6 +14,7 @@ mod place_tools;
 pub mod preview;
 mod preview_tools;
 mod review;
+pub mod schema;
 pub mod signals;
 pub mod timer;
 pub mod toolkit;

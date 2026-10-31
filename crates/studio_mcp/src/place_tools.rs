@@ -5,6 +5,7 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
+use crate::schema::Answers;
 use ljos_mcp_core::{CallCtx, Cap, ErrorCode, SurfaceError, ToolDef, ToolRegistry, denied, typed};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -652,7 +653,7 @@ pub(crate) fn add(registry: ToolRegistry, studio: &Arc<Mutex<Studio>>) -> ToolRe
              margins, Layout.preferred*); refused `arranged` or `anchored` where overridden. \
              `align`, `copy`, `paste`, `duplicate`.",
         )
-        .output::<ArrangeOut>()
+        .answers::<ArrangeOut>()
         .requires(Cap::Inspect)
         .annotated(MUTATE),
         typed(move |ctx: &CallCtx, a: ArrangeArgs| {

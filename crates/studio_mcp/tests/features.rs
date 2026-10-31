@@ -122,10 +122,9 @@ impl StudioWorld {
             Err(e) => (Err(e), Vec::new()),
         };
         // A refusal is an error result, which the output schema does not cover.
-        let output = server.tools().all().find(|d| d.name == tool);
-        if let (Ok(answer), Some(output)) = (&out, output.and_then(|d| d.output_schema.as_deref()))
-        {
-            let broken = schema::validate(&Value::Object(output.clone()), answer);
+        // The whole shape: the one the list advertises is only its fields.
+        if let (Ok(answer), Some(output)) = (&out, studio_mcp::schema::answer_schema(tool)) {
+            let broken = schema::validate(&output, answer);
             if !broken.is_empty() {
                 let broken: Vec<String> = broken.iter().map(ToString::to_string).collect();
                 return Err(format!(
@@ -795,6 +794,31 @@ fn offered(w: &mut StudioWorld, names: String) -> StepResult {
     (got == want)
         .then_some(())
         .ok_or_else(|| format!("offered {got:?}"))
+}
+
+// As `tools/list` writes each tool; the listing is one answer and is paid for
+// by every session.
+#[then(regex = r#"^the list of tools is at most (\d+) bytes$"#)]
+fn list_within(w: &mut StudioWorld, cap: usize) -> StepResult {
+    let caps = w.caps;
+    let tools: Vec<Value> = w
+        .server()?
+        .tools()
+        .visible(caps)
+        .map(|d| {
+            json!({
+                "name": d.name,
+                "description": d.description,
+                "annotations": d.annotations,
+                "inputSchema": &*d.input_schema,
+                "outputSchema": d.output_schema.as_deref(),
+            })
+        })
+        .collect();
+    let bytes = json!({ "tools": tools }).to_string().len();
+    (bytes <= cap)
+        .then_some(())
+        .ok_or_else(|| format!("the list is {bytes} bytes"))
 }
 
 /// A reload Studio reported, applied or not.

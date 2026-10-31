@@ -11,7 +11,6 @@ expression: value
   },
   "description": "A document's objects in order: handle, path, type, id, bindings. Grouped properties are bindings (`font.bold`), not objects. Paginated by `cursor`.",
   "inputSchema": {
-    "additionalProperties": false,
     "properties": {
       "cursor": {
         "description": "From a previous page's `next`.",
@@ -25,8 +24,6 @@ expression: value
       },
       "limit": {
         "description": "At most this many objects (default 200).",
-        "format": "uint",
-        "minimum": 0,
         "type": [
           "integer",
           "null"
@@ -36,68 +33,16 @@ expression: value
     "required": [
       "doc"
     ],
-    "title": "TreeArgs",
     "type": "object"
   },
   "max_result_bytes": 40960,
   "name": "document_tree",
   "outputSchema": {
-    "$defs": {
-      "TreeNode": {
-        "properties": {
-          "bindings": {
-            "description": "`name: value` as written, groups dotted (`font.bold`).",
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
-          },
-          "depth": {
-            "format": "uint",
-            "minimum": 0,
-            "type": "integer"
-          },
-          "id": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "line": {
-            "format": "uint",
-            "minimum": 0,
-            "type": "integer"
-          },
-          "node": {
-            "description": "The object's handle: stays true across edits.",
-            "type": "string"
-          },
-          "path": {
-            "description": "True of this generation only.",
-            "type": "string"
-          },
-          "type": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "node",
-          "path",
-          "type",
-          "depth",
-          "line",
-          "bindings"
-        ],
-        "type": "object"
-      }
-    },
     "properties": {
       "doc": {
         "type": "string"
       },
       "generation": {
-        "format": "uint64",
-        "minimum": 0,
         "type": "integer"
       },
       "next": {
@@ -107,9 +52,6 @@ expression: value
         ]
       },
       "nodes": {
-        "items": {
-          "$ref": "#/$defs/TreeNode"
-        },
         "type": "array"
       }
     },
@@ -118,7 +60,6 @@ expression: value
       "generation",
       "nodes"
     ],
-    "title": "Tree",
     "type": "object"
   },
   "required_cap": "inspect"

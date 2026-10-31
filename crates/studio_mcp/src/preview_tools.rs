@@ -7,6 +7,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 
+use crate::schema::Answers;
 use ljos_mcp_core::{
     Cap, ErrorCode, SurfaceError, ToolAnnotations, ToolDef, ToolRegistry, ToolReply, typed,
 };
@@ -649,7 +650,7 @@ pub(crate) fn add(registry: ToolRegistry, studio: &Arc<Mutex<Studio>>) -> ToolRe
                  live blocks or the project's mock modules. On the open preview it changes size or \
                  state in place, keeping the app's state. Edits show in it at once.",
             )
-            .output::<OpenOut>()
+            .answers::<OpenOut>()
             .requires(Cap::Run)
             .annotated(ToolAnnotations::WRITE),
             typed({
@@ -664,7 +665,7 @@ pub(crate) fn add(registry: ToolRegistry, studio: &Arc<Mutex<Studio>>) -> ToolRe
                  state, which `set` assigns when the block is mocked. `click` or `click_at` clicks \
                  first, as a person does, so a flow plays. Objects are found by `id`.",
             )
-            .output::<StateOut>()
+            .answers::<StateOut>()
             .requires(Cap::Run)
             .annotated(ToolAnnotations::WRITE),
             typed({
@@ -678,7 +679,7 @@ pub(crate) fn add(registry: ToolRegistry, studio: &Arc<Mutex<Studio>>) -> ToolRe
                 "What the preview shows: a PNG at most `max_size` pixels on its longest side \
                  (default 800), or with `format: \"outline\"` its items as text, one per line.",
             )
-            .output::<ScreenshotOut>()
+            .answers::<ScreenshotOut>()
             .requires(Cap::Inspect)
             .annotated(ToolAnnotations::READ_ONLY),
             typed({
@@ -692,7 +693,7 @@ pub(crate) fn add(registry: ToolRegistry, studio: &Arc<Mutex<Studio>>) -> ToolRe
                 "What happened to the preview since a cursor: opened, reloaded (with ms), \
                  reload_failed (the last good one stays), log lines, ended.",
             )
-            .output::<EventsOut>()
+            .answers::<EventsOut>()
             .requires(Cap::Inspect)
             .annotated(ToolAnnotations::READ_ONLY),
             typed({
