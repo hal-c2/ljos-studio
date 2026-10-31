@@ -1018,20 +1018,25 @@ path out of the bundle, an import nobody provides or the manifest does not
 say, a module without its qmldir, another version or target, Studio's files,
 types in Rust, a commit that is not one, a link) and sees each refused.
 
-**Refused for the web**, in this order after the native ones (entry,
-`syntax`, `native_types`, `mocked_only`): `unsupported` with
-`no_web_face`, its `modules` and the `docs` that import them, for a module
-that is neither the project's own nor one ljos-web provides. That covers
-`Ljos.Blocks` shells, `Ljos.Models`, a module only an installed plugin
-gives, and a typo. Before that, `unsupported` with `linked_module` (its
-`module`, its `qmldir` and the copy `through` the link), for a link to a
-directory that declares a module: the site would hold the module twice and
-its builder, which finds modules by their qmldirs, would pick one; natively
-it stays a link. `native_types` says for the web that types written in Rust
-have no face there (request 33). Then `unsupported` with `links_multiply`, for links
-that lead into the same directories along so many ways that the site would
-copy more than 10,000 files and directories through them, even directories
-that hold only more links.
+**Refused for the web**, in the order the checks run, the native ones
+among them:
+
+1. `unsupported` with `links_multiply`, before anything is read: links
+   that lead into the same directories along so many ways that the site
+   would copy more than 10,000 files and directories through them, even
+   directories that hold only more links.
+2. The native entry, `syntax` and `native_types` checks. For the web,
+   `native_types` says that types written in Rust have no face there
+   (request 33).
+3. `unsupported` with `linked_module` (its `module`, its `qmldir` and the
+   copy `through` the link): a link to a directory that declares a module.
+   The site would hold the module twice, and its builder, which finds
+   modules by their qmldirs, would pick one. Natively it stays a link.
+4. The native `mocked_only`.
+5. `unsupported` with `no_web_face`, its `modules` and the `docs` that
+   import them: a module that is neither the project's own nor one ljos-web
+   provides. That covers `Ljos.Blocks` shells, `Ljos.Models`, a module
+   only an installed plugin gives, and a typo.
 
 DECISION: the web export reuses the native one's walk and checks, and adds
 to its manifest rather than forking it; `run` is native's alone, and
