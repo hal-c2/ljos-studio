@@ -2143,6 +2143,17 @@ fn enters_colour(w: &mut UiWorld, value: String) -> StepResult {
     window.enter(&field, &value)
 }
 
+#[then(regex = r#"^the colour picker holds "([^"]+)"$"#)]
+fn picker_holds(w: &mut UiWorld, want: String) -> StepResult {
+    let tree = w.window()?.tree();
+    let field = find(&tree, &|n| n.name == "Colour" && n.key.is_some())
+        .cloned()
+        .ok_or_else(|| format!("no colour field; the window holds {}", names(&tree)))?;
+    (field.value == want)
+        .then_some(())
+        .ok_or_else(|| format!("the colour picker holds {:?}", field.value))
+}
+
 #[then(regex = r#"^the layers panel lists "([^"]*)"$"#)]
 fn layers_list(w: &mut UiWorld, want: String) -> StepResult {
     let window = w.window()?;

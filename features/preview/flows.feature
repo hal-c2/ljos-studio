@@ -175,3 +175,10 @@ Feature: The preview plays a prototype's flow
       {"set": {"playing": true}, "click_at": {"x": 50, "y": 150}}
       """
     Then the agent is refused with "invalid_argument"
+
+  Scenario: Any property of an object is read as the running app has it
+    When the agent calls the tool "preview_state" with:
+      """json
+      {"node": {"id": "title"}, "read": ["text"]}
+      """
+    Then the answer's "/state/text" is "Overview"
