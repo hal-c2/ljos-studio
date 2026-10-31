@@ -23,18 +23,18 @@ view itself loses work.
 
 ## Top ten
 
-| # | ID | Rank | Where | Title |
-|---|---|---|---|---|
-| 1 | D1 | blocker | window | The canvas has no direct manipulation: a drag pans the frame, nothing moves or resizes |
-| 2 | D2 | blocker | window | Typing in the code view replaces the whole selected node |
-| 3 | D3 | blocker | window | No "New document": an empty project cannot be started in the window |
-| 4 | D4 | blocker | window | Play mode's canvas picture goes stale after the first navigation |
-| 5 | D5 | major | window | The palette offers only the project's blocks, no Rectangle, Text, Row or control |
-| 6 | D6 | major | window | The canvas clips the frame instead of fitting it: half of a phone, a third of a desktop |
-| 7 | D7 | major | window | A state's `when` and its changes cannot be set in the States panel |
-| 8 | D8 | major | MCP | `tools/list` answers 62 KB, past the 40 KB cap |
-| 9 | D9 | major | both | A killed Studio leaves its preview process running |
-| 10 | D10 | major | window | Undo in the code view is one keystroke at a time |
+| # | ID | Rank | Where | Title | Now |
+|---|---|---|---|---|---|
+| 1 | D1 | blocker | window | The canvas has no direct manipulation: a drag pans the frame, nothing moves or resizes | fixed, bf87faa, a561a39 |
+| 2 | D2 | blocker | window | Typing in the code view replaces the whole selected node | fixed, 53783be |
+| 3 | D3 | blocker | window | No "New document": an empty project cannot be started in the window | fixed, c94eeb7 |
+| 4 | D4 | blocker | window | Play mode's canvas picture goes stale after the first navigation | fixed, d553611 |
+| 5 | D5 | major | window | The palette offers only the project's blocks, no Rectangle, Text, Row or control | fixed, 7ade037 |
+| 6 | D6 | major | window | The canvas clips the frame instead of fitting it: half of a phone, a third of a desktop | fixed, a561a39 |
+| 7 | D7 | major | window | A state's `when` and its changes cannot be set in the States panel | fixed, 5569e87 |
+| 8 | D8 | major | MCP | `tools/list` answers 62 KB, past the 40 KB cap | fixed, c2608d2 |
+| 9 | D9 | major | both | A killed Studio leaves its preview process running | fixed, 575f69f |
+| 10 | D10 | major | window | Undo in the code view is one keystroke at a time | fixed, 7ca16e4 |
 
 ## Items
 
@@ -57,6 +57,7 @@ view itself loses work.
   section 6 of DESIGN.md says. Owner: Studio, `studio_blocks` canvas
   (`Canvas.qml`) over the existing `node_with`/selection seam; the drop
   becomes a `binding_set` on `x`/`y`/`width`/`height` or an anchor margin.
+- **Fixed** (bf87faa, a561a39): One tool, `node_arrange`, places, aligns and copies; the window draws an outline, eight handles, a ghost and guides, and drops one edit. In a Layout a move reorders and a resize writes `Layout.preferred*`; an `anchors.fill` object says it cannot move. Remains: canvas edits while recording a state write base values (D7), no rubber-band select, no group resize, no geometry on the web host.
 
 #### D2. Typing in the code view replaces the whole selected node
 
@@ -70,6 +71,7 @@ view itself loses work.
 - **Fix:** show the selected range with a highlight, not a text selection,
   and put the caret at the range's start. Owner: Studio, the code view block
   (`studio_blocks`) and the selection seam that sets its cursor.
+- **Fixed** (53783be): A full-width band marks the selection; typing inserts at the caret.
 
 #### D3. No "New document"
 
@@ -82,6 +84,7 @@ view itself loses work.
 - **Fix:** a New button in Documents that calls `document_new` (name, root
   type), and an empty project that opens with one. Owner: Studio, Documents
   block plus `studio_core` (the tool exists already).
+- **Fixed** (c94eeb7): The Documents panel has New; a window on a directory with nothing in it opens with `Main.qml`. `--mcp` never creates one. Remains: a window on an agent's empty workspace writes that `Main.qml`, and the agent's own `document_new Main.qml` is then refused.
 
 #### D4. Play mode's canvas picture goes stale
 
@@ -97,6 +100,7 @@ view itself loses work.
   only after an edit. Owner: Studio, the preview client in `studio_core`;
   Ljós may need to say when it is at rest after input, not only after a
   reload (request 3).
+- **Fixed** (d553611): Cause: nothing asked for a new picture after a click, since a click makes no new generation. A click now looks again every 100 ms, up to 30 looks, stopping after 3 unchanged. Remains: a continuous animation goes stale after the bound, until Ljós request 3 says when the preview is at rest.
 
 ### Major
 
@@ -113,6 +117,7 @@ view itself loses work.
   already reads for the inspector), grouped by module, with a search field.
   Owner: Studio, Palette block; the list comes from `studio_core`'s types
   seam.
+- **Fixed** (7ade037): The palette offers the toolkit's types by module, with a search. Remains: some non-visual types are offered too.
 
 #### D6. The canvas clips the frame instead of fitting it
 
@@ -126,6 +131,7 @@ view itself loses work.
 - **Fix:** fit the frame to the canvas by default, with zoom (Ctrl+wheel,
   Ctrl+0 fit, Ctrl+1 100 %). Owner: Studio, `Canvas.qml` (a scale on the
   picture; hit testing divides by it).
+- **Fixed** (a561a39): The frame fits the panel until a zoom is picked: Fit, 100 %, Ctrl+wheel, Ctrl+0, Ctrl+1, Ctrl+=, Ctrl+-.
 
 #### D7. A state's `when` and its changes cannot be set in the States panel
 
@@ -138,6 +144,7 @@ view itself loses work.
 - **Fix:** a state row that, when entered, records inspector edits as
   `PropertyChanges`, and a "when" field with the breakpoint presets the MCP
   tool already has. Owner: Studio, States block over `state_edit`.
+- **Fixed** (5569e87): `when` and presets already existed; the gap was recording and seeing a state. Pick a state and edits go into it, and `preview_state.show` shows it. Remains: a canvas drag while recording writes the base value, and the state's override then hides it.
 
 #### D8. `tools/list` answers 62 KB
 
@@ -149,6 +156,7 @@ view itself loses work.
   schemas' own descriptions or a `help` resource; or split tools by
   capability so a session with `inspect` only lists those. Owner: Studio,
   `studio_mcp` tool table.
+- **Fixed** (c2608d2): 37 585 bytes, under the 40 KB cap. Answer schemas list fields and types only.
 
 #### D9. A killed Studio leaves its preview process running
 
@@ -162,6 +170,7 @@ view itself loses work.
   the child a way to notice its parent is gone: a pipe on its stdin (now
   `Stdio::null()`) that Ljós watches. Owner: Studio, `studio_preview`
   (`NativeHost::start`); Ljós, request 4.
+- **Fixed** (575f69f): SIGTERM and SIGINT close the preview within 2 s. Remains: SIGKILL, which only the child can notice (Ljós request 4).
 
 #### D10. Undo in the code view is one keystroke at a time
 
@@ -171,6 +180,7 @@ view itself loses work.
 - **Fix:** coalesce typing into one undo step per word or per pause (about
   a second), as text editors do. Owner: Studio, the undo stack in
   `studio_core` where code-view edits are recorded.
+- **Fixed** (7ca16e4): Typing is one undo step per word or pause, through the new `typing` argument; an agent's edits stay one step each.
 
 #### D11. The Documents list shows seven rows and no scroll bar
 
@@ -182,6 +192,7 @@ view itself loses work.
 - **Evidence:** `docs/dogfood/docs-clipped.png`.
 - **Fix:** a scroll bar, and a panel that takes the height it is given.
   Owner: Studio, Documents block.
+- **Fixed** (dff6a44, 1104057): A scroll bar shows when the list overflows and stays hidden when not.
 
 #### D12. The outline hides objects that are not accessible
 
@@ -194,6 +205,7 @@ view itself loses work.
 - **Fix:** an outline that includes every visible item with its type, id
   and geometry, not only the accessible ones. Owner: Ljós (request 2),
   since the outline comes from the preview.
+- **Open**: Ljós request 2.
 
 #### D13. The Layers panel cannot reorder, rename, hide or lock
 
@@ -206,6 +218,7 @@ view itself loses work.
 - **Fix:** drag-to-reorder (a `node_move`), a double-click to rename the
   id, eye and lock toggles that are Studio's own (not written into the
   file). Owner: Studio, Layers block.
+- **Open**: Move up and Move down only, plus reorder by dragging on the canvas in a Layout.
 
 #### D14. Basic controls do not follow `Colors.dark`
 
@@ -215,6 +228,7 @@ view itself loses work.
   dark; each control needed its `palette` set by hand.
 - **Fix:** Ljós request 1: the Basic style reads its palette from
   `Ljos.Design` when the module is imported.
+- **Open**: Ljós request 1.
 
 ### Minor
 
@@ -227,12 +241,14 @@ view itself loses work.
 - **Evidence:** `docs/dogfood/inspector-text.png`.
 - **Fix:** a swatch with a picker, a wider field, clear the row after Set,
   rows for declared properties. Owner: Studio, Inspector block.
+- **Partly fixed** (dff6a44): The property row empties once used. Remains: swatches and declared rows.
 
 #### D16. A file made outside Studio shows only after the next tool call
 
 - **Where:** both.
 - **Fix:** watch the project directory as the preview already watches
   files. Owner: Studio, `studio_core` project.
+- **Open**: Studio does not watch the project directory.
 
 #### D17. The first picture after a target switch is squeezed
 
@@ -242,6 +258,7 @@ view itself loses work.
 - **Evidence:** `docs/dogfood/preview-squeezed.png`.
 - **Fix:** drop pictures whose size is not the frame's. Owner: Studio,
   `Canvas.qml`.
+- **Fixed** (3d0faae): The real cause was wider than the first picture: a picture was fetched once per generation and a resize is not one, so the old size stayed squeezed until the next edit.
 
 #### D18. `node_insert` writes default ids and puts states first
 
@@ -252,6 +269,7 @@ view itself loses work.
 - **Fix:** an id only when the caller names one or a binding needs it;
   keep the file's spacing; put `states` and `transitions` last. Owner:
   Studio, `studio_core` edit formatting.
+- **Not changed**: DECISION: default ids are specified by existing scenarios and `preview_click` and state recording need them; agents can pass `id: false`. Where states go is what the `state_edit` scenarios specify.
 
 #### D19. `node_insert` cannot add a function or a signal handler
 
@@ -260,6 +278,7 @@ view itself loses work.
   refused; the agent wrote those in `document_new`'s text instead.
 - **Fix:** accept members in `node_insert`, or a `member_insert` tool.
   Owner: Studio, `studio_core`.
+- **Open**: `node_insert` still cannot add a function or a signal handler.
 
 #### D20. `JsonListModel` is read-only
 
@@ -268,6 +287,7 @@ view itself loses work.
   `ListModel`. A copy made synchronously in `onCountChanged` seemed to hang
   once under load; `Qt.callLater` did not.
 - **Fix:** Ljós request 5.
+- **Open**: Ljós request 5.
 
 #### D21. The window sometimes never paints
 
@@ -276,6 +296,7 @@ view itself loses work.
   window maps but is never drawn: the process sits in `epoll_wait` at 0 %
   CPU with a black window. Idle, six of six runs drew.
 - **Fix:** Ljós request 6.
+- **Open**: Ljós request 6.
 
 #### D23. `project_open` refused a path inside the workspace, and the build carried on
 
@@ -288,6 +309,23 @@ view itself loses work.
   because of `notes/EntryModel.qml`, a document of the other sample.
 - **Fix:** to be decided after finding why the path was refused. Owner:
   Studio, `studio_mcp` `project_open` and `export`'s choice of documents.
+- **Fixed** (9a5a3a6): Cause: the check for leaving the workspace looked at the path's parts, and a root is not a plain part, so any absolute path was called outside. An agent that carried on wrote into the project still open; the refusal now names it. It now takes an absolute path below the workspace. The agent's site was built again in a new directory: 40 calls, no failures.
+
+#### D24. A site's page did not size the entry's root on the web
+
+- **Where:** web export, found while checking D23's site.
+- **Happened:** the root kept its declared size, so a phone saw the corner
+  of a desktop page and no breakpoint state turned on.
+- **Fixed** (8b641c5): the page sizes the entry's root, as a window does.
+
+#### D25. `--shell` refused to start on a first run
+
+- **Where:** window, found while measuring.
+- **Happened:** with no Studio config directory yet, a window given `--shell`
+  stopped with "cannot watch": it watches the directory the theme file would
+  be in.
+- **Fixed** (e77f895): that directory is made first. Checked in the sandbox with
+  the directory removed. No scenario: it needs a window started as a process.
 
 #### D22. Studio's window is black with the default painter in the sandbox
 
@@ -295,6 +333,7 @@ view itself loses work.
 - **Happened:** with wgpu in the headless sway sandbox the window stays
   black; `LJOS_PAINTER=cpu` draws.
 - **Fix:** none in Studio; noted for anyone driving it off-screen.
+- **Open**: An environment matter; the sandbox uses `LJOS_PAINTER=gl`.
 
 ## What worked
 
@@ -313,13 +352,13 @@ whether the feature exists.
 
 | Feature | Answer | Items |
 |---|---|---|
-| Resize handles | no | D1 |
-| Snapping and guides | no | D1 |
-| Multi-select | no: never seen, not tried on purpose | D1 |
-| Align and distribute | no: never seen, not tried on purpose | D1 |
-| Nudge with arrow keys | not tried | |
-| Copy, paste, duplicate | partly: text in the code view; objects not tried | D2 |
-| Undo a person trusts | partly: inspector and paste yes, typing one key at a time | D10 |
+| Resize handles | yes | D1 fixed |
+| Snapping and guides | yes; Ctrl turns snapping off | D1 fixed |
+| Multi-select | yes: shift-click; no rubber-band, no group resize | D1 fixed |
+| Align and distribute | yes | D1 fixed |
+| Nudge with arrow keys | yes, once the canvas has focus; one undo step a press | D1 fixed |
+| Copy, paste, duplicate | yes, with Studio's own clipboard, not the system's | D1 fixed |
+| Undo a person trusts | yes: a drop is one step, typing one per word or pause | D10 fixed |
 | Layers: drag to reorder, rename, hide, lock | no: Move up and Move down only | D13 |
 | Inspector fields for Layouts, anchors, padding, margins | partly: plain text rows; no dedicated fields seen | D15 |
 | Image and asset import | not tried: neither sample has an image | |
@@ -336,46 +375,49 @@ LJOS=... budgets sample <copy>/site Main.qml "Rectangle root" width 40
 LJOS=... budgets sample <copy>/notes Main.qml "Rectangle root" width 40
 ```
 
-Studio and `budgets` are release builds. **The preview is a debug `ljos`**,
-the only one built, and other builds kept the load average at 11-20. Both
-push the picture numbers up by an amount not measured.
+Studio, `budgets` and the preview's `ljos` are all release builds, taken
+2026-10-31 at about 16:20 UTC. Before N2 the preview was a debug `ljos`, so the
+"was" figures are not a like-for-like comparison.
 
 | Path | Budget | Stock project | `samples/site` | `samples/notes` | Verdict |
 |---|---|---|---|---|---|
-| Drag, per pointer move, p50 / p95 / max | 16.7 ms (60 fps) | 17 / 29 / 147 us | 18 / 33 / 121 us | 18 / 30 / 139 us | not shown, see below |
-| Edit to canvas picture, p50 / p95 | 50 ms p95 | 158.1 / 234.5 ms | 258.7 / 264.9 ms | 230.8 / 236.6 ms | over |
-| Cold start, p50 / p95 | 1 s | 53.2 / 67.3 ms (200 files) | 52.7 / 60.7 ms | 49.3 / 60.1 ms | within |
-| Selection to inspector, p50 / p95 / max | 16 ms | 14.1 / 19.0 / 21.2 ms | | | p95 over |
-| Idle for 5 s | 0 % CPU | 0 ms CPU, 0 wakes | | | within |
+| Drag in the real window, frame interval p50 / p95 / max | 16.7 ms (60 fps) | 17 / 18 / 24 ms | | | about 59 fps, see below |
+| Edit to canvas picture, one per 250 ms, p50 / p95 / max | 50 ms p95 | 27.3 / 30.2 / 30.4 ms (was 158.1 / 234.5) | 35.7 / 40.8 / 45.0 ms (was 258.7 / 264.9) | 32.4 / 52.8 / 72.8 ms (was 230.8 / 236.6) | notes slightly over |
+| Edit to picture, back to back, p50 / p95 | | 25.1 / 1028.8 ms | | | the preview's call rate limit, see below |
+| Cold start, p50 / p95 | 1 s | 52.3 / 65.2 ms (200 files) | 59.4 / 60.2 ms | 53.6 / 57.9 ms | within |
+| Selection to inspector, p50 / p95 / max | 16 ms | 18.7 / 22.9 / 24.8 ms (was 14.1 / 19.0 / 21.2) | | | **over** |
+| Idle for 5 s | 0 % CPU | 0 ms CPU, 0 wakes, 0 frames | | | within |
+| Drag, engine work per pointer move, p50 / p95 / max | | 34 / 45 / 418 us | | | no paint in it |
 
-**The drag number does not show that the 60 fps budget is met.** It is the
-engine's work for a pointer move, on a stage with no painter, so egui's
-tessellation and the GPU are not in it. It also times the only drag there is,
-a pan: a node cannot be dragged (D1). Real frame time on a real window was not
-measured.
+**The drag.** Dragging `card0` 150 moves across a release window, in the
+desktop:cua sandbox with software GL (llvmpipe, a headless sway output). The
+figure is the wall-clock time between frames, read by a `FrameAnimation` in a
+private copy of the shell, in whole milliseconds. Over 613 frames (a median of 17 ms is about 59 fps)
+the slowest was 24 ms, so at least that one frame missed 16.7 ms. It is a
+cadence, not paint time: a frame's own paint shows only by pushing the next
+interval out. No real GPU was measured, and keeping a `FrameAnimation` running
+is itself continuous frames, which an ordinary drag does not have.
 
-**Edit to picture:** the three slowest edits of each sample spent 190-219 ms
-fetching the picture (46-81 KB) from the debug preview. The preview itself
-showed the change 23-32 ms after the save in those edits, so the fetch is the
-first thing to remeasure with a release `ljos`. One site edit took 563 ms, 303
-of it in the file rename, which is probably load.
+**Selection to inspector is over budget**, and worse than before D1: the
+measure runs until everything is at rest, which now includes the overlay's
+geometry read from the preview. No split of how long the inspector alone takes
+was measured.
 
-The MCP counts are from the logs' own runs, not the 13:27 round: notes 11:29, site 13:28, `tools/list` 11:19. Call counts and bytes do not depend on load, but a run before the rebase may differ.
+**Back to back edits:** the p95 is about a second of waiting for a picture,
+because the preview limits how often it is called. One edit per 250 ms does not
+hit that limit.
 
 | MCP, as an agent | Calls | Request bytes | Answer bytes |
 |---|---|---|---|
-| `samples/notes` | 34 | 17 409 | 37 421 (19 006 of it one raw screenshot) |
-| `samples/site` | 40, 2 failed (D23) | 18 246 | 18 964 (screenshot images not counted) |
-| `tools/list`, once per session | 1 | | 62 218 |
+| `samples/notes`, new directory, 2026-10-31 about 16:25 UTC | 32 (was 34), none failed | 17 261 (was 17 409) | 18 109 (was 37 421); images not counted |
+| `samples/site`, new directory | 40, none failed (was 2, D23) | 18 246 | 19 195 (screenshot images not counted) |
+| `tools/list`, once per session | 1, 25 tools | | 37 585 (was 62 218; cap 40 KB) |
 
 ## Not done
 
-- The site's export for the web and what `mise run export:web:check` runs:
-  the only `export` call was refused (D23), so no site was built or checked.
-- The window findings were not walked again on the rebased build; they come
-  from the earlier run's sessions and screenshots.
-- The agent's site build was not repeated in a clean project.
-- The site at phone and tablet was not confirmed. A standalone `ljos run` at
-  390 x 844 stayed black (D21), and an earlier phone frame in the canvas showed
-  nav links that `compact` should hide; whether that was the preview or the QML
-  is still open.
+- Real frame time on a real GPU. The drag above is software GL in the sandbox.
+- The window findings other than the items fixed here were not walked again.
+- A standalone `ljos run` at 390 x 844 stayed black (D21). On the web, `export:web:check`
+  passed with 3 files, 443 282 bytes (157 080 gzipped), first contentful paint
+  144.0 ms, and headless Chromium showed no errors at 390 x 844, 800 x 1100 and
+  1280 x 800.

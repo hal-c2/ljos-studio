@@ -20,7 +20,7 @@ Studio composes three servers rather than duplicating them:
 
 Budgets follow ARCHITECTURE.md section 19.6: tools listed in a fixed order,
 descriptions ≤ 300 characters, responses ≤ 40 KB with cursors, ≤ 25 tools
-on one server. Studio offers 24 tools. Capabilities as in section 19.7:
+on one server. Studio offers 25 tools. Capabilities as in section 19.7:
 `inspect` (read), `mutate` (edit documents), `fs` (write files outside
 documents: export), `run` (start previews). They are granted at launch with
 `--caps`: by default `inspect` on a running window's endpoint and
@@ -159,7 +159,7 @@ shows it; the watcher's quiet time is not on that path.
   app's own.
 - DECISION: `preview_screenshot {format: "outline"}` gives the preview's
   items as text (the inspector's outline) instead of a separate tool:
-  Studio's list of 24 stays within 25 tools.
+  Studio's list of 25 stays within 25 tools.
 - DECISION (phase 3): the native preview runs with the project's type
   dumps (every `ljostypes.json` in it, `--types`), so the types an app
   registers from Rust stand in with the members they declare and a shell
