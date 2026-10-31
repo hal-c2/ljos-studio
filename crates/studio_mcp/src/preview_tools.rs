@@ -331,6 +331,7 @@ fn open(studio: &Mutex<Studio>, a: OpenArgs) -> Result<OpenOut, SurfaceError> {
             clicks: 0,
             shown: None,
         });
+        previews.write_hidden();
     }
     Ok(OpenOut {
         doc: a.doc,
@@ -605,6 +606,11 @@ pub(crate) fn pick(
             declared.column as usize,
         )
         .map_err(error)?;
+    // A locked object is not to be taken by a click: what lies under it is
+    // what the person is after, and the preview names only the topmost.
+    if studio.locked.contains(&handle) {
+        return Ok(None);
+    }
     Ok(Some((declared.file, handle)))
 }
 

@@ -41,6 +41,11 @@ enum Action {
     Paste,
     Duplicate,
     Remove,
+    Rename,
+    Hide,
+    Show,
+    Lock,
+    Unlock,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -67,6 +72,8 @@ struct ArrangeArgs {
     align: Option<Align>,
     /// For `paste`, into any document. Ids it has are renamed.
     parent: Option<Address>,
+    /// For `rename`: the object's new `id`.
+    name: Option<String>,
     #[serde(default)]
     dry_run: bool,
 }
@@ -647,7 +654,15 @@ fn remove(studio: &mut Studio, a: &NodesArgs) -> Result<ManyOut, SurfaceError> {
 /// session's rule for a path is kept here: it is true of the text it was read
 /// from, and is refused on the generation alone, never rebased.
 fn check_paths(studio: &mut Studio, a: &ArrangeArgs) -> Result<(), SurfaceError> {
-    if matches!(a.action, Action::Geometry | Action::Copy) {
+    if matches!(
+        a.action,
+        Action::Geometry
+            | Action::Copy
+            | Action::Hide
+            | Action::Show
+            | Action::Lock
+            | Action::Unlock
+    ) {
         return Ok(());
     }
     let placed = a.places.iter().flatten().map(|p| &p.node);
@@ -685,6 +700,9 @@ fn needed<T>(field: Option<T>, name: &str, action: &str) -> Result<T, SurfaceErr
 
 fn arrange(studio: &mut Studio, a: ArrangeArgs) -> Result<ArrangeOut, SurfaceError> {
     check_paths(studio, &a)?;
+    if matches!(a.action, Action::Place | Action::Align | Action::Remove) {
+        check_unlocked(studio, &a)?;
+    }
     let doc = a.doc;
     let generation = a.generation;
     let nodes = a.nodes;
@@ -773,6 +791,37 @@ fn arrange(studio: &mut Studio, a: ArrangeArgs) -> Result<ArrangeOut, SurfaceErr
             )
             .map(many)
         }
+        Action::Rename => {
+            let name = needed(a.name, "name", "rename")?;
+            rename(studio, &doc, generation, &nodes, &name, a.dry_run)
+        }
+        Action::Hide | Action::Show => {
+            let objects = objects_with_ids(studio, &doc, &nodes)?;
+            let mut previews = crate::preview::lock(&studio.previews);
+            for (id, node) in objects {
+                if matches!(a.action, Action::Hide) {
+                    previews.hide(id);
+                } else {
+                    let written = node.bindings.iter().find(|b| b.name == "visible");
+                    previews.show(&id, written.is_none_or(|b| b.value.trim() != "false"));
+                }
+            }
+            drop(previews);
+            studio.watchers.tell();
+            Ok(ArrangeOut::default())
+        }
+        Action::Lock | Action::Unlock => {
+            for address in &nodes {
+                let (handle, _) = studio.session.resolve(&doc, address).map_err(error)?;
+                if matches!(a.action, Action::Lock) {
+                    studio.locked.insert(handle);
+                } else {
+                    studio.locked.remove(&handle);
+                }
+            }
+            studio.watchers.tell();
+            Ok(ArrangeOut::default())
+        }
         Action::Duplicate | Action::Remove => {
             let args = NodesArgs {
                 doc,
@@ -789,15 +838,113 @@ fn arrange(studio: &mut Studio, a: ArrangeArgs) -> Result<ArrangeOut, SurfaceErr
     }
 }
 
+/// Refused whoever asks: a lock that an agent's `place` walked through
+/// would protect nothing a person left it to protect.
+fn check_unlocked(studio: &mut Studio, a: &ArrangeArgs) -> Result<(), SurfaceError> {
+    if studio.locked.is_empty() {
+        return Ok(());
+    }
+    let placed = a.places.iter().flatten().map(|p| &p.node);
+    for address in a.nodes.iter().chain(placed) {
+        let (handle, _) = studio.session.resolve(&a.doc, address).map_err(error)?;
+        if studio.locked.contains(&handle) {
+            return Err(refused(
+                "locked",
+                format!("`{handle}` is locked: `unlock` it first"),
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// The preview finds an object by its `id`; one without has nothing to find.
+fn objects_with_ids(
+    studio: &mut Studio,
+    doc: &str,
+    nodes: &[Address],
+) -> Result<Vec<(String, Node)>, SurfaceError> {
+    let mut objects = Vec::new();
+    for address in nodes {
+        let (_, node) = studio.session.resolve(doc, address).map_err(error)?;
+        let Some(id) = node.id.clone() else {
+            return Err(refused(
+                "no_id",
+                format!(
+                    "this `{}` has no id for the preview to find it by: give it an id",
+                    node.ty
+                ),
+            ));
+        };
+        objects.push((id, node));
+    }
+    Ok(objects)
+}
+
+fn rename(
+    studio: &mut Studio,
+    doc: &str,
+    generation: Option<u64>,
+    nodes: &[Address],
+    name: &str,
+    dry_run: bool,
+) -> Result<ArrangeOut, SurfaceError> {
+    let [address] = nodes else {
+        return Err(refused("one_object", "`rename` names one object"));
+    };
+    let lowercase = name
+        .chars()
+        .next()
+        .is_some_and(|c| c.is_ascii_lowercase() || c == '_');
+    if !lowercase || !studio_core::flows::is_identifier(name) {
+        return Err(refused(
+            "not_an_id",
+            format!("`{name}` is not an id: an id is one word and starts lowercase"),
+        ));
+    }
+    if taken_ids(studio, doc)?.iter().any(|id| id == name) {
+        return Err(refused(
+            "id_taken",
+            format!("an object of `{doc}` already has the id `{name}`"),
+        ));
+    }
+    let (handle, node) = studio.session.resolve(doc, address).map_err(error)?;
+    let outcome = match &node.id {
+        Some(old) => {
+            // Nothing outside the file reads an id, so the file is all there is.
+            let text = studio.session.text(doc).map_err(error)?.0.to_owned();
+            let text = place::with_id_renamed(&text, old, name);
+            studio
+                .session
+                .replace_text(doc, generation, None, &text, dry_run)
+        }
+        None => studio.session.edit(
+            doc,
+            generation,
+            &Op::SetBinding {
+                node: Address::Node(handle.clone()),
+                name: "id".to_owned(),
+                value: name.to_owned(),
+            },
+            dry_run,
+        ),
+    }
+    .map_err(error)?;
+    Ok(ArrangeOut {
+        edit: Some(outcome.into()),
+        nodes: vec![handle],
+        ..ArrangeOut::default()
+    })
+}
+
 pub(crate) fn add(registry: ToolRegistry, studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
     let studio = studio.clone();
     registry.with(
         ToolDef::new::<ArrangeArgs>(
             "node_arrange",
-            "What a canvas gesture does; each edit one undo step, all or none. `geometry`: boxes, \
-             drag rules, siblings. `place`: x/y/size, writing what governs each object (anchor \
-             margins, Layout.preferred*); refused `arranged` or `anchored` where overridden. \
-             `align`, `copy`, `paste`, `duplicate`, `remove`.",
+            "A canvas gesture; each edit one undo step. `geometry`: boxes, drag rules, siblings. \
+             `place`: x/y/size, writing what governs each object; refused `arranged`/`anchored` \
+             where overridden. `align`, `copy`, `paste`, `duplicate`, `remove`, `rename`. `hide`, \
+             `show`, `lock`, `unlock` leave the file alone.",
         )
         .answers::<ArrangeOut>()
         .requires(Cap::Inspect)

@@ -2,6 +2,10 @@
 // is `node_select`, as an agent selects. A layer with open review comments
 // says how many, and one another writer holds says who: the person's edit
 // of it is refused until they let go.
+//
+// A row dragged onto another takes its place (`node_move`); a double-click
+// names the object (`node_arrange` `rename`). The eye and the lock are
+// `node_arrange` too, Studio's own: the file does not hear of them.
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
@@ -43,11 +47,48 @@ Panel {
         })
     }
 
+    // The row being named, by its handle; empty when none is.
+    property string naming: ""
+
+    // Drops `from` where the row at `y` in the list is: written in the same
+    // object at the same place, so it takes that row's place. Dropped on the
+    // root, it becomes the root's last object.
+    function drop(from, y) {
+        const at = list.indexAt(0, y + list.contentY)
+        if (at < 0)
+            return
+        const onto = workspace.layers[at]
+        if (onto.node === from.node)
+            return
+        const args = {
+            doc: workspace.doc,
+            node: {node: from.node}
+        }
+        if (onto.parent === "") {
+            args.parent = {node: onto.node}
+        } else if (onto.index !== null) {
+            args.parent = {node: onto.parent}
+            args.index = onto.index
+        } else {
+            return
+        }
+        workspace.dispatch("node_move", args)
+    }
+
+    function arrange(action, node) {
+        workspace.dispatch("node_arrange", {
+            action: action,
+            doc: workspace.doc,
+            nodes: [{node: node}]
+        })
+    }
+
     ColumnLayout {
         anchors.fill: parent
         spacing: 0
 
         ListView {
+            id: list
             objectName: "layers"
             Layout.fillWidth: true
             Layout.fillHeight: true
@@ -55,6 +96,12 @@ Panel {
             model: panel.workspace.layers
             Accessible.role: Accessible.List
             Accessible.name: "Layers"
+            ScrollBar.vertical: ScrollBar {
+                Accessible.name: "Scroll the layers"
+                // As the documents' bar: nothing else says there is more.
+                policy: ScrollBar.AlwaysOn
+                visible: list.contentHeight > list.height
+            }
 
             delegate: ItemDelegate {
                 id: row
@@ -64,10 +111,43 @@ Panel {
                 text: modelData.label
                 Accessible.name: modelData.label
                 highlighted: panel.workspace.chosen.indexOf(modelData.node) >= 0
+                opacity: modelData.hidden ? 0.5 : 1
                 onClicked: panel.workspace.dispatch("node_select", {
                     doc: panel.workspace.doc,
                     nodes: [{node: modelData.node}]
                 })
+                onDoubleClicked: panel.naming = modelData.node
+
+                DragHandler {
+                    target: null
+                    grabPermissions: PointerHandler.CanTakeOverFromAnything
+                    enabled: row.modelData.parent !== ""
+                    onActiveChanged: {
+                        if (!active)
+                            panel.drop(row.modelData, row.mapToItem(list, centroid.position.x, centroid.position.y).y)
+                    }
+                }
+
+                TextField {
+                    visible: panel.naming === row.modelData.node
+                    anchors.fill: parent
+                    anchors.leftMargin: row.leftPadding
+                    text: row.modelData.id
+                    Accessible.name: "Name of " + row.modelData.label
+                    onVisibleChanged: if (visible) forceActiveFocus()
+                    onAccepted: {
+                        panel.naming = ""
+                        if (text !== row.modelData.id) {
+                            panel.workspace.dispatch("node_arrange", {
+                                action: "rename",
+                                doc: panel.workspace.doc,
+                                nodes: [{node: row.modelData.node}],
+                                name: text
+                            })
+                        }
+                    }
+                    Keys.onEscapePressed: panel.naming = ""
+                }
 
                 TapHandler {
                     acceptedModifiers: Qt.ShiftModifier
@@ -101,6 +181,20 @@ Panel {
                         Accessible.name: row.modelData.comments
                                          + (row.modelData.comments === 1 ? " comment on " : " comments on ")
                                          + row.modelData.label
+                    }
+                    // The preview finds what it hides by its id.
+                    ToolButton {
+                        visible: row.modelData.id !== ""
+                        text: row.modelData.hidden ? "Show" : "Hide"
+                        font.pixelSize: Typography.captionSize
+                        Accessible.name: text + " " + row.modelData.label
+                        onClicked: panel.arrange(row.modelData.hidden ? "show" : "hide", row.modelData.node)
+                    }
+                    ToolButton {
+                        text: row.modelData.locked ? "Unlock" : "Lock"
+                        font.pixelSize: Typography.captionSize
+                        Accessible.name: text + " " + row.modelData.label
+                        onClicked: panel.arrange(row.modelData.locked ? "unlock" : "lock", row.modelData.node)
                     }
                 }
             }

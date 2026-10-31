@@ -38,6 +38,10 @@ pub struct Layer {
     /// Who holds it, or an object it is in, when that is another writer
     /// than the window (`node_select` with `hold`); empty otherwise.
     pub held: String,
+    /// `node_arrange` `hide` took it out of the preview.
+    pub hidden: bool,
+    /// `node_arrange` `lock` keeps gestures off it.
+    pub locked: bool,
 }
 
 /// A review comment of the open document, as a window lists it.
@@ -311,11 +315,19 @@ impl Studio {
                             index,
                             comments: 0,
                             held: String::new(),
+                            hidden: false,
+                            locked: self.locked.contains(node),
                         }
                     })
                     .collect();
             }
             Err(e) => view.problem = e.to_string(),
+        }
+        {
+            let previews = preview::lock(&self.previews);
+            for layer in &mut view.layers {
+                layer.hidden = previews.is_hidden(&layer.id);
+            }
         }
         view.flow = self.flow(doc).unwrap_or_default();
         // A sidecar that does not read shows no comments here; `review`

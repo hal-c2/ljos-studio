@@ -218,7 +218,7 @@ view itself loses work.
 - **Fix:** drag-to-reorder (a `node_move`), a double-click to rename the
   id, eye and lock toggles that are Studio's own (not written into the
   file). Owner: Studio, Layers block.
-- **Open**: Move up and Move down only, plus reorder by dragging on the canvas in a Layout.
+- **Fixed**: dragging a row is `node_move`; a double-click names the object, what the document says of it following (`node_arrange` `rename`); Hide/Show and Lock/Unlock on each row are `node_arrange` actions that leave the file alone; a scroll bar is the cue. Hiding needs an id, since the preview finds an object by it.
 
 #### D14. Basic controls do not follow `Colors.dark`
 
