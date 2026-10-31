@@ -360,6 +360,75 @@ Feature: An agent wires a prototype's flow
         }
         """
 
+    # The dump is the type `import App.Media` names, so a same-named file
+    # beside the document does not fill in what it inherits.
+    Scenario: A dumped type described in part is not filled in by another of its name
+      Given the file "native/ljostypes.json":
+        """json
+        {"format": 2, "modules": [{"uri": "App.Media", "versions": ["1.0"], "types": [
+          {"name": "Player", "since": "1.0", "base": "Mystery",
+           "creatable": true, "defaultProperty": null, "attached": null,
+           "properties": [], "signals": [{"name": "finished", "parameters": []}],
+           "methods": []}]}]}
+        """
+      And the file "Player.qml":
+        """qml
+        import QtQuick
+
+        Item {
+        }
+        """
+      And the file "Media.qml":
+        """qml
+        import QtQuick
+        import App.Media
+
+        Item {
+            Player {
+                id: player
+            }
+        }
+        """
+      When the agent calls the tool "node_inspect" with:
+        """json
+        {"doc": "Media.qml", "node": {"id": "player"}}
+        """
+      Then the answer's "/signals" is absent
+
+    # The same for a file: the first import that has the type is the type,
+    # however little is known of its root.
+    Scenario: A file whose root is described nowhere is not filled in by a later import
+      Given the file "native/ljostypes.json":
+        """json
+        {"format": 2, "modules": [{"uri": "App.Media", "versions": ["1.0"], "types": [
+          {"name": "Player", "since": "1.0", "base": "Item", "baseModule": "QtQuick",
+           "creatable": true, "defaultProperty": null, "attached": null,
+           "properties": [], "signals": [{"name": "finished", "parameters": []}],
+           "methods": []}]}]}
+        """
+      And the file "parts/Player.qml":
+        """qml
+        Mystery {
+        }
+        """
+      And the file "Media.qml":
+        """qml
+        import QtQuick
+        import "parts"
+        import App.Media
+
+        Item {
+            Player {
+                id: player
+            }
+        }
+        """
+      When the agent calls the tool "node_inspect" with:
+        """json
+        {"doc": "Media.qml", "node": {"id": "player"}}
+        """
+      Then the answer's "/signals" is absent
+
   Rule: A tap opens a document
 
     Scenario: A Loader shows the document
