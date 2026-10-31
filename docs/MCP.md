@@ -168,12 +168,14 @@ shows it; the watcher's quiet time is not on that path.
   A dump is read when the preview starts: an edit of it shows when the
   preview is opened again. Export still refuses a project whose types
   are written in Rust.
-- DECISION: a preview in a browser (ljos-web, DESIGN.md S5) answers what
-  ljos-web can: open, reload, aliases, resize, logs (without file and
-  line). The rest (`preview_screenshot`, `preview_state` reads, writes and
-  clicks, `node_select {at}`) is refused `not_actionable` with
-  `details.kind: "not_supported"` and `details.ljos_web_request`, the
-  numbered ljos-web request it waits on, never with a made-up answer.
+- DECISION: a preview in a browser (ljos-web, DESIGN.md S5) answers every
+  preview tool through `ljos-web/inspect`. A page built without it refuses
+  `not_actionable` with `details.kind: "not_supported"`, never with a
+  made-up answer.
+- DECISION: a preview in a browser keeps the app's state over a reload, as
+  `--watch` does; a file read as data is told to what reads it, nothing
+  compiled; switching a block between live and mocked starts the app again,
+  since another module's code is another program.
 - DECISION: starting a preview needs `run` (it runs the project's code);
   looking at one that runs (`preview_screenshot`, `preview_events`) needs
   only `inspect`.
@@ -465,9 +467,8 @@ than a bundle of either kind (a site built from one, say).
   manifest has no hashes or signature yet.
 - DECISION: a web export is a directory and its manifest, not a site:
   compiling and bundling are ljos-web's, choosing the files and refusing
-  what has no face on the web are Studio's. Until ljos-web builds a site
-  from one (its request 30), `export:web:build` does it with ljos-web's
-  compiler and Vite plugin.
+  what has no face on the web are Studio's. `export:web:build` runs
+  `ljos-web build-site` on it.
 - DECISION: `export` writes no history entry; it changes no document.
 
 `review {action, doc?, node?, comment?, text?, author?}` keeps design

@@ -196,8 +196,7 @@ class Queue {
       }
     }
     const p = view.preview;
-    // No picture on the web yet: a preview page cannot take one
-    // (DESIGN.md S5, the ljos-web requests), so `picture` stays 0.
+    // The canvas shows the frame itself, laid over it, so `picture` stays 0.
     this.#give(
       "preview",
       p && p.doc === view.doc

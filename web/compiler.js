@@ -3,13 +3,13 @@
 // JavaScript (DESIGN.md S5, "The Compiler").
 //
 //   compile({ files, entry, aliases }) -> Promise<
-//     { component } | { diagnostics: [{ file?, line?, column?, message }] }>
+//     { component, base? } | { diagnostics: [{ file?, line?, column?, message }] }>
 //
 // `files` maps a project path to its text, `entry` is the document to show
 // and `aliases` (`[{ module, dir }]`) import a module from another directory,
-// as `ljos run --alias` does. ljos-web compiles ahead of time, natively
-// (`qmlc`), so today's compiler is a server's; one that runs in the page
-// (ljos-web request 1) takes its place without the page changing.
+// as `ljos run --alias` does; `base` is the address the compile's files are
+// at, for a data file told of later. This one is a server's, running ljos-web's
+// `qmlc`; `ljos-web/compiler`, which runs in the page, has the same shape.
 
 // qmlc says where a problem is as `path:line:column: message`.
 const PLACE = /^(.+?):(\d+):(\d+): (.*)$/;
@@ -32,9 +32,9 @@ export function serverCompiler({ endpoint = "/compile", fetch: get = globalThis.
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ files, entry, aliases }),
     });
-    const { url, error } = await asked.json();
+    const { url, base, error } = await asked.json();
     if (error !== undefined) return { diagnostics: diagnostics(error) };
-    return { component: (await load(url)).default };
+    return { component: (await load(url)).default, base };
   };
 }
 

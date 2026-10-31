@@ -140,14 +140,21 @@ impl<P: Port> PreviewHost for WebPreviewHost<P> {
         CALLS_PER_SECOND
     }
 
-    // A click names its object by id, or lands at a point and is followed
-    // by a read of the root's state; ljos-web exposes neither (request 4,
-    // which a click at a point is folded into), so the page is not asked.
-    fn click(&mut self, _at: &Click) -> Result<(), PreviewError> {
-        Err(PreviewError::NotSupported {
-            message: "click: ljos-web keeps a component's ids private to its context".to_owned(),
-            ljos_web_request: 4,
-        })
+    fn click(&mut self, at: &Click) -> Result<(), PreviewError> {
+        let request = match at {
+            Click::Id(id) => Request::Click {
+                id: Some(id.clone()),
+                at: None,
+            },
+            Click::Point { x, y } => Request::Click {
+                id: None,
+                at: Some([*x, *y]),
+            },
+        };
+        match self.ask(request)? {
+            Answer::Done => Ok(()),
+            other => Err(unexpected("click", &other)),
+        }
     }
 
     fn open(&mut self, spec: &PreviewSpec) -> Result<(), PreviewError> {
@@ -363,7 +370,10 @@ pub(crate) mod tests {
                     message: "this page cannot write properties".into(),
                     ljos_web_request: 4,
                 },
-                Request::Resize { .. } | Request::Close => Answer::Done,
+                Request::Click {
+                    id: Some(nobody), ..
+                } if nobody == "nobody" => Answer::NoObject { id: nobody.clone() },
+                Request::Click { .. } | Request::Resize { .. } | Request::Close => Answer::Done,
             })
         }
 
@@ -439,7 +449,7 @@ pub(crate) mod tests {
 
     #[test]
     fn answers_become_what_the_host_returns() {
-        let (mut host, _, _) = host();
+        let (mut host, page, _) = host();
         assert!(matches!(
             host.open(&PreviewSpec {
                 entry: "Nope.qml".into(),
@@ -459,6 +469,19 @@ pub(crate) mod tests {
             })
         );
         assert_eq!(host.pick(-1.0, 0.0).unwrap(), None);
+        host.click(&Click::Id("card".into())).unwrap();
+        host.click(&Click::Point { x: 4.0, y: 6.0 }).unwrap();
+        assert_eq!(
+            page.heard.lock().unwrap().last().unwrap(),
+            &Request::Click {
+                id: None,
+                at: Some([4.0, 6.0])
+            }
+        );
+        assert!(matches!(
+            host.click(&Click::Id("nobody".into())),
+            Err(PreviewError::NoObject(id)) if id == "nobody"
+        ));
         assert!(matches!(
             host.read("nobody", &["x".into()]),
             Err(PreviewError::NoObject(id)) if id == "nobody"
@@ -504,19 +527,8 @@ pub(crate) mod tests {
 
     #[test]
     fn a_call_the_page_cannot_do_yet_leaves_the_preview_alive() {
-        let (mut host, page, _) = host();
+        let (mut host, _, _) = host();
         host.open(&spec()).unwrap();
-        let asked = page.heard.lock().unwrap().len();
-        for at in [Click::Id("card".into()), Click::Point { x: 4.0, y: 4.0 }] {
-            assert!(matches!(
-                host.click(&at),
-                Err(PreviewError::NotSupported {
-                    ljos_web_request: 4,
-                    ..
-                })
-            ));
-        }
-        assert_eq!(page.heard.lock().unwrap().len(), asked);
         assert!(matches!(
             host.write("card", "width", json!(1)),
             Err(PreviewError::NotSupported { .. })
