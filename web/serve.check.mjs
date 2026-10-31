@@ -6,7 +6,7 @@
 //
 //   PLAYWRIGHT=… node web/serve.check.mjs <the assembled app's directory> [screenshot.png]
 
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -126,6 +126,34 @@ check("the server refuses a path out of the project", escape.status === 400, esc
 check("the page logged no errors", said.length === 0, said);
 await browser.close();
 await stop();
+
+// A checkout reached through a link: each project is still its own root, and
+// what the compiler says still names files by the project's own paths.
+const linkDir = mkdtempSync(join(tmpdir(), "studio-serve-link-"));
+try {
+  const link = join(linkDir, "app");
+  symlinkSync(realpathSync(app), link);
+  const linked = await start({ app: link });
+  const compile = async (files) => {
+    const answer = await fetch(`${linked.url}compile`, { method: "POST", body: JSON.stringify({ files, entry: "Main.qml" }) });
+    return answer.json();
+  };
+  const main = "import QtQuick\nimport Parts\n\nPanel {}\n";
+  const first = await compile({
+    "Main.qml": main,
+    // Found from a directory of its own only when the project is qmlc's root.
+    "pages/Other.qml": main,
+    "Parts/qmldir": "module Parts\nPanel 1.0 Panel.qml\n",
+    "Parts/Panel.qml": "import QtQuick\n\nItem {}\n",
+  });
+  check("through a link, a project is its own root", first.url !== undefined, first);
+  const second = await compile({ "Main.qml": main });
+  check("through a link, the next project does not see that module", second.error?.includes("Panel") === true, second);
+  check("through a link, an error names the project's own path", second.error?.includes(realpathSync(app)) === false, second);
+  await linked.stop();
+} finally {
+  rmSync(linkDir, { recursive: true, force: true });
+}
 if (failures.length > 0) {
   console.log(`\n${failures.length} failed: ${failures.join("; ")}`);
   process.exitCode = 1;
