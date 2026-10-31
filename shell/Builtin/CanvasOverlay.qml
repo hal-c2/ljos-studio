@@ -415,6 +415,12 @@ MouseArea {
     onCanceled: endDrag(false)
 
     Keys.onPressed: (event) => {
+        // While playing, keys are the running prototype's, and no outline
+        // shows what an edit would hit.
+        if (playing) {
+            event.accepted = false
+            return
+        }
         const ctrl = (event.modifiers & Qt.ControlModifier) !== 0
         const step = (event.modifiers & Qt.ShiftModifier) !== 0 ? 10 : 1
         const has = workspace.chosen.length > 0

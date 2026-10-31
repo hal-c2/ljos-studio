@@ -443,3 +443,57 @@ Feature: Objects are placed by the tools a canvas drag drops through
     Then the answer's "/entry/label" is "remove"
     And the file "Main.qml" contains "id: a"
     And the file "Main.qml" contains "z: 1"
+
+  Scenario: Taking out an object and what is inside it is one edit
+    Given the studio tools are connected
+    When the agent calls the tool "node_arrange" with:
+      """json
+      {"action": "remove", "doc": "Main.qml", "nodes": [{"id": "row"}, {"id": "first"}, {"id": "row"}]}
+      """
+    Then the answer's "/nodes" has 1 entries
+    And the file "Main.qml" does not contain "id: row"
+    And the file "Main.qml" does not contain "id: first"
+    When the agent calls the tool "history" with:
+      """json
+      {"action": "undo"}
+      """
+    Then the file "Main.qml" contains "id: first"
+
+  Scenario: A selection stays as it was when adding to it is refused
+    Given the studio tools are connected
+    And the agent has called the tool "node_select" with:
+      """json
+      {"doc": "Main.qml", "nodes": [{"id": "a"}]}
+      """
+    When the agent calls the tool "node_select" with:
+      """json
+      {"doc": "Main.qml", "nodes": [{"id": "nope"}], "add": true}
+      """
+    Then the agent is refused with "not_found"
+    When the agent calls the tool "node_select" with:
+      """json
+      {"doc": "Main.qml", "nodes": [{"id": "b"}], "add": true}
+      """
+    Then the answer's "/selection" has 2 entries
+
+  Scenario: A copy's template string follows the copy's new id
+    Given the file "Main.qml":
+      """qml
+      import QtQuick
+
+      Item {
+          id: root
+          Rectangle {
+              id: card
+              width: 10
+              Text { text: `card ${card.width}` }
+          }
+      }
+      """
+    And the studio tools are connected
+    When the agent calls the tool "node_arrange" with:
+      """json
+      {"action": "duplicate", "doc": "Main.qml", "nodes": [{"id": "card"}]}
+      """
+    Then the file "Main.qml" contains "`card ${card.width}`"
+    And the file "Main.qml" contains "`card ${card1.width}`"

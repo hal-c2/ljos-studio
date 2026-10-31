@@ -2932,10 +2932,11 @@ impl Session {
         addresses: &[Address],
     ) -> Result<Vec<String>, Error> {
         let path = &self.canonical(path)?;
-        let mut handles: Vec<String> = std::mem::take(&mut self.selection)
-            .into_iter()
+        let mut handles: Vec<String> = self
+            .selection
+            .iter()
             .filter(|(doc, _)| doc == path)
-            .map(|(_, handle)| handle)
+            .map(|(_, handle)| handle.clone())
             .collect();
         for address in addresses {
             let handle = self.resolve(path, address)?.0;
