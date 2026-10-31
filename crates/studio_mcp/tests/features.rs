@@ -168,7 +168,7 @@ impl StudioWorld {
         let caps = self.caps;
         let server = self.server()?;
         let started = std::time::Instant::now();
-        let out = server.call(tool, &CallCtx { caps, client }, args);
+        let out = server.call(tool, &CallCtx { client, ..CallCtx::new(caps) }, args);
         let took = started.elapsed();
         let (out, images) = match out {
             Ok(reply) => (Ok(reply.structured), reply.images),

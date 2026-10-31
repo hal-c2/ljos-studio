@@ -1462,8 +1462,8 @@ fn call_as(w: &mut UiWorld, client: Option<String>, tool: &str, step: &Step) -> 
     let args: Json = serde_json::from_str(&docstring(step)?).map_err(|e| e.to_string())?;
     let window = w.window()?;
     let ctx = CallCtx {
-        caps: CapSet::of([Cap::Inspect, Cap::Mutate]),
         client,
+        ..CallCtx::new(CapSet::of([Cap::Inspect, Cap::Mutate]))
     };
     window
         .server
