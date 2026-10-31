@@ -1099,8 +1099,9 @@ lists short; "Write bundle" exports for real and shows the output, the
 manifest's `run` command (native) or `mise run export:web:build <path>` (web),
 and "Copy path", both with the answer's absolute `path`. A refusal shows the
 tool's message, in the panel only: its calls leave the window's error line be. The panel keeps the last answer and refusal from `Workspace`'s
-`answered`/`refused`; `Workspace` itself is unchanged except that the
-window's calls now carry `fs`. `features/ui/export.feature`.
+`answered`/`refused`. `Workspace` changed in three ways: the window's calls
+carry `fs`, `export` calls are no gesture for its error line, and a call whose
+job panics is refused to whoever waits for it. `features/ui/export.feature`.
 
 The tool's answer gained `replaces` (whether `out` already held a bundle),
 and `path` (`out` as an absolute path), so the warning is the tool's word and
