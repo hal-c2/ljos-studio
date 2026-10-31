@@ -221,8 +221,14 @@ the single order, as today, and gets four additions:
    base generation. When the base is stale, the session doesn't refuse
    at once. It re-resolves the handles in the current text (they already
    survive edits) and applies the same `qml_edit::Edit` there. It
-   refuses only when a handle is gone, `qml_edit` refuses, or a lease
-   covers the target. This is operational transformation where the
+   refuses when a handle is gone, `qml_edit` refuses, or a lease covers
+   the target, and also when an op applied since the base touched the
+   same handle and property (or removed, moved or replaced the object):
+   two writers setting `color` on n7 from generation 4 is a conflict, not
+   a merge, so the second is refused as `conflict`, naming the op, its
+   author and the value now in place, and never silently overwrites the
+   first. Rebase only carries edits past changes to *other* bindings and
+   objects. This is operational transformation where the
    transform is address resolution. Studio already has that resolution,
    and it merges intent ("set `color` on n7") rather than characters.
 2. **Text changes from the code view are transformed as text OT**
@@ -277,8 +283,10 @@ In Studio (`studio_core`, `studio_mcp`):
    base: generation, body: Edit-by-handle | TextChanges | Lease |
    Release }`. Its answer is applied (new generation, changes, the
    handles touched), rebased (the same, with a note), or refused (stale
-   with a reason, `leased_by`, `gone`, `would_break`). The session keeps
-   the applied ops per document since the oldest base still in use.
+   with a reason, `leased_by`, `gone`, `would_break`, `conflict`). The
+   session keeps the applied ops per document since the oldest base
+   still in use, each with the `(handle, property)` pairs it wrote, so
+   the `conflict` check is a lookup over the ops since the base.
 2. **`Session::rebase`.** Resolve handles at the current generation and
    apply. The handle resolution and `ObjectKey` fallback already exist;
    the change is to stop refusing on generation alone.
@@ -290,7 +298,11 @@ In Studio (`studio_core`, `studio_mcp`):
    holder, expiry), checked on every write that resolves into a leased
    subtree. To stay within the 25-tool budget, presence and leases go as
    arguments of existing tools: `node_select` gains `hold` (lease what
-   is selected) and the change feed carries presence. A lease's time
+   is selected) and the change feed carries presence. `node_select`
+   stays an `inspect` tool for plain selection; `hold` needs `mutate`,
+   checked in the handler the way `history` checks undo and redo, since a
+   lease blocks other writers and an `inspect`-only watcher must not be
+   able to. A lease's time
    comes from the `Timer` seam, so the web build and tests use the same
    clock.
 5. **Author on history.** `Entry` gains an author. Undo and redo are per
@@ -322,6 +334,13 @@ Requests to ljos-ui:
   text into operations for the merge driver.
 
 ## 7. Risks and open questions
+
+- **Same-property conflicts.** Two writers setting one binding from the
+  same base is refused as `conflict` for the second (section 5), never
+  merged last-writer-wins. The refusal names the value in place, so an
+  agent can re-plan; a person sees both. How often this fires on a
+  canvas drag racing an agent's set, and whether a drag should take a
+  lease instead, is to be measured.
 
 - **Key collisions.** Rebase relies on `ObjectKey` when the edit's own
   path effect is unknown: after a code-view edit, or another writer's.
