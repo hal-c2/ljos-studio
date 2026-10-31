@@ -72,6 +72,9 @@ expression: value
       "out": {
         "type": "string"
       },
+      "path": {
+        "type": "string"
+      },
       "replaces": {
         "type": "boolean"
       },
@@ -81,6 +84,7 @@ expression: value
     },
     "required": [
       "out",
+      "path",
       "files",
       "bytes",
       "manifest",

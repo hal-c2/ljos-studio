@@ -59,7 +59,7 @@ Feature: A person exports a native app or a web site from Studio's window
     Then the file "build/native/ljos-bundle.json" exists
     And the file "build/native/Main.qml" exists
     And the export panel says "^Wrote 3 files, \d+ bytes, to build/native$"
-    And the export panel says "^Start it with: ljos run Main.qml --project \.  \(in build/native\)$"
+    And the export panel says "^Start it with: ljos run Main.qml --project \.  \(in /.*/build/native\)$"
     And the export panel's button "Copy path" is enabled
 
   Scenario: The panel warns before it replaces a bundle that is already there
@@ -83,4 +83,20 @@ Feature: A person exports a native app or a web site from Studio's window
     Then the file "build/web/ljos-site.json" exists
     And the file "build/native/ljos-bundle.json" does not exist
     And the export panel says "^Wrote 3 files, \d+ bytes, to build/web$"
-    And the export panel says "^Build the site with: mise run export:web:build build/web$"
+    And the export panel says "^Build the site with: mise run export:web:build /.*/build/web$"
+
+  Scenario: Typing a directory that holds a bundle warns before anything is written
+    Given the person has clicked the button "Export"
+    And the person has set the output directory to "build/old" in the export panel
+    And the person has clicked the button "Write bundle"
+    When the person types the output directory "build/native" in the export panel
+    Then the export panel says "^Would write 3 files, \d+ bytes, to build/native$"
+    When the person types the output directory "build/old" in the export panel
+    Then the export panel says "^build/old already holds a bundle: exporting replaces it$"
+
+  Scenario: Copy path gives the bundle's absolute path
+    Given the person has clicked the button "Export"
+    And the person has clicked the button "Write bundle"
+    When the person clicks the button "Copy path"
+    And the person pastes into the output directory in the export panel
+    Then the export panel's output directory reads "^/.*/build/native$"

@@ -409,6 +409,7 @@ own beside it, and the list's text is unchanged.
 
 `export {entry, target?, out?, dry_run?}` (`fs`) writes a bundle of the
 project below its `build/` (`build/native` by default) and answers `out`,
+`path` (the same, absolute),
 `files` and `bytes` (totals that stay true when a long manifest is cut
 short in the answer), the `manifest`, `written` (false for `dry_run`),
 `replaces` (whether `out` held a bundle before the call, which a real export

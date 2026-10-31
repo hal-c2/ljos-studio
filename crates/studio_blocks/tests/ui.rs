@@ -1765,11 +1765,76 @@ fn file_is(w: &mut UiWorld, name: String, step: &Step) -> StepResult {
     })
 }
 
+#[given(regex = r#"^the person has set the output directory to "([^"]*)" in the export panel$"#)]
 #[when(regex = r#"^the person sets the output directory to "([^"]*)" in the export panel$"#)]
 fn sets_export_out(w: &mut UiWorld, out: String) -> StepResult {
     let window = w.window()?;
     let field = window.node("Export panel", Some("textinput"), "Output directory")?;
     window.enter(&field, &out)
+}
+
+// No Return: what is typed is checked as it is typed.
+#[when(regex = r#"^the person types the output directory "([^"]*)" in the export panel$"#)]
+fn types_export_out(w: &mut UiWorld, out: String) -> StepResult {
+    let window = w.window()?;
+    let field = window.node("Export panel", Some("textinput"), "Output directory")?;
+    window.click_node(&field)?;
+    let mut driver = window.stage.drive();
+    driver
+        .chord(&Chord::parse("Ctrl+A")?, 0)
+        .map_err(drive_error)?;
+    driver.commit(&out).map_err(drive_error)?;
+    window.rest()
+}
+
+#[when("the person pastes into the output directory in the export panel")]
+fn pastes_export_out(w: &mut UiWorld) -> StepResult {
+    let window = w.window()?;
+    let field = window.node("Export panel", Some("textinput"), "Output directory")?;
+    window.click_node(&field)?;
+    window
+        .stage
+        .drive()
+        .chord(&Chord::parse("Ctrl+V")?, 0)
+        .map_err(drive_error)?;
+    window.rest()
+}
+
+#[then(regex = r#"^the export panel's output directory reads "(.+)"$"#)]
+fn export_out_reads(w: &mut UiWorld, pattern: String) -> StepResult {
+    let pattern = regex::Regex::new(&pattern).map_err(|e| e.to_string())?;
+    let field = w
+        .window()?
+        .node("Export panel", Some("textinput"), "Output directory")?;
+    pattern
+        .is_match(&field.value)
+        .then_some(())
+        .ok_or_else(|| format!("it reads {:?}", field.value))
+}
+
+#[when(regex = r#"^the person chooses the entry "([^"]+)" in the export panel$"#)]
+fn chooses_export_entry(w: &mut UiWorld, entry: String) -> StepResult {
+    let window = w.window()?;
+    let combo = window.node("Export panel", None, "Entry document")?;
+    window.click_node(&combo)?;
+    let tree = window.tree();
+    let mut rows = Vec::new();
+    collect_named(&tree, &entry, &mut rows);
+    // The popup is drawn over everything, so it is read last.
+    let row = rows
+        .last()
+        .cloned()
+        .ok_or_else(|| format!("no row {entry:?}; the window holds {}", names(&tree)))?;
+    window.click_node(&row)
+}
+
+fn collect_named(node: &AccessibleNode, name: &str, rows: &mut Vec<AccessibleNode>) {
+    if node.name == name && node.key.is_some() {
+        rows.push(node.clone());
+    }
+    for child in &node.children {
+        collect_named(child, name, rows);
+    }
 }
 
 #[given(regex = r#"^the person has chosen "([^"]+)" in the export panel$"#)]
