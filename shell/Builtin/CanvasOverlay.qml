@@ -78,7 +78,10 @@ MouseArea {
         workspace.dispatch("node_arrange", {
             action: "geometry",
             doc: workspace.doc,
-            nodes: chosen.map(h => ({node: h}))
+            nodes: chosen.map(h => ({node: h})),
+            // Only a press can start the drag that snaps to them, and each
+            // sibling is a read of the running app: selecting does not wait.
+            without_siblings: mode === ""
         })
     }
 
@@ -352,9 +355,11 @@ MouseArea {
         if (handle >= 0) {
             startBox = selectedOne.window
             mode = "pressed"
+            refetch()
         } else if (!shift && inside(mouse.x, mouse.y)) {
             startBox = around()
             mode = "pressed"
+            refetch()
         } else {
             mode = "selecting"
             selectAt(mouse.x, mouse.y, shift)
@@ -484,6 +489,9 @@ MouseArea {
                     overlay.parentBox = answer.parent !== undefined ? answer.parent : null
                     overlay.siblings = answer.siblings !== undefined ? answer.siblings : []
                     overlay.ghost = overlay.dragging ? overlay.ghost : null
+                    // The hand may be ahead of the siblings it snaps to.
+                    if (overlay.mode === "moving" || overlay.mode === "resizing")
+                        overlay.startSnaps()
                     if (overlay.mode === "selecting") {
                         overlay.startBox = overlay.around()
                         if (overlay.startBox !== null)
