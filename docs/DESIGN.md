@@ -993,7 +993,7 @@ a small SVG into the script, the text takes Ljos.Design's colour, and the
 mock never reaches the page. What it cannot do: build a site from a
 directory on its own (request 30), apply `theme.json` (Studio's native
 preview applies it through `ljos_design_qml::theme::apply`, which is Rust:
-request 31), and run `Ljos.Blocks`, `Ljos.Models` or `Ljos.Observer`, which
+request 20), and run `Ljos.Blocks`, `Ljos.Models` or `Ljos.Observer`, which
 are Rust types (requests 32, 33).
 
 **The site contract.** `ljos-site.json`, at the bundle's root:
@@ -1066,13 +1066,13 @@ contentful paint 60–72 ms in headless Chromium, the entry's text shown by
 30. A site builder: `ljos-web build-site <dir>` (or an API) that takes a
     directory with `ljos-site.json` and writes a static site, so Studio's
     interim task goes.
-31. `theme.json` applied to `Ljos.Design` in a page, as Ljós's native
-    `ljos_design_qml::theme::apply` does; today a site has the default
-    palette.
+31. Is request 20 (`theme.json` applied to `Ljos.Design`, in a page as in
+    a preview); today a site has the default palette. The number is kept
+    so 32–36 keep theirs.
 32. `Ljos.Blocks` on the web (request 16), so a shell over `ShellLoader`
     can be exported rather than refused.
 33. Web faces for Ljós's Rust modules (`Ljos.Models`, `Ljos.Observer`) and
-    for a project's `ljostypes.json` (requests 11, 12).
+    for a project's `ljostypes.json` (requests 11, 12, 21, 22).
 34. A machine-readable list of the modules a commit provides, including
     those it compiles from Qt or Ljós, so Studio need not keep one.
 35. A `root` option on the Vite plugin, rather than `--root` through
