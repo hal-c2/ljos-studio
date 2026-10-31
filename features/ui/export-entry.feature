@@ -64,6 +64,5 @@ Feature: The export panel writes the entry it says
     And the person has opened "Third.qml" in the documents list
     When the file "Third.qml" is deleted
     And the person clicks the button "Export"
-    And the person clicks the button "Close"
-    And the person clicks the button "Export"
     Then the export panel says "^Entry Second.qml$"
+    And the export panel's button "Write bundle" is enabled

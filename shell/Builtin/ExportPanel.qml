@@ -138,6 +138,14 @@ Popup {
 
     Connections {
         target: panel.workspace
+        // The list is only as new as the last answer, which may be the one
+        // that says the chosen document is gone.
+        function onDocumentsChanged() {
+            if (!panel.visible || panel.entry !== "")
+                return
+            panel.chosen = panel.defaultEntry()
+            panel.check()
+        }
         function onAnswered(tool, answer) {
             if (tool !== "export")
                 return
