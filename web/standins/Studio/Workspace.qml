@@ -19,6 +19,7 @@ QtObject {
     readonly property var flow
     readonly property var palette
     readonly property var done
+    readonly property int looks
     readonly property var undone
     readonly property var preview
     readonly property string error
@@ -41,6 +42,9 @@ QtObject {
     }
 
     function follow(tool: string, args: var) {
+    }
+
+    function followPicture(on: bool) {
     }
 
     function lookAgain() {
