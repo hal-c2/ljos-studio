@@ -324,9 +324,32 @@ In Studio (`studio_core`, `studio_mcp`):
    leaves conflict markers only for what fails. It can be built last and
    alone.
 
+What phase 4 built (DESIGN.md "Phase 4: rebase by handle, as built" has
+the DECISIONs and numbers, MCP.md "Phase 4" the contract):
+
+- **Seam 1** is a log per document in `studio_core::log`, 256 entries,
+  each with its author, label, the text changes and the `(handle,
+  name)` pairs it touched (`None` for an object as a whole). There is no
+  `Op` type: the existing tools are the ops, their author is the MCP
+  client's name (`agent` by default, `person` for the window).
+- **Seam 2** passes an edit by handle or `id` over the entries since its
+  base when no other writer's entry touched the same pair, or the object
+  or an ancestor as a whole; otherwise `conflict`. An edit by path is
+  still refused on the generation alone. A writer's own entries never
+  conflict with it.
+- **Seam 3** uses `qml_edit::transform` (the earlier change first); an
+  overlap is a `conflict`, a newly broken parse is refused.
+- **Seam 4** is `node_select` `hold`, 5 s past the holder's last call and
+  5 min at most, checked on every write by handle or byte range. Presence
+  is the window's: the Workspace block publishes `leases`, the layers
+  panel and the canvas say "held by". Not yet in a change feed (seam 6).
+- **Seam 5** is built: entries carry their author, undo and redo take the
+  caller's own (`all` the newest), the window's Undo the person's.
+- **Seams 6 to 8** are not built.
+
 Requests to ljos-ui:
 
-- **`qml_edit::transform`** (seam 3), a range-over-range transform of
+- **`qml_edit::transform`** (seam 3; at the pinned Ljós it exists and is used), a range-over-range transform of
   `Change`s, with the same promises as `splice`.
 - **A tree diff by `ObjectKey`** (seam 8): given two parsed files, the
   objects added, removed, moved, and the bindings changed, as `Edit`s.
