@@ -1765,6 +1765,65 @@ fn file_is(w: &mut UiWorld, name: String, step: &Step) -> StepResult {
     })
 }
 
+#[when(regex = r#"^the person sets the output directory to "([^"]*)" in the export panel$"#)]
+fn sets_export_out(w: &mut UiWorld, out: String) -> StepResult {
+    let window = w.window()?;
+    let field = window.node("Export panel", Some("textinput"), "Output directory")?;
+    window.enter(&field, &out)
+}
+
+#[given(regex = r#"^the person has chosen "([^"]+)" in the export panel$"#)]
+#[when(regex = r#"^the person chooses "([^"]+)" in the export panel$"#)]
+fn chooses_export_kind(w: &mut UiWorld, kind: String) -> StepResult {
+    let window = w.window()?;
+    let radio = window.node("Export panel", Some("radiobutton"), &kind)?;
+    window.click_node(&radio)
+}
+
+#[then(regex = r#"^the export panel says "(.+)"$"#)]
+fn export_says(w: &mut UiWorld, pattern: String) -> StepResult {
+    let pattern = regex::Regex::new(&pattern).map_err(|e| e.to_string())?;
+    let window = w.window()?;
+    let tree = window.tree();
+    let panel = find(&tree, &|n| n.name == "Export panel" && n.role != "label")
+        .ok_or("no export panel in the window")?;
+    find(panel, &|n| pattern.is_match(&n.name))
+        .map(drop)
+        .ok_or_else(|| {
+            format!(
+                "the export panel says none of {}; the last refusal {:?}",
+                names(panel),
+                window.read("error").to_js_string()
+            )
+        })
+}
+
+#[then("the export panel is closed")]
+fn export_closed(w: &mut UiWorld) -> StepResult {
+    let tree = w.window()?.tree();
+    match find(&tree, &|n| n.name == "Export panel" && n.role != "label") {
+        None => Ok(()),
+        Some(_) => Err("the export panel is still in the window".to_owned()),
+    }
+}
+
+#[then(regex = r#"^the export panel's button "([^"]+)" is (enabled|disabled)$"#)]
+fn export_button(w: &mut UiWorld, name: String, state: String) -> StepResult {
+    let button = w.window()?.node("Export panel", Some("button"), &name)?;
+    let disabled = button.states.iter().any(|s| s == "disabled");
+    (disabled == (state == "disabled"))
+        .then_some(())
+        .ok_or_else(|| format!("{name:?} is {:?}", button.states))
+}
+
+#[then(regex = r#"^the file "([^"]+)" exists$"#)]
+fn file_present(w: &mut UiWorld, name: String) -> StepResult {
+    let path = w.dir.path().join(&name);
+    path.is_file()
+        .then_some(())
+        .ok_or_else(|| format!("`{name}` is not a file"))
+}
+
 #[then(regex = r#"^the file "([^"]+)" does not exist$"#)]
 fn file_absent(w: &mut UiWorld, name: String) -> StepResult {
     let path = w.dir.path().join(&name);
@@ -2009,7 +2068,70 @@ fn has_pane(w: &mut UiWorld, name: String) -> StepResult {
     ))
 }
 
+/// `STUDIO_PERF_EXPORT=hello|200`: times the export panel's opening, from the
+/// click on the toolbar's button to the list it shows, on `samples/hello` or
+/// on a project of 200 files, in place of the scenarios. Run it in release.
+fn perf_export(project: &str) {
+    let mut w = UiWorld::new();
+    let root = w.dir.path().to_owned();
+    if project == "hello" {
+        let hello = format!("{}/../../samples/hello/Main.qml", manifest_dir());
+        std::fs::copy(hello, root.join("Main.qml")).expect("samples/hello");
+    } else {
+        std::fs::write(root.join("Main.qml"), "import QtQuick\n\nItem {}\n").unwrap();
+        for d in 0..199 {
+            let mut text = String::from("import QtQuick\n\nColumn {\n");
+            for i in 0..40 {
+                text += &format!("    Rectangle {{ id: r{i}; width: {i}; height: 10 }}\n");
+            }
+            text += "}\n";
+            std::fs::write(root.join(format!("S{d}.qml")), text).unwrap();
+        }
+    }
+    w.open().expect("the window opens");
+    let mut samples = Vec::new();
+    for _ in 0..20 {
+        let window = w.window().unwrap();
+        let button = window
+            .node("Export", Some("button"), "Export")
+            .or_else(|_| {
+                let tree = window.tree();
+                find(&tree, &|n| {
+                    n.name == "Export" && n.role == "button" && n.key.is_some()
+                })
+                .cloned()
+                .ok_or_else(|| "no Export button".to_owned())
+            })
+            .expect("the toolbar's button");
+        let started = std::time::Instant::now();
+        window.click_node(&button).expect("opens");
+        samples.push(started.elapsed());
+        let tree = window.tree();
+        assert!(
+            find(&tree, &|n| n.name.starts_with("Would write")).is_some(),
+            "the panel shows no list: {}",
+            names(&tree)
+        );
+        let escape = Chord::parse("Escape").unwrap();
+        window.stage.drive().chord(&escape, 0).unwrap();
+        window.rest().unwrap();
+    }
+    samples.sort();
+    let at = |p: f64| samples[((samples.len() - 1) as f64 * p).round() as usize];
+    let ms = |d: Duration| d.as_secs_f64() * 1e3;
+    println!(
+        "export panel open to list, {project}: p50 {:.2} ms, p95 {:.2} ms over {}",
+        ms(at(0.5)),
+        ms(at(0.95)),
+        samples.len()
+    );
+}
+
 fn main() {
+    if let Ok(project) = std::env::var("STUDIO_PERF_EXPORT") {
+        perf_export(&project);
+        return;
+    }
     let features = format!("{}/../../features/ui", manifest_dir());
     let input = std::env::var("STUDIO_FEATURES").unwrap_or(features);
     // The Engine lives on one thread: one scenario at a time, on this one.
