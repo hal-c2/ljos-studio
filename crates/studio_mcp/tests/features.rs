@@ -6,6 +6,9 @@
 //! The vocabulary is Ljós's own for its MCP servers (`the agent calls the
 //! tool …`, `the answer's "/pointer" is …`), so a scenario reads the same in
 //! both repositories.
+//!
+//! Every answer is also held to the `outputSchema` the tool advertises: a
+//! client SDK that validates rejects an answer that breaks it.
 
 use std::collections::HashMap;
 
@@ -13,6 +16,9 @@ use cucumber::{World, gherkin::Step, given, then, when};
 use ljos_mcp_core::{CallCtx, Cap, CapSet, McpSurface, SurfaceError};
 use serde_json::Value;
 use studio_mcp::{Studio, StudioServer};
+
+#[path = "support/schema.rs"]
+mod schema;
 
 #[derive(World)]
 #[world(init = Self::new)]
@@ -61,7 +67,18 @@ impl StudioWorld {
     fn call(&mut self, tool: &str, args: Value) -> StepResult {
         let caps = self.caps;
         let server = self.server()?;
-        let (out, _) = server.tools().call(tool, &CallCtx::new(caps), args);
+        let (out, def) = server.tools().call(tool, &CallCtx::new(caps), args);
+        // A refusal is an error result, which the output schema does not cover.
+        if let (Ok(answer), Some(output)) = (&out, def.and_then(|d| d.output_schema.as_deref())) {
+            let broken = schema::validate(&Value::Object(output.clone()), answer);
+            if !broken.is_empty() {
+                let broken: Vec<String> = broken.iter().map(ToString::to_string).collect();
+                return Err(format!(
+                    "`{tool}` answered against its outputSchema: {}\nanswer: {answer}",
+                    broken.join("; ")
+                ));
+            }
+        }
         self.answer = Some(out);
         Ok(())
     }
