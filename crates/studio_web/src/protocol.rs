@@ -72,6 +72,13 @@ pub enum Request {
     Logs {
         since: u64,
     },
+    /// A click on the object `id`, or at `at` (logical pixels).
+    Click {
+        #[serde(skip_serializing_if = "Option::is_none")]
+        id: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        at: Option<[f64; 2]>,
+    },
     /// Where the object at `x`, `y` (logical pixels) is declared.
     Pick {
         x: f64,
@@ -93,6 +100,7 @@ impl Request {
             Request::Read { .. } => "read",
             Request::Write { .. } => "write",
             Request::Logs { .. } => "logs",
+            Request::Click { .. } => "click",
             Request::Pick { .. } => "pick",
             Request::Close => "close",
         }

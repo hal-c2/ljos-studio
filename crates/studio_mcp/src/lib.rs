@@ -90,6 +90,22 @@ impl std::fmt::Debug for Studio {
     }
 }
 
+fn told_of_write(previews: &preview::Shared, watchers: &Watchers, timer: &Arc<dyn Timer>) {
+    let catch_up = preview::lock(previews).wrote();
+    watchers.tell();
+    if let Some(delay) = catch_up {
+        let (previews, watchers) = (previews.clone(), watchers.clone());
+        // One wake-up per burst, which ends: a timer, not a poll.
+        timer.after(
+            delay,
+            Box::new(move || {
+                preview::lock(&previews).catch_up();
+                watchers.tell();
+            }),
+        );
+    }
+}
+
 impl Studio {
     /// Opens `workspace` itself as the project.
     #[cfg(feature = "native")]
@@ -156,24 +172,24 @@ impl Studio {
     /// when the budget allows, so a window shows the last state of a burst
     /// without anybody having to look first.
     fn follow(&mut self) {
-        let previews = self.previews.clone();
-        let watchers = self.watchers.clone();
-        let timer = self.timer.clone();
-        self.session.on_write(move |_| {
-            let catch_up = preview::lock(&previews).wrote();
-            watchers.tell();
-            if let Some(delay) = catch_up {
-                let (previews, watchers) = (previews.clone(), watchers.clone());
-                // One wake-up per burst, which ends: a timer, not a poll.
-                timer.after(
-                    delay,
-                    Box::new(move || {
-                        preview::lock(&previews).catch_up();
-                        watchers.tell();
-                    }),
-                );
-            }
-        });
+        let (previews, watchers, timer) = self.written();
+        self.session
+            .on_write(move |_| told_of_write(&previews, &watchers, &timer));
+    }
+
+    fn written(&self) -> (preview::Shared, Watchers, Arc<dyn Timer>) {
+        (
+            self.previews.clone(),
+            self.watchers.clone(),
+            self.timer.clone(),
+        )
+    }
+
+    /// A file changed that no write of the session made (storage got it from
+    /// elsewhere): the open preview and the watchers hear of it as of a write.
+    pub fn file_changed(&self) {
+        let (previews, watchers, timer) = self.written();
+        told_of_write(&previews, &watchers, &timer);
     }
 
     /// Calls `watcher` after every change a window shows: each write of the

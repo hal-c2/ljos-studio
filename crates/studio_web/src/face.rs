@@ -116,7 +116,9 @@ impl Face {
 
     /// What storage got from elsewhere (see [`WebStore::stored`]).
     pub fn stored(&self, pending: Pending) -> Result<(), studio_core::StoreError> {
-        self.store.stored(pending)
+        self.store.stored(pending)?;
+        studio_lock(&self.server.studio()).file_changed();
+        Ok(())
     }
 
     /// A document's text and generation, as a code view shows it.
