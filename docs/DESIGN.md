@@ -876,7 +876,7 @@ signal, and an edit that changes the selection's signals with the box
 open leaves the panel answering (`features/ui/flows.feature`).
 DECISION: `document_new` writes the source as `Qt.resolvedUrl("…")`,
 which resolves against the file it is written in wherever the model is
-made. A plain relative `source` follows Ljós's rule (pinned at f5111666,
+made. A plain relative `source` follows Ljós's rule (ljos-ui 9805b6ad,
 as qml6 reads it): on a document's root object it resolves against the
 file that uses the document, on any other object against its own file.
 Studio reads a plain one on a root through the list that uses the
