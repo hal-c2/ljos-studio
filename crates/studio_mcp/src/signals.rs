@@ -93,6 +93,17 @@ impl Found {
     }
 }
 
+/// What a lookup learned of a type.
+#[derive(Clone, Copy, PartialEq)]
+enum Described {
+    /// Nothing here is this type: the lookup goes on to the next place.
+    Not,
+    /// This is the type, but what it inherits is not known. The lookup stops,
+    /// as another type of the name is not this one.
+    InPart,
+    Whole,
+}
+
 /// The project as a type is looked up in it, read once per lookup: a chain
 /// of bases asks for modules many times, and each walk of the project
 /// would be paid again at every level.
@@ -146,9 +157,7 @@ pub fn of(store: &dyn Store, doc: &str, source: &str, node: &Node) -> Option<Vec
     };
     let mut found = Found::default();
     found.declared(node);
-    types
-        .lookup(&scope, &node.ty, &mut found, 0)
-        .then(|| found.done())
+    (types.lookup(&scope, &node.ty, &mut found, 0) == Described::Whole).then(|| found.done())
 }
 
 fn dir_of(file: &str) -> &str {
@@ -156,11 +165,12 @@ fn dir_of(file: &str) -> &str {
 }
 
 impl Types<'_> {
-    /// Adds the signals of the type `name` is in `scope`; false when no
-    /// description of it is found.
-    fn lookup(&self, scope: &Scope, name: &str, found: &mut Found, depth: usize) -> bool {
+    /// Adds the signals of the type `name` is in `scope`, and says how much
+    /// of it was described. The first place that has the type ends the
+    /// lookup, whatever it knows of it.
+    fn lookup(&self, scope: &Scope, name: &str, found: &mut Found, depth: usize) -> Described {
         if depth > DEPTH {
-            return false;
+            return Described::InPart;
         }
         let (qualifier, bare) = match name.rsplit_once('.') {
             Some((q, n)) => (Some(q), n),
@@ -169,28 +179,37 @@ impl Types<'_> {
         for import in &scope.imports {
             match import {
                 Import::Module { uri, alias } if alias.as_deref() == qualifier => {
-                    if self.in_module(uri, bare, found, depth) {
-                        return true;
+                    let described = self.in_module(uri, bare, found, depth);
+                    if described != Described::Not {
+                        return described;
                     }
                 }
                 Import::Path { path, alias }
                     if alias.as_deref() == qualifier && !path.ends_with(".js") =>
                 {
-                    if let Some(dir) = crate::blocks::join(&scope.dir, path)
-                        && self.in_dir(&dir, bare, found, depth)
-                    {
-                        return true;
+                    if let Some(dir) = crate::blocks::join(&scope.dir, path) {
+                        let described = self.in_dir(&dir, bare, found, depth);
+                        if described != Described::Not {
+                            return described;
+                        }
                     }
                 }
                 _ => {}
             }
         }
-        qualifier.is_none() && self.in_dir(&scope.dir, bare, found, depth)
+        if qualifier.is_some() {
+            return Described::Not;
+        }
+        self.in_dir(&scope.dir, bare, found, depth)
     }
 
-    fn in_module(&self, uri: &str, name: &str, found: &mut Found, depth: usize) -> bool {
+    fn in_module(&self, uri: &str, name: &str, found: &mut Found, depth: usize) -> Described {
         if let Some(ty) = self.dumps.type_named(uri, name) {
-            return self.dumped(uri, ty, found, depth);
+            return if self.dumped(uri, ty, found, depth) {
+                Described::Whole
+            } else {
+                Described::InPart
+            };
         }
         if let Some(file) = self.qmldir_file(uri, name) {
             return self.file(&file, found, depth);
@@ -198,9 +217,9 @@ impl Types<'_> {
         match qt_types::module(uri).and_then(|m| m.type_named(name)) {
             Some(ty) => {
                 toolkit(ty, found);
-                true
+                Described::Whole
             }
-            None => false,
+            None => Described::Not,
         }
     }
 
@@ -264,32 +283,38 @@ impl Types<'_> {
         })
     }
 
-    fn in_dir(&self, dir: &str, name: &str, found: &mut Found, depth: usize) -> bool {
-        let file = crate::blocks::join(dir, &format!("{name}.qml"));
-        file.is_some_and(|file| self.file(&file, found, depth))
+    fn in_dir(&self, dir: &str, name: &str, found: &mut Found, depth: usize) -> Described {
+        match crate::blocks::join(dir, &format!("{name}.qml")) {
+            Some(file) => self.file(&file, found, depth),
+            None => Described::Not,
+        }
     }
 
     /// A component a QML file is: what its root declares, and its root's
-    /// type as the file imports it.
-    fn file(&self, file: &str, found: &mut Found, depth: usize) -> bool {
+    /// type as the file imports it. A file that is there is the type, even
+    /// when it does not read as QML or its root's type is described nowhere.
+    fn file(&self, file: &str, found: &mut Found, depth: usize) -> Described {
         let Ok(source) = self.store.read(file) else {
-            return false;
+            return Described::Not;
         };
         let (Some(nodes), Some(imports)) = (
             studio_core::outline::outline(&source),
             studio_core::outline::imports(&source),
         ) else {
-            return false;
+            return Described::InPart;
         };
         let Some(root) = nodes.first() else {
-            return false;
+            return Described::InPart;
         };
         found.declared(root);
         let scope = Scope {
             dir: dir_of(file).to_owned(),
             imports,
         };
-        self.lookup(&scope, &root.ty, found, depth + 1)
+        match self.lookup(&scope, &root.ty, found, depth + 1) {
+            Described::Whole => Described::Whole,
+            Described::InPart | Described::Not => Described::InPart,
+        }
     }
 }
 
