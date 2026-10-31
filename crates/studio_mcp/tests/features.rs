@@ -1083,6 +1083,29 @@ fn png_picture(w: &mut StudioWorld, side: u32) -> StepResult {
         .ok_or_else(|| format!("the picture is {width}x{height}"))
 }
 
+#[then(regex = r#"^the answer's picture has (some|no) (red|green)$"#)]
+fn picture_colour(w: &mut StudioWorld, some: String, colour: String) -> StepResult {
+    w.answer()?;
+    let [image] = w.images.as_slice() else {
+        return Err(format!("{} pictures", w.images.len()));
+    };
+    let mut reader = png::Decoder::new(std::io::Cursor::new(&image.data))
+        .read_info()
+        .map_err(|e| e.to_string())?;
+    let mut pixels = vec![0; reader.output_buffer_size().ok_or("too large")?];
+    let info = reader.next_frame(&mut pixels).map_err(|e| e.to_string())?;
+    let (at, others) = if colour == "red" { (0, [1, 2]) } else { (1, [0, 2]) };
+    // Lighting shades a colour, so what counts is one channel well above the
+    // others, not any exact value.
+    let found = pixels[..info.buffer_size()]
+        .chunks_exact(info.color_type.samples())
+        .filter(|p| others.iter().all(|&o| p[at] as i32 > p[o] as i32 + 24))
+        .count();
+    ((found > 0) == (some == "some"))
+        .then_some(())
+        .ok_or_else(|| format!("{found} pixels of {colour}"))
+}
+
 /// Width and height from a PNG's header chunk, which comes first.
 fn png_size(data: &[u8]) -> Option<(u32, u32)> {
     const SIGNATURE: &[u8] = b"\x89PNG\r\n\x1a\n";
