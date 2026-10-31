@@ -140,8 +140,9 @@ impl<P: Port> PreviewHost for WebPreviewHost<P> {
         CALLS_PER_SECOND
     }
 
-    // A click names its object by id, or is followed by a read of the
-    // root's state; ljos-web exposes neither, so the page is not asked.
+    // A click names its object by id, or lands at a point and is followed
+    // by a read of the root's state; ljos-web exposes neither (request 4,
+    // which a click at a point is folded into), so the page is not asked.
     fn click(&mut self, _at: &Click) -> Result<(), PreviewError> {
         Err(PreviewError::NotSupported {
             message: "click: ljos-web keeps a component's ids private to its context".to_owned(),
@@ -499,5 +500,27 @@ pub(crate) mod tests {
         assert!(matches!(host.alive(), Err(PreviewError::Ended(_))));
         assert_eq!(page.heard.lock().unwrap().len(), asked);
         assert!(matches!(host.alive(), Err(PreviewError::NotOpen)));
+    }
+
+    #[test]
+    fn a_call_the_page_cannot_do_yet_leaves_the_preview_alive() {
+        let (mut host, page, _) = host();
+        host.open(&spec()).unwrap();
+        let asked = page.heard.lock().unwrap().len();
+        for at in [Click::Id("card".into()), Click::Point { x: 4.0, y: 4.0 }] {
+            assert!(matches!(
+                host.click(&at),
+                Err(PreviewError::NotSupported {
+                    ljos_web_request: 4,
+                    ..
+                })
+            ));
+        }
+        assert_eq!(page.heard.lock().unwrap().len(), asked);
+        assert!(matches!(
+            host.write("card", "width", json!(1)),
+            Err(PreviewError::NotSupported { .. })
+        ));
+        assert!(host.alive().is_ok());
     }
 }
