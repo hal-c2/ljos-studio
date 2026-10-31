@@ -1021,19 +1021,21 @@ types in Rust, a commit that is not one, a link) and sees each refused.
 **Refused for the web**, in the order the checks run, the native ones
 among them:
 
-1. `unsupported` with `links_multiply`, before anything is read: links
-   that lead into the same directories along so many ways that the site
-   would copy more than 10,000 files and directories through them, even
-   directories that hold only more links.
-2. The native entry, `syntax` and `native_types` checks. For the web,
-   `native_types` says that types written in Rust have no face there
+1. The native `not_found`, for an entry that is no document of the
+   project.
+2. `unsupported` with `links_multiply`, right after the walk and before
+   any document is read: links that lead into the same directories along
+   so many ways that the site would copy more than 10,000 files and
+   directories through them, even directories that hold only more links.
+3. The native `entry_left_out`, `syntax` and `native_types` checks. For the
+   web, `native_types` says that types written in Rust have no face there
    (request 33).
-3. `unsupported` with `linked_module` (its `module`, its `qmldir` and the
+4. `unsupported` with `linked_module` (its `module`, its `qmldir` and the
    copy `through` the link): a link to a directory that declares a module.
    The site would hold the module twice, and its builder, which finds
    modules by their qmldirs, would pick one. Natively it stays a link.
-4. The native `mocked_only`.
-5. `unsupported` with `no_web_face`, its `modules` and the `docs` that
+5. The native `mocked_only`.
+6. `unsupported` with `no_web_face`, its `modules` and the `docs` that
    import them: a module that is neither the project's own nor one ljos-web
    provides. That covers `Ljos.Blocks` shells, `Ljos.Models`, a module
    only an installed plugin gives, and a typo.
