@@ -1,15 +1,10 @@
 #!/usr/bin/env bash
 #MISE description="Studio's Gherkin scenarios, or only the given feature files or directories"
 set -euo pipefail
-root="$(cd "$(dirname "$0")/../.." && pwd)"
-# Previews run `ljos`; unless LJOS names one, build it from the Ljós
-# checkout beside this one, the same one the path dependencies use.
-if [ -z "${LJOS:-}" ]; then
-  ljos_ui="$root/../ljos-ui"
-  cargo build --manifest-path "$ljos_ui/Cargo.toml" -p ljos_cli --bin ljos
-  LJOS="${CARGO_TARGET_DIR:-$ljos_ui/target}/debug/ljos"
-fi
-export LJOS
+. "$(dirname "$0")/../_lib/env.sh"
+# Previews run `ljos`: LJOS, else one built from a ljos-ui checkout beside
+# this one, else one installed from the commit Cargo.toml pins.
+find_ljos
 # Each runner takes the scenarios that are its own: studio_mcp's speak to
 # the tools, studio_blocks' (@ui) drive Studio's window; the wasm build's
 # (@web, and the tools' again) are `mise run features:web`. The two here
@@ -20,12 +15,13 @@ run() {
   STUDIO_FEATURES="$1" cargo test -p studio_blocks --test ui || failed=1
 }
 if [ $# -eq 0 ]; then
-  run "$root/features"
+  run "$studio_root/features"
   # The server through its stdio front door, with a real preview.
   cargo test -p studio --test stdio -- --ignored || failed=1
 else
   for path in "$@"; do
-    run "$(realpath "$path")"
+    path="$(absolute "$path")"
+    run "$path"
   done
 fi
 exit $failed

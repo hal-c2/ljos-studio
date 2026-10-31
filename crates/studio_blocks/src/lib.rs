@@ -103,7 +103,8 @@ pub struct Workspace {
     #[qml(readonly, notify)]
     pub text: String,
     /// One row per object, in order: `node`, `type`, `id`, `depth`,
-    /// `label`, and `parent` and `index`, its place as `node_move` counts.
+    /// `label`, `parent` and `index`, its place as `node_move` counts, and
+    /// `comments`, how many open review comments are on it.
     #[qml(readonly, notify)]
     pub layers: Json,
     /// The handle of the selected object of `doc`; empty when none is.
@@ -120,6 +121,16 @@ pub struct Workspace {
     /// `target`, `name`, `value` as written.
     #[qml(readonly, notify)]
     pub states: Json,
+    /// The roles of the data the selected object sees, which a delegate's
+    /// bindings read as `model.<role>`.
+    #[qml(readonly, notify)]
+    pub roles: Json,
+    /// The open document's flow: `states`, the root's, the base state
+    /// (`""`) first, and `edges`, each `kind` (`transition` or
+    /// `interaction`), `from` (`*` for any), `to`, `label`, and an
+    /// interaction's `trigger` and `signal` (empty for a `TapHandler`'s).
+    #[qml(readonly, notify)]
+    pub flow: Json,
     /// The project's blocks: `module`, `name`, `summary`, `category`,
     /// `slots`.
     #[qml(readonly, notify)]
@@ -129,6 +140,12 @@ pub struct Workspace {
     pub done: Json,
     #[qml(readonly, notify)]
     pub undone: Json,
+    /// `doc`'s review comments: `id`, `node` (empty once orphaned),
+    /// `text`, `replies`, `resolved`, `orphaned` and `label`, its object
+    /// as the layers panel names it. Each layer counts its open ones in
+    /// `comments`.
+    #[qml(readonly, notify)]
+    pub comments: Json,
     /// The preview of `doc`, or `null`: `target`, `width`, `height`,
     /// `state`, `variant` (the root's state its breakpoint turns on, or
     /// empty), `generation` (what it shows: 1, and one more each reload
@@ -175,6 +192,8 @@ impl Default for Workspace {
             selection: json!({"start": 0, "end": 0}),
             inspector: none(),
             states: none(),
+            roles: none(),
+            flow: json!({"states": [], "edges": []}),
             palette: none(),
             done: none(),
             undone: none(),
@@ -184,6 +203,7 @@ impl Default for Workspace {
             previews: false,
             theme: String::new(),
             tokens: none(),
+            comments: none(),
             queue: Rc::default(),
         }
     }
@@ -577,9 +597,12 @@ fn publish(engine: &Engine, ws: ObjectId, view: View, seen: u64) {
     let _ = cx.set(Workspace::SELECTION, to_json(&view.selection));
     let _ = cx.set(Workspace::INSPECTOR, to_json(&view.inspector));
     let _ = cx.set(Workspace::STATES, to_json(&view.states));
+    let _ = cx.set(Workspace::ROLES, to_json(&view.roles));
+    let _ = cx.set(Workspace::FLOW, to_json(&view.flow));
     let _ = cx.set(Workspace::PALETTE, to_json(&view.palette));
     let _ = cx.set(Workspace::DONE, to_json(&view.done));
     let _ = cx.set(Workspace::UNDONE, to_json(&view.undone));
+    let _ = cx.set(Workspace::COMMENTS, to_json(&view.comments));
     let _ = cx.set(Workspace::PREVIEW, preview);
     let _ = cx.set(Workspace::PROBLEM, view.problem);
     let _ = cx.set(Workspace::PREVIEWS, view.previews);

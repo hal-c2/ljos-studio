@@ -26,7 +26,7 @@ fn named(store: &dyn Store, name: &str) -> Vec<String> {
 
 /// `dir/file` with `.` and `..` resolved; `None` if it climbs out of the
 /// project.
-fn join(dir: &str, file: &str) -> Option<String> {
+pub(crate) fn join(dir: &str, file: &str) -> Option<String> {
     let mut parts: Vec<&str> = dir.split('/').filter(|p| !p.is_empty()).collect();
     for part in file.split('/') {
         match part {

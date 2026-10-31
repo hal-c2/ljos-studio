@@ -9,7 +9,7 @@ expression: value
     "open_world": false,
     "read_only": true
   },
-  "description": "An object's bindings with their byte ranges, its parent, its children, and its states and transitions.",
+  "description": "An object's bindings with their byte ranges, its parent, its children, its states and transitions, the flows in it, and the roles and rows of the data it sees (a ListModel, a list's model, in a delegate its list's).",
   "inputSchema": {
     "$defs": {
       "Address": {
@@ -160,6 +160,90 @@ expression: value
         ],
         "type": "object"
       },
+      "Interaction": {
+        "description": "One flow of a document, as [`Session::interactions`] lists it.",
+        "properties": {
+          "navigator": {
+            "description": "The `id` of the `Loader` or `StackView` that opens the document.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "open": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "owner": {
+            "description": "The `id` of the object whose state it sets.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "signal": {
+            "description": "The signal handled: `tapped` for a `TapHandler`'s.",
+            "type": "string"
+          },
+          "state": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "trigger": {
+            "description": "The handle of the object that is tapped.",
+            "type": "string"
+          },
+          "trigger_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "trigger",
+          "signal"
+        ],
+        "type": "object"
+      },
+      "Model": {
+        "description": "The data an object sees.",
+        "properties": {
+          "doc": {
+            "description": "The document the `ListModel` is written in.",
+            "type": "string"
+          },
+          "roles": {
+            "description": "Its roles, in the order the rows first bind them.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "rows": {
+            "format": "uint",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "view": {
+            "description": "The handle of the list whose delegate the object is in.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "roles",
+          "rows",
+          "doc"
+        ],
+        "type": "object"
+      },
       "StateInfo": {
         "description": "One `State` of an object.",
         "properties": {
@@ -267,10 +351,28 @@ expression: value
           "null"
         ]
       },
+      "interactions": {
+        "description": "The flows written in it and in everything it holds, in order.",
+        "items": {
+          "$ref": "#/$defs/Interaction"
+        },
+        "type": "array"
+      },
       "line": {
         "format": "uint",
         "minimum": 0,
         "type": "integer"
+      },
+      "model": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/Model"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "description": "The data it sees: its own as a `ListModel`, a list's model's, or\nin a list's delegate the list's, whose roles bind as `model.role`."
       },
       "node": {
         "type": "string"
@@ -318,7 +420,8 @@ expression: value
       "bindings",
       "children",
       "states",
-      "transitions"
+      "transitions",
+      "interactions"
     ],
     "title": "Inspected",
     "type": "object"

@@ -122,7 +122,14 @@ rewrite the user's QML (`mutate`), start a preview that runs project code
 - capabilities are granted at launch (`inspect` by default) and enforced
   in the server;
 - every path a tool takes, `export`'s output among them, is canonicalised
-  and confined to the open project; a path outside it is refused.
+  and confined to the open project; a path outside it is refused, and so
+  is one a link leads out of. `export` leaves a link out of the project,
+  or to anything it leaves out itself (mocks, the sidecar, build output),
+  out of the bundle, and refuses a build directory that is a link. It
+  leaves out what is not a regular file (a pipe would hold it forever),
+  replaces only a directory that is empty or holds a manifest that is a
+  file saying `ljos-bundle`, and asks all of that again just before it
+  replaces one, and again of each file as it copies it.
 
 `studio --mcp` on stdio needs no token: its client started it.
 
@@ -539,7 +546,9 @@ the ljos-web requests below.
   UTF-16 units, as JavaScript counts). `web/features.mjs` runs the
   `features/` scenarios that need no preview and no window against it in
   node (`mise run features:web`); `@web` scenarios
-  (`features/web/storage.feature`) run only there. It reads Scenario
+  (`features/web/storage.feature`) run only there, and `@disk` ones
+  (`features/project/export.feature`: a bundle is written to a directory,
+  and the browser's storage is not one) only natively. It reads Scenario
   Outlines and data tables as cucumber does (one scenario per Examples
   row, `<name>`s written into step text, doc strings and tables) and
   refuses any Gherkin it does not read. Its steps match by kind (`Given`,
@@ -666,6 +675,159 @@ S1–S4 scenarios in a headless browser.
 
 - Prototyping flows (state graph view), CMS-style model binding, export
   bundles, design review comments in the sidecar; multiplayer research.
+
+#### As built: prototyping flows and list data
+
+- **A flow is the app's handlers.** A step of a prototype is what a tap
+  does: go to a state of a component, or open a document in a `Loader` or
+  on a `StackView`. Studio writes it as a signal handler on the object
+  tapped (`onClicked` when the signal is named, otherwise `onTapped` in a
+  `TapHandler`, which any item can hold), so the prototype is the app and
+  runs anywhere QML runs. `state_edit` writes and takes out interactions;
+  `node_inspect` lists them (MCP.md, "Flows and list data").
+- **The state graph is read from the file.** The root's states are its
+  nodes, the base state first; its transitions and its interactions are
+  its edges, an interaction going from any state. There is no flow model
+  beside the file.
+- **The preview plays it.** `preview_state` clicks the running app, by an
+  object's `id` or at a point, and reads the state the `node` it names
+  reached; a click with no `node` plays and reads nothing, which is how
+  the window plays a document whose root has no `id`. Setting a state
+  needs the `node` it is set on.
+- **Data is a model document.** A list's content is a `ListModel` written
+  as QML, in its own document of a data module; a JSON file becomes one
+  with `document_new`. The roles the data binds are offered in the
+  inspector of a delegate as `model.<role>`. The mocked state swaps the
+  module for one under `mocks/`, so a fixture is a file beside the other
+  mocks. Only a view's delegate sees its roles, not its header or footer.
+  A record's keys are its roles, so a key may not repeat within a record,
+  and `id` is not a role: QML reads it as the object's id.
+- **The window.** The *Flow* panel (`shell/FlowPanel.qml`) shows the
+  states as nodes ("Flow state Base", "Flow state details"), each with a
+  button that wires the selection to go to it ("Tap selection to go to
+  details"), and the edges as rows ("Flow edge tapped card to details")
+  with "Remove flow …" on interactions. The canvas's "Play" toggle turns a
+  click in a frame into `preview_state` with `click_at`; the panel then
+  marks the state the app is in ("Playing details"). The inspector's
+  *Roles* section lists the roles the selection sees ("Role name"), each
+  with a field ("Bind role name to") that binds a property to it.
+  `features/ui/flows.feature` drives them.
+
+DECISION: an edge's `from` is `*` for every interaction: a handler sets
+its state from wherever the app is, and Studio does not evaluate which
+states make the trigger visible. DECISION: the flow is the root's; an
+interaction that sets another object's state is that object's and is not
+drawn. DECISION: play mode does not select; leaving it, a click selects
+again.
+#### As built: export bundles and review comments
+
+Two of S6's items are tools with their scenarios
+(`features/project/export.feature`, `features/edit/review.feature`), and
+review is in the window too (`features/ui/review.feature`). MCP.md lists
+their arguments, answers and refusals.
+
+- **An export is what `ljos run` starts.** `export` copies the project
+  into `build/native`: its QML, its theme, its assets and its own blocks,
+  never the mocks or `.studio/`, with a manifest (`ljos-bundle.json`) that
+  says what it holds, what was left out and why, and how to start it. The
+  scenario copies the bundle out of the project and runs it headless: its
+  outline is the live preview's.
+- **What cannot be exported is refused, saying why.** A web site (ljos-web
+  builds none on its own), types written in Rust (only the app's program
+  registers them), a document that does not parse, and a module that only
+  a mock provides each have their own refusal; nothing is written.
+- **Comments sit on objects, in the sidecar.** `review` adds, answers,
+  resolves and reopens comments, and lists them by document or object. A
+  comment follows its object through anybody's edits as a handle does,
+  and is written down with the object's key, so the next session finds it.
+  Deleting `.studio/` loses the comments and nothing else.
+- **A removed object orphans its comments.** They are kept with the
+  place the object last had and can still be answered; undoing the
+  removal gives them their object back, and so does redoing the creation
+  of a document whose undo orphaned them.
+- **The sidecar is never written over blindly.** Each review call reads
+  `.studio/review.json` again when it changed on disk. A sidecar that
+  does not read, or one a later Studio wrote (a higher `version`), is
+  left alone and every call says so (`review_unreadable`) until it is
+  mended or deleted. A sidecar changed by somebody else between Studio's
+  read and its write is not overwritten: the call is refused with
+  `review_changed` and the new file is what Studio holds from then on. A
+  comment the sidecar did not take is not made. Re-reading merges: what
+  the file says is kept, and a comment this session follows keeps its
+  object, place and orphaned state, so an edit or an undo around the
+  change still lands; that is then written down.
+- **The window.** A layer with open comments says how many ("1 comment on
+  Text title"). The inspector's *Comments* section lists the selected
+  object's comments and the document's orphaned ones ("Open comment: Too
+  small", "Resolved comment: …", "Orphaned comment: …"), each with a
+  "Resolve …" or "Reopen …" button, and "New comment" with "Add comment"
+  adds one to the selected object. The box keeps its text until the
+  comment is taken, so a refused one is sent again rather than typed
+  again. Every gesture is the `review` call an agent makes.
+
+DECISION: the bundle is a directory, not Ljós's production bundle
+(ARCHITECTURE.md 12.2) nor an AOT binary: both need a build Studio does
+not make. Its manifest has no hashes or signature until Ljós defines them.
+DECISION: a bundle is written below the project's `build/`, which the
+store does not list, so it is never a document nor part of the next one.
+DECISION: comments are not edits: they are not in the undo history, and
+they change no document's generation. DECISION: while the sidecar does
+not read, the window shows no comments rather than a refusal on every
+repaint; the next review gesture shows the refusal. DECISION: a sidecar
+changed on disk replaces Studio's comments as a whole, so comments made
+in this session and not yet written are not merged into it; the refusal
+says so. DECISION: export leaves a link out of the project out of the
+bundle (named in `left_out`) rather than refusing the export, as it does
+for the mocks; an entry that is left out is refused (`entry_left_out`).
+DECISION: export works path by path, and checks again right before each
+step that removes or reads, rather than through directory handles
+(`openat`/`unlinkat`, or `cap-std`). Between the last check and the
+removal a process of the same user could still swap `build/` for a link
+and have a directory that holds a bundle's manifest removed. That process
+can already remove the directory itself, so the window only matters for a
+swap made by accident, such as a checkout. Directory handles would need a
+dependency on each platform, and the browser build has no directory to
+export. Handles are the next step if Studio ever exports for another user.
+DECISION: export walks each real directory once, under its own name, and
+never walks a link to a directory: links that fan out and meet again (a
+diamond at each of 24 levels took 56 s and failed before) stay linear in
+time and size. Every directory of the project is walked under its own
+name or left out by the walk's rules, so a link to a directory leads to
+one the bundle holds or to one it leaves out. The first goes into the
+bundle as a relative link (the manifest's `links`), so an app that
+imports a directory through the link's name (`import "alias"`) runs
+from the bundle as from the project. Where the system makes no links (a
+Windows user without the privilege), that directory is copied under the
+link's name, with the links inside it copied the same way: each
+`(path, to)` once, and a link back into a directory being copied around it
+not followed again. A copy cannot share what a diamond of links shares, so
+it doubles with every level; the links are made before any file is copied,
+and where they cannot be, what their copies would write is counted first:
+every link followed and every file placed, so a diamond of directories that
+hold only links counts too. Past 10,000 entries the export is refused
+(`unsupported`, `links_multiply`) with nothing written. The answer's `files` and `bytes` count the copies.
+The second stays out with
+its reason, as does a link to a directory it is in, which would make the
+bundle hold itself. A file's check right before it is copied applies the walk's
+exclusions again to where it now leads, so a file swapped for a link into
+`.studio/`, the mocks or build output is not copied.
+
+Measured in a release build on the reference desktop:
+
+| Path | p50 | p95 |
+|---|---|---|
+| `export` of a project whose bundle holds 200 files (415 677 bytes), 20 exports (`studio_mcp` example `export_perf`, release) | 9.41 ms | 9.95 ms |
+
+#### As built: running it
+
+`mise run studio` is the window; `mise run web:serve` is the same shell in a
+browser, for a person. ljos-web compiles QML only outside a page, so
+`web/serve.mjs` compiles and serves the preview, bound to the loopback
+interface and refusing another origin: a page elsewhere must not be able to
+reach it. The project stays in browser storage (OPFS, with the names in
+`localStorage`). The preview pane speaks the same protocol as `web/page.js`.
+What each task finds and what it says when something is missing is pinned by
+`mise run check:tasks`; the pin of ljos-web is `web/ljos-web.rev`.
 
 ## 8. Risks
 

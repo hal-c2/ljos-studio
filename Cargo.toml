@@ -16,29 +16,29 @@ publish = false
 # ljos-ui" in README.md. Every ljos-ui crate names the same `rev`: move them
 # together.
 [workspace.dependencies]
-qml_syntax = { git = "https://github.com/hal-c2/ljos-ui", rev = "63ec3fa4ad17dbc7ed126be86796703201e30403" }
-qml_edit = { git = "https://github.com/hal-c2/ljos-ui", rev = "63ec3fa4ad17dbc7ed126be86796703201e30403" }
-ljos_ir = { git = "https://github.com/hal-c2/ljos-ui", rev = "63ec3fa4ad17dbc7ed126be86796703201e30403" }
+qml_syntax = { git = "https://github.com/hal-c2/ljos-ui", rev = "f5005294c5d6e66e0015349133e8aeca037b1454" }
+qml_edit = { git = "https://github.com/hal-c2/ljos-ui", rev = "f5005294c5d6e66e0015349133e8aeca037b1454" }
+ljos_ir = { git = "https://github.com/hal-c2/ljos-ui", rev = "f5005294c5d6e66e0015349133e8aeca037b1454" }
 # What a theme may say and when Ljós refuses one, judged by Ljós itself.
-ljos_design = { git = "https://github.com/hal-c2/ljos-ui", rev = "63ec3fa4ad17dbc7ed126be86796703201e30403" }
+ljos_design = { git = "https://github.com/hal-c2/ljos-ui", rev = "f5005294c5d6e66e0015349133e8aeca037b1454" }
 # Puts Studio's own theme on its window when no watched session does.
-ljos_design_qml = { git = "https://github.com/hal-c2/ljos-ui", rev = "63ec3fa4ad17dbc7ed126be86796703201e30403" }
-ljos_mcp_core = { git = "https://github.com/hal-c2/ljos-ui", rev = "63ec3fa4ad17dbc7ed126be86796703201e30403" }
-ljos_blocks = { git = "https://github.com/hal-c2/ljos-ui", rev = "63ec3fa4ad17dbc7ed126be86796703201e30403", features = ["source"] }
-ljos_child = { git = "https://github.com/hal-c2/ljos-ui", rev = "63ec3fa4ad17dbc7ed126be86796703201e30403" }
+ljos_design_qml = { git = "https://github.com/hal-c2/ljos-ui", rev = "f5005294c5d6e66e0015349133e8aeca037b1454" }
+ljos_mcp_core = { git = "https://github.com/hal-c2/ljos-ui", rev = "f5005294c5d6e66e0015349133e8aeca037b1454" }
+ljos_blocks = { git = "https://github.com/hal-c2/ljos-ui", rev = "f5005294c5d6e66e0015349133e8aeca037b1454", features = ["source"] }
+ljos_child = { git = "https://github.com/hal-c2/ljos-ui", rev = "f5005294c5d6e66e0015349133e8aeca037b1454" }
 # The facade a Ljós app is written against; each crate turns on what it
 # needs (the window, the compiler, the test window).
-ljos = { git = "https://github.com/hal-c2/ljos-ui", rev = "63ec3fa4ad17dbc7ed126be86796703201e30403", default-features = false }
+ljos = { git = "https://github.com/hal-c2/ljos-ui", rev = "f5005294c5d6e66e0015349133e8aeca037b1454", default-features = false }
 # What settles a scene and counts its frames, for the UI scenarios.
-ljos_drive = { git = "https://github.com/hal-c2/ljos-ui", rev = "63ec3fa4ad17dbc7ed126be86796703201e30403" }
+ljos_drive = { git = "https://github.com/hal-c2/ljos-ui", rev = "f5005294c5d6e66e0015349133e8aeca037b1454" }
 # The watched session the self-reskin scenarios drive in-process, the
 # clock it is pumped with, and the scene a reload shows its root in.
-ljos_dev = { git = "https://github.com/hal-c2/ljos-ui", rev = "63ec3fa4ad17dbc7ed126be86796703201e30403" }
-ljos_runtime = { git = "https://github.com/hal-c2/ljos-ui", rev = "63ec3fa4ad17dbc7ed126be86796703201e30403" }
-ljos_quick = { git = "https://github.com/hal-c2/ljos-ui", rev = "63ec3fa4ad17dbc7ed126be86796703201e30403" }
+ljos_dev = { git = "https://github.com/hal-c2/ljos-ui", rev = "f5005294c5d6e66e0015349133e8aeca037b1454" }
+ljos_runtime = { git = "https://github.com/hal-c2/ljos-ui", rev = "f5005294c5d6e66e0015349133e8aeca037b1454" }
+ljos_quick = { git = "https://github.com/hal-c2/ljos-ui", rev = "f5005294c5d6e66e0015349133e8aeca037b1454" }
 # The role words the driver names nodes by, for tests that find a node by
 # role among several.
-ljos_a11y = { git = "https://github.com/hal-c2/ljos-ui", rev = "63ec3fa4ad17dbc7ed126be86796703201e30403" }
+ljos_a11y = { git = "https://github.com/hal-c2/ljos-ui", rev = "f5005294c5d6e66e0015349133e8aeca037b1454" }
 
 # Pins match ljos-ui's, so the two lock files agree.
 anyhow = "1.0"

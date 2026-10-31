@@ -5,6 +5,13 @@
 // Below them, its states (`state_edit`): one is picked to edit the values
 // it changes and the condition that turns it on, or to give it a
 // breakpoint, a width bound of the window.
+//
+// Then the roles of the data it sees, in a list's delegate: one is bound
+// to a property as `model.<role>`, the form a delegate reads it in.
+//
+// Last, its review comments (`review`), and those of the document whose
+// objects were taken out: a person adds one, resolves it or reopens it.
+// They are kept in Studio's sidecar; the file does not change.
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
@@ -68,6 +75,39 @@ Panel {
         if (text !== "")
             args.binding = text
         editState(args)
+    }
+
+    // The selected object's comments, then those whose objects are gone.
+    readonly property var comments: {
+        const all = workspace.comments
+        const out = []
+        for (let i = 0; i < all.length; i++) {
+            if (all[i].orphaned || all[i].node === workspace.selected)
+                out.push(all[i])
+        }
+        return out
+    }
+
+    // The box keeps its text until the sidecar took the comment, so a
+    // refused one can be sent again rather than typed again.
+    property bool adding: false
+    Connections {
+        target: panel.workspace
+        function onAnswered(tool, answer) {
+            if (tool === "review" && panel.adding) {
+                panel.adding = false
+                newComment.text = ""
+            }
+        }
+        function onRefused(tool, error) {
+            if (tool === "review")
+                panel.adding = false
+        }
+    }
+
+    function review(args) {
+        refusal.text = ""
+        workspace.dispatch("review", args)
     }
 
     function bind(name, text) {
@@ -314,6 +354,112 @@ Panel {
                     Accessible.name: "Set change"
                     enabled: changeTarget.text !== "" && changeName.text !== ""
                     onClicked: panel.change(changeTarget.text, changeName.text, changeValue.text)
+                }
+            }
+        }
+
+        Label {
+            visible: panel.workspace.roles.length > 0
+            text: "Roles"
+            color: Colors.text
+            font.weight: Typography.bodyStrongWeight
+            Accessible.role: Accessible.Heading
+            Accessible.name: text
+        }
+
+        Repeater {
+            model: panel.workspace.roles
+            delegate: RowLayout {
+                id: roleRow
+                required property string modelData
+                Layout.fillWidth: true
+                spacing: Spacing.xxs
+
+                Label {
+                    text: roleRow.modelData
+                    color: Colors.text
+                    Layout.preferredWidth: 96
+                    elide: Text.ElideRight
+                    Accessible.role: Accessible.StaticText
+                    Accessible.name: "Role " + roleRow.modelData
+                }
+                TextField {
+                    placeholderText: "property"
+                    Accessible.name: "Bind role " + roleRow.modelData + " to"
+                    Layout.fillWidth: true
+                    onAccepted: {
+                        if (text === "")
+                            return
+                        panel.bind(text, "model." + roleRow.modelData)
+                        text = ""
+                    }
+                }
+            }
+        }
+
+        Label {
+            text: "Comments"
+            color: Colors.text
+            font.weight: Typography.bodyStrongWeight
+            Accessible.role: Accessible.Heading
+            Accessible.name: text
+        }
+
+        Repeater {
+            model: panel.comments
+            delegate: RowLayout {
+                id: commentRow
+                required property var modelData
+                readonly property string kind: modelData.orphaned ? "Orphaned"
+                                               : modelData.resolved ? "Resolved" : "Open"
+                Layout.fillWidth: true
+                spacing: Spacing.xxs
+
+                Label {
+                    text: commentRow.modelData.orphaned
+                          ? commentRow.modelData.text + " (" + commentRow.modelData.label + ", removed)"
+                          : commentRow.modelData.text
+                    color: commentRow.modelData.resolved ? Colors.textMuted : Colors.text
+                    wrapMode: Text.Wrap
+                    Layout.fillWidth: true
+                    Accessible.role: Accessible.StaticText
+                    Accessible.name: commentRow.kind + " comment: " + commentRow.modelData.text
+                }
+                Button {
+                    text: commentRow.modelData.resolved ? "Reopen" : "Resolve"
+                    Accessible.name: text + " " + commentRow.modelData.text
+                    onClicked: panel.review({
+                        action: commentRow.modelData.resolved ? "reopen" : "resolve",
+                        comment: commentRow.modelData.id
+                    })
+                }
+            }
+        }
+
+        RowLayout {
+            Layout.fillWidth: true
+            spacing: Spacing.xxs
+
+            TextField {
+                id: newComment
+                placeholderText: "comment"
+                Accessible.name: "New comment"
+                Layout.fillWidth: true
+                onAccepted: if (addComment.enabled) addComment.clicked()
+            }
+            Button {
+                id: addComment
+                text: "Comment"
+                Accessible.name: "Add comment"
+                enabled: newComment.text.trim() !== "" && panel.workspace.selected !== ""
+                onClicked: {
+                    panel.adding = true
+                    panel.review({
+                        action: "add",
+                        doc: panel.workspace.doc,
+                        node: {node: panel.workspace.selected},
+                        text: newComment.text
+                    })
                 }
             }
         }

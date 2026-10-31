@@ -9,7 +9,7 @@ expression: value
     "open_world": false,
     "read_only": false
   },
-  "description": "Add, rename or remove an object's State; set or remove a value it changes or its `when` (a `breakpoint` writes the root's width bound); add or remove a Transition. Refused with `would_break` if the file would not parse.",
+  "description": "Add, rename or remove an object's State; set or remove a value it changes or its `when` (`breakpoint`: the root's width bound); add or remove a Transition; write or take out a flow: a tap on `trigger` goes to `state` or opens a document. Refused with `would_break` if the file would not parse.",
   "inputSchema": {
     "$defs": {
       "Address": {
@@ -78,7 +78,8 @@ expression: value
               "rename",
               "remove",
               "add_transition",
-              "remove_transition"
+              "remove_transition",
+              "remove_interaction"
             ],
             "type": "string"
           },
@@ -90,6 +91,11 @@ expression: value
           {
             "const": "when",
             "description": "Set or remove the state's `when`.",
+            "type": "string"
+          },
+          {
+            "const": "interaction",
+            "description": "A flow on `trigger`: to `state` or, by `navigator`, to `open`.",
             "type": "string"
           }
         ]
@@ -163,6 +169,17 @@ expression: value
           "null"
         ]
       },
+      "navigator": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/Address"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "description": "`interaction`: the `Loader` or `StackView` that opens it."
+      },
       "new_name": {
         "description": "`rename`: the new name.",
         "type": [
@@ -180,6 +197,20 @@ expression: value
           }
         ],
         "description": "The object whose states these are; the root when left out."
+      },
+      "open": {
+        "description": "`interaction`: a document beside this one to open, not with `state`.",
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "signal": {
+        "description": "Interactions: its signal (`clicked`), handled as `onClicked`; a\n`TapHandler`'s tap when left out.",
+        "type": [
+          "string",
+          "null"
+        ]
       },
       "state": {
         "description": "The state's name; every action but the transition ones needs it.",
@@ -204,6 +235,17 @@ expression: value
           "string",
           "null"
         ]
+      },
+      "trigger": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/Address"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "description": "Interactions: the object tapped."
       },
       "value": {
         "anyOf": [

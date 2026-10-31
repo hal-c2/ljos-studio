@@ -1,0 +1,255 @@
+#!/usr/bin/env bash
+#MISE description="What the tasks find with nothing set, what they say when something is missing, and that they stay portable to macOS"
+set -euo pipefail
+# Runs `mise-tasks/_lib/env.sh` from a copy, in a made-up layout with stand-ins
+# for cargo, Qt's tools, brew and Playwright: nothing here builds or downloads.
+root="$(cd "$(dirname "$0")/../.." && pwd)"
+scratch="$(mktemp -d "${TMPDIR:-/tmp}/studio-tasks.XXXXXX")"
+trap 'rm -rf "$scratch"' EXIT
+home="$scratch/home"
+co="$scratch/layout/studio"
+web="$scratch/layout/ljos-web"
+stubs="$scratch/stubs"
+mkdir -p "$home" "$co/mise-tasks/_lib" "$co/web" "$stubs"
+cp "$root/mise-tasks/_lib/env.sh" "$co/mise-tasks/_lib/"
+cp "$root/web/ljos-web.rev" "$co/web/"
+pin="$(cat "$root/web/ljos-web.rev")"
+echo 'x = { git = "https://github.com/hal-c2/ljos-ui", rev = "abc123" }' >"$co/Cargo.toml"
+
+failed=0
+stub() { # name, body
+  printf '#!/usr/bin/env bash\n%s\n' "$2" >"$stubs/$1"
+  chmod +x "$stubs/$1"
+}
+unstub() {
+  rm -f "$stubs/$1"
+}
+# Qt's tools and brew answer nothing unless a case says otherwise, whatever
+# this machine has.
+stub qtpaths6 'exit 1'
+stub qtpaths 'echo "qtpaths: Unknown option '"'"'query'"'"'." >&2; exit 1'
+stub brew 'exit 1'
+# `call <lines of bash after sourcing>`: sets `said` and `status`.
+call() {
+  status=0
+  said="$(cd "$co" && env -u LJOS -u LJOS_WEB -u LJOS_UI -u PLAYWRIGHT -u QMLC -u QT_INSTALL_QML -u CARGO_TARGET_DIR -u MISE_ORIGINAL_CWD \
+    HOME="$home" PATH="$stubs:$PATH" ${ENVS:-} bash -c '
+      set -euo pipefail
+      . mise-tasks/_lib/env.sh
+      qt_system_dirs() { :; }
+      '"$1" 2>&1)" || status=$?
+}
+ok() {
+  printf '✔ %s\n' "$1"
+}
+bad() {
+  printf '✘ %s\n  said (status %s): %s\n' "$1" "$status" "$said"
+  failed=1
+}
+says() { # what, text
+  case "$said" in
+    *"$2"*) ok "$1" ;;
+    *) bad "$1: wanted \"$2\"" ;;
+  esac
+}
+refuses() { # what, text
+  if [ "$status" -eq 0 ]; then bad "$1: should have failed"; else says "$1" "$2"; fi
+}
+
+# --- ljos-web ---------------------------------------------------------------
+call find_ljos_web
+refuses "a missing checkout says how to get it" "git clone https://github.com/hal-c2/ljos-web ../ljos-web"
+says "and at which commit" "git checkout $pin"
+mkdir -p "$web"
+call find_ljos_web
+refuses "a checkout without packages says the command" "ljos-web has no packages installed: run (cd ../ljos-web && pnpm install --frozen-lockfile)"
+pnpm_dir="$web/node_modules/.pnpm/test/node_modules"
+mkdir -p "$pnpm_dir/@playwright/test" "$pnpm_dir/playwright" "$web/examples/web/node_modules/@solidjs"
+echo '{"name":"@playwright/test"}' >"$pnpm_dir/@playwright/test/package.json"
+echo '{"name":"playwright"}' >"$pnpm_dir/playwright/package.json"
+ln -s ../../../node_modules/.pnpm/test/node_modules/@playwright "$web/examples/web/node_modules/@playwright"
+for m in ljos-web solid-js vite @solidjs/web; do
+  mkdir -p "$web/examples/web/node_modules/$m"
+  echo '{}' >"$web/examples/web/node_modules/$m/package.json"
+done
+call 'find_ljos_web; echo "$LJOS_WEB"'
+says "a checkout beside this one is found with nothing set" "$(cd "$web" && pwd -P)"
+ENVS="LJOS_WEB=$scratch/nowhere" call find_ljos_web
+refuses "LJOS_WEB overrides the place" "no ljos-web checkout at $scratch/nowhere"
+
+# --- Playwright -------------------------------------------------------------
+echo 'export const chromium = { launch: async () => { throw new Error("browserType.launch: Executable doesn'"'"'t exist at /x") } };' >"$pnpm_dir/playwright/index.mjs"
+call find_playwright
+refuses "a missing Chromium says the command" "Playwright's Chromium is not installed: run (cd ../ljos-web && pnpm --filter ljos-web-example-web exec playwright install chromium)"
+echo 'export const chromium = { launch: async () => ({ close: async () => {} }) };' >"$pnpm_dir/playwright/index.mjs"
+call 'find_playwright; echo "$PLAYWRIGHT"'
+says "Playwright is found where pnpm put it" "$(cd "$pnpm_dir" && pwd -P)/playwright/index.mjs"
+echo 'export const chromium = { launch: async () => { throw new Error("no libnss3") } };' >"$scratch/other.mjs"
+ENVS="PLAYWRIGHT=$scratch/other.mjs" call find_playwright
+refuses "PLAYWRIGHT overrides it, and another failure is said as it is" "no libnss3"
+
+# --- qmlc -------------------------------------------------------------------
+stub cargo 'echo "cargo in $PWD target=${CARGO_TARGET_DIR:-none} $*"; mkdir -p target/debug; printf "#!/bin/sh\n" >target/debug/qmlc; chmod +x target/debug/qmlc'
+ENVS="CARGO_TARGET_DIR=$scratch/ours" call 'find_ljos_web; find_qmlc; echo "QMLC=$QMLC"'
+says "a missing qmlc is built, saying so" "ljos-web has no qmlc yet; building it: (cd ../ljos-web && cargo build --bin qmlc)"
+says "in ljos-web's own target, not ours" "cargo in $(cd "$web" && pwd -P) target=none build --bin qmlc"
+says "and used" "QMLC=$(cd "$web" && pwd -P)/target/debug/qmlc"
+mkdir -p "$web/target/release"
+printf '#!/bin/sh\n' >"$web/target/release/qmlc"
+chmod +x "$web/target/release/qmlc"
+stub cargo 'echo "cargo should not run"; exit 1'
+call 'find_ljos_web; find_qmlc; echo "QMLC=$QMLC"'
+says "a release qmlc comes first, with nothing built" "QMLC=$(cd "$web" && pwd -P)/target/release/qmlc"
+ENVS="QMLC=$scratch/nowhere" call 'find_ljos_web; find_qmlc'
+refuses "QMLC overrides it" "QMLC names $scratch/nowhere, which is not a program"
+rm -rf "$web/target"
+stub cargo 'exit 101'
+call 'find_ljos_web; find_qmlc'
+refuses "a qmlc that does not build says what to run" "building qmlc failed: run (cd ../ljos-web && cargo build --bin qmlc)"
+mkdir -p "$web/target/debug"
+printf '#!/bin/sh\n' >"$web/target/debug/qmlc"
+chmod +x "$web/target/debug/qmlc"
+
+# --- Qt ---------------------------------------------------------------------
+qt6() { mkdir -p "$1/QtQuick/Controls/Basic"; }
+call find_qt
+refuses "no Qt says where to point QT_INSTALL_QML, for Homebrew" '$(brew --prefix qt)/share/qt/qml'
+says "both of Homebrew's layouts" '$(brew --prefix qt)/qml'
+says "and the installer's" "~/Qt/6.x/macos/qml"
+says "and what was asked" "neither qtpaths6 nor qtpaths"
+mkdir -p "$scratch/qt5/QtQuick/Controls"
+ENVS="QT_INSTALL_QML=$scratch/qt5" call find_qt
+refuses "QT_INSTALL_QML must be Qt 6's" "which has no Qt 6 QtQuick/Controls/Basic"
+stub qtpaths "echo $scratch/qt5"
+call find_qt
+refuses "a qtpaths that names Qt 5's is not taken" "Qt 6's QML not found"
+qt6 "$scratch/qt-a"
+stub qtpaths "[ \"\$1\" = --query ] && echo $scratch/qt-a"
+call 'find_qt; echo "QML=$QT_INSTALL_QML"'
+says "qtpaths names it" "QML=$scratch/qt-a"
+qt6 "$scratch/qt-b"
+stub qtpaths6 "[ \"\$1\" = --query ] && echo $scratch/qt-b"
+call 'find_qt; echo "QML=$QT_INSTALL_QML"'
+says "qtpaths6 is asked first" "QML=$scratch/qt-b"
+stub qtpaths6 'exit 1'
+stub qtpaths 'exit 1'
+qt6 "$scratch/brew/qml"
+stub brew "echo $scratch/brew"
+call 'find_qt; echo "QML=$QT_INSTALL_QML"'
+says "Homebrew's qml directory is found" "QML=$scratch/brew/qml"
+qt6 "$scratch/brew/share/qt/qml"
+call 'find_qt; echo "QML=$QT_INSTALL_QML"'
+says "Homebrew's share/qt/qml is found first" "QML=$scratch/brew/share/qt/qml"
+stub brew 'exit 1'
+qt6 "$home/Qt/6.8.0/macos/qml"
+call 'find_qt; echo "QML=$QT_INSTALL_QML"'
+says "the installer's is found" "QML=$home/Qt/6.8.0/macos/qml"
+qt6 "$scratch/qt-c"
+mkdir -p "$scratch/qt-c-bin"
+ENVS="QT_INSTALL_QML=$scratch/qt-c" call 'find_qt; echo "QML=$QT_INSTALL_QML"'
+says "QT_INSTALL_QML overrides them all" "QML=$scratch/qt-c"
+rm -rf "$home/Qt"
+
+# --- Ljós's design module ---------------------------------------------------
+mkdir -p "$scratch/ui/crates/ljos_design_qml/qml" "$scratch/git/crates/ljos_design_qml/qml"
+ENVS="LJOS_UI=$scratch/ui" call 'find_design_qml; echo "D=$LJOS_DESIGN"'
+says "LJOS_UI names the checkout" "D=$scratch/ui/crates/ljos_design_qml/qml"
+stub cargo "echo '{\"packages\":[{\"name\":\"ljos_design_qml\",\"manifest_path\":\"$scratch/git/crates/ljos_design_qml/Cargo.toml\"}]}'"
+call 'find_design_qml; echo "D=$LJOS_DESIGN"'
+says "otherwise cargo says where the pinned one is" "D=$scratch/git/crates/ljos_design_qml/qml"
+
+# --- ljos -------------------------------------------------------------------
+stub cargo 'echo "cargo $*"; if [ "$1" = install ]; then shift; while [ "$1" != --root ]; do shift; done; mkdir -p "$2/bin"; printf "#!/bin/sh\n" >"$2/bin/ljos"; chmod +x "$2/bin/ljos"; fi'
+ENVS="LJOS=/some/ljos" call 'find_ljos; echo "L=$LJOS"'
+says "LJOS is taken as it is" "L=/some/ljos"
+call 'find_ljos; echo "L=$LJOS"'
+refuses "with no ljos-ui beside it, it installs nothing and names setup" "run mise run setup"
+says "and the command setup runs" "cargo install --git https://github.com/hal-c2/ljos-ui --rev abc123 --locked --force ljos_cli --root $co/target/tools"
+if [ -e "$co/target/tools/bin/ljos" ]; then bad "find_ljos installed nothing"; else ok "find_ljos installed nothing"; fi
+call 'install_ljos'
+says "setup prints what it installs" "cargo install --git https://github.com/hal-c2/ljos-ui --rev abc123 --locked --force ljos_cli --root $co/target/tools"
+call 'find_ljos; echo "L=$LJOS"'
+says "and then it is used" "L=$co/target/tools/bin/ljos"
+stub cargo 'echo "cargo should not run"; exit 1'
+call 'install_ljos'
+says "setup does not install the same pin twice" "already in $co/target/tools"
+mkdir -p "$scratch/layout/ljos-ui"
+touch "$scratch/layout/ljos-ui/Cargo.toml"
+stub cargo 'echo "cargo $*"'
+call 'find_ljos; echo "L=$LJOS"'
+says "a ljos-ui beside this one is built instead" "-p ljos_cli --bin ljos"
+says "and its program used" "ljos-ui/target/debug/ljos"
+rm -rf "$scratch/layout/ljos-ui"
+
+# --- wasm-bindgen ------------------------------------------------------------
+echo 'wasm-bindgen = "=9.9.9"' >>"$co/Cargo.toml"
+stub wasm-bindgen 'echo "wasm-bindgen 0.0.1"'
+call 'find_bindgen'
+refuses "another wasm-bindgen is not taken, and nothing installs it" "no wasm-bindgen 9.9.9: run mise run setup"
+says "and the command setup runs" "cargo install wasm-bindgen-cli --version =9.9.9 --locked --root $co/target/tools"
+stub wasm-bindgen 'echo "wasm-bindgen 9.9.9"'
+call 'find_bindgen; echo "B=$WASM_BINDGEN"'
+says "the pinned one on PATH is taken" "B=wasm-bindgen"
+ENVS="WASM_BINDGEN=$stubs/wasm-bindgen" call 'find_bindgen; echo "B=$WASM_BINDGEN"'
+says "WASM_BINDGEN names it" "B=$stubs/wasm-bindgen"
+stub other-bindgen 'echo "wasm-bindgen 0.0.1"'
+ENVS="WASM_BINDGEN=$stubs/other-bindgen" call 'find_bindgen'
+refuses "a named one of another version is refused, not passed over" "is not wasm-bindgen 9.9.9"
+unstub wasm-bindgen
+unstub other-bindgen
+stub cargo 'echo "cargo $*"'
+call 'install_bindgen'
+says "setup prints and runs the install" "cargo install wasm-bindgen-cli --version =9.9.9 --locked --root $co/target/tools"
+
+# --- Rust's parts ----------------------------------------------------------
+printf '[toolchain]\nchannel = "1.0.0"\ncomponents = ["rustfmt", "clippy"]\ntargets = ["wasm32-unknown-unknown"]\n' >"$co/rust-toolchain.toml"
+stub rustup 'echo "ran rustup $*"'
+call 'install_rust_parts'
+says "setup adds rust-toolchain.toml's components" "ran rustup component add rustfmt clippy"
+says "and its targets" "ran rustup target add wasm32-unknown-unknown"
+stub rustup 'case "$1 $2" in "component list") printf "cargo-x86_64-unknown-linux-gnu\\nclippy-x86_64-unknown-linux-gnu\\n" ;; "target list") printf "x86_64-unknown-linux-gnu\\n" ;; esac'
+call 'need_rust_parts components'
+refuses "a missing component names setup" "no rustfmt for this Rust: run mise run setup (it runs rustup component add rustfmt)"
+call 'need_rust_parts targets'
+refuses "a missing target names setup" "no wasm32-unknown-unknown for this Rust: run mise run setup (it runs rustup target add wasm32-unknown-unknown)"
+stub rustup 'case "$1 $2" in "component list") printf "clippy-x86_64-unknown-linux-gnu\\nrustfmt-x86_64-unknown-linux-gnu\\n" ;; "target list") printf "wasm32-unknown-unknown\\n" ;; esac'
+call 'need_rust_parts components; need_rust_parts targets; echo fine'
+says "with them all there, nothing is said" "fine"
+stub rustup 'echo "error: toolchain 1.0.0 is not installed" >&2; exit 1'
+call 'need_rust_parts components'
+refuses "a toolchain rustup cannot list names setup" "rustup cannot list this Rust's components: run mise run setup"
+call 'need_rust_parts targets'
+refuses "and so for its targets" "rustup cannot list this Rust's targets: run mise run setup"
+unstub rustup
+
+# --- Paths from where the person asked ---------------------------------------
+mkdir -p "$scratch/asked/project"
+touch "$scratch/asked/file.feature"
+ENVS="MISE_ORIGINAL_CWD=$scratch/asked" call 'absolute project; absolute file.feature; absolute /'
+says "a directory is taken from where the person asked" "$(cd "$scratch/asked/project" && pwd -P)"
+says "and a file" "$(cd "$scratch/asked" && pwd -P)/file.feature"
+ENVS="MISE_ORIGINAL_CWD=$scratch/asked" call 'absolute nowhere'
+refuses "and what is not there is said" "no such file or directory: $scratch/asked/nowhere"
+
+# --- Portable to macOS: bash 3.2 and BSD tools. Each pattern is a thing that
+# does not run there; `\(^\|[^-_a-z]\)` so a word in a comment's middle is not
+# one. --------------------------------------------------------------------
+portable=1
+while IFS= read -r task; do
+  case "$task" in */check/tasks) continue ;; esac
+  # Comments may name what they avoid.
+  if grep -vE '^[[:space:]]*#' "$task" | grep -nE '(^|[^-_a-z])(readlink -f|realpath |sed -i|mapfile |readarray |declare -A|local -n|cp -a |date -d|stat -c|mktemp --|\$\{[a-zA-Z_]+(,,|\^\^)\})' >"$scratch/found"; then
+    status=1
+    said="$(cat "$scratch/found")"
+    portable=0
+    bad "$task has a construct macOS lacks"
+  fi
+done <<LIST
+$(find "$root/mise-tasks" -type f)
+LIST
+[ "$portable" -eq 0 ] || ok "no task uses a construct macOS lacks"
+
+if [ "$failed" -ne 0 ]; then
+  echo "some checks failed" >&2
+  exit 1
+fi

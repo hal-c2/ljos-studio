@@ -1,4 +1,6 @@
-# The toolchain Ljós pins, with what `mise run check` needs.
+# The toolchain Ljós pins. Without mise, rustup reads this and installs its
+# lists. With mise, mise.toml's `rust` decides the version (it must say the
+# same) and `mise run setup` adds the lists below with rustup.
 [toolchain]
 channel = "1.98.1"
 components = ["rustfmt", "clippy"]

@@ -30,5 +30,6 @@ export default defineConfig({
     }),
   ],
   resolve: { dedupe: ["solid-js", "@solidjs/web", "ljos-web"] },
-  build: { target: "esnext" },
+  // One page and its runtime: nothing here is loaded on demand.
+  build: { target: "esnext", chunkSizeWarningLimit: 4000 },
 });

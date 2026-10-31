@@ -9,11 +9,11 @@ use ljos_mcp_core::{
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use studio_core::{
-    Address, Literal, Mode, Node, Op, Outcome, StateEdit, StateInfo, TransitionInfo,
-    preview::Target,
+    Address, Goal, Interaction, Literal, Mode, Model, Node, Op, Outcome, StateEdit, StateInfo,
+    TransitionInfo, preview::Target,
 };
 
-use crate::{Studio, blocks, error, lock};
+use crate::{Studio, blocks, error, lock, store_error};
 use serde_json::json;
 
 /// What a document gets when `document_new` is given no text.
@@ -99,6 +99,9 @@ struct NewArgs {
     doc: String,
     /// Its text; an empty `Item` importing QtQuick when left out.
     text: Option<String>,
+    /// A project JSON file, an array of flat records: the document is a
+    /// `ListModel` with a `ListElement` for each. Not with `text`.
+    data: Option<String>,
     #[serde(default)]
     dry_run: bool,
 }
@@ -267,6 +270,12 @@ struct Inspected {
     /// Its `State`s in order, each with the values it changes as written.
     states: Vec<StateInfo>,
     transitions: Vec<TransitionInfo>,
+    /// The flows written in it and in everything it holds, in order.
+    interactions: Vec<Interaction>,
+    /// The data it sees: its own as a `ListModel`, a list's model's, or
+    /// in a list's delegate the list's, whose roles bind as `model.role`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    model: Option<Model>,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -406,6 +415,9 @@ enum StateAction {
     When,
     AddTransition,
     RemoveTransition,
+    /// A flow on `trigger`: to `state` or, by `navigator`, to `open`.
+    Interaction,
+    RemoveInteraction,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -440,6 +452,15 @@ struct StateEditArgs {
     to: Option<String>,
     /// `add_transition`: the animations it runs, in QML.
     animations: Option<String>,
+    /// Interactions: the object tapped.
+    trigger: Option<Address>,
+    /// Interactions: its signal (`clicked`), handled as `onClicked`; a
+    /// `TapHandler`'s tap when left out.
+    signal: Option<String>,
+    /// `interaction`: a document beside this one to open, not with `state`.
+    open: Option<String>,
+    /// `interaction`: the `Loader` or `StackView` that opens it.
+    navigator: Option<Address>,
     #[serde(default)]
     dry_run: bool,
 }
@@ -822,6 +843,91 @@ fn root(studio: &mut Studio, doc: &str) -> Result<Address, SurfaceError> {
     Ok(Address::Node(handle))
 }
 
+/// A JSON object's members in the order written, which are a row's roles
+/// in the order a person reads them; a map would sort them.
+struct Record(Vec<(String, serde_json::Value)>);
+
+impl<'de> Deserialize<'de> for Record {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        struct Members;
+        impl<'de> serde::de::Visitor<'de> for Members {
+            type Value = Record;
+            fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.write_str("a record")
+            }
+            fn visit_map<A: serde::de::MapAccess<'de>>(
+                self,
+                mut map: A,
+            ) -> Result<Record, A::Error> {
+                let mut out = Vec::new();
+                while let Some(member) = map.next_entry()? {
+                    out.push(member);
+                }
+                Ok(Record(out))
+            }
+        }
+        d.deserialize_map(Members)
+    }
+}
+
+/// A `ListModel` document holding `json`'s records, each a `ListElement`
+/// whose roles are the record's keys in the order written.
+fn list_model(path: &str, json: &str) -> Result<String, SurfaceError> {
+    let refuse = |kind: &str, why: String| {
+        SurfaceError::invalid_argument(format!("`{path}` {why}"))
+            .with_details(serde_json::json!({ "kind": kind }))
+    };
+    let records: Vec<Record> = serde_json::from_str(json)
+        .map_err(|e| refuse("not_a_list", format!("is not an array of records: {e}")))?;
+    if records.is_empty() {
+        return Ok("import QtQuick\n\nListModel {\n}\n".to_owned());
+    }
+    let mut out = String::from("import QtQuick\n\nListModel {\n");
+    for record in &records {
+        out.push_str("    ListElement {\n");
+        for (n, (role, value)) in record.0.iter().enumerate() {
+            let first_lower = role.chars().next().is_some_and(|c| c.is_ascii_lowercase());
+            if !first_lower || !role.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+                return Err(refuse(
+                    "not_a_role",
+                    format!("has the key `{role}`; a role is a name starting lowercase"),
+                ));
+            }
+            // Written `id: …`, QML reads it as the element's id, not a role.
+            if role == "id" {
+                return Err(refuse(
+                    "not_a_role",
+                    "has the key `id`, which QML reads as an object's id; name the role \
+                     otherwise (`key`, `uid`)"
+                        .to_owned(),
+                ));
+            }
+            // QML refuses a property set twice in one object.
+            if record.0[..n].iter().any(|(r, _)| r == role) {
+                return Err(refuse(
+                    "repeated_role",
+                    format!("has the key `{role}` twice in one record"),
+                ));
+            }
+            let literal = match value {
+                serde_json::Value::String(s) => Literal::String(s.clone()),
+                serde_json::Value::Number(n) => Literal::Number(n.to_string()),
+                serde_json::Value::Bool(b) => Literal::Bool(*b),
+                _ => {
+                    return Err(refuse(
+                        "not_flat",
+                        format!("has `{role}: {value}`; a row holds strings, numbers and booleans"),
+                    ));
+                }
+            };
+            out.push_str(&format!("        {role}: {}\n", literal.to_qml()));
+        }
+        out.push_str("    }\n");
+    }
+    out.push_str("}\n");
+    Ok(out)
+}
+
 fn needs(field: &str, action: &str) -> SurfaceError {
     SurfaceError::invalid_argument(format!("`{action}` needs `{field}`"))
 }
@@ -829,6 +935,43 @@ fn needs(field: &str, action: &str) -> SurfaceError {
 /// The edit a `state_edit` call asks for, with a breakpoint turned into the
 /// condition it stands for.
 fn state_op(studio: &Mutex<Studio>, a: StateEditArgs) -> Result<Op, SurfaceError> {
+    match a.action {
+        StateAction::Interaction => {
+            let trigger = a.trigger.ok_or_else(|| needs("trigger", "interaction"))?;
+            let goal = match (a.state, a.open) {
+                (Some(_), Some(_)) => {
+                    return Err(SurfaceError::invalid_argument(
+                        "give `state` or `open`, not both",
+                    ));
+                }
+                (Some(state), None) => Goal::State {
+                    owner: a.node,
+                    state,
+                },
+                (None, Some(doc)) => Goal::Open {
+                    navigator: a
+                        .navigator
+                        .ok_or_else(|| needs("navigator", "interaction"))?,
+                    doc,
+                },
+                (None, None) => return Err(needs("state` or `open", "interaction")),
+            };
+            return Ok(Op::Interaction {
+                trigger,
+                signal: a.signal,
+                goal,
+            });
+        }
+        StateAction::RemoveInteraction => {
+            return Ok(Op::RemoveInteraction {
+                trigger: a
+                    .trigger
+                    .ok_or_else(|| needs("trigger", "remove_interaction"))?,
+                signal: a.signal,
+            });
+        }
+        _ => {}
+    }
     let node = match a.node {
         Some(node) => node,
         None => root(&mut lock(studio), &a.doc)?,
@@ -893,6 +1036,9 @@ fn state_op(studio: &Mutex<Studio>, a: StateEditArgs) -> Result<Op, SurfaceError
             from: a.from.unwrap_or_else(|| "*".to_owned()),
             to: a.to.unwrap_or_else(|| "*".to_owned()),
         },
+        StateAction::Interaction | StateAction::RemoveInteraction => {
+            unreachable!("handled above")
+        }
     };
     Ok(Op::State { node, edit })
 }
@@ -979,7 +1125,8 @@ fn edit(
 }
 
 pub(crate) fn registry(studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
-    crate::preview_tools::add(edits(studio), studio)
+    let registry = crate::preview_tools::add(edits(studio), studio);
+    crate::review::add(crate::export::add(registry, studio), studio)
 }
 
 /// The project and edit tools, in wire order.
@@ -1079,7 +1226,8 @@ fn edits(studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
         .with(
             ToolDef::new::<NewArgs>(
                 "document_new",
-                "Create a QML document. Refused if it exists or does not parse. Undo removes it.",
+                "Create a QML document, from `text` or as a ListModel of a JSON file's records \
+                 (`data`). Refused if it exists or does not parse. Undo removes it.",
             )
             .output::<EditOut>()
             .requires(Cap::Mutate)
@@ -1088,10 +1236,22 @@ fn edits(studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
                 let studio = s();
                 move |_, a: NewArgs| {
                     let mut studio = lock(&studio);
-                    let text = a.text.as_deref().unwrap_or(NEW_DOCUMENT);
+                    let text = match (a.text, a.data) {
+                        (Some(_), Some(_)) => {
+                            return Err(SurfaceError::invalid_argument(
+                                "give `text` or `data`, not both",
+                            ));
+                        }
+                        (Some(text), None) => text,
+                        (None, Some(data)) => {
+                            let json = studio.session.store().read(&data).map_err(store_error)?;
+                            list_model(&data, &json)?
+                        }
+                        (None, None) => NEW_DOCUMENT.to_owned(),
+                    };
                     studio
                         .session
-                        .create(&a.doc, text, a.dry_run)
+                        .create(&a.doc, &text, a.dry_run)
                         .map(EditOut::from)
                         .map_err(error)
                 }
@@ -1243,8 +1403,9 @@ fn edits(studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
         .with(
             ToolDef::new::<NodeArgs>(
                 "node_inspect",
-                "An object's bindings with their byte ranges, its parent, its children, and its \
-                 states and transitions.",
+                "An object's bindings with their byte ranges, its parent, its children, its \
+                 states and transitions, the flows in it, and the roles and rows of the data it \
+                 sees (a ListModel, a list's model, in a delegate its list's).",
             )
             .output::<Inspected>()
             .requires(Cap::Inspect),
@@ -1255,6 +1416,8 @@ fn edits(studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
                     let doc = studio.session.canonical(&a.doc).map_err(error)?;
                     let (handle, node) = studio.session.resolve(&doc, &a.node).map_err(error)?;
                     let variants = studio.session.variants(&doc, &a.node).map_err(error)?;
+                    let interactions = studio.session.interactions(&doc, &a.node).map_err(error)?;
+                    let model = studio.session.model(&doc, &a.node).map_err(error)?;
                     let (tree, generation) = studio.session.tree(&doc).map_err(error)?;
                     let parent_path = (!node.path.0.is_empty())
                         .then(|| studio_core::NodePath(node.path.0[..node.path.0.len() - 1].to_vec()));
@@ -1293,6 +1456,8 @@ fn edits(studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
                         children,
                         states: variants.states,
                         transitions: variants.transitions,
+                        interactions,
+                        model,
                     })
                 }
             }),
@@ -1443,7 +1608,8 @@ fn edits(studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
             ToolDef::new::<StateEditArgs>(
                 "state_edit",
                 "Add, rename or remove an object's State; set or remove a value it changes or its \
-                 `when` (a `breakpoint` writes the root's width bound); add or remove a Transition. \
+                 `when` (`breakpoint`: the root's width bound); add or remove a Transition; write \
+                 or take out a flow: a tap on `trigger` goes to `state` or opens a document. \
                  Refused with `would_break` if the file would not parse.",
             )
             .output::<EditOut>()

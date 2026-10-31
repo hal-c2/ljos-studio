@@ -20,8 +20,7 @@ Studio composes three servers rather than duplicating them:
 
 Budgets follow ARCHITECTURE.md section 19.6: tools listed in a fixed order,
 descriptions ≤ 300 characters, responses ≤ 40 KB with cursors, ≤ 25 tools
-on one server. Studio offers 22 tools today; with `export` and `review`,
-still to come in S6, it offers 24. Capabilities as in section 19.7:
+on one server. Studio offers 24 tools. Capabilities as in section 19.7:
 `inspect` (read), `mutate` (edit documents), `fs` (write files outside
 documents: export), `run` (start previews). They are granted at launch with
 `--caps`: by default `inspect` on a running window's endpoint and
@@ -34,38 +33,33 @@ documents: export), `run` (start previews). They are granted at launch with
 | 1 | `project_open` | Open a project directory below the workspace, or describe the open one: documents, blocks, targets | inspect |
 | 2 | `document_tree` | A document's objects in order: handle, path, type, `id`, bindings; paginated | inspect |
 | 3 | `document_text` | A document's text or a byte range of it, with its generation and whether it parses | inspect |
-| 4 | `document_new` | Create a QML document; undo removes it | mutate |
+| 4 | `document_new` | Create a QML document, or a `ListModel` from a project JSON file (`data`); undo removes it | mutate |
 | 5 | `document_edit` | Replace a byte range of a document's text, as the code view does | mutate |
 | 6 | `node_find` | Find objects by `id`, type, binding name or text in a binding's value | inspect |
 | 7 | `node_select` | Set Studio's selection (shown on the canvas and in the inspector) by addresses or by a point `at` in the preview | inspect |
-| 8 | `node_inspect` | An object's bindings with byte ranges, its parent, its children, its type's members, its states and transitions | inspect |
+| 8 | `node_inspect` | An object's bindings with byte ranges, its parent, its children, its type's members, its states and transitions, its flows and the data it sees | inspect |
 | 9 | `blocks_list` | Registered blocks with contracts: state, actions, events, slots, mocks | inspect |
 | 10 | `node_insert` | Insert QML text or a block instance as a child at an index | mutate |
 | 11 | `node_move` | Move a node to a parent and index (reparent or reorder) | mutate |
 | 12 | `node_remove` | Remove a node with its comments | mutate |
 | 13 | `property_set` | Set or remove a property's value (a literal) | mutate |
 | 14 | `binding_set` | Set a binding expression or a handler, checked before it is written | mutate |
-| 15 | `state_edit` | Add, rename or remove a `State`; set its changes, its `when` or a breakpoint; add or remove a `Transition` | mutate |
+| 15 | `state_edit` | Add, rename or remove a `State`; set its changes, its `when` or a breakpoint; add or remove a `Transition` or an interaction | mutate |
 | 16 | `slot_contribute` | Write a `Contribution` to a block's slot, or take one out | mutate |
 | 17 | `history` | List, undo or redo edits (each with its inverse changes) | inspect to list; mutate to undo or redo |
 | 18 | `theme_set` | Read the tokens (`Ljos.Design` roles and the theme file, light and dark), or set one; the preview reloads live | mutate |
 | 19 | `preview_open` | Start a preview of a shell on a target (desktop, tablet, phone) or size with live or mocked state; on the open one, change size or state in place | run |
-| 20 | `preview_state` | Read a block's published state in the preview; set it when the block is mocked | run |
+| 20 | `preview_state` | Read an object's state and a block's published state in the preview; set it when the block is mocked; click first | run |
 | 21 | `preview_screenshot` | A PNG of the preview (≤ 1280 px), or its outline as text | inspect |
 | 22 | `preview_events` | Since a cursor: opened, reloaded (with ms), reload failed, logs, ended | inspect |
+| 23 | `export` | Write a bundle that `ljos run` starts: the project's QML, theme, assets and own blocks with a manifest, never mocks or `.studio/` | fs |
+| 24 | `review` | Add, reply to, resolve, reopen or list design review comments on objects, kept in `.studio/` | inspect (writing: mutate) |
 
 A document is a `.qml` file or a `theme.json` of the project outside the
 directories a walk leaves out, judged where its links lead; anything else is
 `path_denied`. A file reached by two names is one document: answers name it
 by where it really is, and it has one generation and one history whichever
 name an edit uses.
-
-Still to come:
-
-| # | Tool | Does | Needs |
-|---|---|---|---|
-| 23 | `export` | Write a build bundle or a site for a target | fs |
-| 24 | `review` | Comments on nodes: add, list, resolve | mutate |
 
 - DECISION: `theme_tokens` folds into `theme_set`, which reads the tokens
   when it is given no value, as `history` lists when given no action.
@@ -164,7 +158,7 @@ shows it; the watcher's quiet time is not on that path.
   app's own.
 - DECISION: `preview_screenshot {format: "outline"}` gives the preview's
   items as text (the inspector's outline) instead of a separate tool:
-  Studio's list stays within 25 tools with the ones still to come.
+  Studio's list of 24 stays within 25 tools.
 - DECISION: starting a preview needs `run` (it runs the project's code);
   looking at one that runs (`preview_screenshot`, `preview_events`) needs
   only `inspect`.
@@ -291,6 +285,140 @@ Studio's window shows the same tokens in its *Tokens* panel (DESIGN.md,
 S4 "As built: tokens, shells and the self-reskin"): its `Workspace`
 publishes `theme` (the file) and `tokens` (the rows `theme_set` reads),
 and an edit there is `dispatch("theme_set", …)`.
+## Flows and list data (S6)
+
+A prototype's flow is the app's own QML: a tap goes to one of a
+component's states or opens another document, written as a signal
+handler on the object tapped. `state_edit` carries it:
+
+| `action` | Takes | Does |
+|---|---|---|
+| `interaction` | `trigger`, `signal?`, and `state` (`""` is the base state) or `open` with `navigator` | Write `onTapped` in a new `TapHandler` of `trigger`, or the signal's own handler (`onClicked`) when `signal` is named; its body is `owner.state = "S"`, `navigator.source = "D"` (a `Loader`) or `navigator.push(Qt.resolvedUrl("D"))` (a `StackView`) |
+| `remove_interaction` | `trigger`, `signal?` | Take it out: the whole `TapHandler` when it holds nothing else |
+
+`node` names the owner of the state (the root by default). The history
+labels are `tapped card to details` and `remove tapped interaction`.
+Refusals: `not_found` with `details.kind` `no_state`, `no_document` (the
+document must be beside this one) or `no_interaction`; `invalid_argument`
+for `exists`, an owner or navigator with no `id` (`no_id`), a navigator
+that is not a `Loader` or `StackView` (`not_a_navigator`), `state` and
+`open` together, and a missing argument. `node_inspect` lists
+`interactions` (`trigger`, `trigger_id`, `signal`, and `owner` and `state`
+or `navigator` and `open`) of the object and everything in it, so the
+root's is the document's whole flow; a handler whose body is not one of
+the three forms is the app's own logic and is not listed.
+
+`preview_state {node?, click?, click_at?: {x, y}, set?}` plays the flow:
+after `set`, it clicks the object `click` names (by its `id`) or the
+topmost item drawn at `click_at`, through the preview's inspector, then
+reads `node`. Without `node` it only clicks and answers nothing (`id` and
+`variant` are left out), so a document whose root has no `id` can be
+played; with neither `node` nor a click, or `set` without `node`, it is
+refused (`invalid_argument`). `variant` is the state it is in now (empty for the base
+state); `block` and `state` are left out for an object that is not a
+block, and `set` on one is refused (`not_a_block`).
+
+A list's data is a `ListModel`, in the document or in a document of its
+own the list makes (`model: Contacts {}`): content a person edits as any
+QML. `document_new {doc, data}` writes one from a project JSON file of
+flat records, one `ListElement` each with the records' keys in order
+(`invalid_argument` with `not_a_list`, `not_a_role` (also for a key
+named `id`, which QML reads as the object's id), `repeated_role` for a
+key a record has twice, or `not_flat` otherwise, and for `text` and
+`data` together). `node_inspect` gives the
+`model` the object sees (a view's delegate only, not its header or
+footer): `roles` (in the order the rows first bind them),
+`rows`, `doc`, and `view`, the list it is a delegate of; a delegate binds
+a role as `model.name` with `binding_set`. The mocked state swaps the data
+for a fixture: a module under `mocks/` of the same name (`mocks/App/Data`)
+replaces the app's (`App/Data`) and the list's text is unchanged.
+
+- DECISION: no new tool. Flows are `state_edit` actions beside states and
+  transitions, which they move between; playing one is `preview_state`
+  with a click, which reads the state the app reached; data is
+  `document_new` and `node_inspect`. The surface stays at 21 tools.
+- DECISION: an interaction is written in one of three forms and read back
+  only in those, so Studio never claims to understand a handler it did
+  not write.
+- DECISION: `click_at` clicks the topmost item drawn at the point, at that
+  item's aim point (its visible middle), since the preview's inspector
+  has no click at an exact point.
+- DECISION: data is QML, not a JSON-backed model. Ljós has no model that
+  reads JSON, and a `ListModel` document is edited, diffed, undone and
+  previewed like the rest; JSON is imported once.
+## Export and review (S6)
+
+`export {entry, target?, out?, dry_run?}` (`fs`) writes a bundle of the
+project below its `build/` (`build/native` by default) and answers `out`,
+`files` and `bytes` (totals that stay true when a long manifest is cut
+short in the answer), the `manifest` and `ms`. The bundle holds every file
+of the project except `.studio/`, the top-level `mocks/`, hidden files,
+`build/`, `target/`, `node_modules/` and unfinished writes, and beside them
+`ljos-bundle.json`:
+
+| Field | Holds |
+|---|---|
+| `format`, `version` | `ljos-bundle`, 1 |
+| `target`, `entry` | `native`; the document the app starts with |
+| `run` | `["ljos", "run", <entry>, "--project", "."]`, run in the bundle |
+| `theme` | `theme.json` beside the entry, when there is one |
+| `blocks` | The project's own blocks (`App.Media.Player`) and their files |
+| `files` | Every file, `path` and `bytes`, sorted |
+| `left_out` | What of the project is not in it, `path` and `why` |
+
+A bundle is written beside its place and swapped in, so it is never half
+of two exports. Refusals: `capability_denied` without `fs`; `not_found`
+for an entry that is not a document; `unsupported` for `target: "web"`
+(`no_web_build`) and for types written in Rust (`native_types`, with
+`details.files`); `syntax` for a document that does not parse (`broken`,
+`details.doc`); `not_actionable` for a module only a mock provides
+(`mocked_only`, `details.modules`) and for a project not in a directory
+(`no_directory`) and for an entry that is not in the bundle
+(`entry_left_out`, `details.why`); `path_denied` for an `out` not below
+`build/` or one a link leads elsewhere; a link out of the project is left
+out (`left_out`, "a link out of the project");
+`invalid_argument` (`exists`) for an `out` that holds something other
+than a bundle.
+
+- DECISION: the native bundle is the project directory as `ljos run`
+  starts it. Ljós's production bundles (ARCHITECTURE.md 12.2: hashed,
+  signed, A/B) and AOT binaries need a build Studio does not make, so the
+  manifest has no hashes or signature yet.
+- DECISION: a web site is refused rather than half made: ljos-web compiles
+  QML to modules that need its runtime package and a bundler, and builds
+  no site on its own.
+- DECISION: `export` writes no history entry; it changes no document.
+
+`review {action, doc?, node?, comment?, text?, author?}` keeps design
+review comments in `.studio/review.json`, never in the QML:
+
+| `action` | Takes | Does |
+|---|---|---|
+| `add` | `doc`, `node`, `text`, `author?` | Comment on an object (`c1`, `c2`, …) |
+| `reply` | `comment`, `text`, `author?` | Answer it |
+| `resolve`, `reopen` | `comment` | Mark it resolved, or open again |
+| `list` | `doc?`, `node?` (with `doc`) | The comments, in the order they were made |
+
+A comment answers `id`, `doc`, `node` (the object's handle, absent once
+orphaned), `anchor` (`path`, `line`, `type`, `id?`: where the object is or
+last was), `orphaned`, `resolved` and `thread` (`author?`, `text`, `at`,
+milliseconds since the epoch). Listing needs `inspect`; the rest `mutate`.
+Refusals: `not_found` (`no_comment`), `invalid_argument` for a comment
+with no text, `not_actionable` (`review_unreadable`) for any call while
+the sidecar does not read or a later Studio wrote it (it is read again on
+each call, so mending it is enough), `stale_ref` (`review_changed`) for a
+write when somebody else changed the sidecar since Studio read it: the
+comment is not made and the sidecar on disk is what Studio holds now.
+
+- DECISION: a comment follows its object as a handle does, through
+  anybody's edits; on disk it carries the object's key, so the next
+  session finds it again.
+- DECISION: a comment whose object is removed is kept, orphaned, at the
+  place it last had, and can still be answered and resolved. Undo gives it
+  its object back in the session; a new session does not match an
+  orphaned comment to an object again.
+- DECISION: comments are not in the undo history. `reopen` takes back
+  `resolve`; a comment is not deleted, it is resolved.
 
 ## Prompts
 
@@ -301,3 +429,12 @@ and an edit there is `dispatch("theme_set", …)`.
   contrast → `preview_events` (the reload) → `preview_screenshot`.
 - **fix-preview:** `preview_events` → `document_text` → `binding_set` /
   `property_set` → `preview_events`.
+- **prototype:** `state_edit` (`add`, a state per screen) → `state_edit`
+  (`interaction`, a trigger per step) → `preview_open` → `preview_state`
+  (`click`) per step, checking `variant` → `preview_screenshot`.
+- **review:** `review` (`list`, by doc) → `document_tree` →
+  `node_inspect` of each object commented on → `preview_screenshot` →
+  `review` (`add` or `reply`, one per finding, on the object it is about)
+  → `review` (`resolve`) once an edit answers one.
+- **ship:** `export` with `dry_run` → mend what it refuses → `export` →
+  start the bundle with its manifest's `run`.

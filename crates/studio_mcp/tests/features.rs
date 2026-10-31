@@ -47,6 +47,10 @@ struct StudioWorld {
     endpoint: Option<HttpServer>,
     /// What it answered last: status and body.
     reply: Option<(u16, String)>,
+    /// How many reloads Studio had reported when the preview was last read.
+    reloads_read: usize,
+    /// How long the last tool call took to answer.
+    took: std::time::Duration,
 }
 
 impl std::fmt::Debug for StudioWorld {
@@ -73,7 +77,16 @@ impl StudioWorld {
             kept: HashMap::new(),
             endpoint: None,
             reply: None,
+            reloads_read: 0,
+            took: std::time::Duration::ZERO,
         }
+    }
+
+    /// Where the endpoint keeps its token: a directory for the server to
+    /// make, as Studio's state directory is the user's alone and a temporary
+    /// directory is as open as the umask leaves it.
+    fn endpoint_state(&self) -> std::path::PathBuf {
+        self.state.path().join("endpoint")
     }
 
     fn server(&mut self) -> Result<&StudioServer, String> {
@@ -96,7 +109,9 @@ impl StudioWorld {
     fn call(&mut self, tool: &str, args: Value) -> StepResult {
         let caps = self.caps;
         let server = self.server()?;
+        let started = std::time::Instant::now();
         let out = server.call(tool, &CallCtx::new(caps), args);
+        let took = started.elapsed();
         let (out, images) = match out {
             Ok(reply) => (Ok(reply.structured), reply.images),
             Err(e) => (Err(e), Vec::new()),
@@ -116,6 +131,7 @@ impl StudioWorld {
         }
         self.answer = Some(out);
         self.images = images;
+        self.took = took;
         Ok(())
     }
 
@@ -134,6 +150,37 @@ impl StudioWorld {
             .as_str()
             .map(str::to_owned)
             .ok_or_else(|| format!("no outline in {}", reply.structured))
+    }
+
+    /// Every event of the open preview, all pages; leaves the last answer be.
+    fn preview_events(&mut self) -> Result<Vec<Value>, String> {
+        let caps = self.caps;
+        let server = self.server()?;
+        let mut events = Vec::new();
+        loop {
+            let reply = server
+                .call(
+                    "preview_events",
+                    &CallCtx::new(caps),
+                    json!({ "since": events.len() }),
+                )
+                .map_err(|e| format!("the preview's events were refused: {}", e.to_value()))?;
+            let page = reply.structured["events"]
+                .as_array()
+                .ok_or_else(|| format!("no events in {}", reply.structured))?;
+            if page.is_empty() {
+                return Ok(events);
+            }
+            events.extend(page.iter().cloned());
+        }
+    }
+
+    /// The reloads Studio reported, and every event as one line each: what
+    /// a step that read the preview says when it was not what it wanted.
+    fn reloads(events: &[Value]) -> (usize, String) {
+        let reloads = events.iter().filter(|e| is_reload(e)).count();
+        let lines: Vec<String> = events.iter().map(Value::to_string).collect();
+        (reloads, lines.join("\n"))
     }
 
     fn answer(&self) -> Result<&Value, String> {
@@ -232,6 +279,7 @@ fn json(text: &str) -> Result<Value, String> {
 fn empty_project(_: &mut StudioWorld) {}
 
 #[given(regex = r#"^the file "([^"]+)":$"#)]
+#[when(regex = r#"^somebody writes the file "([^"]+)":$"#)]
 fn the_file(w: &mut StudioWorld, name: String, step: &Step) -> StepResult {
     let path = w.dir.path().join(&name);
     if let Some(parent) = path.parent() {
@@ -267,8 +315,12 @@ fn link_inside(w: &mut StudioWorld, name: String, to: String) -> StepResult {
 fn link_outside(w: &mut StudioWorld, name: String, file: String) -> StepResult {
     let outside = tempfile::tempdir().map_err(|e| e.to_string())?;
     std::fs::write(outside.path().join(file), "Item {}\n").map_err(|e| e.to_string())?;
-    std::os::unix::fs::symlink(outside.path(), w.dir.path().join(name))
-        .map_err(|e| e.to_string())?;
+    // The link may be below directories the project does not have yet.
+    let at = w.dir.path().join(name);
+    if let Some(parent) = at.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    std::os::unix::fs::symlink(outside.path(), at).map_err(|e| e.to_string())?;
     w.outside.push(outside);
     Ok(())
 }
@@ -281,6 +333,22 @@ fn link_file_outside(w: &mut StudioWorld, name: String, file: String) -> StepRes
     std::os::unix::fs::symlink(target, w.dir.path().join(name)).map_err(|e| e.to_string())?;
     w.outside.push(outside);
     Ok(())
+}
+
+#[given(regex = r#"^the named pipe "([^"]+)"$"#)]
+fn named_pipe(w: &mut StudioWorld, name: String) -> StepResult {
+    let at = w.dir.path().join(name);
+    if let Some(parent) = at.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    // A reader of it waits for a writer that never comes.
+    let made = std::process::Command::new("mkfifo")
+        .arg(&at)
+        .status()
+        .map_err(|e| format!("mkfifo: {e}"))?;
+    made.success()
+        .then_some(())
+        .ok_or_else(|| format!("mkfifo {}: {made}", at.display()))
 }
 
 #[then("nothing was written outside the project")]
@@ -296,6 +364,77 @@ fn nothing_outside(w: &mut StudioWorld) -> StepResult {
             if std::fs::read_to_string(one).is_ok_and(|text| text == "Item {}\n"));
         if !untouched {
             return Err(format!("{entries:?}"));
+        }
+    }
+    Ok(())
+}
+
+#[given(
+    regex = r#"^"([^"]+)" links to a directory outside the project that holds the file "([^"]+)"$"#
+)]
+fn links_out(w: &mut StudioWorld, link: String, file: String) -> StepResult {
+    link_outside(w, link, file)
+}
+
+#[given(regex = r#"^"([^"]+)" links to "([^"]+)" in the project$"#)]
+fn links_in(w: &mut StudioWorld, link: String, target: String) -> StepResult {
+    #[cfg(unix)]
+    return std::os::unix::fs::symlink(w.dir.path().join(&target), w.dir.path().join(&link))
+        .map_err(|e| e.to_string());
+    #[cfg(not(unix))]
+    return Err(format!("`{link}`: links are made on unix only"));
+}
+
+/// `levels` directories below `under`, `0` to `levels - 1`, each holding one
+/// file and, but the last, two links `left` and `right` to the next: a
+/// diamond at every level, so every way down through the links is another
+/// copy of all below.
+#[given(regex = r#"^a diamond of directory links (\d+) levels deep in "([^"]+)"$"#)]
+fn diamond(w: &mut StudioWorld, levels: usize, under: String) -> StepResult {
+    let under = w.dir.path().join(under);
+    for level in 0..levels {
+        let dir = under.join(level.to_string());
+        std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+        std::fs::write(dir.join("level.txt"), format!("{level}\n")).map_err(|e| e.to_string())?;
+        if level + 1 == levels {
+            continue;
+        }
+        #[cfg(unix)]
+        for side in ["left", "right"] {
+            std::os::unix::fs::symlink(under.join((level + 1).to_string()), dir.join(side))
+                .map_err(|e| e.to_string())?;
+        }
+        #[cfg(not(unix))]
+        return Err("links are made on unix only".to_owned());
+    }
+    Ok(())
+}
+
+#[then(regex = r#"^it answered within (\d+) seconds?$"#)]
+fn answered_within(w: &mut StudioWorld, seconds: u64) -> StepResult {
+    let limit = std::time::Duration::from_secs(seconds);
+    (w.took <= limit)
+        .then_some(())
+        .ok_or_else(|| format!("it took {:?}", w.took))
+}
+
+#[then(regex = r#"^the directory outside the project holds only "([^"]*)"$"#)]
+fn outside_holds(w: &mut StudioWorld, names: String) -> StepResult {
+    let outside = w.outside.last().ok_or("no directory outside the project")?;
+    let mut held: Vec<String> = std::fs::read_dir(outside.path())
+        .map_err(|e| e.to_string())?
+        .map(|e| e.map(|e| e.file_name().to_string_lossy().into_owned()))
+        .collect::<Result<_, _>>()
+        .map_err(|e| e.to_string())?;
+    held.sort();
+    let want: Vec<&str> = names.split(", ").filter(|n| !n.is_empty()).collect();
+    if held != want {
+        return Err(format!("it holds {held:?}, not {want:?}"));
+    }
+    for name in &held {
+        let text = std::fs::read_to_string(outside.path().join(name)).map_err(|e| e.to_string())?;
+        if text != "Item {}\n" {
+            return Err(format!("`{name}` was written: {text:?}"));
         }
     }
     Ok(())
@@ -472,6 +611,89 @@ fn file_absent(w: &mut StudioWorld, name: String) -> StepResult {
         .ok_or_else(|| format!("`{name}` exists"))
 }
 
+#[then(regex = r#"^the file "([^"]+)" exists$"#)]
+fn file_exists(w: &mut StudioWorld, name: String) -> StepResult {
+    w.dir
+        .path()
+        .join(&name)
+        .is_file()
+        .then_some(())
+        .ok_or_else(|| format!("`{name}` does not exist"))
+}
+
+#[given(regex = r#"^the directory "([^"]+)" is deleted$"#)]
+fn directory_deleted(w: &mut StudioWorld, name: String) -> StepResult {
+    std::fs::remove_dir_all(w.dir.path().join(&name)).map_err(|e| format!("`{name}`: {e}"))
+}
+
+/// A new server on the same directory: what a session kept in memory is
+/// gone, what it wrote is read again.
+#[given("the studio tools are reconnected")]
+fn reconnected(w: &mut StudioWorld) -> StepResult {
+    w.server = None;
+    w.server().map(|_| ())
+}
+
+/// The bundle is copied somewhere apart from the project, so it can only
+/// run on what it holds, and started as its manifest says.
+#[then(
+    regex = r#"^the bundle "([^"]+)", copied out of the project, runs headless and shows what the preview shows$"#
+)]
+fn bundle_runs(w: &mut StudioWorld, out: String) -> StepResult {
+    use studio_core::preview::{PreviewHost, PreviewSpec, Target};
+
+    w.answer()?;
+    let want = w.preview_outline()?;
+    let copy = tempfile::tempdir().map_err(|e| e.to_string())?;
+    copy_dir(&w.dir.path().join(&out), copy.path())?;
+    let manifest: studio_mcp::export::Manifest = serde_json::from_str(
+        &std::fs::read_to_string(copy.path().join(studio_mcp::export::MANIFEST))
+            .map_err(|e| e.to_string())?,
+    )
+    .map_err(|e| e.to_string())?;
+    let state = tempfile::tempdir().map_err(|e| e.to_string())?;
+    // A directory for the host to make: a temporary directory itself is as
+    // open as the umask leaves it.
+    let mut host = NativeHost::new(
+        copy.path(),
+        NativeHost::default_program(),
+        state.path().join("preview"),
+    );
+    host.open(&PreviewSpec {
+        entry: manifest.entry,
+        // What `preview_open` runs at when no size is given.
+        size: Target::Desktop.size(),
+        aliases: Vec::new(),
+    })
+    .map_err(|e| format!("the bundle does not start: {e}"))?;
+    let got = host.outline().map_err(|e| e.to_string())?;
+    (got == want)
+        .then_some(())
+        .ok_or_else(|| format!("the bundle shows:\n{got}\nthe preview:\n{want}"))
+}
+
+fn copy_dir(from: &std::path::Path, to: &std::path::Path) -> StepResult {
+    for entry in std::fs::read_dir(from).map_err(|e| format!("{}: {e}", from.display()))? {
+        let entry = entry.map_err(|e| e.to_string())?;
+        let target = to.join(entry.file_name());
+        let kind = entry.file_type().map_err(|e| e.to_string())?;
+        // A bundle's links are relative to it, so they hold in the copy.
+        if kind.is_symlink() {
+            let link = std::fs::read_link(entry.path()).map_err(|e| e.to_string())?;
+            #[cfg(unix)]
+            std::os::unix::fs::symlink(link, &target).map_err(|e| e.to_string())?;
+            #[cfg(not(unix))]
+            return Err(format!("{}: links are copied on unix only", link.display()));
+        } else if kind.is_dir() {
+            std::fs::create_dir_all(&target).map_err(|e| e.to_string())?;
+            copy_dir(&entry.path(), &target)?;
+        } else {
+            std::fs::copy(entry.path(), &target).map_err(|e| e.to_string())?;
+        }
+    }
+    Ok(())
+}
+
 #[then(regex = r#"^the agent is offered the tools "([^"]*)"$"#)]
 fn offered(w: &mut StudioWorld, names: String) -> StepResult {
     let caps = w.caps;
@@ -486,13 +708,47 @@ fn offered(w: &mut StudioWorld, names: String) -> StepResult {
         .ok_or_else(|| format!("offered {got:?}"))
 }
 
+/// A reload Studio reported, applied or not.
+fn is_reload(event: &Value) -> bool {
+    matches!(event["kind"].as_str(), Some("reloaded" | "reload_failed"))
+}
+
 #[then(regex = r#"^the preview shows "([^"]*)"$"#)]
 fn preview_shows(w: &mut StudioWorld, text: String) -> StepResult {
+    // Read first: what a burst of writes left out is reloaded before the
+    // events answer, so the outline is read after every reload they name.
+    let events = w.preview_events()?;
     let outline = w.preview_outline()?;
+    let (reloads, lines) = StudioWorld::reloads(&events);
+    w.reloads_read = reloads;
     outline
         .contains(&format!("\"{text}\""))
         .then_some(())
-        .ok_or_else(|| format!("the preview shows:\n{outline}"))
+        .ok_or_else(|| {
+            format!("the preview shows:\n{outline}\nafter these events of Studio's:\n{lines}")
+        })
+}
+
+// What a write is waited on by: the reload Studio reports for it, which it
+// asks of the preview before the write's answer. Not a time.
+#[then(regex = r"^Studio has reported the preview reloaded since it was read$")]
+fn reloaded_since_read(w: &mut StudioWorld) -> StepResult {
+    let events = w.preview_events()?;
+    let (reloads, lines) = StudioWorld::reloads(&events);
+    let read = w.reloads_read;
+    let last = events.iter().rev().find(|e| is_reload(e));
+    match last {
+        Some(event) if reloads > read && event["kind"] == "reloaded" => Ok(()),
+        Some(event) if reloads > read => Err(format!(
+            "the last reload Studio reported failed: {event}\nevents:\n{lines}"
+        )),
+        _ => Err(format!(
+            "no reload since the preview was read ({read} then, {reloads} now; the last at \
+             generation {}); events:\n{lines}",
+            last.and_then(|e| e["generation"].as_u64())
+                .map_or_else(|| "none".to_owned(), |g| g.to_string())
+        )),
+    }
 }
 
 #[then(regex = r#"^the answer has a PNG picture at most (\d+) pixels on its longest side$"#)]
@@ -525,7 +781,8 @@ fn serves_agents(w: &mut StudioWorld, caps: String) -> StepResult {
     let caps = CapSet::parse_list(&caps).map_err(|e| e.to_string())?;
     let studio = Studio::open(w.dir.path()).map_err(|e| e.to_string())?;
     let server = Arc::new(StudioServer::new(studio));
-    let http = endpoint::serve_agents(&server, caps, w.state.path()).map_err(|e| e.to_string())?;
+    let http =
+        endpoint::serve_agents(&server, caps, &w.endpoint_state()).map_err(|e| e.to_string())?;
     w.endpoint = Some(http);
     Ok(())
 }
@@ -642,7 +899,7 @@ fn on_loopback(w: &mut StudioWorld) -> StepResult {
 fn token_file_private(w: &mut StudioWorld) -> StepResult {
     use std::os::unix::fs::PermissionsExt as _;
     let http = w.endpoint.as_ref().ok_or("nothing serves agents")?;
-    let path = w.state.path().join(endpoint::TOKEN_FILE);
+    let path = w.endpoint_state().join(endpoint::TOKEN_FILE);
     let meta = std::fs::metadata(&path).map_err(|e| format!("{}: {e}", path.display()))?;
     let text = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
     let mode = meta.permissions().mode() & 0o777;

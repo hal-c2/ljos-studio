@@ -127,6 +127,30 @@
               "notify": "statesChanged"
             },
             {
+              "name": "roles",
+              "type": "var",
+              "kind": "value",
+              "list": false,
+              "readonly": true,
+              "final": true,
+              "required": false,
+              "constant": false,
+              "group": false,
+              "notify": "rolesChanged"
+            },
+            {
+              "name": "flow",
+              "type": "var",
+              "kind": "value",
+              "list": false,
+              "readonly": true,
+              "final": true,
+              "required": false,
+              "constant": false,
+              "group": false,
+              "notify": "flowChanged"
+            },
+            {
               "name": "palette",
               "type": "var",
               "kind": "value",
@@ -161,6 +185,18 @@
               "constant": false,
               "group": false,
               "notify": "undoneChanged"
+            },
+            {
+              "name": "comments",
+              "type": "var",
+              "kind": "value",
+              "list": false,
+              "readonly": true,
+              "final": true,
+              "required": false,
+              "constant": false,
+              "group": false,
+              "notify": "commentsChanged"
             },
             {
               "name": "preview",

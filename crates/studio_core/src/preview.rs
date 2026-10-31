@@ -183,6 +183,16 @@ pub struct Declared {
     pub column: u32,
 }
 
+/// What a click in the preview is aimed at.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Click {
+    /// The object with this `id`.
+    Id(String),
+    /// The topmost item drawn at this point, in the preview's logical
+    /// pixels.
+    Point { x: f64, y: f64 },
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum PreviewError {
     #[error("no preview is open")]
@@ -264,6 +274,16 @@ pub trait PreviewHost: Send {
     /// is declared: the topmost object there that has a declaration.
     /// `None` when nothing is there.
     fn pick(&mut self, x: f64, y: f64) -> Result<Option<Declared>, PreviewError>;
+
+    /// Clicks as a person does, with the primary button: the app's own
+    /// handlers answer it. A host that takes no input refuses.
+    fn click(&mut self, at: &Click) -> Result<(), PreviewError> {
+        let _ = at;
+        Err(PreviewError::Refused {
+            code: "unsupported".to_owned(),
+            message: "this preview takes no input".to_owned(),
+        })
+    }
 
     /// Ends the preview.
     fn close(&mut self);

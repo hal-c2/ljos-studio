@@ -14,6 +14,8 @@ QtObject {
     readonly property var selection
     readonly property var inspector
     readonly property var states
+    readonly property var roles
+    readonly property var flow
     readonly property var palette
     readonly property var done
     readonly property var undone
@@ -23,6 +25,7 @@ QtObject {
     readonly property bool previews
     readonly property string theme
     readonly property var tokens
+    readonly property var comments
 
     signal answered(string tool, var answer)
     signal refused(string tool, var error)

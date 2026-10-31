@@ -12,7 +12,7 @@ use ljos::item::{DrawOp, MouseButtons, kurbo::Point};
 use ljos::prelude::*;
 use ljos::testing::AccessibleNode;
 use ljos_dev::{DevSession, Host, Report};
-use ljos_drive::{Chord, DriveError, Stage};
+use ljos_drive::{Chord, DriveError, Stage, Wheel};
 use ljos_mcp_core::{CallCtx, Cap, CapSet};
 use ljos_runtime::SystemClock;
 use serde_json::Value as Json;
@@ -370,24 +370,46 @@ impl Window {
     /// Clicks `row` of the list named `list` where it shows: a list
     /// clips the rows past its ends, and the driver aims at a node's
     /// middle whatever clips it, so a row half past the end would give
-    /// the click to what lies below the list.
+    /// the click to what lies below the list. A row past an end is
+    /// scrolled to first, a wheel notch at a time over the list, as a
+    /// person does.
     fn click_row(&mut self, list: &str, row: &AccessibleNode) -> StepResult {
         let key = row.key.ok_or("the row has no key")?;
         let shown = self
             .bounds(&|role, name| role == "list" && name == list)
             .ok_or_else(|| format!("no list {list:?} in the window"))?;
-        let mut at = None;
-        self.stage.scene.accessibility_tree().walk(|k, _, d| {
-            if k == key {
-                let b = d.bounds;
-                at = Some(ljos::item::kurbo::Rect::new(b.x0, b.y0, b.x1, b.y1));
+        let at = |w: &Self| {
+            let mut at = None;
+            w.stage.scene.accessibility_tree().walk(|k, _, d| {
+                if k == key {
+                    let b = d.bounds;
+                    at = Some(ljos::item::kurbo::Rect::new(b.x0, b.y0, b.x1, b.y1));
+                }
+            });
+            at.ok_or_else(|| format!("{:?} is not in {list:?}", row.name))
+        };
+        let mut now = at(self)?;
+        while now.y0 < shown.y0 || now.y1 > shown.y1 {
+            // A positive notch turns the wheel away, which shows what is
+            // above.
+            let notch = if now.y1 > shown.y1 { -1.0 } else { 1.0 };
+            self.stage
+                .drive()
+                .wheel(shown.center(), Wheel::Notches(0.0, notch))
+                .map_err(drive_error)?;
+            // A wheel notch eases the list over time; the person waits for
+            // it to stop, on the test clock.
+            self.stage.drive().advance(1000).map_err(drive_error)?;
+            let then = at(self)?;
+            if then.y0 == now.y0 {
+                break;
             }
-        });
-        let at = at.ok_or_else(|| format!("{:?} is not in {list:?}", row.name))?;
-        let seen = at.intersect(shown);
+            now = then;
+        }
+        let seen = now.intersect(shown);
         if seen.area() <= 0.0 {
             return Err(format!(
-                "{:?} at {at:?} is out of the view of {list:?}, {shown:?}",
+                "{:?} at {now:?} is out of the view of {list:?}, {shown:?}, and the wheel does not bring it in",
                 row.name
             ));
         }
@@ -748,6 +770,24 @@ fn adds_state(w: &mut UiWorld, name: String) -> StepResult {
     })
 }
 
+#[given(regex = r#"^the person has typed the comment "(.*)" in the inspector$"#)]
+fn types_comment(w: &mut UiWorld, text: String) -> StepResult {
+    let text = unescape(&text);
+    let window = w.window()?;
+    let field = window.node("Inspector", Some("textinput"), "New comment")?;
+    window.click_node(&field)?;
+    window.stage.drive().commit(&text).map_err(drive_error)?;
+    window.rest()
+}
+
+#[when(regex = r#"^the person adds the comment "(.*)" in the inspector$"#)]
+fn adds_comment(w: &mut UiWorld, text: String) -> StepResult {
+    let text = unescape(&text);
+    let window = w.window()?;
+    let field = window.node("Inspector", Some("textinput"), "New comment")?;
+    window.enter(&field, &text)
+}
+
 #[given(regex = r#"^the person has picked the state "([^"]+)" in the inspector$"#)]
 #[when(regex = r#"^the person picks the state "([^"]+)" in the inspector$"#)]
 fn picks_state(w: &mut UiWorld, name: String) -> StepResult {
@@ -811,6 +851,119 @@ fn shown_states(window: &Window) -> Result<Vec<String>, String> {
         }
     });
     Ok(shown)
+}
+
+/// The names in the panel `within` that start with `prefix`, without it,
+/// in order.
+fn shown_with(window: &Window, within: &str, prefix: &str) -> Result<Vec<String>, String> {
+    let tree = window.tree();
+    let panel = find(&tree, &|n| n.name == within && n.role != "label")
+        .ok_or_else(|| format!("no {within:?} in the window"))?;
+    let mut shown = Vec::new();
+    collect(panel, &mut |n| {
+        if let Some(name) = n.name.strip_prefix(prefix) {
+            shown.push(name.to_owned());
+        }
+    });
+    Ok(shown)
+}
+
+fn listed(names: &str) -> Vec<String> {
+    if names.is_empty() {
+        Vec::new()
+    } else {
+        list(names)
+    }
+}
+
+#[then(regex = r#"^the flow panel lists the states "([^"]*)"$"#)]
+fn flow_lists_states(w: &mut UiWorld, names: String) -> StepResult {
+    let shown = shown_with(w.window()?, "Flow", "Flow state ")?;
+    (shown == listed(&names))
+        .then_some(())
+        .ok_or_else(|| format!("the flow panel lists the states {shown:?}"))
+}
+
+#[then(regex = r#"^the flow panel lists the flows "([^"]*)"$"#)]
+fn flow_lists_flows(w: &mut UiWorld, names: String) -> StepResult {
+    let window = w.window()?;
+    let shown = shown_with(window, "Flow", "Flow edge ")?;
+    (shown == listed(&names)).then_some(()).ok_or_else(|| {
+        format!(
+            "the flow panel lists the flows {shown:?}; the last refusal {:?}",
+            window.read("error").to_js_string()
+        )
+    })
+}
+
+#[then(regex = r#"^the flow panel says the app is in the state "([^"]+)"$"#)]
+fn flow_plays(w: &mut UiWorld, state: String) -> StepResult {
+    let window = w.window()?;
+    let shown = shown_with(window, "Flow", "Playing ")?;
+    (shown == [state]).then_some(()).ok_or_else(|| {
+        format!(
+            "the flow panel says {shown:?}; the last refusal {:?}",
+            window.read("error").to_js_string()
+        )
+    })
+}
+
+#[then(regex = r#"^the window shows a refusal that says "(.+)"$"#)]
+fn refusal_says(w: &mut UiWorld, want: String) -> StepResult {
+    let error = w.window()?.read("error").to_js_string();
+    error
+        .contains(&want)
+        .then_some(())
+        .ok_or_else(|| format!("the window shows the refusal {error:?}"))
+}
+
+#[then(regex = r#"^the inspector's button "([^"]+)" is disabled$"#)]
+fn inspector_button_disabled(w: &mut UiWorld, name: String) -> StepResult {
+    let button = w.window()?.node("Inspector", Some("button"), &name)?;
+    button
+        .states
+        .iter()
+        .any(|s| s == "disabled")
+        .then_some(())
+        .ok_or_else(|| format!("{name:?} is {:?}", button.states))
+}
+
+#[then(regex = r#"^the inspector's comment box holds "(.*)"$"#)]
+fn comment_box_holds(w: &mut UiWorld, want: String) -> StepResult {
+    let field = w
+        .window()?
+        .node("Inspector", Some("textinput"), "New comment")?;
+    (field.value == unescape(&want))
+        .then_some(())
+        .ok_or_else(|| format!("the comment box holds {:?}", field.value))
+}
+
+#[then("the window shows no refusal")]
+fn no_refusal(w: &mut UiWorld) -> StepResult {
+    let error = w.window()?.read("error").to_js_string();
+    error
+        .is_empty()
+        .then_some(())
+        .ok_or_else(|| format!("the window shows the refusal {error:?}"))
+}
+
+#[then(regex = r#"^the inspector lists the roles "([^"]*)"$"#)]
+fn lists_roles(w: &mut UiWorld, names: String) -> StepResult {
+    let shown = shown_with(w.window()?, "Inspector", "Role ")?;
+    (shown == listed(&names))
+        .then_some(())
+        .ok_or_else(|| format!("the inspector lists the roles {shown:?}"))
+}
+
+#[when(regex = r#"^the person binds the role "([^"]+)" to "([^"]+)" in the inspector$"#)]
+fn binds_role(w: &mut UiWorld, role: String, name: String) -> StepResult {
+    let window = w.window()?;
+    let field = window.node(
+        "Inspector",
+        Some("textinput"),
+        &format!("Bind role {role} to"),
+    )?;
+    window.enter(&field, &name)
 }
 
 #[then(regex = r#"^the frame "([^"]+)" shows the state "([^"]+)"$"#)]
@@ -1102,6 +1255,52 @@ fn inspector_shows(w: &mut UiWorld, name: String, value: String) -> StepResult {
     (field.value == value)
         .then_some(())
         .ok_or_else(|| format!("the inspector shows {name} as {:?}", field.value))
+}
+
+#[then(regex = r#"^the inspector shows the (open|resolved|orphaned) comment "(.*)"$"#)]
+fn inspector_shows_comment(w: &mut UiWorld, kind: String, text: String) -> StepResult {
+    let window = w.window()?;
+    let mut kind = kind;
+    kind[..1].make_ascii_uppercase();
+    window
+        .node(
+            "Inspector",
+            None,
+            &format!("{kind} comment: {}", unescape(&text)),
+        )
+        .map(|_| ())
+}
+
+/// The layers' comment counts: what the panel shows beside the rows.
+fn comment_counts(window: &Window) -> Result<Vec<String>, String> {
+    let tree = window.tree();
+    let list = find(&tree, &|n| n.name == "Layers" && n.role == "list")
+        .ok_or("no layers list in the window")?;
+    let mut counts = Vec::new();
+    collect(list, &mut |n| {
+        // Static text reads as a label.
+        if n.key.is_some() && n.role == "label" && n.name.contains(" comment") {
+            counts.push(n.name.clone());
+        }
+    });
+    Ok(counts)
+}
+
+#[then(regex = r#"^the layers panel shows "([^"]+)"$"#)]
+fn layers_show(w: &mut UiWorld, want: String) -> StepResult {
+    let counts = comment_counts(w.window()?)?;
+    (counts == [want])
+        .then_some(())
+        .ok_or_else(|| format!("the layers panel shows {counts:?}"))
+}
+
+#[then("the layers panel shows no comments")]
+fn layers_show_no_comments(w: &mut UiWorld) -> StepResult {
+    let counts = comment_counts(w.window()?)?;
+    counts
+        .is_empty()
+        .then_some(())
+        .ok_or_else(|| format!("the layers panel shows {counts:?}"))
 }
 
 #[then(regex = r#"^the file "([^"]+)" is:$"#)]

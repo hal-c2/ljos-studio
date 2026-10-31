@@ -14,6 +14,7 @@ import { TAG, VERSION, answerBuffer, relay, workerAsk } from "./preview.js";
 
 if (!isMainThread) {
   const ask = workerAsk(workerData.buffer, (m) => parentPort.postMessage({ post: m }), { timeoutMs: 200 });
+  const outs = [];
   for (const request of ["one", "two"]) {
     let out;
     try {
@@ -21,9 +22,12 @@ if (!isMainThread) {
     } catch (e) {
       out = { error: e.message };
     }
-    parentPort.postMessage({ asked: request, ...out });
+    outs.push({ asked: request, ...out });
   }
+  // Read before the page thread has both answers: it stops the relay as
+  // soon as it does, and a read after that would race the stop.
   const before = ask.gone();
+  for (const out of outs) parentPort.postMessage(out);
   parentPort.once("message", () => parentPort.postMessage({ gone: { before, after: ask.gone() } }));
 } else {
   const buffer = answerBuffer(1 << 10);

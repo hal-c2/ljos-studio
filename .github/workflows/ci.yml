@@ -1,0 +1,154 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gates:
+    runs-on: ubuntu-latest
+    env:
+      # Ljós's table of Qt's types is generated from an installed Qt and never
+      # committed; none is installed here, and this says so outright.
+      LJOS_QT_TYPES: none
+      # Line tables are enough for a backtrace; full debug info is most of
+      # target/'s size.
+      CARGO_PROFILE_DEV_DEBUG: line-tables-only
+    steps:
+      # The runner has ~14 GB free, and a debug Ljós build with its tests filled
+      # it (ld died with SIGBUS). Toolchains this repo never uses go first; the
+      # df lines say how much there was if it happens again.
+      - run: df -h /
+      - run: sudo rm -rf /usr/local/lib/android /opt/ghc /usr/share/dotnet /opt/hostedtoolcache/CodeQL && df -h /
+      - uses: actions/checkout@v5
+      # The Rust version comes from mise.toml; mise exports RUSTUP_TOOLCHAIN, so
+      # rust-toolchain.toml's components and target come from `mise run setup`.
+      - uses: jdx/mise-action@v3
+      # Saved even when a later step fails: otherwise nothing is saved until a
+      # run is green, and each run builds everything again.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+      # Only restored here: rust-cache's own save trims target/, which holds
+      # the ljos and wasm-bindgen setup installs, so they are saved after setup.
+      # Keyed by the two pins the tools are built from, ljos-ui's rev and
+      # wasm-bindgen's version, and not all of Cargo.toml: ljos takes ~30 min to
+      # build, and another dependency changes nothing in it.
+      - id: pins
+        run: echo "key=$(grep -oE 'hal-c2/ljos-ui", rev = "[0-9a-f]+"|^wasm-bindgen = .*' Cargo.toml | sort -u | sha256sum | cut -c1-16)" >> "$GITHUB_OUTPUT"
+      - id: tools
+        uses: actions/cache/restore@v4
+        with:
+          path: target/tools
+          key: tools-${{ runner.os }}-${{ steps.pins.outputs.key }}
+          # An older set still has what didn't change; setup checks each
+          # tool's version and builds only the one whose pin moved.
+          restore-keys: tools-${{ runner.os }}-
+      # The render tests need a wgpu adapter (lavapipe is a software Vulkan);
+      # Ljós links fontconfig and ALSA on Linux.
+      - run: sudo apt-get update && sudo apt-get install -y mesa-vulkan-drivers libfontconfig1-dev libasound2-dev pkg-config
+      # rustup's components and target for the gates, then ljos at the rev
+      # Cargo.toml pins and the pinned wasm-bindgen, unless the cache above has
+      # them: the only step that installs anything.
+      - run: mise run setup
+      # Saved at once, so a failure later doesn't build ljos again.
+      - if: steps.tools.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: target/tools
+          key: ${{ steps.tools.outputs.cache-primary-key }}
+      - run: mise run check
+      - run: mise run check:tasks
+      - run: mise run check:wasm
+      # The whole ledger with the unit tests, and the stdio server's test: the
+      # Gherkin runners are cargo tests, so `mise run features` would run them
+      # again.
+      - run: mise run test
+      - run: mise run features:web
+      - if: always()
+        run: df -h /
+
+  browser:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: studio
+    env:
+      # ljos-web's mise.toml sets Rust's options, which mise wants trusted.
+      MISE_TRUSTED_CONFIG_PATHS: ${{ github.workspace }}/ljos-web
+      CARGO_PROFILE_DEV_DEBUG: line-tables-only
+    steps:
+      # The runner has ~14 GB free, and a debug Ljós build with its tests filled
+      # it (ld died with SIGBUS). Toolchains this repo never uses go first; the
+      # df lines say how much there was if it happens again.
+      - run: df -h /
+        working-directory: .
+      - run: sudo rm -rf /usr/local/lib/android /opt/ghc /usr/share/dotnet /opt/hostedtoolcache/CodeQL && df -h /
+        working-directory: .
+      - uses: actions/checkout@v5
+        with:
+          path: studio
+      # The pin's one place is web/ljos-web.rev; the tasks read it too.
+      - id: pin
+        run: echo "rev=$(cat web/ljos-web.rev)" >> "$GITHUB_OUTPUT"
+      # Beside this checkout, where the tasks look with nothing set.
+      - uses: actions/checkout@v5
+        with:
+          repository: hal-c2/ljos-web
+          ref: ${{ steps.pin.outputs.rev }}
+          path: ljos-web
+      - uses: jdx/mise-action@v3
+        with:
+          working_directory: studio
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: ljos-web/package.json
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+          workspaces: |
+            studio
+            ljos-web
+      # As in `gates`.
+      - id: pins
+        run: echo "key=$(grep -oE 'hal-c2/ljos-ui", rev = "[0-9a-f]+"|^wasm-bindgen = .*' Cargo.toml | sort -u | sha256sum | cut -c1-16)" >> "$GITHUB_OUTPUT"
+      - id: tools
+        uses: actions/cache/restore@v4
+        with:
+          path: studio/target/tools
+          key: tools-${{ runner.os }}-${{ steps.pins.outputs.key }}
+          # An older set still has what didn't change; setup checks each
+          # tool's version and builds only the one whose pin moved.
+          restore-keys: tools-${{ runner.os }}-
+      # Qt 6.11's QML, as Ljós's own CI uses: the shell's Controls are read from
+      # it, and Ubuntu's Qt is older and split across packages. Only QML is
+      # wanted, so no archives beyond the base.
+      - uses: jurplel/install-qt-action@v4
+        with:
+          version: "6.11.2"
+          cache: true
+      - run: sudo apt-get update && sudo apt-get install -y libfontconfig1-dev libasound2-dev pkg-config
+      # ljos-web names ljos-ui by ssh://; both are public, and a runner has no key.
+      - run: git config --global url."https://github.com/".insteadOf "ssh://git@github.com/"
+      - run: pnpm install --frozen-lockfile
+        working-directory: ljos-web
+      - run: pnpm --filter ljos-web-example-web exec playwright install --with-deps chromium
+        working-directory: ljos-web
+      # rustup's wasm target, ljos and wasm-bindgen, as in `gates`.
+      - run: mise run setup
+      - if: steps.tools.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: studio/target/tools
+          key: ${{ steps.tools.outputs.cache-primary-key }}
+      - run: mise run web:browser
+      - run: mise run web:shell
+      - run: mise run web:serve:check
+      - if: always()
+        run: df -h /
+        working-directory: .

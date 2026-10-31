@@ -6,8 +6,8 @@
 //
 // With no arguments it runs every scenario that needs no preview: a
 // preview is a page of its own (`@preview`), a window is native (`@ui`),
-// and a link or a file that is not text is the file system's, which
-// storage has not (`@disk`).
+// and a link, a bundle or a file that is not text is the file system's,
+// which storage is not (`@disk`).
 //
 // DECISION: node, not Playwright. These scenarios touch no DOM and no
 // browser storage, and node runs the very module a page loads; the OPFS
@@ -323,15 +323,21 @@ const keeps = (w, s, pointer, name) => void w.kept.set(name, must(w.ok(), pointe
 
 const STEPS = [
   step("given", /^an empty project$/, () => {}),
-  step("given", /^the file "([^"]+)":$/, (w, s, name) => {
-    // The native store reads the directory as it is; this one holds what
-    // it loaded when the tools connected, so a file given later is in
-    // storage and told to the tools, as another tab's would be.
-    w.backend.files.set(name, fileText(s));
-    w.studio?.stored(name, fileText(s));
-  }),
+  ...[["given", /^the file "([^"]+)":$/], ["when", /^somebody writes the file "([^"]+)":$/]].map(([kind, pattern]) =>
+    step(kind, pattern, (w, s, name) => {
+      // The native store reads the directory as it is; this one holds what
+      // it loaded when the tools connected, so a file given later is in
+      // storage and told to the tools, as another tab's would be.
+      w.backend.files.set(name, fileText(s));
+      w.studio?.stored(name, fileText(s));
+    }),
+  ),
   step("given", /^the studio tools are connected$/, async (w) => void (await w.server())),
   step("given", /^the studio tools are connected with the capabilities "([^"]*)"$/, async (w, s, caps) => {
+    // The native runner gives the capabilities with each call; a studio
+    // here is opened with them, so one with others is opened again over
+    // the same storage.
+    if (w.caps !== caps) w.studio = undefined;
     w.caps = caps;
     await w.server();
   }),
@@ -397,6 +403,25 @@ const STEPS = [
     if (got === undefined) throw new Error(`\`${name}\` does not exist`);
     if (got !== want) throw new Error(`\`${name}\` is:\n${got}\nnot:\n${want}`);
   }),
+  step("then", /^the file "([^"]+)" exists$/, (w, s, name) => {
+    if (!w.backend.files.has(name)) throw new Error(`\`${name}\` does not exist`);
+  }),
+  step("given", /^the directory "([^"]+)" is deleted$/, (w, s, name) => {
+    const below = `${name.replace(/\/$/, "")}/`;
+    const gone = [...w.backend.files.keys()].filter((f) => f.startsWith(below));
+    if (gone.length === 0) throw new Error(`\`${name}\`: there is no such directory`);
+    // Told to the tools, as another tab's removal would be (see "the file").
+    for (const f of gone) {
+      w.backend.files.delete(f);
+      w.studio?.stored(f, null);
+    }
+  }),
+  // A new studio over the same storage: what a session kept in memory is
+  // gone, what it wrote is read again.
+  step("given", /^the studio tools are reconnected$/, async (w) => {
+    w.studio = undefined;
+    await w.server();
+  }),
   step("then", /^the file "([^"]+)" does not exist$/, (w, s, name) => {
     if (w.backend.files.has(name)) throw new Error(`\`${name}\` exists`);
   }),
@@ -434,8 +459,10 @@ const STEPS = [
 // written here or listed.
 const NATIVE_ONLY = new Map([
   ['then ^the preview shows "([^"]*)"$', "a preview is a page of its own (@preview)"],
+  ['then ^Studio has reported the preview reloaded since it was read$', "a preview is a page of its own (@preview)"],
   ["then ^the answer has a PNG picture at most (\\d+) pixels on its longest side$", "a picture is a preview's (@preview)"],
   ['given ^the link "([^"]+)" leads to "([^"]+)"$', "storage holds no links (@disk)"],
+  ['given ^the named pipe "([^"]+)"$', "storage holds no pipes (@disk)"],
   ['given ^the link "([^"]+)" leads to a directory outside the project holding "([^"]+)"$', "storage holds no links (@disk)"],
   ['given ^the link "([^"]+)" leads to the file "([^"]+)" outside the project$', "storage holds no links (@disk)"],
   ["then ^nothing was written outside the project$", "storage has no outside (@disk)"],
@@ -447,6 +474,12 @@ const NATIVE_ONLY = new Map([
   ['then ^the endpoint\'s tool refuses it with "([a-z_]+)"$', "the endpoint is a native window's (endpoint.feature)"],
   ["then ^the endpoint listens on loopback only$", "the endpoint is a native window's (endpoint.feature)"],
   ["then ^the token file can be read by its owner alone$", "the endpoint is a native window's (endpoint.feature)"],
+  ['given ^"([^"]+)" links to a directory outside the project that holds the file "([^"]+)"$', "storage holds no links (@disk)"],
+  ['given ^"([^"]+)" links to "([^"]+)" in the project$', "storage holds no links (@disk)"],
+  ['given ^a diamond of directory links (\\d+) levels deep in "([^"]+)"$', "storage holds no links (@disk)"],
+  ["then ^it answered within (\\d+) seconds?$", "a call's time is measured on the native side, where the disk is"],
+  ['then ^the bundle "([^"]+)", copied out of the project, runs headless and shows what the preview shows$', "a bundle runs as a native process (@preview)"],
+  ['then ^the directory outside the project holds only "([^"]*)"$', "storage holds no links (@disk)"],
 ]);
 const WEB_ONLY = new Set(['given ^storage refuses to keep "([^"]+)"$', "when ^storage keeps files again$"]);
 

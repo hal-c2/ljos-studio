@@ -23,16 +23,23 @@ extern "C" {
     #[wasm_bindgen(js_namespace = performance, js_name = now)]
     fn performance_now() -> f64;
 
+    #[wasm_bindgen(js_namespace = Date, js_name = now)]
+    fn date_now() -> f64;
+
     #[wasm_bindgen(js_name = setTimeout)]
     fn set_timeout(then: &JsValue, ms: f64) -> JsValue;
 }
 
-/// The page's monotonic clock and its event loop's timeouts.
+/// The page's clocks and its event loop's timeouts.
 struct WebTimer;
 
 impl Timer for WebTimer {
     fn now(&self) -> Duration {
         Duration::from_secs_f64(performance_now().max(0.0) / 1000.0)
+    }
+
+    fn wall(&self) -> Duration {
+        Duration::from_secs_f64(date_now().max(0.0) / 1000.0)
     }
 
     fn after(&self, delay: Duration, then: Box<dyn FnOnce() + Send>) {

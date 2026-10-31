@@ -10,6 +10,8 @@ Feature: A project kept in the browser's storage
   storage too. A write storage refuses refuses the call that made it,
   naming the file, and goes to storage again with the next call as the
   session then holds it. Removing a file storage does not have is done.
+  Storage is not a directory, so there is nowhere to write a bundle: an
+  export is refused, saying so.
 
   Background:
     Given the file "Main.qml":
@@ -106,3 +108,12 @@ Feature: A project kept in the browser's storage
           width: 20
       }
       """
+
+  Scenario: A project in the browser's storage has no directory to export
+    Given the studio tools are connected with the capabilities "inspect, mutate, fs"
+    When the agent calls the tool "export" with:
+      """json
+      {"entry": "Main.qml"}
+      """
+    Then the agent is refused with "not_actionable"
+    And the refusal's "/details/kind" is "no_directory"

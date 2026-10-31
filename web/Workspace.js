@@ -32,7 +32,7 @@ export function serve(studio) {
 }
 
 // The view's parts, as the workspace's properties.
-const PARTS = ["documents", "generation", "text", "layers", "selected", "selection", "inspector", "states", "palette", "done", "undone", "problem", "previews", "theme", "tokens"];
+const PARTS = ["documents", "generation", "text", "layers", "selected", "selection", "inspector", "states", "roles", "flow", "palette", "done", "undone", "problem", "previews", "theme", "tokens", "comments"];
 
 export const Workspace = defineType("Workspace", QtObject, {
   properties: {
@@ -45,6 +45,10 @@ export const Workspace = defineType("Workspace", QtObject, {
     selection: null,
     inspector: null,
     states: null,
+    // What a panel reads before the first view is in starts empty, as the
+    // native block's does (`studio_blocks`, `Default for Workspace`).
+    roles: [],
+    flow: { states: [], edges: [] },
     palette: null,
     done: null,
     undone: null,
@@ -53,9 +57,8 @@ export const Workspace = defineType("Workspace", QtObject, {
     problem: typed(kinds.string, ""),
     previews: typed(kinds.bool, false),
     theme: typed(kinds.string, ""),
-    // Empty, as the native block's, so a panel filters it before the
-    // first view is in.
     tokens: [],
+    comments: [],
   },
   signals: ["answered", "refused"],
   methods: {

@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Ljós Studio</title>
+    <style>
+      html, body { margin: 0; height: 100%; font: 13px system-ui, sans-serif; }
+      body { display: grid; grid-template: "bar bar" auto "app preview" minmax(0, 1fr) / minmax(0, 1fr) 420px; }
+      #bar { grid-area: bar; display: flex; gap: 8px; align-items: center; padding: 6px 10px; border-bottom: 1px solid #8884; }
+      #bar .place { margin-left: auto; opacity: 0.6; }
+      /* The window fills the element it is mounted in. */
+      #app { grid-area: app; min-width: 0; min-height: 0; position: relative; }
+      #preview { grid-area: preview; display: flex; flex-direction: column; min-height: 0; border-left: 1px solid #8884; }
+      #preview header { display: flex; gap: 8px; align-items: center; padding: 6px 10px; border-bottom: 1px solid #8884; }
+      #preview iframe { flex: 1; min-height: 0; border: 0; background: #fff; }
+      #problem { color: #b00020; padding: 6px 10px; white-space: pre-wrap; max-height: 30%; overflow: auto; }
+      #problem:empty { display: none; }
+    </style>
+  </head>
+  <body>
+    <div id="bar">
+      <label>Project <select id="projects" aria-label="Project"></select></label>
+      <button id="new" type="button">New</button>
+      <label>Import folder <input id="import" aria-label="Import folder" type="file" webkitdirectory /></label>
+      <span class="place" id="place"></span>
+    </div>
+    <div id="app"></div>
+    <aside id="preview" aria-label="Preview">
+      <header>
+        <label>Preview <select id="entry" aria-label="Previewed document"></select></label>
+        <span id="state" aria-label="Preview state"></span>
+      </header>
+      <div id="problem" aria-label="Preview problem"></div>
+      <iframe id="frame" title="Preview of the project" src="/preview/frame.html"></iframe>
+    </aside>
+    <script type="module" src="./main.js"></script>
+  </body>
+</html>
