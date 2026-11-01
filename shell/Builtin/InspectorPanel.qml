@@ -87,6 +87,20 @@ Panel {
             : outer.y + outer.height - at.y - at.height
         return Math.round(away)
     }
+    // Where the running app has it, for what the file does not say: only what
+    // is on the canvas has a place, and only where no layout or anchor says it.
+    readonly property var placeRows: {
+        const box = seenBox
+        if (box === null || box.local === undefined || box.scene !== undefined || placedBy !== "" || isRoot)
+            return []
+        const pinned = workspace.inspector.some(r => r.name.startsWith("anchors."))
+        return pinned ? [] : [
+            {name: "x", at: box.local.x},
+            {name: "y", at: box.local.y},
+            {name: "width", at: box.local.width},
+            {name: "height", at: box.local.height}
+        ].filter(p => !workspace.inspector.some(r => r.name === p.name))
+    }
     function togglePin(side) {
         const args = {
             action: "anchor",
@@ -116,6 +130,10 @@ Panel {
                 panel.forgetRefused()
             else
                 panel.offered = null
+            // Those boxes were another object's, and a pin or a place offered
+            // from them would be wrong for this one.
+            panel.seenBox = null
+            panel.seenParent = null
         }
         function onRefused(tool, error) {
             if (["property_set", "binding_set", "state_edit", "node_arrange"].includes(tool))
@@ -641,6 +659,29 @@ Panel {
                         text: modelData.label
                         checked: panel.isPinned(modelData.side)
                         onClicked: panel.togglePin(modelData.side)
+                    }
+                }
+            }
+
+            Repeater {
+                model: panel.placeRows
+                delegate: RowLayout {
+                    id: placeRow
+                    required property var modelData
+                    Layout.fillWidth: true
+                    spacing: Spacing.xxs
+
+                    Label {
+                        text: placeRow.modelData.name
+                        color: Colors.textMuted
+                        font.pixelSize: Typography.captionSize
+                        Layout.preferredWidth: 72
+                    }
+                    Field {
+                        placeholderText: Math.round(placeRow.modelData.at)
+                        Accessible.name: placeRow.modelData.name
+                        Layout.fillWidth: true
+                        onAccepted: if (text.trim() !== "") panel.set(placeRow.modelData.name, text)
                     }
                 }
             }

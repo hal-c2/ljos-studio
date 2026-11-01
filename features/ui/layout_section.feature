@@ -24,6 +24,7 @@ Feature: A person pins an object from the inspector's Layout section
               columns: 2
               Text { id: cell }
           }
+          Timer { id: tick }
       }
       """
     And Studio's window shows the project
@@ -55,3 +56,21 @@ Feature: A person pins an object from the inspector's Layout section
     When the person selects "Text cell" in the layers panel
     Then the inspector has no button "Pin left"
     And the window says "It is placed by its Grid"
+
+  # A Row just placed has no x written, and an empty one has no size to drag.
+  @preview
+  Scenario: Where an object is can be written without knowing the names
+    When the person selects "Grid table" in the layers panel
+    Then the inspector offers the field "y"
+    When the person sets "y" to "30" in the inspector
+    Then the file "Main.qml" says "y: 30"
+
+  @preview
+  Scenario: What has no place on the canvas is offered none
+    When the person selects "Timer tick" in the layers panel
+    Then the inspector does not offer the field "y"
+
+  @preview
+  Scenario: What a layout places is offered no place
+    When the person selects "Text cell" in the layers panel
+    Then the inspector does not offer the field "y"
