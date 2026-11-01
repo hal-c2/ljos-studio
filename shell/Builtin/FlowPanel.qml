@@ -22,8 +22,11 @@ Panel {
     title: "Flow"
 
     readonly property var flow: workspace.flow
-    // The state the running app was last read in; null before a click.
+    // The state a click in play left the running app in; null before one.
+    // A frame showing a state answers `preview_state` too, and is no click.
     property var playing: null
+    readonly property bool inPlay: workspace.playing
+    onInPlayChanged: playing = null
     // What the selection's wires handle: a tap (a TapHandler, which any
     // item can hold) or a signal the selection has. A new selection starts
     // from a tap again.
@@ -82,9 +85,9 @@ Panel {
     Connections {
         target: panel.workspace
 
-        function onAnswered(tool, answer) {
+        function onAnswered(tool, answer, asked) {
             // A click that read nothing leaves where the flow is unknown.
-            if (tool === "preview_state")
+            if (tool === "preview_state" && asked.click_at !== undefined && panel.inPlay)
                 panel.playing = answer.variant !== undefined ? answer.variant : null
         }
     }

@@ -58,7 +58,7 @@ Panel {
     // What a drag on the frame draws; "" selects and moves.
     property string drawing: ""
     readonly property real zoom: fitted ? Math.max(0.125, fit) : chosenZoom
-    property bool playing: false
+    readonly property bool playing: workspace.playing
     onPlayingChanged: workspace.followPicture(playing)
     // The state the inspector is recording into; null for none. What the
     // canvas sets goes there, as what the inspector sets does.
@@ -512,7 +512,7 @@ Panel {
                 checked: panel.drawing === modelData.kind
                 onClicked: {
                     panel.hand = false
-                    panel.playing = false
+                    panel.workspace.playing = false
                     panel.drawing = panel.drawing === modelData.kind ? "" : modelData.kind
                     checked = Qt.binding(() => panel.drawing === modelData.kind)
                     canvasFocus.forceActiveFocus()
@@ -526,7 +526,7 @@ Panel {
             checkable: true
             checked: panel.playing
             onClicked: {
-                panel.playing = !panel.playing
+                panel.workspace.playing = !panel.playing
                 panel.drawing = ""
                 checked = Qt.binding(() => panel.playing)
             }
@@ -622,15 +622,7 @@ Panel {
         // where the keys are, has nothing to give back.
         handHeld = false
         drawing = tool
-        playing = false
-        // The overlay is disabled under the hand, and the next letter has to
-        // reach someone; it takes the keys back when the hand goes.
-        if (hand) {
-            keysWere = from
-            canvasFocus.forceActiveFocus()
-        } else if (canvasFocus.activeFocus && keysWere !== null) {
-            keysWere.forceActiveFocus()
-        }
+        workspace.playing = false
         return true
     }
 

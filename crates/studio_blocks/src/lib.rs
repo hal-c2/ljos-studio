@@ -105,6 +105,9 @@ pub struct Workspace {
     /// calls `lookAgain` every so often until this is false.
     #[qml(readonly, notify)]
     pub settling: bool,
+    /// A click on the canvas is a click on the running app. The shell sets it.
+    #[qml(notify)]
+    pub playing: bool,
     /// How many pictures of the preview have been asked for.
     #[qml(readonly, notify)]
     pub looks: i32,
@@ -229,6 +232,7 @@ impl Default for Workspace {
             documents: none(),
             assets: none(),
             settling: false,
+            playing: false,
             looks: 0,
             blank: false,
             doc: String::new(),
