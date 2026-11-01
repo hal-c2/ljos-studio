@@ -38,6 +38,10 @@ struct UiWorld {
     pointer_was: Option<Point>,
     /// A workspace a scenario expects to go.
     remembered: Option<ObjectId>,
+    /// The threads following a picture before the one a scenario starts, and
+    /// that one once it is told.
+    followers_before: Vec<String>,
+    follower: Option<String>,
     /// Where the outline was shown, bare of a ghost, in the frames of a flick.
     outlines: Vec<(f64, f64)>,
     dir: tempfile::TempDir,
@@ -227,6 +231,8 @@ impl UiWorld {
             frame_before: None,
             pointer_was: None,
             remembered: None,
+            followers_before: Vec::new(),
+            follower: None,
             outlines: Vec::new(),
             dir: tempfile::tempdir().expect("a temporary directory"),
             state: tempfile::tempdir().expect("a temporary directory"),
@@ -3258,13 +3264,75 @@ fn opens_again(w: &mut UiWorld) -> StepResult {
     w.open_watched()
 }
 
-#[given(regex = r"^1 thread is following the preview's picture$")]
-fn one_follower(w: &mut UiWorld) -> StepResult {
+/// The ids of the threads following a preview's picture, as the operating
+/// system lists them: what a person's task manager shows, so there is no
+/// hook the product keeps for a test. An earlier scenario's window may be
+/// ending its own, so a scenario knows its thread by being new.
+fn picture_followers() -> Result<Vec<String>, String> {
+    // A thread's name is cut to 15 bytes there.
+    const NAME: &str = "studio-picture-";
+    let tasks =
+        std::fs::read_dir("/proc/self/task").map_err(|e| format!("/proc/self/task: {e}"))?;
+    Ok(tasks
+        .filter_map(Result::ok)
+        .filter(|t| {
+            std::fs::read_to_string(t.path().join("comm")).is_ok_and(|name| name.starts_with(NAME))
+        })
+        .map(|t| t.file_name().to_string_lossy().into_owned())
+        .collect())
+}
+
+#[given("the person has listed the threads following the preview's picture")]
+fn list_followers(w: &mut UiWorld) -> StepResult {
+    w.followers_before = picture_followers()?;
+    Ok(())
+}
+
+#[given("a new thread is following the preview's picture")]
+fn new_follower(w: &mut UiWorld) -> StepResult {
+    let before = w.followers_before.clone();
     let window = w.window()?;
-    let got = studio_blocks::followers(window.engine());
-    (got == 1)
-        .then_some(())
-        .ok_or_else(|| format!("{got} threads follow the picture"))
+    let deadline = std::time::Instant::now() + Duration::from_secs(3);
+    loop {
+        let new: Vec<String> = picture_followers()?
+            .into_iter()
+            .filter(|t| !before.contains(t))
+            .collect();
+        match new.as_slice() {
+            [one] => {
+                w.follower = Some(one.clone());
+                return Ok(());
+            }
+            _ if std::time::Instant::now() >= deadline => {
+                return Err(format!("{} new threads follow the picture", new.len()));
+            }
+            _ => {}
+        }
+        std::thread::sleep(Duration::from_millis(50));
+        window.stage.drive().advance(50).map_err(drive_error)?;
+    }
+}
+
+// The seconds are real ones: a thread that sees it should stop only when its
+// wait on the preview ends, which for an app at rest is half a minute, is not
+// counted out in these.
+#[then(regex = r"^that thread has ended within (\d+) seconds?$")]
+fn follower_ended(w: &mut UiWorld, seconds: u64) -> StepResult {
+    let thread = w.follower.clone().ok_or("no thread was told")?;
+    let window = w.window()?;
+    let deadline = std::time::Instant::now() + Duration::from_secs(seconds);
+    loop {
+        if !picture_followers()?.contains(&thread) {
+            return Ok(());
+        }
+        if std::time::Instant::now() >= deadline {
+            return Err(format!(
+                "the thread following the picture is still there after {seconds} s"
+            ));
+        }
+        std::thread::sleep(Duration::from_millis(50));
+        window.stage.drive().advance(50).map_err(drive_error)?;
+    }
 }
 
 #[given("the person has remembered the window's workspace")]
@@ -3279,27 +3347,6 @@ fn remembered_is_gone(w: &mut UiWorld) -> StepResult {
     (!w.window()?.engine().is_alive(was))
         .then_some(())
         .ok_or_else(|| "the reload kept the workspace, so this says nothing".to_owned())
-}
-
-// A wait on an app that moves ends with its next rest, so this is short;
-// the thread only looks at what stops it when a wait ends.
-#[then(regex = r"^no thread is following the preview's picture$")]
-fn no_follower(w: &mut UiWorld) -> StepResult {
-    let window = w.window()?;
-    let deadline = std::time::Instant::now() + PATIENCE;
-    loop {
-        let got = studio_blocks::followers(window.engine());
-        if got == 0 {
-            return Ok(());
-        }
-        if std::time::Instant::now() >= deadline {
-            return Err(format!(
-                "{got} threads still follow the picture after {PATIENCE:?}"
-            ));
-        }
-        std::thread::sleep(std::time::Duration::from_millis(50));
-        window.advance(50)?;
-    }
 }
 
 #[given("the window has taken the change")]

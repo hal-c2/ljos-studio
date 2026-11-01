@@ -23,14 +23,14 @@ use std::cell::RefCell;
 use std::collections::{HashMap, VecDeque};
 use std::hash::Hasher;
 use std::rc::Rc;
-use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, mpsc};
 use std::time::{Duration, Instant};
 
 use ljos::item::{self, DisplayListBuilder, ImageHandle, ItemPaint, TextEngine, kurbo};
 use ljos::prelude::*;
 use ljos::task::{self, Lane};
-use ljos_mcp_core::{CallCtx, Cap, CapSet};
+use ljos_mcp_core::{CallCtx, Cap, CapSet, McpSurface};
 use serde_json::{Value as Json, json};
 use studio_mcp::StudioServer;
 use studio_mcp::view::View;
@@ -82,8 +82,6 @@ struct Context {
     wake_at: std::cell::Cell<Option<Instant>>,
     /// What the last reload said, for a status made after it.
     reload_error: RefCell<String>,
-    /// The threads following a preview's picture that have not ended.
-    followers: Arc<AtomicUsize>,
 }
 
 /// The session a shell binds: its state as plain JS values, and one
@@ -343,8 +341,12 @@ impl Workspace {
         queue.borrow_mut().follow_wanted = on;
         if on {
             follow(cx.engine, cx.this);
-        } else if let Some(stop) = queue.borrow_mut().following.take() {
-            stop.store(true, Ordering::SeqCst);
+        } else {
+            let mut q = queue.borrow_mut();
+            if let Some(stop) = q.following.take() {
+                stop.stop();
+                // A thread waiting for a picture to land is told by these going.
+            }
         }
         Ok(())
     }
@@ -395,7 +397,7 @@ struct Queue {
     /// Play mode wants the picture to follow the preview.
     follow_wanted: bool,
     /// What stops the thread waiting on the preview, while there is one.
-    following: Option<Arc<AtomicBool>>,
+    following: Option<Arc<Stop>>,
     /// The lists last set, by the property's name.
     given: HashMap<&'static str, Json>,
 }
@@ -405,7 +407,7 @@ impl Drop for Queue {
     /// thread would go on waiting on the preview for it.
     fn drop(&mut self) {
         if let Some(stop) = self.following.take() {
-            stop.store(true, Ordering::SeqCst);
+            stop.stop();
         }
     }
 }
@@ -787,28 +789,56 @@ fn finish(engine: &Engine, ws: ObjectId, done: Done) {
     }
 }
 
-/// How long one wait on the preview lasts. The thread sees that it should stop
-/// only when a wait ends, and a person who left play mode leaves it behind for
-/// no longer than this; it costs the app nothing meanwhile.
+/// How long one wait on the preview lasts; a stop ends it earlier.
 const FOLLOW_WAIT_MS: u64 = 30_000;
 const LOOK_AT_MOST_EVERY_MS: u64 = 100;
 
-/// Counts a following thread out, however it ends.
-struct Follower(Arc<AtomicUsize>);
+/// Ends a following thread's wait on the preview as soon as it is told, not
+/// when the wait runs out: for an app at rest that is half a minute, in which
+/// the thread would hold the session, and the preview's connection, for
+/// nobody.
+struct Stop {
+    stopped: AtomicBool,
+    /// Keeps a stop told before the wait began, so it is not missed.
+    woken: tokio::sync::Notify,
+}
 
-impl Drop for Follower {
-    fn drop(&mut self) {
-        self.0.fetch_sub(1, Ordering::SeqCst);
+impl Stop {
+    fn new() -> Arc<Self> {
+        Arc::new(Stop {
+            stopped: AtomicBool::new(false),
+            woken: tokio::sync::Notify::new(),
+        })
+    }
+
+    fn stop(&self) {
+        self.stopped.store(true, Ordering::SeqCst);
+        self.woken.notify_one();
+    }
+
+    fn is_stopped(&self) -> bool {
+        self.stopped.load(Ordering::SeqCst)
     }
 }
 
-/// How many threads are following a preview's picture for this Engine's
-/// workspaces.
-pub fn followers(engine: &Engine) -> usize {
-    engine
-        .extension::<Context>()
-        .followers
-        .load(Ordering::SeqCst)
+/// `preview_events` waiting `args`, dropped unanswered if `stop` is told
+/// first; `None` then, and when it could not be asked.
+fn wait_on_preview(
+    runtime: &tokio::runtime::Runtime,
+    weak: &std::sync::Weak<StudioServer>,
+    args: Json,
+    stop: &Stop,
+) -> Option<Json> {
+    let server = weak.upgrade()?;
+    let ctx = person();
+    runtime.block_on(async {
+        tokio::select! {
+            reply = server.call_tool("preview_events", &ctx, args) => {
+                reply.ok().map(|reply| reply.structured)
+            }
+            () = stop.woken.notified() => None,
+        }
+    })
 }
 
 /// Starts waiting on the preview, if wanted and not already waiting. Nothing
@@ -823,7 +853,7 @@ fn follow(engine: &Engine, ws: ObjectId) {
     let Some(weak) = context.server.borrow().as_ref().map(Arc::downgrade) else {
         return;
     };
-    let stop = Arc::new(AtomicBool::new(false));
+    let stop = Stop::new();
     {
         let mut q = queue.borrow_mut();
         if !q.follow_wanted || q.following.is_some() {
@@ -833,28 +863,28 @@ fn follow(engine: &Engine, ws: ObjectId) {
     }
     let post = Platform::of(engine).poster();
     let mine = Arc::clone(&stop);
-    let followers = Arc::clone(&context.followers);
-    followers.fetch_add(1, Ordering::SeqCst);
-    let counted = Arc::clone(&followers);
     let spawned = std::thread::Builder::new()
         .name("studio-picture-watch".to_owned())
         .spawn(move || {
-            let _ended = Follower(counted);
+            // A wait here is dropped when told to stop, which needs a
+            // reactor of its own to be driven on.
+            let Ok(runtime) = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+            else {
+                return;
+            };
             let mut since = None;
-            while !stop.load(Ordering::SeqCst) {
+            while !stop.is_stopped() {
                 let mut args = json!({"wait_ms": FOLLOW_WAIT_MS});
                 if let Some(since) = since {
                     args["rests"] = json!(since);
                 }
-                let Some(server) = weak.upgrade() else {
+                let Some(reply) = wait_on_preview(&runtime, &weak, args, &stop) else {
                     break;
                 };
-                let Ok(reply) = server.call("preview_events", &person(), args) else {
-                    break;
-                };
-                drop(server);
                 let held = since;
-                since = reply.structured["rests"].as_u64();
+                since = reply["rests"].as_u64();
                 // A rest told of past one already held is a change, and the
                 // last of them, an animation's end, has no wake after it.
                 let moved = held.is_some() && since != held;
@@ -862,30 +892,26 @@ fn follow(engine: &Engine, ws: ObjectId) {
                 // makes it rest again with its next wake: this asks only as
                 // often as the app itself moves, and no more than a person
                 // can see. The wait is on the app: a new rest ends it early.
-                if let Some(wake) = reply.structured["wake_in_ms"].as_u64() {
+                if let Some(wake) = reply["wake_in_ms"].as_u64() {
                     std::thread::sleep(Duration::from_millis(LOOK_AT_MOST_EVERY_MS));
                     let rest = wake
                         .min(FOLLOW_WAIT_MS)
                         .saturating_sub(LOOK_AT_MOST_EVERY_MS);
-                    if rest > 0 && !stop.load(Ordering::SeqCst) {
+                    if rest > 0 && !stop.is_stopped() {
                         let mut args = json!({"wait_ms": rest});
                         if let Some(since) = since {
                             args["rests"] = json!(since);
                         }
-                        let Some(server) = weak.upgrade() else {
+                        let Some(reply) = wait_on_preview(&runtime, &weak, args, &stop) else {
                             break;
                         };
-                        let Ok(reply) = server.call("preview_events", &person(), args) else {
-                            break;
-                        };
-                        drop(server);
-                        since = reply.structured["rests"].as_u64();
+                        since = reply["rests"].as_u64();
                     }
                 } else if !moved {
                     // An app that will not wake by itself shows what it shows.
                     continue;
                 }
-                if !stop.load(Ordering::SeqCst) {
+                if !stop.is_stopped() {
                     // The next look's wait starts when this picture has
                     // landed: a picture slower than the app moves would
                     // otherwise have the next asked before it is done, and
@@ -908,7 +934,6 @@ fn follow(engine: &Engine, ws: ObjectId) {
         });
     if spawned.is_err() {
         // No thread to wait on: the next refresh tries again.
-        followers.fetch_sub(1, Ordering::SeqCst);
         let mut q = queue.borrow_mut();
         if q.following.as_ref().is_some_and(|s| Arc::ptr_eq(s, &mine)) {
             q.following = None;

@@ -23,10 +23,11 @@ Feature: A shell made again during Play leaves nothing following the preview
       """
     And Studio's window runs the person's shell, a copy of its own
     And the person has opened "Spin.qml" in the documents list
+    And the person has listed the threads following the preview's picture
     And the person has clicked the button "Play"
-    And 1 thread is following the preview's picture
+    And a new thread is following the preview's picture
     And the person has remembered the window's workspace
     And the person's "Shell.qml" has "id: shell" replaced with "id: shell\n    Component.onCompleted: { throw new Error(\"no shell today\") }"
     When the window takes the change
     Then the remembered workspace is gone
-    And no thread is following the preview's picture
+    And that thread has ended within 3 seconds
