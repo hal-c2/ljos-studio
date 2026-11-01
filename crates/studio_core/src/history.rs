@@ -33,6 +33,8 @@ pub struct Entry {
     /// The entry this one is one step with, in another file: undo and redo
     /// take both, and the lists show the one that is not the new file.
     pub group: Option<u64>,
+    /// The new document is a block, and this is its module's `qmldir` line.
+    pub(crate) declares: Option<crate::Declared>,
     pub(crate) handles_before: Vec<Tracked>,
     /// Also every handle given out on the text after it while that was the
     /// document's text: redo puts each back where it was.

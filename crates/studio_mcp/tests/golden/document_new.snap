@@ -9,9 +9,13 @@ expression: value
     "open_world": false,
     "read_only": false
   },
-  "description": "Create a QML document from `text`, or from a JSON file's records (`data`). Refused if it exists or does not parse. Undo removes it.",
+  "description": "Create a QML document from `text`, or from a JSON file's records (`data`). Refused if it exists or does not parse. `block` declares it in the `qmldir` beside it. Undo removes it.",
   "inputSchema": {
     "properties": {
+      "block": {
+        "description": "Also declare it a functional block in the `qmldir` beside it.",
+        "type": "boolean"
+      },
       "data": {
         "description": "A project JSON file of records: a `JsonListModel` of it, or with `model: \"list\"` a `ListModel` copy. Not with `text`.",
         "type": "string"
