@@ -797,13 +797,22 @@ fn arrange(studio: &mut Studio, a: ArrangeArgs) -> Result<ArrangeOut, SurfaceErr
         }
         Action::Hide | Action::Show => {
             let objects = objects_with_ids(studio, &doc, &nodes)?;
+            if a.dry_run {
+                return Ok(ArrangeOut::default());
+            }
             let mut previews = crate::preview::lock(&studio.previews);
-            for (id, node) in objects {
+            for (id, handle, node) in objects {
+                let pairs = studio
+                    .rehandled
+                    .iter()
+                    .map(|(o, n)| (o.as_str(), n.as_str()));
+                let handles = crate::linked(pairs, &handle);
                 if matches!(a.action, Action::Hide) {
-                    previews.hide(id);
+                    previews.hide(&doc, handles, id);
                 } else {
                     let written = node.bindings.iter().find(|b| b.name == "visible");
-                    previews.show(&id, written.is_none_or(|b| b.value.trim() != "false"));
+                    let visible = written.is_none_or(|b| b.value.trim() != "false");
+                    previews.show(&doc, handles, &id, visible);
                 }
             }
             drop(previews);
@@ -811,12 +820,24 @@ fn arrange(studio: &mut Studio, a: ArrangeArgs) -> Result<ArrangeOut, SurfaceErr
             Ok(ArrangeOut::default())
         }
         Action::Lock | Action::Unlock => {
+            let mut handles = Vec::new();
             for address in &nodes {
-                let (handle, _) = studio.session.resolve(&doc, address).map_err(error)?;
-                if matches!(a.action, Action::Lock) {
-                    studio.locked.insert(handle);
-                } else {
-                    studio.locked.remove(&handle);
+                handles.push(studio.session.resolve(&doc, address).map_err(error)?.0);
+            }
+            if a.dry_run {
+                return Ok(ArrangeOut::default());
+            }
+            for handle in handles {
+                let pairs = studio
+                    .rehandled
+                    .iter()
+                    .map(|(o, n)| (o.as_str(), n.as_str()));
+                for handle in crate::linked(pairs, &handle) {
+                    if matches!(a.action, Action::Lock) {
+                        studio.locked.insert(handle);
+                    } else {
+                        studio.locked.remove(&handle);
+                    }
                 }
             }
             studio.watchers.tell();
@@ -862,10 +883,10 @@ fn objects_with_ids(
     studio: &mut Studio,
     doc: &str,
     nodes: &[Address],
-) -> Result<Vec<(String, Node)>, SurfaceError> {
+) -> Result<Vec<(String, String, Node)>, SurfaceError> {
     let mut objects = Vec::new();
     for address in nodes {
-        let (_, node) = studio.session.resolve(doc, address).map_err(error)?;
+        let (handle, node) = studio.session.resolve(doc, address).map_err(error)?;
         let Some(id) = node.id.clone() else {
             return Err(refused(
                 "no_id",
@@ -875,7 +896,7 @@ fn objects_with_ids(
                 ),
             ));
         };
-        objects.push((id, node));
+        objects.push((id, handle, node));
     }
     Ok(objects)
 }
@@ -908,6 +929,10 @@ fn rename(
         ));
     }
     let (handle, node) = studio.session.resolve(doc, address).map_err(error)?;
+    let selected = studio
+        .session
+        .selection()
+        .contains(&(doc.to_owned(), handle.clone()));
     let outcome = match &node.id {
         Some(old) => {
             // Nothing outside the file reads an id, so the file is all there is.
@@ -929,9 +954,42 @@ fn rename(
         ),
     }
     .map_err(error)?;
+    if dry_run {
+        return Ok(ArrangeOut {
+            edit: Some(outcome.into()),
+            nodes: vec![handle],
+            ..ArrangeOut::default()
+        });
+    }
+    // Written as a new text, the object comes back with a new handle: what
+    // Studio holds of the old one goes with it.
+    let renamed = Address::Id(name.to_owned());
+    let (now, _) = studio.session.resolve(doc, &renamed).map_err(error)?;
+    if studio.locked.contains(&handle) {
+        studio.locked.insert(now.clone());
+    }
+    studio.rehandled.push((handle.clone(), now.clone()));
+    if selected {
+        let others: Vec<Address> = studio
+            .session
+            .selection()
+            .into_iter()
+            .filter(|(_, h)| *h != handle)
+            .map(|(_, h)| Address::Node(h))
+            .chain([renamed])
+            .collect();
+        studio.session.select(doc, &others).map_err(error)?;
+    }
+    // The call's end writes it under its new id (`hidden_now`).
+    {
+        let mut previews = crate::preview::lock(&studio.previews);
+        if previews.is_hidden(doc, &handle) {
+            previews.hidden.insert((doc.to_owned(), now.clone()));
+        }
+    }
     Ok(ArrangeOut {
         edit: Some(outcome.into()),
-        nodes: vec![handle],
+        nodes: vec![now],
         ..ArrangeOut::default()
     })
 }

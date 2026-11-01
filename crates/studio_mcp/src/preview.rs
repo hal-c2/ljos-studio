@@ -95,9 +95,17 @@ pub(crate) struct Open {
 }
 
 pub(crate) struct Previews {
-    /// The ids of the objects `node_arrange` `hide` hides, which outlast a
-    /// reload and a preview. Written to the running app, never to the file.
-    pub(crate) hidden: BTreeSet<String>,
+    /// The objects `node_arrange` `hide` hides, by document and handle, which
+    /// outlast a reload and a preview: an id can pass to another object, a
+    /// handle is never used again. Written to the running app, never to the
+    /// file.
+    pub(crate) hidden: BTreeSet<(String, String)>,
+    /// The ids those objects have now, by document, which is what the running
+    /// app knows them by. Only the session knows them, and a reload can come
+    /// while it is busy or on a timer's thread, so `Studio::hidden_now` keeps
+    /// them. An id means something in one document only, so only the
+    /// document's own preview hears of them.
+    pub(crate) hidden_ids: BTreeSet<(String, String)>,
     pub open: Option<Open>,
     pub events: Vec<PreviewEvent>,
     /// The host's log mark already read into `events`.
@@ -106,6 +114,19 @@ pub(crate) struct Previews {
 }
 
 impl Open {
+    fn write_hidden(&mut self, ids: &BTreeSet<(String, String)>) {
+        let mut wrote = false;
+        for (_, id) in ids.iter().filter(|(doc, _)| *doc == self.doc) {
+            // An object the text no longer has has nothing to hide.
+            let _ = self.host.write(id, "visible", false.into());
+            wrote = true;
+        }
+        // Drawn after the reload's picture was asked for, as a click is.
+        if wrote {
+            self.clicks += 1;
+        }
+    }
+
     /// How long from `now` (the timer's time) until the budget next allows
     /// a reload; `None` when it does now.
     fn spent_until(&mut self, now: Duration) -> Option<Duration> {
@@ -165,28 +186,38 @@ impl Previews {
             log_mark: 0,
             timer,
             hidden: BTreeSet::new(),
+            hidden_ids: BTreeSet::new(),
         }
     }
 
-    /// Whether the object with `id` is hidden.
-    pub(crate) fn is_hidden(&self, id: &str) -> bool {
-        self.hidden.contains(id)
+    /// Whether the object with `handle` in `doc` is hidden.
+    pub(crate) fn is_hidden(&self, doc: &str, handle: &str) -> bool {
+        self.hidden.contains(&(doc.to_owned(), handle.to_owned()))
     }
 
-    /// Hides an object in the preview, now and after each reload.
-    pub(crate) fn hide(&mut self, id: String) {
-        self.hidden.insert(id);
+    /// Hides an object, which has had `handles` and now has `id`, in the
+    /// preview, now and after each reload.
+    pub(crate) fn hide(&mut self, doc: &str, handles: BTreeSet<String>, id: String) {
+        for handle in handles {
+            self.hidden.insert((doc.to_owned(), handle));
+        }
+        self.hidden_ids.insert((doc.to_owned(), id));
         self.write_hidden();
     }
 
     /// Shows it again with `visible`, what its file says. The file has not
     /// changed, so a reload would change nothing: a `visible` the file binds
     /// to an expression holds this value until the next reload.
-    pub(crate) fn show(&mut self, id: &str, visible: bool) {
-        if !self.hidden.remove(id) {
+    pub(crate) fn show(&mut self, doc: &str, handles: BTreeSet<String>, id: &str, visible: bool) {
+        let mut was = false;
+        for handle in handles {
+            was |= self.hidden.remove(&(doc.to_owned(), handle));
+        }
+        if !was {
             return;
         }
-        if let Some(open) = &mut self.open {
+        self.hidden_ids.remove(&(doc.to_owned(), id.to_owned()));
+        if let Some(open) = self.open.as_mut().filter(|open| open.doc == doc) {
             // An object the text no longer has has nothing to show.
             let _ = open.host.write(id, "visible", visible.into());
             open.clicks += 1;
@@ -195,14 +226,9 @@ impl Previews {
 
     /// What `node_arrange` `hide` holds, on what a reload or a new app put back.
     pub(crate) fn write_hidden(&mut self) {
-        let Some(open) = self.open.as_mut().filter(|_| !self.hidden.is_empty()) else {
-            return;
-        };
-        for id in &self.hidden {
-            // An object the text no longer has has nothing to hide.
-            let _ = open.host.write(id, "visible", false.into());
+        if let Some(open) = &mut self.open {
+            open.write_hidden(&self.hidden_ids);
         }
-        open.clicks += 1;
     }
 
     /// After a file was written: the open preview shows it now, or, in a
@@ -256,16 +282,14 @@ impl Previews {
             // Drawn after the reload's picture was asked for, as a click is.
             open.clicks += 1;
         }
-        if matches!(reload, Ok(Reload::Applied { .. })) {
-            for id in &self.hidden {
-                let _ = open.host.write(id, "visible", false.into());
-            }
-        }
 
         // Stamped once answered: however long the call took, the reload the
         // budget allows a second after this reaches the inspector more than
         // a second after this one did.
         open.reloads.push_back(self.timer.now());
+        if matches!(reload, Ok(Reload::Applied { .. })) {
+            open.write_hidden(&self.hidden_ids);
+        }
         let event = match reload {
             Ok(Reload::Applied { generation }) => PreviewEvent::Reloaded {
                 generation,
@@ -443,6 +467,7 @@ mod tests {
         let count = Arc::new(Mutex::new(0));
         let previews = Previews {
             hidden: BTreeSet::new(),
+            hidden_ids: BTreeSet::new(),
             open: Some(Open {
                 host: Box::new(Counting(count.clone())),
                 doc: "Main.qml".to_owned(),

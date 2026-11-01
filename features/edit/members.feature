@@ -24,6 +24,42 @@ Feature: An agent adds a function, a signal or a handler to an object
       """
     And the studio tools are connected
 
+  Scenario: A property declared with a value is set where it is declared
+    When the agent calls the tool "property_set" with:
+      """json
+      {"doc": "Main.qml", "node": {"id": "root"}, "name": "count", "value": 7}
+      """
+    Then the file "Main.qml" contains "property int count: 7"
+    And the file "Main.qml" does not contain "count: 0"
+    When the agent calls the tool "binding_set" with:
+      """json
+      {"doc": "Main.qml", "node": {"id": "root"}, "name": "count", "value": "width / 2"}
+      """
+    Then the file "Main.qml" contains "property int count: width / 2"
+    When the agent calls the tool "binding_set" with:
+      """json
+      {"doc": "Main.qml", "node": {"id": "root"}, "name": "count", "value": "width /"}
+      """
+    Then the agent is refused with "would_break"
+
+  Scenario: An alias keeps its target when it is set
+    Given the file "Aliased.qml":
+      """qml
+      import QtQuick
+
+      Item {
+          id: root
+          property alias label: inner.text
+
+          Text { id: inner }
+      }
+      """
+    When the agent calls the tool "property_set" with:
+      """json
+      {"doc": "Aliased.qml", "node": {"id": "root"}, "name": "label", "value": "Hello"}
+      """
+    Then the file "Aliased.qml" contains "property alias label: inner.text"
+
   Scenario: A function goes after the object's members
     When the agent calls the tool "node_insert" with:
       """json

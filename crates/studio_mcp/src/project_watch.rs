@@ -53,7 +53,7 @@ impl Drop for ProjectWatch {
 impl ProjectWatch {
     /// `None` when the system gives no watch (out of inotify watches, say):
     /// a window then hears of such files at the next tool call, as it did.
-    pub(crate) fn start(root: PathBuf, told: Box<dyn Fn() + Send>) -> Option<Self> {
+    pub(crate) fn start(root: PathBuf, told: Box<dyn Fn(News) + Send>) -> Option<Self> {
         let (stop, messages) = channel();
         let events = stop.clone();
         let mut watcher = notify::recommended_watcher(move |event| {
@@ -85,6 +85,15 @@ impl ProjectWatch {
             }
         }
     }
+}
+
+/// What an event says, the most it says in a burst last.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) enum News {
+    /// A file that is no document, for who lists them.
+    Other,
+    /// A document may have changed: what the preview shows is behind.
+    Document,
 }
 
 fn hashed(bytes: &[u8]) -> u64 {
@@ -132,40 +141,43 @@ fn follow(
     root: &Path,
     known: &Known,
     messages: &Receiver<Message>,
-    told: &dyn Fn(),
+    told: &dyn Fn(News),
 ) {
     while let Ok(first) = messages.recv() {
         // A checkout comes as a burst: one telling reads all of it.
-        let mut news = false;
+        let mut news = None;
         for message in std::iter::once(first).chain(messages.try_iter()) {
             match message {
                 Message::Stop => return,
                 Message::Event(Ok(event)) if !matches!(event.kind, EventKind::Access(_)) => {
                     for path in &event.paths {
-                        news |= is_news(&mut watcher, path, root, known);
+                        news = news.max(news_of(&mut watcher, path, root, known));
                     }
                 }
                 Message::Event(_) => {}
             }
         }
-        if news {
-            told();
+        if let Some(news) = news {
+            told(news);
         }
     }
 }
 
-fn is_news(watcher: &mut RecommendedWatcher, path: &Path, root: &Path, known: &Known) -> bool {
-    let Some(rel) = relative(path, root) else {
-        return false;
-    };
+fn news_of(
+    watcher: &mut RecommendedWatcher,
+    path: &Path,
+    root: &Path,
+    known: &Known,
+) -> Option<News> {
+    let rel = relative(path, root)?;
     let is_dir = path.symlink_metadata().is_ok_and(|m| m.is_dir());
     if is_dir {
         // A directory made with files already in it says nothing of them.
         if walked(path, root) {
             watch_tree(watcher, path, root);
-            return true;
+            return Some(News::Document);
         }
-        return false;
+        return None;
     }
     let name = rel.rsplit('/').next().unwrap_or_default();
     if !listed(&rel)
@@ -173,11 +185,13 @@ fn is_news(watcher: &mut RecommendedWatcher, path: &Path, root: &Path, known: &K
         || name.ends_with('~')
         || name.ends_with(".studio-tmp")
     {
-        return false;
+        return None;
     }
     if !document_path(&rel) {
-        // An asset or a directory gone: not worth reading to tell.
-        return true;
+        // Not worth reading to tell. A directory gone may have taken
+        // documents with it; what is gone says no more than its name.
+        let gone = !name.contains('.') && path.symlink_metadata().is_err();
+        return Some(if gone { News::Document } else { News::Other });
     }
     let now = said(path);
     let mut known = known.lock().unwrap_or_else(PoisonError::into_inner);
@@ -187,9 +201,9 @@ fn is_news(watcher: &mut RecommendedWatcher, path: &Path, root: &Path, known: &K
         // The disk tells of a write once it has it, and of the ones before
         // it together with it.
         document.own.drain(..=at);
-        return false;
+        return None;
     }
-    was != Some(now)
+    (was != Some(now)).then_some(News::Document)
 }
 
 #[cfg(test)]
@@ -221,7 +235,7 @@ mod tests {
         let counter = told.clone();
         let watch = ProjectWatch::start(
             dir.canonicalize().unwrap(),
-            Box::new(move || {
+            Box::new(move |_| {
                 counter.fetch_add(1, Ordering::SeqCst);
             }),
         )
@@ -273,6 +287,29 @@ mod tests {
         std::fs::write(dir.path().join("Theirs.qml"), "Item {}\n").unwrap();
         waits_for("the later file", || told.load(Ordering::SeqCst) > 0);
         assert_eq!(told.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn a_churning_log_is_no_news_of_a_document() {
+        let dir = tempfile::tempdir().unwrap();
+        let documents = Arc::new(AtomicU64::new(0));
+        let others = Arc::new(AtomicU64::new(0));
+        let (d, o) = (documents.clone(), others.clone());
+        let _watch = ProjectWatch::start(
+            dir.path().canonicalize().unwrap(),
+            Box::new(move |news| {
+                let count = if news == News::Document { &d } else { &o };
+                count.fetch_add(1, Ordering::SeqCst);
+            }),
+        )
+        .expect("a watch");
+        for n in 0..20 {
+            std::fs::write(dir.path().join("app.log"), format!("{n}\n")).unwrap();
+        }
+        waits_for("the log", || others.load(Ordering::SeqCst) > 0);
+        assert_eq!(documents.load(Ordering::SeqCst), 0);
+        std::fs::write(dir.path().join("A.qml"), "Item {}\n").unwrap();
+        waits_for("the document", || documents.load(Ordering::SeqCst) == 1);
     }
 
     #[test]

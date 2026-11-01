@@ -72,15 +72,18 @@ Panel {
     property string renamedPicked: ""
 
     // Whether a row holds a colour, by its name or by what is written.
-    function isColour(name, value) {
-        return /(^|\.)[a-z]*[cC]olor$/.test(name) || /^"#[0-9a-fA-F]{3,8}"$/.test(value)
+    function isColour(row, value) {
+        return row.colour === true || /(^|\.)[a-z]*[cC]olor$/.test(row.name) || /^"#[0-9a-fA-F]{3,8}"$/.test(value)
     }
 
     // What a swatch paints: what is written, when that is a colour by itself.
     // An expression (`Colors.text`) is not read here, so it paints nothing.
     function painted(value) {
         const text = value.replace(/"/g, "")
-        return /^(#[0-9a-fA-F]{3,8}|[a-z]+)$/.test(text) && value.charAt(0) === "\"" ? text : "transparent"
+        return writesColour(text) && value.charAt(0) === "\"" ? text : "transparent"
+    }
+    function writesColour(text) {
+        return /^(#[0-9a-fA-F]{3,8}|[a-z]+)$/.test(text)
     }
 
     function set(name, text) {
@@ -234,6 +237,9 @@ Panel {
         function onRefused(tool, error) {
             if (tool === "review")
                 panel.adding = false
+            // The reason is on the window's error line; the sliders stay still.
+            if (tool === "preview_state")
+                picker.waiting = false
             panel.rowEditing = false
         }
     }
@@ -264,17 +270,21 @@ Panel {
     // it cannot, they stay still rather than start from black.
     Popup {
         id: picker
+        objectName: "colourPicker"
         property string name: ""
         property string written: ""
         property bool waiting: false
         property bool known: false
-        readonly property color chosen: Qt.hsva(hue.value, saturation.value, brightness.value, 1)
+        // What the sliders have no say over stays as it was written.
+        property real alpha: 1
+        readonly property color chosen: Qt.hsva(hue.value, saturation.value, brightness.value, alpha)
 
         function start(colour) {
             const start = Qt.color(colour)
             hue.value = Math.max(0, start.hsvHue)
             saturation.value = start.hsvSaturation
             brightness.value = start.hsvValue
+            alpha = start.a
             hex.text = colour
             waiting = false
             known = true
@@ -363,7 +373,13 @@ Panel {
                 Layout.fillWidth: true
                 placeholderText: "#rrggbb"
                 Accessible.name: "Colour"
-                onAccepted: picker.take(text)
+                onAccepted: {
+                    if (!panel.writesColour(text))
+                        return
+                    picker.take(text)
+                    // The sliders go on from it, not from what it replaced.
+                    picker.start(text)
+                }
             }
         }
     }
@@ -389,7 +405,7 @@ Panel {
                     elide: Text.ElideRight
                 }
                 Button {
-                    visible: panel.isColour(row.modelData.name, value.text)
+                    visible: panel.isColour(row.modelData, value.text)
                     Layout.preferredWidth: 24
                     Layout.preferredHeight: 24
                     padding: 0

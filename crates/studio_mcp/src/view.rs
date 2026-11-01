@@ -64,6 +64,9 @@ pub struct Commented {
 pub struct Shown {
     pub name: String,
     pub value: String,
+    /// A row whose value is a colour by its declaration, a name too.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub colour: bool,
 }
 
 /// The selected object's place in [`View::text`], in UTF-16 units, as a
@@ -326,7 +329,7 @@ impl Studio {
         {
             let previews = preview::lock(&self.previews);
             for layer in &mut view.layers {
-                layer.hidden = previews.is_hidden(&layer.id);
+                layer.hidden = previews.is_hidden(doc, &layer.node);
             }
         }
         view.flow = self.flow(doc).unwrap_or_default();
@@ -408,6 +411,7 @@ impl Studio {
                 .map(|b| Shown {
                     name: b.name.clone(),
                     value: b.value.clone(),
+                    colour: b.colour,
                 })
                 .collect();
             // Declared without a value (`property var stack`): nothing is
@@ -417,6 +421,7 @@ impl Studio {
                     view.inspector.push(Shown {
                         name: name.clone(),
                         value: String::new(),
+                        colour: false,
                     });
                 }
             }

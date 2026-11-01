@@ -57,6 +57,16 @@ pub struct Binding {
     /// `property` declarations say so: they are part of the object's own
     /// interface, not settings of an inherited one.
     pub declared: bool,
+    /// `property alias`: what is written is the target, not a value.
+    #[serde(skip)]
+    pub alias: bool,
+    /// A declaration whose value is an object or a list of them, with its
+    /// own members and handles: a value set over it would lose them.
+    #[serde(skip)]
+    pub holds_objects: bool,
+    /// `property color`: its value is a colour whatever is written, a name too.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub colour: bool,
 }
 
 /// A `signal` an object declares, each argument's name and type as
@@ -292,20 +302,34 @@ pub(crate) fn collect_bindings(
                     QmlBindingValue::Object(inner) if is_group(inner) => {
                         collect_bindings(source, inner, &format!("{name}."), out);
                     }
-                    _ => {}
+                    QmlBindingValue::Object(_) | QmlBindingValue::Objects(_) => {}
                 }
             }
             QmlMember::Object(inner) if is_group(inner) => {
                 collect_bindings(source, inner, &format!("{prefix}{}.", inner.type_name), out);
             }
             QmlMember::Property(p) => {
-                if let Some(QmlBindingValue::Expression(e)) = &p.value {
-                    out.push(binding(
-                        source,
-                        format!("{prefix}{}", p.name.name),
-                        e.span(),
-                        true,
-                    ));
+                let written = match &p.value {
+                    None => None,
+                    Some(QmlBindingValue::Expression(e)) => Some((e.span(), false)),
+                    Some(QmlBindingValue::Statement(s)) => Some((s.span(), false)),
+                    Some(QmlBindingValue::Object(o)) => Some((o.span, true)),
+                    Some(QmlBindingValue::Objects(list)) => {
+                        array_span(source, list).map(|span| (span, true))
+                    }
+                };
+                if let Some((span, holds_objects)) = written {
+                    let mut declared =
+                        binding(source, format!("{prefix}{}", p.name.name), span, true);
+                    declared.holds_objects = holds_objects;
+                    let of_type = |name: &str| {
+                        p.type_name
+                            .as_ref()
+                            .is_some_and(|t| t.name.to_string() == name)
+                    };
+                    declared.alias = of_type("alias");
+                    declared.colour = of_type("color");
+                    out.push(declared);
                 }
             }
             _ => {}
@@ -320,7 +344,19 @@ fn binding(source: &str, name: String, span: qml_syntax::Span, declared: bool) -
         start: span.start as usize,
         end: span.end as usize,
         declared,
+        alias: false,
+        holds_objects: false,
+        colour: false,
     }
+}
+
+/// `[ ... ]` around a list of objects, whose own span ends at its objects.
+fn array_span(source: &str, list: &[QmlObject<'_>]) -> Option<qml_syntax::Span> {
+    let first = list.first()?.span.start;
+    let last = list.last()?.span.end;
+    let open = source[..first as usize].rfind('[')? as u32;
+    let close = last + source[last as usize..].find(']')? as u32 + 1;
+    Some(qml_syntax::Span::new(open, close))
 }
 
 pub(crate) fn literal_string(value: &str) -> Option<String> {
