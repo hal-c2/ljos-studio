@@ -106,12 +106,13 @@ Panel {
 
     // A row that holds an expression stays one when it is edited: a vector
     // or an enumeration has no literal to fall back on. Only the row's own
-    // kind decides, so a typo in a literal row is still refused, not bound.
-    function enter(name, text, written) {
-        if (picked === "" && name !== "id" && written !== "" && !literal(written).ok && !literal(text).ok)
-            bind(name, text)
+    // kind, as the parser read it, decides, so a typo in a literal row is
+    // still refused, not bound.
+    function enter(row, text) {
+        if (picked === "" && row.name !== "id" && row.expression === true && !literal(text).ok)
+            bind(row.name, text)
         else
-            set(name, text)
+            set(row.name, text)
     }
 
     // On the selected object unless a picker says which it was opened on.
@@ -483,7 +484,7 @@ Panel {
                     Accessible.name: row.modelData.name
                     Layout.fillWidth: true
                     Layout.minimumWidth: 96
-                    onAccepted: panel.enter(row.modelData.name, text, row.modelData.value)
+                    onAccepted: panel.enter(row.modelData, text)
                     // The rows are not made anew for a list that reads the
                     // same, and what is typed in one is not the next object's,
                     // nor stays when the file refused it.

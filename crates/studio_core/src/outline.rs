@@ -70,6 +70,11 @@ pub struct Binding {
     /// `property color`: its value is a colour whatever is written, a name too.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub colour: bool,
+    /// Written as a literal, in any of QML's forms (`'a'`, `.5`, `0x10`):
+    /// what is left is an expression, which an edit has no literal to fall
+    /// back on.
+    #[serde(skip)]
+    pub literal: bool,
 }
 
 /// A `signal` an object declares, each argument's name and type as
@@ -311,7 +316,9 @@ pub(crate) fn collect_bindings(
                 let name = format!("{prefix}{}", b.name);
                 match &b.value {
                     QmlBindingValue::Expression(e) => {
-                        out.push(binding(source, name, e.span(), false))
+                        let mut written = binding(source, name, e.span(), false);
+                        written.literal = is_literal(e);
+                        out.push(written);
                     }
                     QmlBindingValue::Statement(s) => {
                         out.push(binding(source, name, s.span(), false))
@@ -346,6 +353,10 @@ pub(crate) fn collect_bindings(
                     };
                     declared.alias = of_type("alias");
                     declared.colour = of_type("color");
+                    declared.literal = matches!(
+                        &p.value,
+                        Some(QmlBindingValue::Expression(e)) if is_literal(e)
+                    );
                     out.push(declared);
                 }
             }
@@ -364,6 +375,25 @@ fn binding(source: &str, name: String, span: qml_syntax::Span, declared: bool) -
         alias: false,
         holds_objects: false,
         colour: false,
+        literal: false,
+    }
+}
+
+fn is_literal(e: &qml_syntax::js::Expression<'_>) -> bool {
+    use qml_syntax::js;
+    match e {
+        js::Expression::BooleanLiteral(_)
+        | js::Expression::NullLiteral(_)
+        | js::Expression::NumericLiteral(_)
+        | js::Expression::StringLiteral(_) => true,
+        js::Expression::TemplateLiteral(t) => t.expressions.is_empty(),
+        js::Expression::UnaryExpression(u) => {
+            matches!(
+                u.operator,
+                js::UnaryOperator::UnaryNegation | js::UnaryOperator::UnaryPlus
+            ) && matches!(u.argument, js::Expression::NumericLiteral(_))
+        }
+        _ => false,
     }
 }
 

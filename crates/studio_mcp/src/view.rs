@@ -67,6 +67,9 @@ pub struct Shown {
     /// A row whose value is a colour by its declaration, a name too.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub colour: bool,
+    /// A row holding an expression; a row with nothing written holds none.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub expression: bool,
 }
 
 /// The selected object's place in [`View::text`], in UTF-16 units, as a
@@ -412,6 +415,7 @@ impl Studio {
                     name: b.name.clone(),
                     value: b.value.clone(),
                     colour: b.colour,
+                    expression: !b.literal,
                 })
                 .collect();
             // Declared without a value (`property var stack`): nothing is
@@ -422,6 +426,7 @@ impl Studio {
                         name: name.clone(),
                         value: String::new(),
                         colour: node.colours.contains(name),
+                        expression: false,
                     });
                 }
             }

@@ -72,6 +72,19 @@ Feature: The inspector shows colours and every declared property
     Then the window shows a refusal that says "is declared with this value"
     And the file "Main.qml" says "property int count: 1"
 
+  Scenario Outline: A row written as a literal in any of QML's forms refuses an expression
+    When the person replaces "width: 100" with "<name>: <written>" in the code view
+    And the person sets "<name>" to "cube" in the inspector
+    Then the window says "cube is not a literal: bind it as an expression"
+    And the file "Main.qml" says "<name>: <written>"
+
+    Examples:
+      | name       | written |
+      | objectName | 'hello' |
+      | opacity    | .5      |
+      | width      | 0x10    |
+      | x          | -1      |
+
   Scenario: The picker writes nothing for what is not a colour
     When the person clicks the button "Pick color"
     And the person enters "#12" in the colour picker
