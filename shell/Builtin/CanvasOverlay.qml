@@ -274,6 +274,8 @@ MouseArea {
                           && at.y >= n.window.y && at.y <= n.window.y + n.window.height)
     }
 
+    property bool gathering: false
+
     function selectAt(x, y, add) {
         const args = {doc: workspace.doc, at: {x: Math.floor(x / zoom), y: Math.floor(y / zoom)}}
         if (add)
@@ -712,6 +714,7 @@ MouseArea {
             return
         }
         const shift = (mouse.modifiers & Qt.ShiftModifier) !== 0
+        gathering = shift
         handle = shift ? -1 : handleAt(mouse.x, mouse.y)
         const arrow = shift || spatial === null ? -1 : arrowAt(mouse.x, mouse.y)
         if (arrow >= 0) {
@@ -806,8 +809,10 @@ MouseArea {
         else if (mode === "resizing")
             wrote = dropResize()
         else if (mode === "pressed")
-            // A click inside the selection may mean what is under it.
-            selectAt(mouse.x, mouse.y, false)
+            // A click inside the selection may mean what is under it, unless
+            // it was Shift's: that one has just added it.
+            if (!gathering)
+                selectAt(mouse.x, mouse.y, false)
         endDrag(wrote)
     }
 

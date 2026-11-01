@@ -205,7 +205,7 @@ Panel {
                                 action: "add_transition",
                                 from: "*",
                                 to: node.modelData,
-                                animations: "NumberAnimation { properties: \"x,y,width,height,opacity\"; duration: " + Motion.durationMedium + " }"
+                                animations: "NumberAnimation { properties: \"x,y,width,height,opacity\"; duration: " + Motion.moveScreen + " }"
                             })
                         }
                         TextButton {
