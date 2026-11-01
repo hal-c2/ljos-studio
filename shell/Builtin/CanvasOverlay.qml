@@ -76,6 +76,9 @@ MouseArea {
             nodes = []
             parentBox = null
             siblings = []
+            // No read is coming to let go of a ghost.
+            if (!dragging)
+                ghost = null
             return
         }
         ++reads
@@ -311,9 +314,30 @@ MouseArea {
         mode = ""
         guideX = -1
         guideY = -1
-        dropping = wrote
-        if (!wrote)
+        if (wrote)
+            dropping = true
+        else
+            endDrop(false)
+    }
+
+    // Every way a drop ends comes here. A write that went in keeps the ghost
+    // for the read that says the new box, so the outline does not jump back;
+    // otherwise there is nothing to wait for. The ghost of a drag still in
+    // hand is that drag's.
+    function endDrop(wentIn) {
+        dropWaits = false
+        dropping = false
+        if (!wentIn && !dragging)
             ghost = null
+    }
+
+    // What was held was for an object no longer selected: letting go must
+    // not write it to whatever is selected now.
+    function letGo() {
+        mode = ""
+        guideX = -1
+        guideY = -1
+        endDrop(false)
     }
 
     // Each press is its own undo step. The boxes move at once, so a key held
@@ -359,8 +383,7 @@ MouseArea {
 
     onPressed: (mouse) => {
         forceActiveFocus()
-        dropWaits = false
-        dropping = false
+        endDrop(true)
         if (playing)
             return
         pressedAt = Qt.point(mouse.x, mouse.y)
@@ -474,6 +497,9 @@ MouseArea {
             if (key !== overlay.seenChosen) {
                 overlay.seenChosen = key
                 overlay.writing = false
+                // Choosing is how a press on another object starts its drag.
+                if (overlay.mode !== "selecting")
+                    overlay.letGo()
                 overlay.refetch()
             }
         }
@@ -492,6 +518,7 @@ MouseArea {
             if (tool === "node_select" && overlay.mode === "selecting") {
                 overlay.refetch()
             } else if (tool === "node_move") {
+                overlay.endDrop(true)
                 overlay.refetch()
             } else if (tool === "node_arrange") {
                 overlay.reread = false
@@ -502,10 +529,9 @@ MouseArea {
                         overlay.siblings = answer.siblings !== undefined ? answer.siblings : []
                         if (overlay.siblings.length > 0 || overlay.reads === 0) {
                             overlay.dropWaits = false
-                            // An agent may have emptied the selection meanwhile.
+                            // An agent may have emptied the selection's boxes meanwhile.
                             if (overlay.selectedOne === null || !overlay.dropReorder()) {
-                                overlay.dropping = false
-                                overlay.ghost = null
+                                overlay.endDrop(false)
                                 overlay.refetch()
                             }
                         }
@@ -525,29 +551,29 @@ MouseArea {
                         if (overlay.startBox !== null)
                             overlay.mode = "pressed"
                     }
-                } else if (overlay.writing) {
-                    settled.restart()
                 } else {
                     // The read asked now is the first that can say the new box.
-                    overlay.dropping = false
-                    overlay.refetch()
+                    overlay.endDrop(true)
+                    if (overlay.writing)
+                        settled.restart()
+                    else
+                        overlay.refetch()
                 }
             }
         }
         function onRefused(tool, error) {
             if (tool === "node_move") {
+                overlay.endDrop(false)
                 overlay.refetch()
             } else if (tool === "node_arrange") {
                 // A refused read leaves nothing to draw; a refused drop goes
                 // back to what the preview says.
                 overlay.writing = false
-                overlay.dropping = false
-                overlay.ghost = null
+                overlay.endDrop(false)
                 // Read again once only: when the read is what is refused
                 // (a preview gone, or one that cannot say), asking on would
                 // keep an idle window busy for ever.
                 overlay.reads = Math.max(0, overlay.reads - 1)
-                overlay.dropWaits = false
                 const refusedTwice = overlay.reread
                 overlay.reread = !refusedTwice
                 if (refusedTwice || (error.details !== undefined && error.details.kind === "no_preview")) {
