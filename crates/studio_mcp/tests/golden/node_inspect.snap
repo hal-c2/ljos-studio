@@ -100,6 +100,9 @@ expression: value
       "states": {
         "type": "array"
       },
+      "takes": {
+        "type": "array"
+      },
       "transitions": {
         "type": "array"
       },
@@ -120,7 +123,8 @@ expression: value
       "children",
       "states",
       "transitions",
-      "interactions"
+      "interactions",
+      "takes"
     ],
     "type": "object"
   },

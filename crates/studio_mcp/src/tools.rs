@@ -320,6 +320,9 @@ struct Inspected {
     /// import, project file, type dump or Ljós type has it).
     #[serde(skip_serializing_if = "Option::is_none")]
     signals: Option<Vec<crate::signals::Signal>>,
+    /// What its type takes that the project says: the properties its files
+    /// and type dumps declare, written here or not.
+    takes: Vec<String>,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -1682,6 +1685,8 @@ fn edits(studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
                     let model = studio.session.model(&doc, &a.node).map_err(error)?;
                     let source = studio.session.text(&doc).map_err(error)?.0.to_owned();
                     let signals = crate::signals::of(studio.session.store(), &doc, &source, &node);
+                    let takes =
+                        crate::signals::properties(studio.session.store(), &doc, &source, &node);
                     let (tree, generation) = studio.session.tree(&doc).map_err(error)?;
                     let parent_path = (!node.path.0.is_empty())
                         .then(|| studio_core::NodePath(node.path.0[..node.path.0.len() - 1].to_vec()));
@@ -1723,6 +1728,7 @@ fn edits(studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
                         interactions,
                         model,
                         signals,
+                        takes,
                     })
                 }
             }),
