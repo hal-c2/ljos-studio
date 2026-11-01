@@ -4,6 +4,8 @@
 //! does, by role and name, and click, type and press keys as a person does;
 //! the oracle is the file text, as for the MCP scenarios.
 
+use std::cell::Cell;
+use std::rc::Rc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, mpsc};
 use std::time::Duration;
@@ -209,6 +211,7 @@ impl PreviewHost for NoPlaces {
 }
 
 struct Window {
+    overflowed: Rc<Cell<Option<String>>>,
     /// Dropped first: the watcher's thread ends before the engine goes.
     watch: Option<Watch>,
     stage: Stage,
@@ -346,6 +349,13 @@ impl UiWorld {
             }));
         let server = Arc::new(StudioServer::new(studio));
         let engine = ljos::engine();
+        let overflowed = Rc::new(Cell::new(None));
+        let seen = Rc::clone(&overflowed);
+        engine.set_warning_handler(move |message| {
+            if message.contains("Maximum call stack") {
+                seen.set(Some(message.to_owned()));
+            }
+        });
         studio_blocks::register(&engine);
         let mut stage = Stage::new(&engine, WIDTH, HEIGHT);
         studio_blocks::serve(&engine, Arc::clone(&server));
@@ -356,6 +366,7 @@ impl UiWorld {
             .map_err(|e| e.to_string())?;
         stage.scene.set_accessibility_active(&engine, true);
         let mut window = Window {
+            overflowed,
             watch,
             stage,
             root,
@@ -557,7 +568,13 @@ impl Window {
         let mut patience = self.patience();
         let mut driver = self.stage.drive().serving(Some(&mut patience));
         driver.settle().map_err(drive_error)?;
-        driver.finish_promised().map_err(drive_error)
+        driver.finish_promised().map_err(drive_error)?;
+        // A binding that runs out of stack keeps its old value and says so
+        // only in a warning: the window looks stale for no visible reason.
+        match self.overflowed.take() {
+            Some(warning) => Err(format!("the window ran out of JS stack: {warning}")),
+            None => Ok(()),
+        }
     }
 
     /// Lets `ms` pass on the test clock, as patient as `rest`.
@@ -1711,7 +1728,11 @@ fn shift_selects_layer(w: &mut UiWorld, label: String) -> StepResult {
         .find(|n| n.name == label)
         .ok_or_else(|| format!("the layers panel lists {:?}", window.layers()))?;
     let key = row.key.ok_or("the row has no key")?;
-    let at = window.stage.drive().aim_at_node(key).map_err(|why| format!("{why:?}"))?;
+    let at = window
+        .stage
+        .drive()
+        .aim_at_node(key)
+        .map_err(|why| format!("{why:?}"))?;
     shift_click(window, at)
 }
 
