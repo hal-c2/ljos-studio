@@ -1388,6 +1388,23 @@ fn presses(w: &mut UiWorld, chord: String) -> StepResult {
     window.rest()
 }
 
+#[when("the person switches to another window")]
+fn leaves_window(w: &mut UiWorld) -> StepResult {
+    window_active(w, false)
+}
+
+#[when("the person comes back to the window")]
+fn comes_back(w: &mut UiWorld) -> StepResult {
+    window_active(w, true)
+}
+
+fn window_active(w: &mut UiWorld, active: bool) -> StepResult {
+    let window = w.window()?;
+    let stage = &mut window.stage;
+    stage.scene.set_window_active(&stage.engine, active);
+    window.rest()
+}
+
 #[when(regex = r#"^the person presses "([^"]+)" without waiting between them$"#)]
 fn presses_quickly(w: &mut UiWorld, chords: String) -> StepResult {
     let window = w.window()?;
@@ -2350,6 +2367,15 @@ fn names_no_object(w: &mut UiWorld) -> StepResult {
     let tree = w.window()?.tree();
     find(&tree, &|n| n.name.starts_with("Name of "))
         .map_or(Ok(()), |n| Err(format!("the field {:?} is open", n.name)))
+}
+
+#[then(regex = r#"^the layers panel is naming "([^"]+)"$"#)]
+fn naming(w: &mut UiWorld, label: String) -> StepResult {
+    let tree = w.window()?.tree();
+    let name = format!("Name of {label}");
+    find(&tree, &|n| n.name == name)
+        .map(|_| ())
+        .ok_or_else(|| format!("the field {name:?} is not open"))
 }
 
 #[then(regex = r#"^the layers panel has "([^"]+)" selected$"#)]
