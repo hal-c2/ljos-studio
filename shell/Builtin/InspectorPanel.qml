@@ -104,6 +104,10 @@ Panel {
             set(row.name, text)
     }
 
+    // A refused value the refusal offers to bind, while that refusal stands.
+    property var offered: null
+    property string offeredSays: ""
+
     // On the selected object unless a picker says which it was opened on.
     function set(name, text, node) {
         if (picked !== "") {
@@ -114,7 +118,11 @@ Panel {
         // `0x20` stays `0x20`. An expression is for "Bind".
         const typed = text.trim()
         if (!workspace.literal(typed)) {
-            refusal.text = text + " is not a literal: bind it as an expression"
+            // The field goes back to what the file says; what was typed is
+            // kept for the button under the refusal, which is what it asks for.
+            offered = {name: name, value: typed}
+            refusal.text = typed + " is not a literal: bind it as an expression"
+            offeredSays = refusal.text
             reseed()
             return
         }
@@ -303,8 +311,8 @@ Panel {
     // Hue, saturation and value, or the hex a person has from elsewhere.
     // Set when the hand lets go or Enter is pressed: a drag is one undo step.
     // A colour an expression works out to is asked of the preview, so the
-    // sliders start from what is on the canvas; until it answers, or when
-    // it cannot, they stay still rather than start from black.
+    // sliders start from what is on the canvas; when it cannot say, they go
+    // on from a mid grey and an empty hex rather than stay off or start black.
     Popup {
         id: picker
         objectName: "colourPicker"
@@ -476,6 +484,12 @@ Panel {
             font.pixelSize: Typography.captionSize
             padding: Spacing.xs
             Layout.fillWidth: true
+        }
+        TextButton {
+            visible: panel.offered !== null && refusal.text === panel.offeredSays
+            Layout.leftMargin: Spacing.xs
+            text: visible ? "Bind " + panel.offered.name + " to " + panel.offered.value : ""
+            onClicked: panel.bind(panel.offered.name, panel.offered.value)
         }
 
         Section {

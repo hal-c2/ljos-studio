@@ -74,6 +74,41 @@ Feature: Studio's window is laid out to work in
     Then the middle of the view shows the same place of the frame "Desktop"
 
   @preview
+  Scenario: Zooming a long way keeps what is at the middle of the view there
+    Given the person has opened "Main.qml" in the documents list
+    When the person zooms in with the button 5 times
+    Then the middle of the view shows the same place of the frame "Desktop"
+
+  @preview
+  Scenario: An edit leaves the view where the person moved it
+    Given the person has opened "Main.qml" in the documents list
+    And the person has selected "Rectangle root" in the layers panel
+    When the person turns the wheel over the canvas
+    And the person sets "width" to "401" in the inspector
+    Then the frame "Desktop" has moved
+
+  @preview
+  Scenario: The middle button moves the view
+    Given the person has opened "Main.qml" in the documents list
+    When the person pans the canvas with the middle button
+    Then the frame "Desktop" has moved
+
+  @preview
+  Scenario: Fit brings back a view moved without zooming
+    Given the person has opened "Main.qml" in the documents list
+    When the person turns the wheel over the canvas
+    And the person clicks the button "Fit"
+    Then the frame "Desktop" is back where it was
+
+  @preview
+  Scenario: The tool in use stays on when it is clicked again
+    Given the person has opened "Main.qml" in the documents list
+    When the person clicks the button "Hand"
+    And the person clicks the button "Hand"
+    Then the button "Hand" is on
+    And the button "Select" is off
+
+  @preview
   Scenario: With the hand a click in the frame selects nothing
     Given the person has opened "Main.qml" in the documents list
     And the person has clicked the button "Hand"
