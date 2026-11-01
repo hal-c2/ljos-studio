@@ -1046,6 +1046,12 @@ fn palette_offers(w: &mut UiWorld, how: String, name: String) -> StepResult {
     Ok(())
 }
 
+#[then(regex = r#"^the palette says "(.*)"$"#)]
+fn palette_says(w: &mut UiWorld, text: String) -> StepResult {
+    let text = text.replace("\\\"", "\"");
+    w.window()?.node("Palette", None, &text).map(|_| ())
+}
+
 #[given(regex = r#"^the person has clicked the button "([^"]+)"$"#)]
 #[when(regex = r#"^the person clicks the button "([^"]+)"$"#)]
 fn clicks_button(w: &mut UiWorld, name: String) -> StepResult {
