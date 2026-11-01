@@ -375,9 +375,10 @@ assemble_page() {
   if [ -n "${2:-}" ]; then
     cp "$studio_root/web/$2"/* "$app/"
   fi
+  # (Icon.qml imports icons.js, so the scripts go with the QML.)
   # The built-in shell, in a window of the page's own: the native window
   # loads a person's shell through `Ljos.Blocks`, which ljos-web lacks.
-  cp "$studio_root"/shell/Builtin/*.qml "$studio_root"/web/shell/Window.qml "$app/qml/"
+  cp "$studio_root"/shell/Builtin/*.{qml,js} "$studio_root"/web/shell/Window.qml "$app/qml/"
   cp -r "$studio_root/web/standins" "$studio_root/web/pkg" "$app/"
   cp "$studio_root"/web/{store,studio,Workspace,page,preview,compiler}.js "$app/"
   cp "$studio_root/samples/hello/Main.qml" "$app/sample.txt"
