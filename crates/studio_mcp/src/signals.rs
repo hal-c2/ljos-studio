@@ -147,47 +147,16 @@ pub struct TypeSays {
     /// declare that may be written from outside, the nearest first. Known even
     /// when what the type inherits is not.
     pub takes: Vec<String>,
-    /// Those of them no string can be written to.
-    pub not_text: Vec<String>,
+    /// What it can be given, nearest first, whether written or not: a person
+    /// should not need the documentation open to find a property's name, nor
+    /// the spelling of its values.
+    pub offers: Vec<Offer>,
 }
 
-/// What `node`'s type can be given, nearest first, whether written or not:
-/// a person should not need the documentation open to find a property's name,
-/// nor the spelling of its values.
-pub fn offers(store: &dyn Store, doc: &str, source: &str, node: &Node) -> Vec<Offer> {
-    let Some((found, _)) = look_up(store, doc, source, node) else {
-        return Vec::new();
-    };
-    let mut seen: Vec<Offer> = Vec::new();
-    for name in found.taken {
-        if !seen.iter().any(|o| o.name == name) {
-            seen.push(Offer {
-                name,
-                ty: String::new(),
-                values: Vec::new(),
-            });
-        }
-    }
-    for offer in found.offers {
-        if !seen.iter().any(|o| o.name == offer.name) {
-            seen.push(offer);
-        }
-    }
-    seen
-}
-
-/// What `node`'s type takes that its project says: the properties its files
-/// and type dumps declare, the nearest first. Known even when what the type
-/// inherits is not.
-pub fn not_text(store: &dyn Store, doc: &str, source: &str, node: &Node) -> Vec<String> {
-    look_up(store, doc, source, node)
-        .map(|(found, _)| found.not_text)
-        .unwrap_or_default()
-}
-
-pub fn properties(store: &dyn Store, doc: &str, source: &str, node: &Node) -> Vec<String> {
-    let Some((found, _)) = look_up(store, doc, source, node) else {
-        return Vec::new();
+/// All that of `node` of the document `doc`, whose text is `source`.
+pub fn described(store: &dyn Store, doc: &str, source: &str, node: &Node) -> TypeSays {
+    let Some((found, whole)) = look_up(store, doc, source, node) else {
+        return TypeSays::default();
     };
     let mut takes: Vec<String> = Vec::new();
     for name in &found.taken {
@@ -195,10 +164,23 @@ pub fn properties(store: &dyn Store, doc: &str, source: &str, node: &Node) -> Ve
             takes.push(name.clone());
         }
     }
+    let mut offers: Vec<Offer> = takes
+        .iter()
+        .map(|name| Offer {
+            name: name.clone(),
+            ty: String::new(),
+            values: Vec::new(),
+        })
+        .collect();
+    for offer in &found.offers {
+        if !offers.iter().any(|o| o.name == offer.name) {
+            offers.push(offer.clone());
+        }
+    }
     TypeSays {
-        not_text: std::mem::take(&mut found.not_text),
         signals: (whole == Described::Whole).then(|| found.done()),
         takes,
+        offers,
     }
 }
 

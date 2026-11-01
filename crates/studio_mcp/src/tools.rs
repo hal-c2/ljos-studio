@@ -1735,11 +1735,11 @@ fn edits(studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
                     let interactions = studio.session.interactions(&doc, &a.node).map_err(error)?;
                     let model = studio.session.model(&doc, &a.node).map_err(error)?;
                     let source = studio.session.text(&doc).map_err(error)?.0.to_owned();
-                    let signals = crate::signals::of(studio.session.store(), &doc, &source, &node);
-                    let takes =
-                        crate::signals::properties(studio.session.store(), &doc, &source, &node);
-                    let offers =
-                        crate::signals::offers(studio.session.store(), &doc, &source, &node);
+                    let crate::signals::TypeSays {
+                        signals,
+                        takes,
+                        offers,
+                    } = crate::signals::described(studio.session.store(), &doc, &source, &node);
                     let (tree, generation) = studio.session.tree(&doc).map_err(error)?;
                     let parent_path = (!node.path.0.is_empty())
                         .then(|| studio_core::NodePath(node.path.0[..node.path.0.len() - 1].to_vec()));
