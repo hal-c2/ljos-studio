@@ -27,6 +27,23 @@ Feature: The colour picker belongs to the object it was opened on
               width: 100
               height: 100
           }
+
+          Rectangle {
+              color: "#ffff00"
+              width: 50
+              height: 50
+          }
+      }
+      """
+    And the file "Other.qml":
+      """qml
+      import QtQuick
+
+      Rectangle {
+          id: elsewhere
+          color: "#00ffff"
+          width: 100
+          height: 100
       }
       """
     And Studio's window shows the project
@@ -46,6 +63,46 @@ Feature: The colour picker belongs to the object it was opened on
     And the person drags the picker's "Brightness" to its middle while an agent selects "b"
     Then the file "Main.qml" says "#800000"
     And the file "Main.qml" says "#00ff00"
+
+  Scenario: A slider let go after the selection moved records on the object it was opened on
+    Given the person has added the state "s" in the inspector
+    And the person has picked the state "s" in the inspector
+    When the person clicks the button "Pick color"
+    And the person drags the picker's "Brightness" to its middle while an agent calls "node_select" with '{"doc": "Main.qml", "nodes": [{"id": "b"}]}'
+    Then the file "Main.qml" says "target: a"
+    And the file "Main.qml" does not say "target: b"
+
+  Scenario: A slider let go after its object was named again records under the new name
+    Given the person has added the state "s" in the inspector
+    And the person has picked the state "s" in the inspector
+    When the person clicks the button "Pick color"
+    And the person drags the picker's "Brightness" to its middle while an agent calls "node_arrange" with '{"doc": "Main.qml", "action": "rename", "nodes": [{"id": "a"}], "name": "c"}'
+    Then the file "Main.qml" says "target: c"
+
+  Scenario: A slider let go after its object was removed writes nothing
+    Given the person has selected "Rectangle b" in the layers panel
+    And the person has added the state "s" in the inspector
+    And the person has picked the state "s" in the inspector
+    When the person clicks the button "Pick color"
+    And the person drags the picker's "Brightness" to its middle while an agent calls "node_remove" with '{"doc": "Main.qml", "node": {"id": "b"}}'
+    Then the file "Main.qml" does not say "#008000"
+    And the window says "The object this picker was opened on has gone"
+
+  Scenario: A slider let go after a selection in another document writes to the object it was opened on
+    Given the person has selected "Rectangle b" in the layers panel
+    When the person clicks the button "Pick color"
+    And the person drags the picker's "Brightness" to its middle while an agent calls "node_select" with '{"doc": "Other.qml", "nodes": [{"id": "elsewhere"}]}'
+    Then the file "Main.qml" says "#008000"
+    And the file "Other.qml" says "#00ffff"
+
+  Scenario: An object with no id cannot record into a state
+    Given the person has added the state "s" in the inspector
+    And the person has picked the state "s" in the inspector
+    And the person has selected "Rectangle" in the layers panel
+    When the person clicks the button "Pick color"
+    And the person drags the picker's "Brightness" to its middle
+    Then the window says "A state names the object it changes: give this one an id"
+    And the file "Main.qml" does not say "#808000"
 
   @preview
   Scenario: A late answer about another object does not seed the picker
