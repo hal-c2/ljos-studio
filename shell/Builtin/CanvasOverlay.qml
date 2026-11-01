@@ -75,12 +75,14 @@ MouseArea {
             siblings = []
             return
         }
+        ++reads
         workspace.dispatch("node_arrange", {
             action: "geometry",
             doc: workspace.doc,
             nodes: chosen.map(h => ({node: h})),
             // Only a press can start the drag that snaps to them, and each
-            // sibling is a read of the running app: selecting does not wait.
+            // sibling is a read of the running app: a selection made anywhere
+            // but on the canvas does not wait for them.
             without_siblings: mode === ""
         })
     }
@@ -239,6 +241,12 @@ MouseArea {
 
     // A layout places the object: the drop picks its place among the others.
     function dropReorder() {
+        // The hand let go before the press's read answered: the drop is decided
+        // when it does.
+        if (siblings.length === 0 && reads > 0) {
+            dropWaits = true
+            return true
+        }
         const layers = workspace.layers
         const layerOf = (node) => layers.find(l => l.node === node)
         const self = layerOf(selectedOne.node)
@@ -347,6 +355,7 @@ MouseArea {
 
     onPressed: (mouse) => {
         forceActiveFocus()
+        dropWaits = false
         if (playing)
             return
         pressedAt = Qt.point(mouse.x, mouse.y)
@@ -453,9 +462,8 @@ MouseArea {
 
     Connections {
         target: overlay.workspace
-        // Every publish sets the list anew, and reading geometry publishes:
-        // only a selection that differs may read again, or the two would feed
-        // each other and an idle window would never rest.
+        // A list set again need not be another selection: only one that differs
+        // reads again, or an idle window could feed itself and never rest.
         function onChosenChanged() {
             const key = JSON.stringify(overlay.workspace.chosen)
             if (key !== overlay.seenChosen) {
@@ -483,6 +491,20 @@ MouseArea {
             } else if (tool === "node_arrange") {
                 overlay.reread = false
                 if (answer.edit === undefined && answer.generation === undefined) {
+                    if (answer.copied === undefined)
+                        overlay.reads = Math.max(0, overlay.reads - 1)
+                    if (overlay.dropWaits && answer.copied === undefined) {
+                        overlay.siblings = answer.siblings !== undefined ? answer.siblings : []
+                        if (overlay.siblings.length > 0 || overlay.reads === 0) {
+                            overlay.dropWaits = false
+                            // An agent may have emptied the selection meanwhile.
+                            if (overlay.selectedOne === null || !overlay.dropReorder()) {
+                                overlay.ghost = null
+                                overlay.refetch()
+                            }
+                        }
+                        return
+                    }
                     if (answer.copied !== undefined || overlay.writing)
                         return
                     overlay.nodes = answer.boxes !== undefined ? answer.boxes : []
@@ -515,6 +537,8 @@ MouseArea {
                 // Read again once only: when the read is what is refused
                 // (a preview gone, or one that cannot say), asking on would
                 // keep an idle window busy for ever.
+                overlay.reads = Math.max(0, overlay.reads - 1)
+                overlay.dropWaits = false
                 const refusedTwice = overlay.reread
                 overlay.reread = !refusedTwice
                 if (refusedTwice || (error.details !== undefined && error.details.kind === "no_preview")) {
@@ -541,6 +565,9 @@ MouseArea {
             overlay.refetch()
         }
     }
+    // Geometry reads asked and not answered; they answer in order.
+    property int reads: 0
+    property bool dropWaits: false
     property int seenGeneration: -1
     property string seenChosen: "[]"
 

@@ -265,7 +265,32 @@ impl Workspace {
     /// `refused` tells how each went.
     #[qml(invokable)]
     fn dispatch(cx: &Cx, tool: String, args: Json) -> Result<(), EngineError> {
-        enqueue(cx.engine, cx.this, Job::Call { tool, args });
+        enqueue(
+            cx.engine,
+            cx.this,
+            Job::Call {
+                tool,
+                args,
+                follows: false,
+            },
+        );
+        Ok(())
+    }
+
+    /// `dispatch` for a call that follows from what the person just did and
+    /// is no gesture of its own: it leaves the refusal on the window's line,
+    /// and says its own refusal only when that line is empty.
+    #[qml(invokable)]
+    fn follow(cx: &Cx, tool: String, args: Json) -> Result<(), EngineError> {
+        enqueue(
+            cx.engine,
+            cx.this,
+            Job::Call {
+                tool,
+                args,
+                follows: true,
+            },
+        );
         Ok(())
     }
 
@@ -352,13 +377,12 @@ enum Job {
     Call {
         tool: String,
         args: Json,
+        follows: bool,
     },
     /// Read the session again.
     Refresh,
     /// Fetch the preview's picture.
-    Picture {
-        generation: u64,
-    },
+    Picture { generation: u64 },
 }
 
 /// What a job did, read off the UI thread.
@@ -366,6 +390,7 @@ enum Done {
     Call {
         tool: String,
         args: Json,
+        follows: bool,
         answer: Result<Json, Json>,
         /// With the session's write count it was read at; none for a call
         /// that changes nothing shown.
@@ -446,6 +471,7 @@ fn pump(engine: &Engine, ws: ObjectId) {
         Job::Call { tool, .. } => Some(tool.clone()),
         _ => None,
     };
+    let refreshing = matches!(job, Job::Refresh);
     let spawned = task::spawn_in(
         engine,
         Lane::Visible,
@@ -457,6 +483,8 @@ fn pump(engine: &Engine, ws: ObjectId) {
             if let Some(queue) = queue_of(engine, ws) {
                 queue.borrow_mut().busy = false;
             }
+            // A read that panics never catches up, and would ask again for ever.
+            let again = done.is_ok() || !refreshing;
             match done {
                 Ok(done) => finish(engine, ws, done),
                 Err(panic) => {
@@ -469,7 +497,9 @@ fn pump(engine: &Engine, ws: ObjectId) {
                     }
                 }
             }
-            refresh_if_behind(engine, ws);
+            if again {
+                refresh_if_behind(engine, ws);
+            }
             pump(engine, ws);
         },
     );
@@ -492,7 +522,11 @@ fn run(server: &StudioServer, writes: &AtomicU64, doc: &str, job: Job) -> Done {
         (studio.view(doc), seen)
     };
     match job {
-        Job::Call { tool, args } => {
+        Job::Call {
+            tool,
+            args,
+            follows,
+        } => {
             let answer = server
                 .call(&tool, &person(), args.clone())
                 .map(|reply| reply.structured)
@@ -502,6 +536,7 @@ fn run(server: &StudioServer, writes: &AtomicU64, doc: &str, job: Job) -> Done {
             Done::Call {
                 tool,
                 args,
+                follows,
                 answer,
                 view,
             }
@@ -588,6 +623,7 @@ fn finish(engine: &Engine, ws: ObjectId, done: Done) {
         Done::Call {
             tool,
             args,
+            follows,
             answer,
             view,
         } => {
@@ -599,8 +635,11 @@ fn finish(engine: &Engine, ws: ObjectId, done: Done) {
             }
             // What the canvas reads for itself is no gesture of the person's:
             // it neither clears the refusal of the drop before it nor raises one.
-            // The export panel shows its own answers and refusals.
-            let gesture = !(is_geometry(&tool, &args) || tool == "export");
+            // The export panel shows its own answers and refusals. A call made
+            // with `follow` must not clear or replace the refusal of the gesture
+            // it follows; with none on the line its own is the only word the
+            // person gets.
+            let gesture = !(is_geometry(&tool, &args) || tool == "export" || follows);
             match answer {
                 Ok(answer) => {
                     if gesture {
@@ -609,7 +648,13 @@ fn finish(engine: &Engine, ws: ObjectId, done: Done) {
                     let _ = Workspace::emit_answered(&cx, tool, answer);
                 }
                 Err(error) => {
-                    if gesture {
+                    let free = || {
+                        engine
+                            .get(ws, Workspace::ERROR)
+                            .unwrap_or_default()
+                            .is_empty()
+                    };
+                    if gesture || (follows && free()) {
                         let message = error["message"].as_str().unwrap_or_default().to_owned();
                         let _ = cx.set(Workspace::ERROR, message);
                     }
@@ -695,7 +740,9 @@ fn rebase(engine: &Engine, ws: ObjectId, tool: &str, args: &Json, answer: &Json)
         return;
     };
     for job in &mut queue.borrow_mut().jobs {
-        if let Job::Call { tool, args: next } = job
+        if let Job::Call {
+            tool, args: next, ..
+        } = job
             && tool == "document_edit"
             && next["doc"] == args["doc"]
             && next["generation"].as_u64() == Some(from)
@@ -944,12 +991,15 @@ fn refresh_all(engine: &Engine) {
     for ws in live {
         // A job running or waiting may be what wrote, and reads after it: it
         // says when it is done whether that was enough.
-        let idle = queue_of(engine, ws).is_some_and(|q| {
+        let (busy, empty) = queue_of(engine, ws).map_or((true, false), |q| {
             let q = q.borrow();
-            !q.busy && q.jobs.is_empty()
+            (q.busy, q.jobs.is_empty())
         });
-        if idle {
+        if !busy && empty {
             refresh_if_behind_of(engine, ws, writes);
+        } else if !busy {
+            // Jobs that could not start: this is the next write to ask again.
+            pump(engine, ws);
         }
     }
 }
@@ -974,7 +1024,6 @@ fn lock(
         .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
-/// A view's part as the JSON a script reads.
 /// Sets a list a panel shows, if it is not what the panel has: a panel over a
 /// list made anew makes its rows anew, and most publishes change one list.
 fn give(cx: &Cx, prop: Prop<Json>, name: &'static str, value: Json, queue: &Rc<RefCell<Queue>>) {
@@ -986,6 +1035,7 @@ fn give(cx: &Cx, prop: Prop<Json>, name: &'static str, value: Json, queue: &Rc<R
     }
 }
 
+/// A view's part as the JSON a script reads.
 fn to_json(v: &impl serde::Serialize) -> Json {
     serde_json::to_value(v).unwrap_or_default()
 }

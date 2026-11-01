@@ -75,6 +75,12 @@ Feature: Objects are moved and resized on the canvas
     Then the file "Main.qml" says "id: two;"
     And the history lists "move"
 
+  Scenario: A drop in a layout before the siblings are read still changes the order
+    Given the person has clicked the frame "Desktop" at 50, 220
+    When the person drags in the frame "Desktop" from 50, 220 to 280, 220 at once
+    Then the file "Main.qml" says "id: two;"
+    And the history lists "move"
+
   Scenario: Arrow keys nudge, shift by ten
     Given the person has clicked the frame "Desktop" at 40, 40
     When the person presses "Right"
