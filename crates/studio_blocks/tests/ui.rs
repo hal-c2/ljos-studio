@@ -2280,6 +2280,28 @@ fn canvas_text_holds(w: &mut UiWorld, want: String) -> StepResult {
 
 // A write that fails is what a person meets on a full disk or a read-only
 // checkout, and no gesture can bring it about.
+#[when(regex = r#"^the person holds "([^"]+)"$"#)]
+fn holds_key(w: &mut UiWorld, key: String) -> StepResult {
+    let window = w.window()?;
+    window
+        .stage
+        .drive()
+        .key_down(&Chord::parse(&key)?)
+        .map_err(drive_error)?;
+    window.rest()
+}
+
+#[when(regex = r#"^the person lets go of "([^"]+)"$"#)]
+fn lets_go_of_key(w: &mut UiWorld, key: String) -> StepResult {
+    let window = w.window()?;
+    window
+        .stage
+        .drive()
+        .key_up(&Chord::parse(&key)?)
+        .map_err(drive_error)?;
+    window.rest()
+}
+
 #[given("the project's folder takes no writes")]
 fn folder_takes_no_writes(w: &mut UiWorld) -> StepResult {
     set_folder_read_only(w, true)

@@ -121,7 +121,7 @@ Panel {
         if (picked === "" && row.name !== "id" && row.expression === true && !workspace.literal(text.trim()))
             bind(row.name, text)
         else {
-            heldText = row.value === "" || String(row.value).startsWith('"')
+            heldText = (row.value === "" && row.notText !== true) || String(row.value).startsWith('"')
             set(row.name, text)
             heldText = false
         }

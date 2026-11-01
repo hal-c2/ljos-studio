@@ -37,6 +37,9 @@ pub struct Node {
     /// Those of them only the type can write: QML refuses a value from outside.
     #[serde(skip)]
     pub read_only: Vec<String>,
+    /// Those of them whose declared type no string can be written to.
+    #[serde(skip)]
+    pub not_text: Vec<String>,
     /// Those of them of type `color`, which says so with no value too.
     #[serde(skip)]
     pub colours: Vec<String>,
@@ -203,12 +206,17 @@ fn walk(
             .members
             .iter()
             .filter_map(|m| match m {
-                QmlMember::Property(p)
-                    if source[p.span.start as usize..p.name.span.start as usize]
-                        .split_whitespace()
-                        .any(|word| word == "readonly") =>
-                {
-                    Some(p.name.name.to_string())
+                QmlMember::Property(p) if p.is_readonly => Some(p.name.name.to_string()),
+                _ => None,
+            })
+            .collect(),
+        not_text: object
+            .members
+            .iter()
+            .filter_map(|m| match m {
+                QmlMember::Property(p) => {
+                    let ty = qml_syntax::text(source, p.type_name.as_ref()?.span);
+                    (!holds_text(ty)).then(|| p.name.name.to_string())
                 }
                 _ => None,
             })
@@ -304,6 +312,23 @@ fn declared_signals(source: &str, object: &QmlObject<'_>) -> Vec<DeclaredSignal>
             _ => None,
         })
         .collect()
+}
+
+/// Whether a string can be written to a property declared with this type, by
+/// QML's name or a type dump's. What only a run knows, such as an alias, may.
+pub fn holds_text(ty: &str) -> bool {
+    matches!(
+        ty,
+        "string"
+            | "url"
+            | "var"
+            | "variant"
+            | "alias"
+            | "QString"
+            | "QUrl"
+            | "QVariant"
+            | "QJSValue"
+    )
 }
 
 /// Whether an object has an `id` or a literal `objectName`, so that its key

@@ -561,6 +561,9 @@ Panel {
         if (tool === undefined)
             return false
         hand = event.key === Qt.Key_H
+        // The tool is the person's choice now, and Space's release, which goes
+        // where the keys are, has nothing to give back.
+        handHeld = false
         drawing = tool
         playing = false
         // The overlay is disabled under the hand, and the next letter has to
