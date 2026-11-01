@@ -416,7 +416,7 @@ hit that limit.
 | `samples/site`, new directory | 40, none failed (was 2, D23) | 18 246 | 19 195 (screenshot images not counted) |
 | `tools/list`, once per session | 1, 25 tools | | 37 585 (was 62 218; cap 40 KB) |
 
-#### D23. Objects of a 3D scene were told they are not shown
+#### D26. Objects of a 3D scene were told they are not shown
 
 - **Where:** window, found placing a `View3D` on the native preview.
 - **Happened:** selecting a `Model` said "The preview does not show this
@@ -429,6 +429,15 @@ hit that limit.
 - **Open:** a click on the picture selects the `View3D`, not the model under
   the pointer, and there are no 3D handles or orbit: a 3D object is chosen in
   Layers and edited in the inspector.
+
+**Phase 5, at the final commit** (7d77044, machine load 10 to 17 from other
+builds). Selection to inspector, driver's clock advanced between clicks: p50 /
+p95 / max 10.1 / 11.3 / 15.9 ms, and 14.8 / 16.7 / 18.0 at load 17. Edit to picture, one per 250 ms: stock
+22.4 ms p50 on the data drive, whose p95 of 904.1 is a stalled rename; with the
+project on tmpfs 23.0 / 27.3 / 32.1. `samples/notes` on tmpfs 26.8 / 43.0 / 46.5;
+on the drive 35.8 / 1121.2 / 3262.2. `samples/site` on the drive 34.2 / 41.9 /
+47.1; on tmpfs 41.0 / 57.7 / 130.8. Idle 0 ms CPU, 0 wakes, 0 frames. `tools/list` is 40 324 bytes
+against the scenario's 40 960: little room left.
 
 ## Not done
 
