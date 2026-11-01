@@ -120,9 +120,14 @@ Panel {
         }
         if (picked === "" && row.name !== "id" && row.expression === true && !workspace.literal(text.trim()))
             bind(row.name, text)
-        else
+        else {
+            heldText = String(row.value).startsWith('"')
             set(row.name, text)
+            heldText = false
+        }
     }
+    // The row being entered held a string, so a word typed in it may be meant as one.
+    property bool heldText: false
 
     // A refused value the refusal offers to bind, while that refusal stands.
     property var offered: null
@@ -136,11 +141,13 @@ Panel {
         }
         // The parser's word on what QML reads as a literal, and written as typed:
         // `0x20` stays `0x20`. An expression is for "Bind".
-        const typed = text.trim()
+        // Only a colour starts with `#`: no expression does, so it needs no asking.
+        const trimmed = text.trim()
+        const typed = /^#[0-9a-fA-F]+$/.test(trimmed) ? '"' + trimmed + '"' : trimmed
         if (!workspace.literal(typed)) {
             // The field goes back to what the file says; what was typed is
             // kept for the button under the refusal, which is what it asks for.
-            offered = {name: name, value: typed}
+            offered = {name: name, value: typed, asText: heldText}
             refusal.text = typed + " is not a literal: bind it as an expression"
             offeredSays = refusal.text
             reseed()
@@ -520,6 +527,12 @@ Panel {
             Layout.leftMargin: Spacing.xs
             text: visible ? "Bind " + panel.offered.name + " to " + panel.offered.value : ""
             onClicked: panel.bind(panel.offered.name, panel.offered.value)
+        }
+        TextButton {
+            visible: panel.offered !== null && panel.offered.asText && refusal.text === panel.offeredSays
+            Layout.leftMargin: Spacing.xs
+            text: visible ? "Write " + panel.offered.value + " as text" : ""
+            onClicked: panel.set(panel.offered.name, JSON.stringify(panel.offered.value))
         }
 
         Section {

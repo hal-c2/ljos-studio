@@ -60,6 +60,11 @@ Feature: Drawing on the canvas and writing text where it is
     When the person presses in the frame "Desktop" at 30, 100 and holds it at 197, 160
     Then the canvas shows a x guide at 200
 
+  Scenario: A drawing started just off an edge starts on it
+    Given the person has clicked the button "Draw rectangle"
+    When the person drags in the frame "Desktop" from 3, 2 to 130, 160
+    Then the file "Main.qml" says "x: 0\n        y: 0\n"
+
   Scenario: A click with the tool places an object of a usable size
     Given the person has clicked the button "Draw rectangle"
     When the person clicks the frame "Desktop" at 30, 100
