@@ -993,6 +993,21 @@ fn sets(w: &mut UiWorld, name: String, value: String) -> StepResult {
     }
 }
 
+#[then(regex = r#"^the inspector offers the field "([^"]+)"$"#)]
+fn offers_field(w: &mut UiWorld, name: String) -> StepResult {
+    w.window()?
+        .node("Inspector", Some("textinput"), &name)
+        .map(|_| ())
+}
+
+#[then(regex = r#"^the inspector does not offer the field "([^"]+)"$"#)]
+fn no_field(w: &mut UiWorld, name: String) -> StepResult {
+    match w.window()?.node("Inspector", Some("textinput"), &name) {
+        Ok(_) => Err(format!("the inspector offers {name:?}")),
+        Err(_) => Ok(()),
+    }
+}
+
 #[when(regex = r#"^the person binds "([^"]+)" to "(.*)" in the inspector$"#)]
 fn binds(w: &mut UiWorld, name: String, expression: String) -> StepResult {
     let expression = unescape(&expression);
