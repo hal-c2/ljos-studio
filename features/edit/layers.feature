@@ -43,6 +43,22 @@ Feature: An object is renamed, hidden and locked through `node_arrange`
       }
       """
 
+  # A string written as an id leaves an object nothing can name, and what
+  # reads the old id reading nothing.
+  Scenario Outline: An id is not set as a value: <tool>
+    When the agent calls the tool "<tool>" with:
+      """json
+      {"doc": "Main.qml", "node": {"id": "footer"}, "name": "id", "value": "credit"}
+      """
+    Then the agent is refused with "invalid_argument"
+    And the refusal's message matches "rename"
+    And the file "Main.qml" contains "id: footer"
+
+    Examples:
+      | tool         |
+      | property_set |
+      | binding_set  |
+
   Scenario: An object with no id gets the one it is named
     When the agent calls the tool "node_arrange" with:
       """json
