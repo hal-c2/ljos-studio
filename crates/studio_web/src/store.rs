@@ -16,6 +16,7 @@
 //! storage refuses is known only then, so the call that made it is
 //! refused after its edit is in the session (its answer says which file).
 
+use base64::{Engine as _, engine::general_purpose::STANDARD};
 use std::{
     collections::BTreeMap,
     sync::{Arc, Mutex, MutexGuard},
@@ -115,6 +116,10 @@ impl WebStore {
     }
 }
 
+/// How a file that is not text is held: browser storage and what is handed to
+/// a preview are text, so a picture goes as a data URL's text.
+const BYTES: &str = "data:application/octet-stream;base64,";
+
 impl Store for WebStore {
     fn list(&self, extension: &str) -> Vec<String> {
         // `BTreeMap` keeps them sorted, as a directory walk sorts them.
@@ -155,6 +160,24 @@ impl Store for WebStore {
 
     fn exists(&self, path: &str) -> bool {
         inside(path) && self.held().files.contains_key(path)
+    }
+
+    fn read_bytes(&self, path: &str) -> Result<Vec<u8>, StoreError> {
+        let text = self.read(path)?;
+        match text.strip_prefix(BYTES) {
+            Some(data) => STANDARD.decode(data).map_err(|e| StoreError::Io {
+                path: path.to_owned(),
+                message: e.to_string(),
+            }),
+            None => Ok(text.into_bytes()),
+        }
+    }
+
+    fn write_bytes(&self, path: &str, bytes: &[u8]) -> Result<(), StoreError> {
+        match std::str::from_utf8(bytes) {
+            Ok(text) => self.write(path, text),
+            Err(_) => self.write(path, &format!("{BYTES}{}", STANDARD.encode(bytes))),
+        }
     }
 
     fn describe(&self) -> String {

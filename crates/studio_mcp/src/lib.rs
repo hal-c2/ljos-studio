@@ -6,6 +6,7 @@
 //! across everyone's later edits. Tool order is wire order and never
 //! changes between versions without a golden-file diff (DESIGN.md, MCP.md).
 
+mod assets;
 mod blocks;
 #[cfg(feature = "http")]
 pub mod endpoint;

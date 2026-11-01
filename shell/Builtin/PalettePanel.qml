@@ -84,6 +84,11 @@ Panel {
             return "Controls"
         return "More"
     }
+    // A picture's url as the open document writes it: urls resolve from the
+    // file that says them.
+    function fromDocument(url) {
+        return "../".repeat(panel.workspace.doc.split("/").length - 1) + url
+    }
     // What a tile draws of it: its kind, in the look of the thing.
     function typeIcon(type) {
         const known = {
@@ -272,6 +277,107 @@ Panel {
                 text: "Nothing called \"" + search.text + "\""
                 Accessible.role: Accessible.StaticText
                 Accessible.name: text
+            }
+
+            Section {
+                id: assetsSection
+                title: "Assets"
+                width: parent.width
+
+                Flow {
+                    Layout.fillWidth: true
+                    spacing: Spacing.xxs
+
+                    Repeater {
+                        model: panel.workspace.assets
+                        delegate: AbstractButton {
+                            id: picture
+                            required property var modelData
+                            visible: modelData.name.toLowerCase().includes(panel.needle)
+                            text: modelData.name
+                            Accessible.name: "Place " + modelData.name
+                            Accessible.role: Accessible.Button
+                            enabled: panel.target !== ""
+                            width: (assetsSection.width - 2 * Spacing.xxs) / 3
+                            height: 68
+                            ToolTip.visible: hovered
+                            ToolTip.text: "Place " + modelData.name
+                            ToolTip.delay: 500
+                            background: Rectangle {
+                                radius: 6
+                                color: picture.down ? Colors.surfacePressed
+                                    : picture.hovered ? Colors.surfaceHover : Colors.surfaceRaised
+                                border.width: picture.visualFocus ? 2 : 1
+                                border.color: picture.visualFocus ? Colors.focusRing : Colors.surfacePressed
+                            }
+                            contentItem: Column {
+                                spacing: Spacing.xxs
+                                topPadding: Spacing.xxs
+                                Item {
+                                    width: parent.width
+                                    height: 40
+                                    Image {
+                                        id: thumbnail
+                                        anchors.fill: parent
+                                        anchors.margins: 2
+                                        source: picture.modelData.file
+                                        sourceSize.width: 96
+                                        sourceSize.height: 96
+                                        fillMode: Image.PreserveAspectFit
+                                        asynchronous: true
+                                    }
+                                    Icon {
+                                        anchors.centerIn: parent
+                                        visible: thumbnail.status !== Image.Ready
+                                        name: "image"
+                                        size: 24
+                                        color: Colors.textMuted
+                                    }
+                                }
+                                Text {
+                                    width: parent.width
+                                    leftPadding: 2
+                                    rightPadding: 2
+                                    text: picture.modelData.name
+                                    color: picture.enabled ? Colors.text : Colors.textDisabled
+                                    font.pixelSize: Typography.captionSize
+                                    horizontalAlignment: Text.AlignHCenter
+                                    elide: Text.ElideRight
+                                }
+                            }
+                            onClicked: panel.workspace.dispatch("node_insert", {
+                                doc: panel.workspace.doc,
+                                parent: {node: panel.target},
+                                import: "QtQuick",
+                                text: "Image {\n    source: \"" + panel.fromDocument(modelData.url) + "\"\n}"
+                            })
+                        }
+                    }
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    Layout.topMargin: Spacing.xxs
+                    spacing: Spacing.xxs
+
+                    Field {
+                        id: incoming
+                        placeholderText: "Path of a file to import"
+                        Accessible.name: "Path of a file to import"
+                        Layout.fillWidth: true
+                        onAccepted: bring.clicked()
+                    }
+                    TextButton {
+                        id: bring
+                        text: "Import"
+                        Accessible.name: "Import asset"
+                        enabled: incoming.text !== ""
+                        onClicked: {
+                            panel.workspace.dispatch("project_open", {asset: "import", file: incoming.text})
+                            incoming.text = ""
+                        }
+                    }
+                }
             }
 
             Repeater {

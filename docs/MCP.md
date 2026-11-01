@@ -30,7 +30,7 @@ documents: export), `run` (start previews). They are granted at launch with
 
 | # | Tool | Does | Needs |
 |---|---|---|---|
-| 1 | `project_open` | Open a project directory below the workspace, or describe the open one: documents, blocks, targets | inspect |
+| 1 | `project_open` | Open a project directory below the workspace, or describe the open one: documents, blocks, targets; `asset` lists, imports or removes its pictures and fonts | inspect; fs to import or remove |
 | 2 | `document_tree` | A document's objects in order: handle, path, type, `id`, bindings; paginated | inspect |
 | 3 | `document_text` | A document's text or a byte range of it, with its generation and whether it parses | inspect |
 | 4 | `document_new` | Create a QML document, or one keeping a project JSON file's records (`data`): a `JsonListModel` of the file, or a `ListModel` copy; undo removes it | mutate |
@@ -639,6 +639,39 @@ instead; `not_a_sibling`, `root`, `locked`.
 Each is one undo step. The bar above the canvas has wrap and unwrap; the
 inspector's Layout section has the pin pad, a layout's spacing and columns, and
 wrap.
+
+## Assets
+
+`project_open` with `asset` works on the project's `assets/`, by the same call
+the Insert tab's Assets section makes. An action here and not a tool of its
+own because the list stays at 25 tools.
+
+| `asset` | Takes | Answers | Needs |
+|---|---|---|---|
+| `list` | | `assets`: `name`, `url` (from the project's root), `kind` (`image`, `font`), `bytes`, and `width`, `height` of a picture that says them | inspect |
+| `import` | `file` or `data` (base64) with `name`; `name` is optional with `file` | `asset`, as above | fs |
+| `remove` | `name` | `removed`, the url | fs |
+
+- `import` takes png, jpg, webp, svg, gif, ttf, otf and woff2, by the name's
+  extension and by what the file begins with; anything else is refused
+  `not_actionable`, kind `asset_kind`, listing them. 64 MiB at most (kind
+  `asset_size`).
+- The name becomes letters, digits, `.`, `_` and `-`, leads nowhere, and takes
+  a number if a name differing at most by case is there: `LOGO-1.svg`.
+- `file` is judged where it really is, relative to the project: below the
+  workspace and a regular file, or `path_denied` (what is missing answers the
+  same, so a refusal does not tell what exists outside). A file elsewhere goes
+  as `data`.
+- `remove` is refused `not_actionable`, kind `asset_in_use`, with `documents`,
+  while a document says the asset's url. A url a document builds at run time
+  from parts is not seen.
+- DECISION: assets have no undo. They are not documents; an import writes a
+  name nothing uses and a removal happens only when nothing does.
+- A picture is placed by `node_insert` with `text: "Image { source:
+  \"assets/x.png\" }"`, and `export` carries `assets/` in both bundles, bytes
+  as they are.
+- On the web a file that is not text is held in browser storage as a data
+  URL's text; `list`, `import` and `remove` work the same.
 
 ## Prompts
 

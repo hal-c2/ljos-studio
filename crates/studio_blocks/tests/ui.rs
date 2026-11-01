@@ -1050,6 +1050,17 @@ fn places(w: &mut UiWorld, name: String) -> StepResult {
     window.click_node(&button)
 }
 
+#[when(regex = r#"^the person imports "([^"]+)" in the palette$"#)]
+fn imports_asset(w: &mut UiWorld, path: String) -> StepResult {
+    let window = w.window()?;
+    let field = window.node("Palette", Some("textinput"), "Path of a file to import")?;
+    window.click_shown(&field)?;
+    window.stage.drive().commit(&path).map_err(drive_error)?;
+    window.rest()?;
+    let button = window.node("Palette", None, "Import asset")?;
+    window.click_node(&button)
+}
+
 #[given(regex = r#"^the person has searched the palette for "([^"]*)"$"#)]
 #[when(regex = r#"^the person searches the palette for "([^"]*)"$"#)]
 fn searches_palette(w: &mut UiWorld, text: String) -> StepResult {

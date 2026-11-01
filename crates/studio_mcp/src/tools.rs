@@ -2,6 +2,7 @@
 
 use std::sync::{Arc, Mutex};
 
+use crate::assets::{self, AssetAction, AssetInfo};
 use crate::schema::Answers;
 use ljos_mcp_core::{
     CallCtx, Cap, ErrorCode, SurfaceError, ToolAnnotations, ToolDef, ToolRegistry, denied,
@@ -28,6 +29,14 @@ const TREE_PAGE: usize = 200;
 struct ProjectOpenArgs {
     /// A directory below the workspace, relative or absolute (`.` is the workspace). Left out, describes the open project.
     path: Option<String>,
+    /// On the project's `assets/`: `list` it, `import` a picture or font (`fs`), `remove` one no document uses (`fs`).
+    asset: Option<AssetAction>,
+    /// `import`: a file below the workspace.
+    file: Option<String>,
+    /// `import`: the file's bytes in base64, for a client with no file here; needs `name`.
+    data: Option<String>,
+    /// `import`: the name to give it. `remove`: the asset's name.
+    name: Option<String>,
 }
 
 #[derive(Serialize, JsonSchema)]
@@ -35,6 +44,15 @@ struct ProjectInfo {
     project: String,
     /// QML documents, relative to the project.
     documents: Vec<String>,
+    /// What `list` found.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    assets: Option<Vec<AssetInfo>>,
+    /// What `import` wrote.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    asset: Option<AssetInfo>,
+    /// The url `remove` took out.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    removed: Option<String>,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -812,7 +830,60 @@ fn info(studio: &Studio) -> ProjectInfo {
     ProjectInfo {
         project: studio.project().to_owned(),
         documents: studio.session.documents(),
+        assets: None,
+        asset: None,
+        removed: None,
     }
+}
+
+fn project_open(
+    studio: &mut Studio,
+    ctx: &CallCtx,
+    a: ProjectOpenArgs,
+) -> Result<ProjectInfo, SurfaceError> {
+    let action = match a.asset {
+        Some(action) => Some(action),
+        None if a.file.is_some() || a.data.is_some() || a.name.is_some() => {
+            return Err(SurfaceError::invalid_argument(
+                "`file`, `data` and `name` go with `asset`".to_owned(),
+            ));
+        }
+        None => None,
+    };
+    // Listing only reads; the registry checked `inspect`, the rest is
+    // checked here, refused the way the registry does.
+    if matches!(action, Some(AssetAction::Import | AssetAction::Remove))
+        && !ctx.caps.contains(Cap::Fs)
+    {
+        return Err(denied("project_open", Cap::Fs, ctx));
+    }
+    if let Some(path) = a.path {
+        studio.switch(&path)?;
+    }
+    let mut out = ProjectInfo {
+        documents: Vec::new(),
+        ..info(studio)
+    };
+    match action {
+        Some(AssetAction::List) => out.assets = Some(assets::list(studio.session.store())),
+        Some(AssetAction::Import) => {
+            out.asset = Some(assets::import(
+                studio,
+                a.file.as_deref(),
+                a.data.as_deref(),
+                a.name.as_deref(),
+            )?);
+        }
+        Some(AssetAction::Remove) => {
+            let name = a.name.ok_or_else(|| {
+                SurfaceError::invalid_argument("`remove` needs `name`".to_owned())
+            })?;
+            out.removed = Some(assets::remove(studio, &name)?);
+        }
+        None => {}
+    }
+    out.documents = studio.session.documents();
+    Ok(out)
 }
 
 pub(crate) const MUTATE: ToolAnnotations = ToolAnnotations {
@@ -1333,19 +1404,15 @@ fn edits(studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
         .with(
             ToolDef::new::<ProjectOpenArgs>(
                 "project_open",
-                "Open a project directory below the workspace, or describe the open one. Opening starts a new session: handles and history end.",
+                "Open a project directory below the workspace, or describe the open one. Opening starts a new session: handles and history end. `asset` lists, imports or removes the project's pictures and fonts.",
             )
             .answers::<ProjectInfo>()
-            .requires(Cap::Inspect),
+            .requires(Cap::Inspect)
+            // An asset's import or removal writes; a reader is told by `fs`.
+            .annotated(DESTRUCTIVE),
             typed({
                 let studio = s();
-                move |_, a: ProjectOpenArgs| {
-                    let mut studio = lock(&studio);
-                    if let Some(path) = a.path {
-                        studio.switch(&path)?;
-                    }
-                    Ok(info(&studio))
-                }
+                move |ctx: &CallCtx, a: ProjectOpenArgs| project_open(&mut lock(&studio), ctx, a)
             }),
         )
         .with(
