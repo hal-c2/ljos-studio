@@ -201,6 +201,60 @@ Feature: Objects are moved and resized on the canvas
     Then the file "Main.qml" says "id: a; x: 20; y: 20;"
     And the file "Main.qml" says "x: 21"
 
+  Scenario: A handle resize while a state is picked goes into that state
+    Given the person has selected "Rectangle root" in the layers panel
+    And the person has added the state "compact" in the inspector
+    And the person has picked the state "compact" in the inspector
+    And the person has clicked the frame "Desktop" at 40, 40
+    When the person drags in the frame "Desktop" from 70, 70 to 110, 90
+    Then the file "Main.qml" says "id: a; x: 20; y: 20; width: 50; height: 50;"
+    And the file "Main.qml" says "target: a"
+    And the file "Main.qml" says "width: 90"
+    And the file "Main.qml" says "height: 70"
+
+  Scenario: An align while a state is picked goes into that state
+    Given the person has selected "Rectangle root" in the layers panel
+    And the person has added the state "compact" in the inspector
+    And the person has picked the state "compact" in the inspector
+    And an agent has called the tool "node_select" with:
+      """json
+      {"doc": "Main.qml", "nodes": [{"id": "a"}, {"id": "b"}]}
+      """
+    When the person clicks the button "Align Top"
+    Then the file "Main.qml" says "id: b; x: 200; y: 100;"
+    And the file "Main.qml" says "target: b"
+    And the file "Main.qml" says "y: 20"
+
+  Scenario: A refused place into a state is said on the window's line
+    Given the person has selected "Rectangle root" in the layers panel
+    And the person has added the state "compact" in the inspector
+    And the person has picked the state "compact" in the inspector
+    When the person replaces "id: a; " with "" in the code view
+    Given the person has clicked the frame "Desktop" at 40, 40
+    When the person presses "Right"
+    Then the window shows a refusal that says "id"
+    And the file "Main.qml" does not say "target:"
+
+  Scenario: What a state could not do is not said once another object is selected
+    Given the person has selected "Rectangle root" in the layers panel
+    And the person has added the state "compact" in the inspector
+    And the person has picked the state "compact" in the inspector
+    And the person has clicked the frame "Desktop" at 50, 220
+    And the person has dragged in the frame "Desktop" from 50, 220 to 160, 220
+    Then the window says "A state cannot change the order of a layout"
+    When the person selects "Rectangle a" in the layers panel
+    Then the window does not say "A state cannot change the order of a layout"
+
+  Scenario: What a state could not do is not said once the state is done
+    Given the person has selected "Rectangle root" in the layers panel
+    And the person has added the state "compact" in the inspector
+    And the person has picked the state "compact" in the inspector
+    And the person has clicked the frame "Desktop" at 50, 220
+    And the person has dragged in the frame "Desktop" from 50, 220 to 160, 220
+    Then the window says "A state cannot change the order of a layout"
+    When the person clicks the button "Done editing state"
+    Then the window does not say "A state cannot change the order of a layout"
+
   Scenario: A state cannot change the order of a layout
     Given the person has selected "Rectangle root" in the layers panel
     And the person has added the state "compact" in the inspector

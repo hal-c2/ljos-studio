@@ -273,19 +273,37 @@ impl RestWatch for Rests {
         if let Some(since) = since {
             args["since"] = json!({ "rests": since });
         }
-        match self.0.call("app_watch", args) {
-            Ok(answer) => {
-                let told = &answer.structured;
-                Ok(Rest {
-                    rests: told["counts"]["rests"].as_u64().ok_or_else(|| {
-                        PreviewError::Transport("app_watch gave no rests".to_owned())
-                    })?,
-                    wake_in_ms: told["rest"]["wake_in_ms"].as_u64(),
-                })
-            }
-            Err(Fault::Refused { code, message }) => Err(PreviewError::Refused { code, message }),
-            Err(Fault::Transport(message)) => Err(PreviewError::Transport(message)),
+        rest_of(self.0.call("app_watch", args))
+    }
+
+    fn parked(
+        &self,
+        since: u64,
+        wait_ms: u64,
+    ) -> std::pin::Pin<Box<dyn Future<Output = Result<Rest, PreviewError>> + Send>> {
+        let args = json!({
+            "topics": ["rests"],
+            "wait_ms": wait_ms,
+            "since": { "rests": since },
+        });
+        let asking = self.0.asking("app_watch", args);
+        Box::pin(async move { rest_of(asking.await) })
+    }
+}
+
+fn rest_of(answer: Result<Answer, Fault>) -> Result<Rest, PreviewError> {
+    match answer {
+        Ok(answer) => {
+            let told = &answer.structured;
+            Ok(Rest {
+                rests: told["counts"]["rests"]
+                    .as_u64()
+                    .ok_or_else(|| PreviewError::Transport("app_watch gave no rests".to_owned()))?,
+                wake_in_ms: told["rest"]["wake_in_ms"].as_u64(),
+            })
         }
+        Err(Fault::Refused { code, message }) => Err(PreviewError::Refused { code, message }),
+        Err(Fault::Transport(message)) => Err(PreviewError::Transport(message)),
     }
 }
 

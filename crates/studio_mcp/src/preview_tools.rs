@@ -671,6 +671,31 @@ fn wait_for_rest(
     })
 }
 
+/// A wait for a server's thread, begun with the session held only to find it.
+#[cfg(feature = "native")]
+pub(crate) fn parked(
+    studio: &Mutex<Studio>,
+    rests: u64,
+    wait_ms: u64,
+) -> Result<
+    impl Future<Output = Result<studio_core::preview::Rest, PreviewError>> + Send + use<>,
+    SurfaceError,
+> {
+    let studio = lock(studio);
+    let previews = preview::lock(&studio.previews);
+    let open = previews
+        .open
+        .as_ref()
+        .ok_or_else(|| preview_error(PreviewError::NotOpen))?;
+    let watch = open.host.rest_watch().ok_or_else(|| {
+        preview_error(PreviewError::NotSupported {
+            message: "this preview cannot say when it rests".to_owned(),
+            ljos_web_request: 25,
+        })
+    })?;
+    Ok(watch.parked(rests, wait_ms.min(3_600_000)))
+}
+
 fn events(studio: &Mutex<Studio>, a: EventsArgs) -> Result<EventsOut, SurfaceError> {
     if let Some(wait_ms) = a.wait_ms {
         return wait_for_rest(studio, a.since.unwrap_or(0), a.rests, wait_ms);

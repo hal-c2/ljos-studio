@@ -80,6 +80,9 @@ fn main() -> anyhow::Result<()> {
             Box::new(NativeHost::new(project, &ljos, &previews))
         }));
     stop_on_signal(studio.preview_closer(), state.clone());
+    // The window's end ends the preview, whoever still holds the session: a
+    // process leaving runs no destructor another thread's Arc keeps alive.
+    let close_preview = studio.preview_closer();
     let server = Arc::new(StudioServer::new(studio));
     if args.mcp {
         let server = Arc::into_inner(server).expect("nothing else holds the server yet");
@@ -120,10 +123,12 @@ fn main() -> anyhow::Result<()> {
     if let (Some(_), Some(dir)) = (&shell, theme.as_deref().and_then(Path::parent)) {
         std::fs::create_dir_all(dir).with_context(|| format!("making {}", dir.display()))?;
     }
-    match shell {
+    let ended = match shell {
         Some(shell) => watched_window(server, &shell, theme, &state),
         None => window(server, theme),
-    }
+    };
+    close_preview();
+    ended
 }
 
 /// A signal skips every `Drop`, which is what closes a preview, so a stopped

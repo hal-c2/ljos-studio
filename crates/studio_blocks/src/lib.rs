@@ -760,7 +760,9 @@ fn follow(engine: &Engine, ws: ObjectId) {
         return;
     };
     let context = engine.extension::<Context>();
-    let Some(server) = context.server.borrow().clone() else {
+    // It may not keep the session, and so the preview, past the window: it
+    // holds the server only while it asks.
+    let Some(weak) = context.server.borrow().as_ref().map(Arc::downgrade) else {
         return;
     };
     let stop = Arc::new(AtomicBool::new(false));
@@ -782,20 +784,45 @@ fn follow(engine: &Engine, ws: ObjectId) {
                 if let Some(since) = since {
                     args["rests"] = json!(since);
                 }
+                let Some(server) = weak.upgrade() else {
+                    break;
+                };
                 let Ok(reply) = server.call("preview_events", &person(), args) else {
                     break;
                 };
+                drop(server);
+                let held = since;
                 since = reply.structured["rests"].as_u64();
-                // An app that will not wake by itself shows what it shows.
-                // One that will is looked at when it has, and the look makes
-                // it rest again with its next wake: this asks only as often
-                // as the app itself moves, and no more than a person can see.
-                let Some(wake) = reply.structured["wake_in_ms"].as_u64() else {
+                // A rest told of past one already held is a change, and the
+                // last of them, an animation's end, has no wake after it.
+                let moved = held.is_some() && since != held;
+                // One that will wake is looked at when it has, and the look
+                // makes it rest again with its next wake: this asks only as
+                // often as the app itself moves, and no more than a person
+                // can see. The wait is on the app: a new rest ends it early.
+                if let Some(wake) = reply.structured["wake_in_ms"].as_u64() {
+                    std::thread::sleep(Duration::from_millis(LOOK_AT_MOST_EVERY_MS));
+                    let rest = wake
+                        .min(FOLLOW_WAIT_MS)
+                        .saturating_sub(LOOK_AT_MOST_EVERY_MS);
+                    if rest > 0 && !stop.load(Ordering::SeqCst) {
+                        let mut args = json!({"wait_ms": rest});
+                        if let Some(since) = since {
+                            args["rests"] = json!(since);
+                        }
+                        let Some(server) = weak.upgrade() else {
+                            break;
+                        };
+                        let Ok(reply) = server.call("preview_events", &person(), args) else {
+                            break;
+                        };
+                        drop(server);
+                        since = reply.structured["rests"].as_u64();
+                    }
+                } else if !moved {
+                    // An app that will not wake by itself shows what it shows.
                     continue;
-                };
-                std::thread::sleep(Duration::from_millis(
-                    wake.clamp(LOOK_AT_MOST_EVERY_MS, FOLLOW_WAIT_MS),
-                ));
+                }
                 if !stop.load(Ordering::SeqCst) {
                     post.send(move |engine| look(engine, ws));
                 }
