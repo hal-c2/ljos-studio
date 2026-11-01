@@ -381,6 +381,9 @@ struct Queue {
     /// The preview's size when last published: a new size is a new picture
     /// of the same generation.
     size: (u32, u32),
+    /// The document of the preview when last published: each preview counts
+    /// its own generations, so another document's number says nothing.
+    previewed: String,
     image: Option<ImageHandle>,
     /// The generation `image` shows.
     picture: u64,
@@ -1041,12 +1044,21 @@ fn publish(engine: &Engine, ws: ObjectId, view: View, seen: u64) {
         .map_or((0, 0), |p| (p.width, p.height));
     let resized = queue_of(engine, ws)
         .is_some_and(|q| std::mem::replace(&mut q.borrow_mut().size, size) != size);
+    let other_doc = queue_of(engine, ws).is_some_and(|q| {
+        let doc = view.preview.as_ref().map_or("", |p| p.doc.as_str());
+        let mut q = q.borrow_mut();
+        let other = q.previewed != doc;
+        if other {
+            doc.clone_into(&mut q.previewed);
+        }
+        other
+    });
     let wanted = view
         .preview
         .as_ref()
         .filter(|p| p.doc == view.doc)
         .map(|p| p.generation)
-        .filter(|&g| resized || (g != picture && g != fetched));
+        .filter(|&g| resized || other_doc || (g != picture && g != fetched));
     let _ = cx.set(Workspace::BLANK, view.blank);
     give(
         &cx,
