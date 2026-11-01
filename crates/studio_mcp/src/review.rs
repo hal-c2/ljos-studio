@@ -178,9 +178,7 @@ pub(crate) fn add(registry: ToolRegistry, studio: &Arc<Mutex<Studio>>) -> ToolRe
     registry.with(
         ToolDef::new::<ReviewArgs>(
             NAME,
-            "Design review comments on objects, kept in Studio's sidecar (`.studio/`), never in \
-             the QML: add, reply, resolve, reopen, or list by doc and node. A comment follows its \
-             object through edits; one whose object is removed stays, orphaned, at its last place.",
+            "Design review comments on objects, kept in `.studio/`, never in the QML: add, reply, resolve, reopen, or list by doc and node. A comment follows its object through edits; if it is removed the comment stays, orphaned.",
         )
         .answers::<ReviewOut>()
         .requires(Cap::Inspect)

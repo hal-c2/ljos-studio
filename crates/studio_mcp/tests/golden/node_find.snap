@@ -9,41 +9,26 @@ expression: value
     "open_world": false,
     "read_only": true
   },
-  "description": "Find objects by id, type, binding name or text in a binding's value, in one document or all (naming those it could not parse or read). Returns handles.",
+  "description": "Find objects by id, type, binding name or text in a binding's value, in one document or all (naming those it could not read). Returns handles.",
   "inputSchema": {
     "properties": {
       "binding": {
         "description": "Has a binding of this name (`font.bold`).",
-        "type": [
-          "string",
-          "null"
-        ]
+        "type": "string"
       },
       "doc": {
         "description": "One document; every one that parses when left out.",
-        "type": [
-          "string",
-          "null"
-        ]
+        "type": "string"
       },
       "id": {
-        "type": [
-          "string",
-          "null"
-        ]
+        "type": "string"
       },
       "text": {
         "description": "Some binding's value contains this text.",
-        "type": [
-          "string",
-          "null"
-        ]
+        "type": "string"
       },
       "type": {
-        "type": [
-          "string",
-          "null"
-        ]
+        "type": "string"
       }
     },
     "type": "object"

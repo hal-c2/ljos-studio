@@ -9,25 +9,19 @@ expression: value
     "open_world": false,
     "read_only": true
   },
-  "description": "A document's objects in order: handle, path, type, id, bindings. Grouped properties are bindings (`font.bold`), not objects. Paginated by `cursor`.",
+  "description": "A document's objects in order: handle, path, type, id, bindings. Grouped properties (`font.bold`) are bindings. Paginated by `cursor`.",
   "inputSchema": {
     "properties": {
       "cursor": {
         "description": "From a previous page's `next`.",
-        "type": [
-          "string",
-          "null"
-        ]
+        "type": "string"
       },
       "doc": {
         "type": "string"
       },
       "limit": {
         "description": "At most this many objects (default 200).",
-        "type": [
-          "integer",
-          "null"
-        ]
+        "type": "integer"
       }
     },
     "required": [
@@ -45,12 +39,7 @@ expression: value
       "generation": {
         "type": "integer"
       },
-      "next": {
-        "type": [
-          "string",
-          "null"
-        ]
-      },
+      "next": {},
       "nodes": {
         "type": "array"
       }

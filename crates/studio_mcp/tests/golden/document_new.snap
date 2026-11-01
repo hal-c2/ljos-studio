@@ -9,51 +9,31 @@ expression: value
     "open_world": false,
     "read_only": false
   },
-  "description": "Create a QML document, from `text` or reading a JSON file's records (`data`): a JsonListModel of the file, or with `model: \"list\"` a ListModel copy. Refused if it exists or does not parse. Undo removes it.",
+  "description": "Create a QML document from `text`, or from a JSON file's records (`data`). Refused if it exists or does not parse. Undo removes it.",
   "inputSchema": {
-    "$defs": {
-      "DataModel": {
-        "description": "How a document keeps a JSON file's records.",
-        "oneOf": [
-          {
-            "const": "json",
-            "description": "A `JsonListModel` whose `source` is the file: the file stays the\ndata.",
-            "type": "string"
-          },
-          {
-            "const": "list",
-            "description": "A `ListModel` copy of the records, edited as QML from then on.",
-            "type": "string"
-          }
-        ]
-      }
-    },
     "properties": {
       "data": {
-        "description": "A project JSON file, an array of records: the document is a\n`JsonListModel` reading it, or with `model: \"list\"` a `ListModel`\ncopy, a `ListElement` for each (flat) record. Not with `text`.",
-        "type": [
-          "string",
-          "null"
-        ]
+        "description": "A project JSON file of records: a `JsonListModel` of it, or with `model: \"list\"` a `ListModel` copy. Not with `text`.",
+        "type": "string"
       },
       "doc": {
         "description": "A new `.qml` path relative to the project.",
         "type": "string"
       },
       "dry_run": {
-        "default": false,
         "type": "boolean"
       },
       "model": {
-        "$ref": "#/$defs/DataModel",
-        "description": "How `data` is kept: `json` (the default), or `list`."
+        "description": "How `data` is kept: `json` (the default), or `list`.",
+        "enum": [
+          "json",
+          "list"
+        ],
+        "type": "string"
       },
       "text": {
         "description": "Its text; an empty `Item` importing QtQuick when left out.",
-        "type": [
-          "string",
-          "null"
-        ]
+        "type": "string"
       }
     },
     "required": [
@@ -74,30 +54,10 @@ expression: value
       "generation": {
         "type": "integer"
       },
-      "history": {
-        "type": [
-          "integer",
-          "null"
-        ]
-      },
-      "node": {
-        "type": [
-          "string",
-          "null"
-        ]
-      },
-      "rebased_from": {
-        "type": [
-          "integer",
-          "null"
-        ]
-      },
-      "text": {
-        "type": [
-          "string",
-          "null"
-        ]
-      },
+      "history": {},
+      "node": {},
+      "rebased_from": {},
+      "text": {},
       "unchanged": {
         "type": "boolean"
       }

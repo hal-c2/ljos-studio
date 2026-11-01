@@ -11,42 +11,23 @@ expression: value
   },
   "description": "Remove an object with its comments. Its handle then answers `stale_ref` until undo.",
   "inputSchema": {
-    "$defs": {
-      "Address": {
-        "description": "One of: `node`, a handle the session gave out (`n7`), stable for the session; `id`, the object's `id`; `path`, as `document_tree` prints it (`root/0/contentItem:`), true of the current text only.",
-        "maxProperties": 1,
-        "minProperties": 1,
-        "properties": {
-          "id": {
-            "type": "string"
-          },
-          "node": {
-            "type": "string"
-          },
-          "path": {
-            "type": "string"
-          }
-        },
-        "type": "object"
-      }
-    },
     "properties": {
       "doc": {
         "type": "string"
       },
       "dry_run": {
-        "default": false,
         "type": "boolean"
       },
       "generation": {
-        "description": "The generation read. By handle or `id`, the edit is moved past what\nothers wrote since, or refused as a conflict; by `path`, which is true\nof one generation only, it is refused if the document moved on, so\na `path` needs it.",
-        "type": [
-          "integer",
-          "null"
-        ]
+        "description": "The generation read; a `path` needs it (handles and ids are moved past others' edits).",
+        "type": "integer"
       },
       "node": {
-        "$ref": "#/$defs/Address"
+        "additionalProperties": {
+          "type": "string"
+        },
+        "description": "One of `node` (session handle), `id`, `path` (from `document_tree`; this text only).",
+        "type": "object"
       }
     },
     "required": [
@@ -68,30 +49,10 @@ expression: value
       "generation": {
         "type": "integer"
       },
-      "history": {
-        "type": [
-          "integer",
-          "null"
-        ]
-      },
-      "node": {
-        "type": [
-          "string",
-          "null"
-        ]
-      },
-      "rebased_from": {
-        "type": [
-          "integer",
-          "null"
-        ]
-      },
-      "text": {
-        "type": [
-          "string",
-          "null"
-        ]
-      },
+      "history": {},
+      "node": {},
+      "rebased_from": {},
+      "text": {},
       "unchanged": {
         "type": "boolean"
       }

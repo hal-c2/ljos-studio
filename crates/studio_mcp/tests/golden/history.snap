@@ -9,24 +9,18 @@ expression: value
     "open_world": false,
     "read_only": false
   },
-  "description": "List edits and who made them (`inspect`), or undo or redo the caller's last one (`mutate`), moved past what others wrote since; `all` takes the newest whoever made it. Undo gives back the document's bytes.",
+  "description": "List edits and their authors (`inspect`), or undo or redo the caller's last (`mutate`), moved past others' edits; `all` takes the newest whoever made it. Undo gives back the document's bytes.",
   "inputSchema": {
-    "$defs": {
-      "HistoryAction": {
+    "properties": {
+      "action": {
         "enum": [
           "list",
           "undo",
           "redo"
         ],
         "type": "string"
-      }
-    },
-    "properties": {
-      "action": {
-        "$ref": "#/$defs/HistoryAction"
       },
       "all": {
-        "default": false,
         "description": "Undo or redo the newest edit whoever made it, not the caller's own.",
         "type": "boolean"
       }
@@ -44,12 +38,7 @@ expression: value
         "type": "array"
       },
       "entry": {},
-      "generation": {
-        "type": [
-          "integer",
-          "null"
-        ]
-      },
+      "generation": {},
       "undone": {
         "type": "array"
       }

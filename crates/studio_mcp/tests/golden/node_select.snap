@@ -9,27 +9,15 @@ expression: value
     "open_world": false,
     "read_only": true
   },
-  "description": "Set Studio's selection, shown on the canvas and in the inspector, by addresses or by a point `at` in the document's preview (the object declared there). Empty clears it.",
+  "description": "Set Studio's selection (canvas and inspector) by addresses, or by a point `at` in the document's preview. Empty clears it.",
   "inputSchema": {
-    "$defs": {
-      "Address": {
-        "description": "One of: `node`, a handle the session gave out (`n7`), stable for the session; `id`, the object's `id`; `path`, as `document_tree` prints it (`root/0/contentItem:`), true of the current text only.",
-        "maxProperties": 1,
-        "minProperties": 1,
-        "properties": {
-          "id": {
-            "type": "string"
-          },
-          "node": {
-            "type": "string"
-          },
-          "path": {
-            "type": "string"
-          }
-        },
-        "type": "object"
+    "properties": {
+      "add": {
+        "description": "Toggle these in the selection instead of replacing it.",
+        "type": "boolean"
       },
-      "Point": {
+      "at": {
+        "description": "Instead of `nodes`: a point in the open preview, in logical pixels; selects what is declared where the topmost object is. Nothing there clears it.",
         "properties": {
           "x": {
             "type": "number"
@@ -43,38 +31,22 @@ expression: value
           "y"
         ],
         "type": "object"
-      }
-    },
-    "properties": {
-      "add": {
-        "default": false,
-        "description": "Toggle these in the selection instead of replacing it.",
-        "type": "boolean"
-      },
-      "at": {
-        "anyOf": [
-          {
-            "$ref": "#/$defs/Point"
-          },
-          {
-            "type": "null"
-          }
-        ],
-        "description": "Instead of `nodes`: a point in the open preview of `doc`, in its\nlogical pixels. Selects the object declared where the preview's\ntopmost object there is declared; nothing there clears it."
       },
       "doc": {
         "type": "string"
       },
       "hold": {
-        "default": false,
-        "description": "Also hold the selected objects and all they hold (`mutate`): another\nwriter's edit of them is refused as `busy` until the caller has made\nno call for five seconds, and for five minutes at most. Selecting\nnothing lets go of what the caller holds.",
+        "description": "Also hold the selected objects and what they hold (`mutate`): others' edits of them are `busy` until the caller is idle five seconds (five minutes at most). Selecting nothing lets go.",
         "type": "boolean"
       },
       "nodes": {
-        "default": [],
-        "description": "Empty clears the selection.",
+        "description": "Empty or null clears the selection.",
         "items": {
-          "$ref": "#/$defs/Address"
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "One of `node` (session handle), `id`, `path` (from `document_tree`; this text only).",
+          "type": "object"
         },
         "type": "array"
       }
