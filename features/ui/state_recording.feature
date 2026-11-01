@@ -51,6 +51,12 @@ Feature: A person records values into a state in the inspector
     And the file "Main.qml" says "width: 40"
     And the file "Main.qml" does not say "PropertyChanges"
 
+  Scenario: The recording shows with the inspector behind a tab, and ends there
+    When the person opens the "Tokens tab"
+    Then the window says "Editing state compact"
+    When the person clicks the button "Done editing state"
+    Then the window does not say "Editing state compact"
+
   Scenario: Done ends the recording and values go to the object again
     When the person clicks the button "Done editing state"
     And the person selects "Text label" in the layers panel

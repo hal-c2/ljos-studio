@@ -38,12 +38,15 @@ Panel {
     readonly property real reach: Math.max(flick.width, flick.height)
     // Whether a drag pans, whatever is under it, and a click selects nothing.
     property bool hand: false
+    // In play a press is the app's, whichever tool waits for after.
+    readonly property bool panning: hand && !playing
     readonly property real zoom: fitted ? Math.max(0.125, fit) : chosenZoom
     property bool playing: false
     onPlayingChanged: workspace.followPicture(playing)
     // The state the inspector is recording into; null for none. What the
     // canvas sets goes there, as what the inspector sets does.
     property var recording: null
+    signal doneRecording()
     property bool dragging: false
     property string says: ""
     readonly property var preview: workspace.preview
@@ -138,10 +141,11 @@ Panel {
     // A step back from the panels and from the frame on it.
     fill: Colors.surfaceHover
 
-    // The middle button pans wherever it presses, over the frame too.
+    // The middle button and the hand pan wherever they press, over the frame too.
     MouseArea {
         anchors.fill: flick
-        acceptedButtons: Qt.MiddleButton
+        acceptedButtons: panel.panning ? Qt.LeftButton | Qt.MiddleButton : Qt.MiddleButton
+        cursorShape: panel.panning ? (pressed ? Qt.ClosedHandCursor : Qt.OpenHandCursor) : Qt.ArrowCursor
         property real fromX: 0
         property real fromY: 0
         onPressed: (mouse) => {
@@ -192,7 +196,8 @@ Panel {
         objectName: "canvas"
         anchors.fill: parent
         clip: true
-        interactive: !panel.dragging
+        // The hand pans in the area under this, as the middle button does.
+        interactive: !panel.dragging && !panel.panning
         boundsBehavior: Flickable.StopAtBounds
         contentWidth: frames.width + 2 * panel.reach
         contentHeight: frames.height + 2 * panel.reach
@@ -284,7 +289,7 @@ Panel {
                             onHasBoxesChanged: panel.framesWithoutBoxes += hasBoxes ? -1 : 1
                             Component.onDestruction: if (!hasBoxes) panel.framesWithoutBoxes -= 1
                             objectName: "overlay"
-                            enabled: !panel.hand
+                            enabled: !panel.panning
                             anchors.fill: parent
                             workspace: panel.workspace
                             zoom: panel.zoom
@@ -353,6 +358,30 @@ Panel {
                     panel.workspace.dispatch("node_arrange", args)
                 }
             }
+        }
+    }
+
+    // Here and not in the inspector: the inspector can be folded or behind a
+    // tab, and a drag still goes into the state. This is where it takes effect.
+    FloatBar {
+        anchors.left: parent.left
+        anchors.bottom: parent.bottom
+        anchors.margins: Spacing.xs
+        visible: panel.recording !== null
+
+        Label {
+            text: panel.recording !== null ? "Editing state " + panel.recording.state : ""
+            color: Colors.text
+            font.weight: Typography.bodyStrongWeight
+            leftPadding: Spacing.xs
+            anchors.verticalCenter: parent.verticalCenter
+            Accessible.role: Accessible.StaticText
+            Accessible.name: text
+        }
+        TextButton {
+            text: "Done"
+            Accessible.name: "Done editing state"
+            onClicked: panel.doneRecording()
         }
     }
 

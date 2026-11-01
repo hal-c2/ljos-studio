@@ -192,6 +192,16 @@ Feature: A person wires and plays a prototype's flow in Studio's window
     When the person clicks the frame "Desktop" at 50, 150
     Then the flow panel says the app is in the state "details"
 
+  @preview
+  Scenario: The hand left on does not stop a click reaching the app in play
+    Given the person has selected "Rectangle card" in the layers panel
+    And the person has opened the "Flow tab"
+    And the person has clicked the button "Tap selection to go to details"
+    And the person has clicked the button "Hand"
+    And the person has clicked the button "Play"
+    When the person clicks the frame "Desktop" at 50, 150
+    Then the flow panel says the app is in the state "details"
+
   # The picture was fetched once for each generation, and a click is no new
   # generation, so the frame kept showing the app as it was before the click.
   @preview

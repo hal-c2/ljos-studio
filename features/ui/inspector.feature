@@ -20,7 +20,14 @@ Feature: The inspector shows colours and every declared property
           property color accentColor: Qt.rgba(0, 1, 0, 1)
           color: "#ff0000"
           width: 100
+          Item { id: other }
       }
+      """
+    And the file "Other.qml":
+      """qml
+      import QtQuick
+
+      Item { }
       """
     And Studio's window shows the project
     And the person has opened "Main.qml" in the documents list
@@ -255,4 +262,24 @@ Feature: The inspector shows colours and every declared property
     When the person sets "width" to "parent.width" in the inspector
     And the person clicks the button "Bind width to parent.width"
     Then the file "Main.qml" says "width: parent.width"
+    And the window shows no refusal
+
+  Scenario: A refused value is forgotten when something else is selected
+    Given the person has set "width" to "parent.width" in the inspector
+    When the person selects "Item other" in the layers panel
+    Then the inspector has no button "Bind width to parent.width"
+    And the window shows no refusal
+
+  Scenario: A refused value is forgotten when another document opens
+    Given the person has set "width" to "parent.width" in the inspector
+    When the person opens "Other.qml" in the documents list
+    Then the inspector has no button "Bind width to parent.width"
+    And the window shows no refusal
+
+  Scenario: A refused value is forgotten when a state is picked
+    Given the person has set "width" to "parent.width" in the inspector
+    And the person has added the state "compact" in the inspector
+    And the person has set "width" to "parent.width" in the inspector
+    When the person picks the state "compact" in the inspector
+    Then the inspector has no button "Bind width to parent.width"
     And the window shows no refusal

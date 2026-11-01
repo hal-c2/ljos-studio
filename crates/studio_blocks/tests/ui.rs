@@ -9,7 +9,7 @@ use std::sync::{Arc, mpsc};
 use std::time::Duration;
 
 use cucumber::{World, gherkin::Step, given, then, when};
-use ljos::item::{DrawOp, MouseButtons, kurbo::Point};
+use ljos::item::{DrawOp, MouseButtons, WheelEvent, kurbo::Point};
 use ljos::prelude::*;
 use ljos::testing::AccessibleNode;
 use ljos_dev::{DevSession, Host, Report};
@@ -34,6 +34,8 @@ const HEIGHT: f64 = 900.0;
 struct UiWorld {
     /// Where a frame was before the wheel turned.
     frame_before: Option<ljos::item::kurbo::Rect>,
+    /// Where the pointer was for a zoom.
+    pointer_was: Option<Point>,
     /// A workspace a scenario expects to go.
     remembered: Option<ObjectId>,
     /// Where the outline was shown, bare of a ghost, in the frames of a flick.
@@ -223,6 +225,7 @@ impl UiWorld {
     fn new() -> Self {
         Self {
             frame_before: None,
+            pointer_was: None,
             remembered: None,
             outlines: Vec::new(),
             dir: tempfile::tempdir().expect("a temporary directory"),
@@ -566,13 +569,14 @@ impl Window {
 
     /// The answer to a gesture's call, as the worker's arrives: for one that
     /// was on its way when the person did something else.
-    fn answer(&mut self, tool: &str, answer: Json) -> StepResult {
+    fn answer(&mut self, tool: &str, answer: Json, asked: Json) -> StepResult {
         let workspace = self.workspace;
         let engine = &mut self.stage.engine;
         studio_blocks::Workspace::emit_answered(
             &Cx::new(engine, workspace),
             tool.to_owned(),
             answer,
+            asked,
         )
         .map_err(|e| format!("{e:?}"))
     }
@@ -2320,8 +2324,71 @@ fn late_answer(w: &mut UiWorld, button: String, about: String, says: String) -> 
         .write_by_name(picker, "waiting", Value::Bool(true))
         .map_err(|e| format!("{e:?}"))?;
     let answer = serde_json::json!({"id": about, "state": {name: says}, "mocked": false});
-    window.answer("preview_state", answer)?;
+    let asked = serde_json::json!({"node": {"node": about}, "read": [name]});
+    window.answer("preview_state", answer, asked)?;
     window.rest()
+}
+
+/// The picker on `button` opened and waiting, as `late_answer`'s is; what it
+/// asked about, for an answer to name.
+fn picker_waiting(window: &mut Window, button: &str) -> Result<(String, String), String> {
+    let tree = window.tree();
+    let node = find(&tree, &|n| n.name == button && n.role == "button")
+        .cloned()
+        .ok_or_else(|| format!("no button {button:?}; the window holds {}", names(&tree)))?;
+    let key = node.key.ok_or("the button has no key")?;
+    let name = button
+        .strip_prefix("Pick ")
+        .ok_or("not a picker's button")?;
+    let mut driver = window.stage.drive();
+    let at = driver.aim_at_node(key).map_err(|why| format!("{why:?}"))?;
+    driver
+        .click(at, MouseButtons::LEFT, 1)
+        .map_err(drive_error)?;
+    let picker = ljos_drive::find_below(window.engine(), window.root, "colourPicker")
+        .ok_or("the window has no colour picker")?;
+    window
+        .engine()
+        .write_by_name(picker, "waiting", Value::Bool(true))
+        .map_err(|e| format!("{e:?}"))?;
+    let Value::String(on) = window.engine().read_by_name(picker, "node") else {
+        return Err("the picker is on no object".into());
+    };
+    Ok((name.to_owned(), on.to_string()))
+}
+
+#[when(
+    regex = r#"^the person clicks the button "([^"]+)" and the answer to showing a state on the same object comes first$"#
+)]
+fn other_call_answer(w: &mut UiWorld, button: String) -> StepResult {
+    let window = w.window()?;
+    let (_, on) = picker_waiting(window, &button)?;
+    let answer = serde_json::json!({"id": "a", "state": {}, "mocked": false});
+    let asked = serde_json::json!({"node": {"node": on}, "show": "open"});
+    window.answer("preview_state", answer, asked)?;
+    window.rest()
+}
+
+#[when(
+    regex = r#"^the person clicks the button "([^"]+)" and the preview's answer has no value for it$"#
+)]
+fn empty_answer(w: &mut UiWorld, button: String) -> StepResult {
+    let window = w.window()?;
+    let (name, on) = picker_waiting(window, &button)?;
+    let answer = serde_json::json!({"id": "a", "state": {}, "mocked": false});
+    let asked = serde_json::json!({"node": {"node": on}, "read": [name]});
+    window.answer("preview_state", answer, asked)?;
+    window.rest()
+}
+
+#[then("the colour picker still waits for the preview")]
+fn picker_still_waits(w: &mut UiWorld) -> StepResult {
+    let window = w.window()?;
+    let picker = ljos_drive::find_below(window.engine(), window.root, "colourPicker")
+        .ok_or("the window has no colour picker")?;
+    (window.engine().read_by_name(picker, "waiting") == Value::Bool(true))
+        .then_some(())
+        .ok_or_else(|| "another call's answer ended the picker's wait".to_owned())
 }
 
 #[then(regex = r#"^the window has no colour picker open$"#)]
@@ -3296,6 +3363,71 @@ fn wheel_over_canvas(w: &mut UiWorld) -> StepResult {
     Ok(())
 }
 
+#[when(
+    regex = r#"^the person drags with the hand in the frame "([^"]+)" from (\d+), (\d+) by (\d+), (\d+)$"#
+)]
+fn hand_drag(w: &mut UiWorld, target: String, x: f64, y: f64, dx: f64, dy: f64) -> StepResult {
+    let window = w.window()?;
+    let before = frame_bounds(window, &target)?;
+    let from = frame_point(window, &target, x, y)?;
+    window
+        .stage
+        .drive()
+        .drag(from, Point::new(from.x + dx, from.y + dy))
+        .map_err(drive_error)?;
+    window.rest()?;
+    w.frame_before = Some(before);
+    Ok(())
+}
+
+#[then(regex = r#"^the frame "([^"]+)" has moved by (\d+), (\d+)$"#)]
+fn frame_moved_by(w: &mut UiWorld, target: String, dx: f64, dy: f64) -> StepResult {
+    let before = w.frame_before.ok_or("no place noted")?;
+    let now = frame_bounds(w.window()?, &target)?;
+    if (now.x0 - before.x0 - dx).abs() > 1.0 || (now.y0 - before.y0 - dy).abs() > 1.0 {
+        return Err(format!("the frame went from {before:?} to {now:?}"));
+    }
+    Ok(())
+}
+
+#[when(
+    regex = r#"^the person zooms in with Ctrl and the wheel over the frame "([^"]+)" at (\d+), (\d+)$"#
+)]
+fn ctrl_wheel(w: &mut UiWorld, target: String, x: f64, y: f64) -> StepResult {
+    let window = w.window()?;
+    let before = frame_bounds(window, &target)?;
+    let at = frame_point(window, &target, x, y)?;
+    let mut driver = window.stage.drive();
+    let mut turned = WheelEvent::notches(at.x, at.y, 0.0, 1.0, driver.now());
+    turned.modifiers = ljos_drive::parse_modifiers("Ctrl")?;
+    driver.send_wheel(&turned);
+    driver.settle().map_err(drive_error)?;
+    window.stage.drive().advance(1000).map_err(drive_error)?;
+    window.rest()?;
+    w.frame_before = Some(before);
+    w.pointer_was = Some(at);
+    Ok(())
+}
+
+#[then(regex = r#"^the frame "([^"]+)" grew, with its point under the pointer still there$"#)]
+fn zoomed_about_pointer(w: &mut UiWorld, target: String) -> StepResult {
+    let before = w.frame_before.ok_or("no place noted")?;
+    let at = w.pointer_was.ok_or("no pointer noted")?;
+    let now = frame_bounds(w.window()?, &target)?;
+    if now.width() <= before.width() {
+        return Err(format!("the frame went from {before:?} to {now:?}"));
+    }
+    let along =
+        |r: &ljos::item::kurbo::Rect| ((at.x - r.x0) / r.width(), (at.y - r.y0) / r.height());
+    let (was, is) = (along(&before), along(&now));
+    if (was.0 - is.0).abs() > 0.01 || (was.1 - is.1).abs() > 0.01 {
+        return Err(format!(
+            "the point under the pointer went from {was:?} to {is:?} of the frame"
+        ));
+    }
+    Ok(())
+}
+
 #[then(regex = r#"^the frame "([^"]+)" has moved$"#)]
 fn frame_moved(w: &mut UiWorld, target: String) -> StepResult {
     let before = w.frame_before.ok_or("no place noted")?;
@@ -3411,6 +3543,21 @@ fn picker_from_grey(w: &mut UiWorld) -> StepResult {
         .ok_or_else(|| format!("no sliders; the window holds {}", names(&tree)))?;
     if slider.states.iter().any(|s| s == "disabled") {
         return Err("the sliders are off".into());
+    }
+    // A slider's value is not in the accessibility tree.
+    let value_of = |name: &str| -> Result<f64, String> {
+        let slider = ljos_drive::find_below(window.engine(), window.root, name)
+            .ok_or_else(|| format!("no slider {name:?}"))?;
+        let read = window.engine().read_by_name(slider, "value");
+        <f64 as QmlValue>::from_value(&read).map_err(|_| format!("{name:?} reads {read:?}"))
+    };
+    let brightness = value_of("pickerBrightness")?;
+    if (brightness - 0.5).abs() > 0.01 {
+        return Err(format!("brightness is {brightness}, not grey's"));
+    }
+    let saturation = value_of("pickerSaturation")?;
+    if saturation.abs() > 0.01 {
+        return Err(format!("saturation is {saturation}, not grey's"));
     }
     Ok(())
 }
