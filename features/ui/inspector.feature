@@ -4,7 +4,7 @@
 @ui
 Feature: The inspector shows colours and every declared property
   A colour has a swatch, and the swatch opens a picker; what the picker sets
-  is `property_set`, as the row's own field is. A property declared without a
+  is `binding_set`, as the row's own field's is. A property declared without a
   value has a row too, so it can be given one.
 
   Background:
@@ -199,6 +199,11 @@ Feature: The inspector shows colours and every declared property
       | expression                          | property int size: 1 + 1                       | size                 | no picker |             |                                                        |
       | colour by expression                | property color shade: Qt.rgba(0, 1, 0, 1)      | shade                | a picker  |             | Worked out by Qt.rgba(0, 1, 0, 1): picking replaces it |
       | colour-named expression             | property var borderColor: Colors.text          | borderColor          | a picker  |             | Worked out by Colors.text: picking replaces it         |
+      | single-quoted colour                | property color shade: 'red'                    | shade                | a picker  | red         |                                                        |
+      | single-quoted hex text              | property string code: '#123456'                | code                 | a picker  | #123456     |                                                        |
+      | single-quoted text                  | property string label: 'red'                   | label                | no picker |             |                                                        |
+      | template colour                     | property color shade: `red`                    | shade                | a picker  | red         |                                                        |
+      | colour by name, a number            | property var borderColor: 3                    | borderColor          | a picker  |             |                                                        |
 
   @preview
   Scenario: A new picker does not keep what the last one refused
@@ -216,6 +221,13 @@ Feature: The inspector shows colours and every declared property
     And the person clicks the button "Pick color"
     Then the window does not say "Worked out by "transparent": picking replaces it"
     And the colour picker holds "transparent"
+
+  Scenario: A colour in single quotes is written, not worked out
+    When the person replaces "color: \"#ff0000\"" with "color: 'red'" in the code view
+    And the person selects "Rectangle root" in the layers panel
+    And the person clicks the button "Pick color"
+    Then the window does not say "Worked out by 'red': picking replaces it"
+    And the colour picker holds "red"
 
   Scenario: The picker's sliders leave a colour's alpha as it was written
     When the person clicks the button "Pick tint"
