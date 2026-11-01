@@ -59,3 +59,62 @@ Feature: A 3D view in the preview
       {"doc": "Main.qml", "node": {"id": "paint"}, "read": ["baseColor"]}
       """
     Then the answer's "/state/baseColor" is "#40c080"
+
+  Scenario: A point on a model selects the model, not the view
+    When the agent calls the tool "node_select" with:
+      """json
+      {"doc": "Main.qml", "at": {"x": 640, "y": 400}}
+      """
+    Then the answer's "/selection/0/id" is "cube"
+
+  Scenario: A point on the view beside the model selects the view
+    When the agent calls the tool "node_select" with:
+      """json
+      {"doc": "Main.qml", "at": {"x": 8, "y": 8}}
+      """
+    Then the answer's "/selection/0/type" is "View3D"
+
+  Scenario: The face of the model ends where the picture shows it ending
+    # 100 units across at 250 units from a camera of 60 degrees over the
+    # window's 800 pixels: 277 pixels, so 138 either side of the middle.
+    When the agent calls the tool "node_select" with:
+      """json
+      {"doc": "Main.qml", "at": {"x": 770, "y": 400}}
+      """
+    Then the answer's "/selection/0/id" is "cube"
+    When the agent calls the tool "node_select" with:
+      """json
+      {"doc": "Main.qml", "at": {"x": 786, "y": 400}}
+      """
+    Then the answer's "/selection/0/type" is "View3D"
+
+  Scenario: A model is told where its axes go on the picture
+    When the agent calls the tool "node_arrange" with:
+      """json
+      {"action": "geometry", "doc": "Main.qml", "nodes": [{"id": "cube"}]}
+      """
+    Then the answer's "/boxes/0/scene/origin/2" is 0.0
+    And the answer's "/boxes/0/scene/eye/position/2" is 300.0
+    And the answer's "/boxes/0/scene/local/0" is 0.0
+
+  Scenario: A model is moved along an axis as one undo step
+    When the agent calls the tool "node_arrange" with:
+      """json
+      {"action": "place", "doc": "Main.qml", "places": [{"node": {"id": "cube"}, "x": 20, "z": -30}]}
+      """
+    Then the file "Main.qml" contains "x: 20"
+    And the file "Main.qml" contains "z: -30"
+    And the history has 2 entries
+
+  Scenario: A model whose axis is an expression is not moved along it
+    Given the agent has called the tool "binding_set" with:
+      """json
+      {"doc": "Main.qml", "node": {"id": "cube"}, "name": "x", "value": "root.width / 10"}
+      """
+    When the agent calls the tool "node_arrange" with:
+      """json
+      {"action": "place", "doc": "Main.qml", "places": [{"node": {"id": "cube"}, "x": 20}]}
+      """
+    Then the agent is refused with "not_actionable"
+    And the refusal's "/details/kind" is "bound"
+    And the file "Main.qml" contains "x: root.width / 10"

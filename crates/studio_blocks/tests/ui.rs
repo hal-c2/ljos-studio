@@ -66,6 +66,13 @@ struct NoPlaces(NativeHost);
 struct SlowPictures(NativeHost, Arc<AtomicU64>);
 
 impl PreviewHost for SlowPictures {
+    fn scene(
+        &mut self,
+        at: &Declared,
+    ) -> Result<Option<studio_core::scene3d::Scene>, PreviewError> {
+        self.0.scene(at)
+    }
+
     fn open(&mut self, spec: &PreviewSpec) -> Result<(), PreviewError> {
         self.0.open(spec)
     }
@@ -137,6 +144,13 @@ impl PreviewHost for SlowPictures {
 }
 
 impl PreviewHost for NoPlaces {
+    fn scene(
+        &mut self,
+        at: &Declared,
+    ) -> Result<Option<studio_core::scene3d::Scene>, PreviewError> {
+        self.0.scene(at)
+    }
+
     fn open(&mut self, spec: &PreviewSpec) -> Result<(), PreviewError> {
         self.0.open(spec)
     }
@@ -2004,6 +2018,19 @@ fn handles_shown(w: &mut UiWorld, want: usize) -> StepResult {
     (got == want)
         .then_some(())
         .ok_or_else(|| format!("{got} handles"))
+}
+
+#[then(regex = r#"^the canvas shows (\d+) move arrows$"#)]
+fn arrows_shown(w: &mut UiWorld, want: usize) -> StepResult {
+    let window = w.window()?;
+    let overlay = overlay_part(window, "overlay")?;
+    let got = window
+        .engine()
+        .read_by_name(overlay, "arrowsShown")
+        .to_number() as usize;
+    (got == want)
+        .then_some(())
+        .ok_or_else(|| format!("{got} arrows"))
 }
 
 #[then(regex = r#"^the canvas shows a ([xy]) guide at (\d+)$"#)]
