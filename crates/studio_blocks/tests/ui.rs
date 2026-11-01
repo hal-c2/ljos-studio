@@ -30,6 +30,8 @@ const HEIGHT: f64 = 900.0;
 #[derive(World)]
 #[world(init = Self::new)]
 struct UiWorld {
+    /// Where the outline was shown, bare of a ghost, in the frames of a flick.
+    outlines: Vec<(f64, f64)>,
     dir: tempfile::TempDir,
     /// Where previews keep their token files and logs, apart from the
     /// project the preview watches.
@@ -132,6 +134,7 @@ fn drive_error(e: DriveError) -> String {
 impl UiWorld {
     fn new() -> Self {
         Self {
+            outlines: Vec::new(),
             dir: tempfile::tempdir().expect("a temporary directory"),
             state: tempfile::tempdir().expect("a temporary directory"),
             window: None,
@@ -1438,6 +1441,83 @@ fn drags_in_frame_at_once(
     drive.move_to(to).map_err(drive_error)?;
     drive.release(to, MouseButtons::LEFT).map_err(drive_error)?;
     window.rest()
+}
+
+/// Each frame's outline while nothing covers it: where a person saw it.
+struct OutlineWatch {
+    overlay: ObjectId,
+    frame: ObjectId,
+    bare: Vec<(f64, f64)>,
+}
+
+impl ljos_drive::Host for OutlineWatch {
+    fn after_frame(&mut self, engine: &Engine, _scene: &mut ljos_quick::QuickScene) {
+        // Before the hand lets go the ghost is not yet the drop's to keep.
+        if !matches!(engine.read_by_name(self.overlay, "mode"), Value::String(m) if m.is_empty())
+            || !matches!(engine.read_by_name(self.overlay, "ghost"), Value::Null)
+        {
+            return;
+        }
+        let Some(outline) = ljos_drive::find_below(engine, self.frame, "selectionOutline") else {
+            return;
+        };
+        let zoom = engine.read_by_name(self.overlay, "zoom").to_number();
+        self.bare.push((
+            engine.read_by_name(outline, "x").to_number() / zoom,
+            engine.read_by_name(outline, "y").to_number() / zoom,
+        ));
+    }
+}
+
+#[when(
+    regex = r#"^the person flicks in the frame "([^"]+)" from (\d+), (\d+) to (\d+), (\d+), watching the outline$"#
+)]
+fn flicks_in_frame(
+    w: &mut UiWorld,
+    target: String,
+    x0: f64,
+    y0: f64,
+    x1: f64,
+    y1: f64,
+) -> StepResult {
+    let window = w.window()?;
+    let from = frame_point(window, &target, x0, y0)?;
+    let to = frame_point(window, &target, x1, y1)?;
+    let overlay = overlay_part(window, "overlay")?;
+    let mut watch = OutlineWatch {
+        overlay,
+        frame: window.frame("Desktop")?,
+        bare: Vec::new(),
+    };
+    let mut drive = window.stage.drive().hosted(&mut watch);
+    drive.press(from, MouseButtons::LEFT).map_err(drive_error)?;
+    drive.move_to(to).map_err(drive_error)?;
+    drive.release(to, MouseButtons::LEFT).map_err(drive_error)?;
+    // Not `finish_promised`, which takes every answer before the next frame:
+    // a person sees a frame between the read's answer and the write's.
+    let deadline = std::time::Instant::now() + PATIENCE;
+    while drive.engine.read_by_name(overlay, "ghost") != Value::Null
+        && std::time::Instant::now() < deadline
+    {
+        drive.settle().map_err(drive_error)?;
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+    drive.finish_promised().map_err(drive_error)?;
+    w.outlines = watch.bare;
+    Ok(())
+}
+
+#[then(regex = r"^the outline was never shown back at (\d+), (\d+) once the hand let go$")]
+fn outline_never_back(w: &mut UiWorld, x: f64, y: f64) -> StepResult {
+    let close = |a: f64, b: f64| (a - b).abs() < 0.5;
+    // Without a frame at all, this would say nothing about the flick.
+    if w.outlines.is_empty() {
+        return Err("no frame showed the outline once the drop was done".to_owned());
+    }
+    match w.outlines.iter().find(|o| close(o.0, x) && close(o.1, y)) {
+        Some(_) => Err(format!("the outline went back: {:?}", w.outlines)),
+        None => Ok(()),
+    }
 }
 
 #[when(
