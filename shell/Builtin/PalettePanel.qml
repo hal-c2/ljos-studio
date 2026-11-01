@@ -44,6 +44,25 @@ Panel {
     // A string, which changes only when the list does: `toolkit` is a new
     // value at each publish, and rebuilding the buttons would drop a press.
     readonly property string toolkit: JSON.stringify(workspace.toolkit)
+    // Read after a publish rather than inside it: every tile is rebuilt from
+    // this, deeper than JS may go at the end of a publish, and a binding out
+    // of stack keeps its old value without a word.
+    property var besideDocument: []
+    function readBeside() {
+        const open = workspace.doc
+        const beside = open.substring(0, open.lastIndexOf("/") + 1)
+        besideDocument = workspace.documents
+            .filter(doc => doc !== open && doc.startsWith(beside) && doc.endsWith(".qml"))
+            .map(doc => doc.substring(beside.length, doc.length - 4))
+            .filter(name => /^[A-Z][A-Za-z0-9_]*$/.test(name))
+    }
+    Component.onCompleted: readBeside()
+    Connections {
+        target: panel.workspace
+        function onDocChanged() { Qt.callLater(panel.readBeside) }
+        function onDocumentsChanged() { Qt.callLater(panel.readBeside) }
+    }
+
     // By what they are for, which is how a person looks for them; the module
     // a type comes from goes along, for the import.
     readonly property var groups: {
@@ -53,11 +72,8 @@ Panel {
         // A file beside the document is a type it can use with no import, and
         // the one open cannot hold itself. A file in another directory needs
         // an import of that directory, which `node_insert` does not write.
-        const beside = panel.workspace.doc.substring(0, panel.workspace.doc.lastIndexOf("/") + 1)
-        for (const doc of panel.workspace.documents) {
-            const name = doc.substring(beside.length, doc.length - 4)
-            if (doc !== panel.workspace.doc && doc.startsWith(beside) && doc.endsWith(".qml")
-                    && /^[A-Z][A-Za-z0-9_]*$/.test(name) && name.toLowerCase().includes(needle))
+        for (const name of panel.besideDocument) {
+            if (name.toLowerCase().includes(needle))
                 out[0].types.push({name: name, module: ""})
         }
         for (const g of JSON.parse(toolkit)) {

@@ -47,6 +47,10 @@ Panel {
         looked = true
         if (workspace.blank)
             make("Main.qml")
+        // With one document there is nothing to choose; with more, which to
+        // start on is the person's.
+        else if (workspace.doc === "" && workspace.documents.length === 1)
+            show(workspace.documents[0])
     }
 
     Component.onCompleted: firstLook()

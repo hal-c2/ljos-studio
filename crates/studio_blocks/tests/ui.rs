@@ -2968,6 +2968,14 @@ fn window_shows_document(w: &mut UiWorld, want: String) -> StepResult {
         .ok_or_else(|| format!("the window shows the document {doc:?}"))
 }
 
+#[then("the window shows no document")]
+fn window_shows_no_document(w: &mut UiWorld) -> StepResult {
+    let doc = w.window()?.read("doc").to_js_string().to_string();
+    doc.is_empty()
+        .then_some(())
+        .ok_or_else(|| format!("the window shows the document {doc:?}"))
+}
+
 #[then("the documents panel says why it made no document")]
 fn documents_says_why(w: &mut UiWorld) -> StepResult {
     let window = w.window()?;
