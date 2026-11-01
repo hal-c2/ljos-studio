@@ -46,6 +46,15 @@ Feature: A person places a 3D view from the palette
     Then the window says "This object has no box on the canvas"
     And the inspector has no button "Align Left"
 
+  Scenario: A material's colour is picked in its own row
+    Given the person has searched the palette for "View3D"
+    And the person has placed "View3D" from the palette
+    And the person has selected "PrincipledMaterial" in the layers panel
+    When the person clicks the button "Pick baseColor"
+    And the person enters "#c04040" in the colour picker
+    Then the file "Main.qml" says "#c04040"
+    And the file "Main.qml" does not say "#40c080"
+
   Scenario: A row that holds a vector stays an expression when it is edited
     Given the person has searched the palette for "View3D"
     And the person has placed "View3D" from the palette

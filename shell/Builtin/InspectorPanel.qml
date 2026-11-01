@@ -108,7 +108,7 @@ Panel {
     // or an enumeration has no literal to fall back on. Only the row's own
     // kind decides, so a typo in a literal row is still refused, not bound.
     function enter(name, text, written) {
-        if (picked === "" && name !== "id" && !literal(written).ok && !literal(text).ok)
+        if (picked === "" && name !== "id" && written !== "" && !literal(written).ok && !literal(text).ok)
             bind(name, text)
         else
             set(name, text)

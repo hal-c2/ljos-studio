@@ -30,6 +30,11 @@ Feature: The inspector shows colours and every declared property
     When the person sets "stack" to "3" in the inspector
     Then the file "Main.qml" says "stack: 3"
 
+  Scenario: A row with nothing written still refuses an expression typed by mistake
+    When the person sets "stack" to "cube" in the inspector
+    Then the window says "cube is not a literal: bind it as an expression"
+    And the file "Main.qml" does not say "cube"
+
   Scenario: A colour has a swatch and others do not
     Then the inspector has the button "Pick color"
     And the inspector has no button "Pick width"

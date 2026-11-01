@@ -54,9 +54,9 @@ const uncompiled = (request, type) => {
 };
 export const WAITING = new Map([
   ["Waiting on the preview says when its app wakes next", refused(25)],
-  // The page's outline names the objects, without their boxes or files.
   ["The picture shows the scene", { request: 27, cause: said(/0 pixels of green/) }],
   ["An edit inside the scene reaches the picture", { request: 27, cause: said(/0 pixels of red/) }],
+  // The page's outline names the objects, without their boxes or files.
   ["The outline lists every item, with its box and where it is written", { request: 26, cause: said(/`\/outline` is .*without "Rectangle#card 10,20/s) }],
 ]);
 
