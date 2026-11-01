@@ -1100,6 +1100,25 @@ fn clicks_button(w: &mut UiWorld, name: String) -> StepResult {
     window.click_node(&button)
 }
 
+#[when(regex = r#"^the pointer rests on the button "([^"]+)" until its tip has shown$"#)]
+fn rests_on_button(w: &mut UiWorld, name: String) -> StepResult {
+    let window = w.window()?;
+    let tree = window.tree();
+    let button = find(&tree, &|n| {
+        n.name == name && n.role == "button" && n.key.is_some()
+    })
+    .cloned()
+    .ok_or_else(|| format!("no button {name:?}; the window holds {}", names(&tree)))?;
+    let mut driver = window.stage.drive();
+    let at = driver
+        .aim_at_node(button.key.ok_or("the button has no key")?)
+        .map_err(|why| format!("{name:?} is not reached: {why:?}"))?;
+    driver.move_to(at).map_err(drive_error)?;
+    // Longer than the tip's delay.
+    window.advance(800)?;
+    window.rest()
+}
+
 #[given(regex = r#"^the person has added the state "([^"]+)" in the inspector$"#)]
 #[when(regex = r#"^the person adds the state "([^"]+)" in the inspector$"#)]
 fn adds_state(w: &mut UiWorld, name: String) -> StepResult {

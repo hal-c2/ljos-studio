@@ -13,9 +13,17 @@ ToolButton {
     implicitHeight: 28
     padding: 0
     Accessible.name: text
-    ToolTip.visible: hovered && text !== ""
-    ToolTip.text: text
-    ToolTip.delay: 500
+
+    // Below, not the attached tip's place above: along the top of the window
+    // there is no room above, and a tip kept inside the window would lie on
+    // the button and take its press.
+    ToolTip {
+        parent: button
+        visible: button.hovered && button.text !== ""
+        text: button.text
+        delay: 500
+        y: button.height + 4
+    }
 
     contentItem: Item {
         Icon {

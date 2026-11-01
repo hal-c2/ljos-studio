@@ -326,3 +326,10 @@ Feature: The inspector shows colours and every declared property
     And the inspector does not offer the field "Handle done"
     And the inspector offers the field "onDone"
 
+
+  Scenario: An id changed in its row is one step back
+    When the person selects "Item other" in the layers panel
+    And the person sets "id" to "renamed" in the inspector
+    Then the file "Main.qml" says "id: renamed"
+    When the person clicks the button "Undo"
+    Then the file "Main.qml" says "id: other"
