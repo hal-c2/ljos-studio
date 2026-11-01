@@ -51,19 +51,28 @@ export function servePreview({ element, mount, reload: remade, inspect, tell, co
   const logs = [];
   let dropped = 0;
 
+  const note = (level, message) => {
+    logs.push({ level, message });
+    if (logs.length > 1000) {
+      logs.shift();
+      dropped += 1;
+    }
+  };
   // The previewed app's console lines, without file or line: ljos-web's
   // runtime does not say where a line was logged from.
   for (const level of ["debug", "log", "info", "warn", "error"]) {
     const original = w.console[level].bind(w.console);
     w.console[level] = (...args) => {
-      logs.push({ level: level === "log" ? "info" : level, message: args.map(String).join(" ") });
-      if (logs.length > 1000) {
-        logs.shift();
-        dropped += 1;
-      }
+      note(level === "log" ? "info" : level, args.map(String).join(" "));
       original(...args);
     };
   }
+  // A handler that throws once the app is mounted (`Component.onCompleted`)
+  // is not the mount's error to catch: it surfaces on the page, where the
+  // native preview's process tells it as a log line. Said the same way, so
+  // an agent hears that the app threw instead of seeing a picture.
+  w.addEventListener?.("error", (e) => note("error", String(e.message ?? e.error ?? e)));
+  w.addEventListener?.("unhandledrejection", (e) => note("error", String(e.reason?.message ?? e.reason)));
 
   const waiting = (call, why, request) => ({ answer: "not_supported", message: `${call}: ${why}`, ljos_web_request: request });
 
