@@ -70,6 +70,80 @@ Feature: An object of the project's own type says what it takes
     When the person sets "count" to "hi" in the inspector
     Then the inspector has no button "Write hi as text"
 
+  # What each type takes is what qml6 loads, measured by writing a string to it.
+  Scenario Outline: A type QML writes as a string still offers it in a row with nothing written
+    Given the file "Plain.qml":
+      """qml
+      import QtQuick
+
+      Rectangle {
+          property color tint
+          property date due
+          property point spot
+          property size box
+          property rect frame
+          property vector2d flat
+          property vector3d far
+          property vector4d wide
+          property quaternion turn
+          property font face
+      }
+      """
+    And the person has selected "Badge badge" in the layers panel
+    When the person sets "<row>" to "<word>" in the inspector
+    And the person clicks the button "Write <word> as text"
+    Then the file "Main.qml" says "<row>: \"<word>\""
+
+    Examples:
+      | row   | word       |
+      | tint  | red        |
+      | due   | 2020-01-02 |
+      | spot  | 1,2        |
+      | box   | 1x2        |
+      | frame | 1,2,3x4    |
+      | flat  | 1,2        |
+      | far   | 1,2,3      |
+      | wide  | 1,2,3,4    |
+      | turn  | 1,2,3,4    |
+      | face  | Arial      |
+
+  Scenario Outline: A type QML takes no string for offers none
+    Given the file "Plain.qml":
+      """qml
+      import QtQuick
+
+      Rectangle {
+          property int count
+          property real ratio
+          property bool on
+          property matrix4x4 warp
+      }
+      """
+    And the person has selected "Badge badge" in the layers panel
+    When the person sets "<row>" to "hi" in the inspector
+    Then the inspector has no button "Write hi as text"
+
+    Examples:
+      | row   |
+      | count |
+      | ratio |
+      | on    |
+      | warp  |
+
+  # `list<int>` cannot be written inside an outline, which takes `<int>` for a column.
+  Scenario: A list takes no string and offers none
+    Given the file "Plain.qml":
+      """qml
+      import QtQuick
+
+      Rectangle {
+          property list<int> marks
+      }
+      """
+    And the person has selected "Badge badge" in the layers panel
+    When the person sets "marks" to "hi" in the inspector
+    Then the inspector has no button "Write hi as text"
+
   Scenario: A word in a row with nothing written can be text
     Given the person has selected "Badge badge" in the layers panel
     When the person sets "label" to "hi" in the inspector

@@ -1045,3 +1045,55 @@ fn typing_after_an_undo_does_not_join_what_is_left() {
     s.undo().unwrap();
     assert_eq!(s.text("Main.qml").unwrap().0, "Item {}");
 }
+
+#[test]
+fn what_qml6_loads_a_string_for_is_what_a_type_takes() {
+    for ty in [
+        "string",
+        "url",
+        "var",
+        "variant",
+        "alias",
+        "color",
+        "date",
+        "point",
+        "size",
+        "rect",
+        "vector2d",
+        "vector3d",
+        "vector4d",
+        "quaternion",
+        "font",
+        "QString",
+        "QUrl",
+        "QVariant",
+        "QJSValue",
+        "QColor",
+        "QDateTime",
+        "QPointF",
+        "QSizeF",
+        "QRectF",
+        "QVector3D",
+        "QFont",
+        "Qt::Alignment",
+    ] {
+        assert!(crate::outline::takes_string(ty), "{ty} takes a string");
+    }
+    for ty in [
+        "int",
+        "real",
+        "double",
+        "bool",
+        "matrix4x4",
+        "list<int>",
+        "list<string>",
+        "list<Item>",
+        "qreal",
+        "float",
+        "QMatrix4x4",
+        "QQuickItem*",
+        "QQmlListProperty<QQuickItem>",
+    ] {
+        assert!(!crate::outline::takes_string(ty), "{ty} takes none");
+    }
+}
