@@ -1017,9 +1017,22 @@ fn list_within(w: &mut StudioWorld, cap: usize) -> StepResult {
         })
         .collect();
     let bytes = json!({ "tools": tools }).to_string().len();
-    (bytes <= cap)
-        .then_some(())
-        .ok_or_else(|| format!("the list is {bytes} bytes"))
+    // A list over its cap names what to cut first.
+    let mut sizes: Vec<(usize, &str)> = tools
+        .iter()
+        .map(|t| (t.to_string().len(), t["name"].as_str().unwrap_or("?")))
+        .collect();
+    sizes.sort_unstable_by(|a, b| b.cmp(a));
+    (bytes <= cap).then_some(()).ok_or_else(|| {
+        let largest: Vec<String> = sizes
+            .iter()
+            .map(|(n, name)| format!("{name} {n}"))
+            .collect();
+        format!(
+            "the list is {bytes} bytes; per tool: {}",
+            largest.join(", ")
+        )
+    })
 }
 
 /// A reload Studio reported, applied or not.

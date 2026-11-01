@@ -26,9 +26,7 @@ const TREE_PAGE: usize = 200;
 #[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct ProjectOpenArgs {
-    /// A directory below the workspace, from it or absolute; `.` for the
-    /// workspace itself. Left
-    /// out, the open project is described without reopening it.
+    /// A directory below the workspace, relative or absolute (`.` is the workspace). Left out, describes the open project.
     path: Option<String>,
 }
 
@@ -101,9 +99,7 @@ struct NewArgs {
     doc: String,
     /// Its text; an empty `Item` importing QtQuick when left out.
     text: Option<String>,
-    /// A project JSON file, an array of records: the document is a
-    /// `JsonListModel` reading it, or with `model: "list"` a `ListModel`
-    /// copy, a `ListElement` for each (flat) record. Not with `text`.
+    /// A project JSON file of records: a `JsonListModel` of it, or with `model: "list"` a `ListModel` copy. Not with `text`.
     data: Option<String>,
     /// How `data` is kept: `json` (the default), or `list`.
     #[serde(default)]
@@ -134,8 +130,7 @@ struct EditTextArgs {
     start: Option<usize>,
     end: Option<usize>,
     text: String,
-    /// A person's typing: a character joins the last one in one undo step,
-    /// until a pause of a second or a new word.
+    /// A person's typing: joins the last in one undo step until a pause of a second or a new word.
     #[serde(default)]
     typing: bool,
     #[serde(default)]
@@ -242,17 +237,12 @@ struct SelectArgs {
     /// Empty or null clears the selection.
     #[serde(default, deserialize_with = "list_or_null")]
     nodes: Vec<Address>,
-    /// Instead of `nodes`: a point in the open preview of `doc`, in its
-    /// logical pixels. Selects the object declared where the preview's
-    /// topmost object there is declared; nothing there clears it.
+    /// Instead of `nodes`: a point in the open preview, in logical pixels; selects what is declared where the topmost object is. Nothing there clears it.
     at: Option<Point>,
     /// Toggle these in the selection instead of replacing it.
     #[serde(default)]
     add: bool,
-    /// Also hold the selected objects and all they hold (`mutate`): another
-    /// writer's edit of them is refused as `busy` until the caller has made
-    /// no call for five seconds, and for five minutes at most. Selecting
-    /// nothing lets go of what the caller holds.
+    /// Also hold the selected objects and what they hold (`mutate`): others' edits of them are `busy` until the caller is idle five seconds (five minutes at most). Selecting nothing lets go.
     #[serde(default)]
     hold: bool,
 }
@@ -329,20 +319,14 @@ struct Inspected {
 #[serde(deny_unknown_fields)]
 struct InsertArgs {
     doc: String,
-    /// The generation read. By handle or `id`, the edit is moved past what
-    /// others wrote since, or refused as a conflict; by `path`, which is true
-    /// of one generation only, it is refused if the document moved on, so
-    /// a `path` needs it.
+    /// The generation read; a `path` needs it (handles and ids are moved past others' edits).
     generation: Option<u64>,
     parent: Address,
     /// Child position; the end when left out.
     index: Option<usize>,
-    /// One object in QML (`Rectangle { color: "red" }`), or one member:
-    /// `function f() {}`, `signal s()`, `property int n`, `onClicked: f()`.
-    /// With `block`, it may be left out for the bare block, or set its inputs.
+    /// One object in QML, or one member (`function f() {}`, `signal s()`, `property int n`, `onClicked: f()`). With `block`: left out for the bare block, or its inputs.
     text: Option<String>,
-    /// A functional block from `blocks_list`, `Module.Name`: its module is
-    /// imported and `text` must be of its type.
+    /// A block from `blocks_list`, `Module.Name`; imported, and `text` must be of its type.
     block: Option<String>,
     /// A module the document must import for it (`Shop.Blocks`).
     import: Option<String>,
@@ -356,15 +340,11 @@ struct InsertArgs {
 #[serde(deny_unknown_fields)]
 struct MoveArgs {
     doc: String,
-    /// The generation read. By handle or `id`, the edit is moved past what
-    /// others wrote since, or refused as a conflict; by `path`, which is true
-    /// of one generation only, it is refused if the document moved on, so
-    /// a `path` needs it.
+    /// The generation read; a `path` needs it (handles and ids are moved past others' edits).
     generation: Option<u64>,
     node: Address,
     parent: Address,
-    /// Child position in the new parent, counted without the moved object;
-    /// the end when left out.
+    /// Index in the new parent, without the moved object; the end if left out.
     index: Option<usize>,
     #[serde(default)]
     dry_run: bool,
@@ -374,10 +354,7 @@ struct MoveArgs {
 #[serde(deny_unknown_fields)]
 struct RemoveArgs {
     doc: String,
-    /// The generation read. By handle or `id`, the edit is moved past what
-    /// others wrote since, or refused as a conflict; by `path`, which is true
-    /// of one generation only, it is refused if the document moved on, so
-    /// a `path` needs it.
+    /// The generation read; a `path` needs it (handles and ids are moved past others' edits).
     generation: Option<u64>,
     node: Address,
     #[serde(default)]
@@ -428,15 +405,12 @@ impl<T: JsonSchema> JsonSchema for Present<T> {
 #[serde(deny_unknown_fields)]
 struct PropertyArgs {
     doc: String,
-    /// The generation read. By handle or `id`, the edit is moved past what
-    /// others wrote since, or refused as a conflict; by `path`, which is true
-    /// of one generation only, it is refused if the document moved on, so
-    /// a `path` needs it.
+    /// The generation read; a `path` needs it (handles and ids are moved past others' edits).
     generation: Option<u64>,
     node: Address,
     /// `width`, `font.bold`; written grouped or dotted as the file already does.
     name: String,
-    /// `null` removes the binding. Required: left out, nothing is removed.
+    /// `null` removes the binding. Required.
     value: Present<LiteralArg>,
     #[serde(default)]
     dry_run: bool,
@@ -446,16 +420,12 @@ struct PropertyArgs {
 #[serde(deny_unknown_fields)]
 struct BindingArgs {
     doc: String,
-    /// The generation read. By handle or `id`, the edit is moved past what
-    /// others wrote since, or refused as a conflict; by `path`, which is true
-    /// of one generation only, it is refused if the document moved on, so
-    /// a `path` needs it.
+    /// The generation read; a `path` needs it (handles and ids are moved past others' edits).
     generation: Option<u64>,
     node: Address,
     /// A property (`width`) or a handler (`onClicked`).
     name: String,
-    /// QML after the `:` (`parent.width / 2`, `{ count++ }`); `null` removes it.
-    /// Required: left out, nothing is removed.
+    /// QML after the `:` (`parent.width / 2`, `{ count++ }`); `null` removes it. Required.
     value: Present<String>,
     #[serde(default)]
     dry_run: bool,
@@ -486,34 +456,30 @@ struct StateEditArgs {
     /// The object whose states these are; the root when left out.
     node: Option<Address>,
     action: StateAction,
-    /// The state's name; every action but the transition ones needs it.
+    /// The state's name; all but the transition actions need it.
     state: Option<String>,
     /// `rename`: the new name.
     new_name: Option<String>,
-    /// `add`, `when`: the condition, QML after `when:`. Left out of `when`,
-    /// it removes it.
+    /// `add`, `when`: the condition, QML after `when:`; left out of `when`, removes it.
     when: Option<String>,
-    /// `add`, `when`: a preview target whose width bound becomes the `when`
-    /// (`root.width < 600`); not with `when`.
+    /// `add`, `when`: a preview target whose width bound is the `when`.
     breakpoint: Option<Target>,
     /// `change`: the object, which must have an id.
     target: Option<Address>,
     /// `change`: its property (`text`, `anchors.left`).
     name: Option<String>,
-    /// `change`: a literal. With neither this nor `binding`, the value is
-    /// removed.
+    /// `change`: a literal; with neither this nor `binding`, the value is removed.
     value: Option<LiteralArg>,
     /// `change`: an expression (`root.width / 2`).
     binding: Option<String>,
-    /// Transitions: the states it runs between; `*` (any) when left out.
+    /// Transitions: the states between; `*` (any) if left out.
     from: Option<String>,
     to: Option<String>,
     /// `add_transition`: the animations it runs, in QML.
     animations: Option<String>,
     /// Interactions: the object tapped.
     trigger: Option<Address>,
-    /// Interactions: its signal (`clicked`), handled as `onClicked`; a
-    /// `TapHandler`'s tap when left out.
+    /// Interactions: its signal (`clicked`); a `TapHandler`'s tap if left out.
     signal: Option<String>,
     /// `interaction`: a document beside this one to open, not with `state`.
     open: Option<String>,
@@ -629,8 +595,7 @@ impl Variant {
 #[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct ThemeArgs {
-    /// A document whose theme it is: the nearest `theme.json` up from it.
-    /// The open preview's when left out, else the project's own.
+    /// Whose theme: the nearest `theme.json` up from it; left out, the preview's, else the project's.
     doc: Option<String>,
     /// `Colors.accent`; a singleton (`Spacing`) reads its roles. Every role
     /// when left out.
@@ -1368,9 +1333,7 @@ fn edits(studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
         .with(
             ToolDef::new::<ProjectOpenArgs>(
                 "project_open",
-                "Open a project directory below the workspace (relative or absolute path), or \
-                 describe the open one. Opening starts a new session: earlier handles and history \
-                 end.",
+                "Open a project directory below the workspace, or describe the open one. Opening starts a new session: handles and history end.",
             )
             .answers::<ProjectInfo>()
             .requires(Cap::Inspect),
@@ -1388,8 +1351,7 @@ fn edits(studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
         .with(
             ToolDef::new::<TreeArgs>(
                 "document_tree",
-                "A document's objects in order: handle, path, type, id, bindings. Grouped \
-                 properties are bindings (`font.bold`), not objects. Paginated by `cursor`.",
+                "A document's objects in order: handle, path, type, id, bindings. Grouped properties (`font.bold`) are bindings. Paginated by `cursor`.",
             )
             .answers::<Tree>()
             .requires(Cap::Inspect),
@@ -1459,9 +1421,8 @@ fn edits(studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
         .with(
             ToolDef::new::<NewArgs>(
                 "document_new",
-                "Create a QML document, from `text` or reading a JSON file's records (`data`): a \
-                 JsonListModel of the file, or with `model: \"list\"` a ListModel copy. Refused \
-                 if it exists or does not parse. Undo removes it.",
+                "Create a QML document from `text`, or from a JSON file's records (`data`). Refused if it \
+                 exists or does not parse. Undo removes it.",
             )
             .answers::<EditOut>()
             .requires(Cap::Mutate)
@@ -1497,8 +1458,7 @@ fn edits(studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
         .with(
             ToolDef::new::<EditTextArgs>(
                 "document_edit",
-                "Replace a byte range of a document's text, as the code view does. The result may \
-                 not parse; structural edits then wait and handles hold. Needs the generation read.",
+                "Replace a byte range of a document's text, as the code view does. It may leave the text unparsed; structural edits then wait and handles hold. Needs the generation read.",
             )
             .answers::<EditOut>()
             .requires(Cap::Mutate)
@@ -1531,8 +1491,7 @@ fn edits(studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
         .with(
             ToolDef::new::<FindArgs>(
                 "node_find",
-                "Find objects by id, type, binding name or text in a binding's value, in one \
-                 document or all (naming those it could not parse or read). Returns handles.",
+                "Find objects by id, type, binding name or text in a binding's value, in one document or all (naming those it could not read). Returns handles.",
             )
             .answers::<FindOut>()
             .requires(Cap::Inspect),
@@ -1598,9 +1557,7 @@ fn edits(studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
         .with(
             ToolDef::new::<SelectArgs>(
                 "node_select",
-                "Set Studio's selection, shown on the canvas and in the inspector, by addresses \
-                 or by a point `at` in the document's preview (the object declared there). \
-                 Empty clears it.",
+                "Set Studio's selection (canvas and inspector) by addresses, or by a point `at` in the document's preview. Empty clears it.",
             )
             .answers::<Selection>()
             .requires(Cap::Inspect),
@@ -1677,10 +1634,7 @@ fn edits(studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
         .with(
             ToolDef::new::<NodeArgs>(
                 "node_inspect",
-                "An object's bindings with their byte ranges, its parent, its children, its \
-                 states and transitions, the flows in it, the signals it has with their \
-                 arguments, and the roles and rows of the data it sees (a ListModel's, a JsonListModel's file's, \
-                 a list's model's, in a delegate its list's).",
+                "An object's bindings with byte ranges, parent, children, states, transitions, flows, signals with arguments, and the roles and rows of the data it sees (in a delegate, its list's).",
             )
             .answers::<Inspected>()
             .requires(Cap::Inspect),
@@ -1745,10 +1699,7 @@ fn edits(studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
         .with(
             ToolDef::new::<BlocksArgs>(
                 "blocks_list",
-                "List the project's functional blocks with their contracts; `node_insert` places \
-                 one by `Module.Name`. Unreadable ones are in `errors`. With `doc`, `types` lists \
-                 the toolkit types it can place: its imports first, and `node_insert`'s `import` \
-                 adds a missing one.",
+                "List the project's functional blocks with their contracts; `node_insert` places one by `Module.Name`. Unreadable ones are in `errors`. With `doc`, `types` lists the toolkit types it can place, its imports first.",
             )
             .answers::<BlocksOut>()
             .requires(Cap::Inspect),
@@ -1790,9 +1741,7 @@ fn edits(studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
         .with(
             ToolDef::new::<InsertArgs>(
                 "node_insert",
-                "Insert one object written in QML, or a `block` from `blocks_list`, as a child at an \
-                 index, or one member (function, signal, property, handler) of `parent`. An object \
-                 gets an id unless it has one; `import` is added once. Returns the handle.",
+                "Insert an object written in QML, or a `block` from `blocks_list`, as a child at an index, or a member (function, signal, property, handler) of `parent`. It gets an id unless it has one. Returns the handle.",
             )
             .answers::<EditOut>()
             .requires(Cap::Mutate)
@@ -1850,8 +1799,7 @@ fn edits(studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
         .with(
             ToolDef::new::<PropertyArgs>(
                 "property_set",
-                "Set a property to a literal (bool, number, string) or remove it with null. Grouped \
-                 and dotted forms are one property; a new one follows the file's style.",
+                "Set a property to a literal (bool, number, string), or remove it with null. Grouped and dotted forms are one property; a new one follows the file's style.",
             )
             .answers::<EditOut>()
             .requires(Cap::Mutate)
@@ -1904,10 +1852,7 @@ fn edits(studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
         .with(
             ToolDef::new::<StateEditArgs>(
                 "state_edit",
-                "Add, rename or remove an object's State; set or remove a value it changes or its \
-                 `when` (`breakpoint`: the root's width bound); add or remove a Transition; write \
-                 or take out a flow: a tap on `trigger` goes to `state` or opens a document. \
-                 Refused with `would_break` if the file would not parse.",
+                "States: add, rename, remove; change a value or the `when` (`breakpoint`: the root's width bound); add or remove a Transition; write or remove a flow (a tap on `trigger` goes to `state` or opens a document). `would_break` if the file would not parse.",
             )
             .answers::<EditOut>()
             .requires(Cap::Mutate)
@@ -1924,9 +1869,7 @@ fn edits(studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
         .with(
             ToolDef::new::<ContributeArgs>(
                 "slot_contribute",
-                "Write a Contribution to a block's slot, showing QML `text` or a `block`, importing \
-                 Ljos.Blocks and the block's module once; or `remove` one. Refuses a slot no block \
-                 offers (`blocks_list`).",
+                "Write a Contribution to a block's slot, showing QML `text` or a `block` (imports added once); or `remove` one. Refuses a slot no block offers (`blocks_list`).",
             )
             .answers::<EditOut>()
             .requires(Cap::Mutate)
@@ -1942,9 +1885,7 @@ fn edits(studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
         .with(
             ToolDef::new::<HistoryArgs>(
                 "history",
-                "List edits and who made them (`inspect`), or undo or redo the caller's last \
-                 one (`mutate`), moved past what others wrote since; `all` takes the newest \
-                 whoever made it. Undo gives back the document's bytes.",
+                "List edits and their authors (`inspect`), or undo or redo the caller's last (`mutate`), moved past others' edits; `all` takes the newest whoever made it. Undo gives back the document's bytes.",
             )
             .answers::<HistoryOut>()
             .requires(Cap::Inspect)
@@ -1988,9 +1929,7 @@ fn edits(studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
         .with(
             ToolDef::new::<ThemeArgs>(
                 "theme_set",
-                "Read the tokens of Ljos.Design, the module's value beside the theme file's; or set \
-                 one (`null` gives it back) in the theme file Ljós reads, the project's made when none, \
-                 the rest kept byte for byte. A theme Ljós would refuse is refused with its message.",
+                "Read the tokens of Ljos.Design, the module's value beside the theme file's; or set one (`null` gives it back) in the theme file (made if none), the rest kept byte for byte. A theme Ljós would refuse is refused.",
             )
             .answers::<ThemeOut>()
             .requires(Cap::Mutate)

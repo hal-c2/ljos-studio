@@ -9,33 +9,18 @@ expression: value
     "open_world": false,
     "read_only": true
   },
-  "description": "An object's bindings with their byte ranges, its parent, its children, its states and transitions, the flows in it, the signals it has with their arguments, and the roles and rows of the data it sees (a ListModel's, a JsonListModel's file's, a list's model's, in a delegate its list's).",
+  "description": "An object's bindings with byte ranges, parent, children, states, transitions, flows, signals with arguments, and the roles and rows of the data it sees (in a delegate, its list's).",
   "inputSchema": {
-    "$defs": {
-      "Address": {
-        "description": "One of: `node`, a handle the session gave out (`n7`), stable for the session; `id`, the object's `id`; `path`, as `document_tree` prints it (`root/0/contentItem:`), true of the current text only.",
-        "maxProperties": 1,
-        "minProperties": 1,
-        "properties": {
-          "id": {
-            "type": "string"
-          },
-          "node": {
-            "type": "string"
-          },
-          "path": {
-            "type": "string"
-          }
-        },
-        "type": "object"
-      }
-    },
     "properties": {
       "doc": {
         "type": "string"
       },
       "node": {
-        "$ref": "#/$defs/Address"
+        "additionalProperties": {
+          "type": "string"
+        },
+        "description": "One of `node` (session handle), `id`, `path` (from `document_tree`; this text only).",
+        "type": "object"
       }
     },
     "required": [
@@ -63,12 +48,7 @@ expression: value
       "generation": {
         "type": "integer"
       },
-      "id": {
-        "type": [
-          "string",
-          "null"
-        ]
-      },
+      "id": {},
       "interactions": {
         "type": "array"
       },
@@ -79,21 +59,11 @@ expression: value
       "node": {
         "type": "string"
       },
-      "parent": {
-        "type": [
-          "string",
-          "null"
-        ]
-      },
+      "parent": {},
       "path": {
         "type": "string"
       },
-      "signals": {
-        "type": [
-          "array",
-          "null"
-        ]
-      },
+      "signals": {},
       "start": {
         "type": "integer"
       },

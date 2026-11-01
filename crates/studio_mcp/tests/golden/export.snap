@@ -9,27 +9,10 @@ expression: value
     "open_world": false,
     "read_only": false
   },
-  "description": "Write a bundle of the project that runs without Studio: its QML, theme, assets and own modules, never mocks or `.studio/`. `native`: `ljos-bundle.json` says how `ljos run` starts it. `web`: `ljos-site.json` says what ljos-web builds a site from. `dry_run` writes nothing.",
+  "description": "Write a bundle that runs without Studio: QML, theme, assets and own modules, never mocks or `.studio/`. `native`: `ljos-bundle.json` says how `ljos run` starts it. `web`: `ljos-site.json` is what ljos-web builds from. `dry_run` writes nothing.",
   "inputSchema": {
-    "$defs": {
-      "Target": {
-        "oneOf": [
-          {
-            "const": "native",
-            "description": "A directory `ljos run` starts.",
-            "type": "string"
-          },
-          {
-            "const": "web",
-            "description": "A directory ljos-web builds a static site from.",
-            "type": "string"
-          }
-        ]
-      }
-    },
     "properties": {
       "dry_run": {
-        "default": false,
         "description": "Say what the bundle would hold; write nothing.",
         "type": "boolean"
       },
@@ -38,16 +21,17 @@ expression: value
         "type": "string"
       },
       "out": {
-        "description": "Where, relative to the project and below its `build/`; default\n`build/<target>`. A previous bundle there is replaced.",
-        "type": [
-          "string",
-          "null"
-        ]
+        "description": "Below the project's `build/`; default `build/<target>`. A bundle there is replaced.",
+        "type": "string"
       },
       "target": {
-        "$ref": "#/$defs/Target",
         "default": "native",
-        "description": "`native` (default) or `web`."
+        "description": "`native` (default) or `web`.",
+        "enum": [
+          "native",
+          "web"
+        ],
+        "type": "string"
       }
     },
     "required": [

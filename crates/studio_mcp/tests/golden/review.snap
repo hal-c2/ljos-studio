@@ -9,10 +9,10 @@ expression: value
     "open_world": false,
     "read_only": false
   },
-  "description": "Design review comments on objects, kept in Studio's sidecar (`.studio/`), never in the QML: add, reply, resolve, reopen, or list by doc and node. A comment follows its object through edits; one whose object is removed stays, orphaned, at its last place.",
+  "description": "Design review comments on objects, kept in `.studio/`, never in the QML: add, reply, resolve, reopen, or list by doc and node. A comment follows its object through edits; if it is removed the comment stays, orphaned.",
   "inputSchema": {
-    "$defs": {
-      "Action": {
+    "properties": {
+      "action": {
         "enum": [
           "add",
           "reply",
@@ -22,66 +22,28 @@ expression: value
         ],
         "type": "string"
       },
-      "Address": {
-        "description": "One of: `node`, a handle the session gave out (`n7`), stable for the session; `id`, the object's `id`; `path`, as `document_tree` prints it (`root/0/contentItem:`), true of the current text only.",
-        "maxProperties": 1,
-        "minProperties": 1,
-        "properties": {
-          "id": {
-            "type": "string"
-          },
-          "node": {
-            "type": "string"
-          },
-          "path": {
-            "type": "string"
-          }
-        },
-        "type": "object"
-      }
-    },
-    "properties": {
-      "action": {
-        "$ref": "#/$defs/Action"
-      },
       "author": {
         "description": "Who says it; the caller's own name if absent.",
-        "type": [
-          "string",
-          "null"
-        ]
+        "type": "string"
       },
       "comment": {
         "description": "The comment's id (`reply`, `resolve`, `reopen`).",
-        "type": [
-          "string",
-          "null"
-        ]
+        "type": "string"
       },
       "doc": {
         "description": "The document (`add`; `list` filters by it).",
-        "type": [
-          "string",
-          "null"
-        ]
+        "type": "string"
       },
       "node": {
-        "anyOf": [
-          {
-            "$ref": "#/$defs/Address"
-          },
-          {
-            "type": "null"
-          }
-        ],
-        "description": "The object (`add`; `list` filters by it, with `doc`)."
+        "additionalProperties": {
+          "type": "string"
+        },
+        "description": "The object (`add`; `list` filters by it, with `doc`).",
+        "type": "object"
       },
       "text": {
         "description": "What the comment or reply says.",
-        "type": [
-          "string",
-          "null"
-        ]
+        "type": "string"
       }
     },
     "required": [
@@ -94,12 +56,7 @@ expression: value
   "outputSchema": {
     "properties": {
       "comment": {},
-      "comments": {
-        "type": [
-          "array",
-          "null"
-        ]
-      }
+      "comments": {}
     },
     "type": "object"
   },

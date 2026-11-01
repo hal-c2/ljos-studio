@@ -9,79 +9,45 @@ expression: value
     "open_world": false,
     "read_only": false
   },
-  "description": "Insert one object written in QML, or a `block` from `blocks_list`, as a child at an index, or one member (function, signal, property, handler) of `parent`. An object gets an id unless it has one; `import` is added once. Returns the handle.",
+  "description": "Insert an object written in QML, or a `block` from `blocks_list`, as a child at an index, or a member (function, signal, property, handler) of `parent`. It gets an id unless it has one. Returns the handle.",
   "inputSchema": {
-    "$defs": {
-      "Address": {
-        "description": "One of: `node`, a handle the session gave out (`n7`), stable for the session; `id`, the object's `id`; `path`, as `document_tree` prints it (`root/0/contentItem:`), true of the current text only.",
-        "maxProperties": 1,
-        "minProperties": 1,
-        "properties": {
-          "id": {
-            "type": "string"
-          },
-          "node": {
-            "type": "string"
-          },
-          "path": {
-            "type": "string"
-          }
-        },
-        "type": "object"
-      }
-    },
     "properties": {
       "block": {
-        "description": "A functional block from `blocks_list`, `Module.Name`: its module is\nimported and `text` must be of its type.",
-        "type": [
-          "string",
-          "null"
-        ]
+        "description": "A block from `blocks_list`, `Module.Name`; imported, and `text` must be of its type.",
+        "type": "string"
       },
       "doc": {
         "type": "string"
       },
       "dry_run": {
-        "default": false,
         "type": "boolean"
       },
       "generation": {
-        "description": "The generation read. By handle or `id`, the edit is moved past what\nothers wrote since, or refused as a conflict; by `path`, which is true\nof one generation only, it is refused if the document moved on, so\na `path` needs it.",
-        "type": [
-          "integer",
-          "null"
-        ]
+        "description": "The generation read; a `path` needs it (handles and ids are moved past others' edits).",
+        "type": "integer"
       },
       "id": {
         "description": "Give the object an `id` if it has none (default true).",
-        "type": [
-          "boolean",
-          "null"
-        ]
+        "type": "boolean"
       },
       "import": {
         "description": "A module the document must import for it (`Shop.Blocks`).",
-        "type": [
-          "string",
-          "null"
-        ]
+        "type": "string"
       },
       "index": {
         "description": "Child position; the end when left out.",
-        "type": [
-          "integer",
-          "null"
-        ]
+        "type": "integer"
       },
       "parent": {
-        "$ref": "#/$defs/Address"
+        "additionalProperties": {
+          "type": "string"
+        },
+        "description": "One of `node` (session handle), `id`, `path` (from `document_tree`; this text only).",
+        "type": "object"
       },
       "text": {
-        "description": "One object in QML (`Rectangle { color: \"red\" }`), or one member:\n`function f() {}`, `signal s()`, `property int n`, `onClicked: f()`.\nWith `block`, it may be left out for the bare block, or set its inputs.",
-        "type": [
-          "string",
-          "null"
-        ]
+        "description": "One object in QML, or one member (`function f() {}`, `signal s()`, `property int n`, `onClicked: f()`). With `block`: left out for the bare block, or its inputs.",
+        "type": "string"
       }
     },
     "required": [
@@ -103,30 +69,10 @@ expression: value
       "generation": {
         "type": "integer"
       },
-      "history": {
-        "type": [
-          "integer",
-          "null"
-        ]
-      },
-      "node": {
-        "type": [
-          "string",
-          "null"
-        ]
-      },
-      "rebased_from": {
-        "type": [
-          "integer",
-          "null"
-        ]
-      },
-      "text": {
-        "type": [
-          "string",
-          "null"
-        ]
-      },
+      "history": {},
+      "node": {},
+      "rebased_from": {},
+      "text": {},
       "unchanged": {
         "type": "boolean"
       }

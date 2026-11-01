@@ -16,17 +16,11 @@ expression: value
         "type": "string"
       },
       "end": {
-        "type": [
-          "integer",
-          "null"
-        ]
+        "type": "integer"
       },
       "start": {
         "description": "Byte offsets; the whole text when left out.",
-        "type": [
-          "integer",
-          "null"
-        ]
+        "type": "integer"
       }
     },
     "required": [

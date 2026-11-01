@@ -41,9 +41,7 @@ struct OpenArgs {
     target: Option<Target>,
     /// A size in logical pixels instead of a target's.
     size: Option<Size>,
-    /// `live` runs the app's own blocks; `mocked` the project's mock
-    /// modules (`mocks/`) in their place. Default: the open preview's, else
-    /// `live`.
+    /// `live` runs the app's blocks; `mocked` the mock modules (`mocks/`) in their place. Default: the open preview's, else `live`.
     state: Option<State>,
 }
 
@@ -64,22 +62,17 @@ struct OpenOut {
 #[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct StateArgs {
-    /// The object to read; it needs an `id`. In the previewed document
-    /// unless `doc` names another. Left out, the call only clicks: a
-    /// prototype plays without an `id` on the object whose state it reads.
+    /// The object to read, with an `id`; in the previewed document unless `doc` names another. Left out, the call only clicks.
     node: Option<Address>,
     doc: Option<String>,
-    /// Put `node` in this QML state of its own for the preview, through
-    /// reloads, until `""`; the file does not change.
+    /// Show `node` in this QML state through reloads, until `""`.
     show: Option<String>,
-    /// Properties of `node` to read into `state`, as the running app has
-    /// them: what an expression works out to.
+    /// Properties of `node` to read into `state`, as the running app has them.
     #[serde(default)]
     read: Vec<String>,
     /// Values to assign to a block's state (mocked previews only).
     set: Option<Map<String, Value>>,
-    /// An object (with an `id`) to click first, after `set`, as a person
-    /// does: the app's own handlers answer, so a flow plays.
+    /// An object (with an `id`) to click first, after `set`, as a person does; its handlers answer.
     click: Option<Address>,
     /// A point to click instead, exactly there: whatever is on top gets it.
     click_at: Option<ClickAt>,
@@ -113,8 +106,7 @@ struct StateOut {
 #[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct ScreenshotArgs {
-    /// `png` (default) or `outline`: what the preview shows as text, one
-    /// line per item, for reading rather than looking.
+    /// `png` (default) or `outline`: one text line per item.
     #[serde(default)]
     format: Format,
     /// Longest side of a PNG in pixels (default 800, at most 1280).
@@ -146,8 +138,7 @@ struct ScreenshotOut {
 struct EventsArgs {
     /// The `next` of an earlier answer; 0 or left out: from the start.
     since: Option<usize>,
-    /// Instead of events, wait until the preview's app rests saying something
-    /// new: at most this long (up to 3 600 000), past `rests`.
+    /// Instead of events, wait up to this long (3 600 000 at most) for the app to rest past `rests`.
     wait_ms: Option<u64>,
     /// The `rests` of an earlier answer; left out, the answer comes at once.
     rests: Option<u64>,
@@ -741,9 +732,7 @@ pub(crate) fn add(registry: ToolRegistry, studio: &Arc<Mutex<Studio>>) -> ToolRe
         .with(
             ToolDef::new::<OpenArgs>(
                 "preview_open",
-                "Run a document (a shell) in a preview for a target (desktop, tablet, phone) with \
-                 live blocks or the project's mock modules. On the open preview it changes size or \
-                 state in place, keeping the app's state. Edits show in it at once.",
+                "Run a document (a shell) in a preview for a target (desktop, tablet, phone) with live blocks or the mock modules. On the open preview it changes size or state in place, keeping the app's state.",
             )
             .answers::<OpenOut>()
             .requires(Cap::Run)
@@ -756,10 +745,7 @@ pub(crate) fn add(registry: ToolRegistry, studio: &Arc<Mutex<Studio>>) -> ToolRe
         .with(
             ToolDef::new::<StateArgs>(
                 "preview_state",
-                "Read an object in the preview: its QML state (`variant`), a block's published \
-                 state, which `set` assigns when the block is mocked, and any property named in \
-                 `read`. `click` or `click_at` clicks first, as a person does, so a flow plays. \
-                 Objects are found by `id`.",
+                "Read an object in the preview: its QML state (`variant`), a block's published state (`set` assigns it when mocked), and the properties in `read`. `click` or `click_at` clicks first, as a person does, so a flow plays. Objects are found by `id`.",
             )
             .answers::<StateOut>()
             .requires(Cap::Run)
@@ -786,9 +772,7 @@ pub(crate) fn add(registry: ToolRegistry, studio: &Arc<Mutex<Studio>>) -> ToolRe
         .with(
             ToolDef::new::<EventsArgs>(
                 "preview_events",
-                "What happened to the preview since a cursor: opened, reloaded (with ms), \
-                 reload_failed (the last good one stays), log lines, ended. `wait_ms` instead waits \
-                 for it to rest past `rests`, and says `wake_in_ms`.",
+                "The preview's events since a cursor: opened, reloaded (ms), reload_failed (the last good one stays), log lines, ended. `wait_ms` waits instead for it to rest past `rests`, saying `wake_in_ms`.",
             )
             .answers::<EventsOut>()
             .requires(Cap::Inspect)

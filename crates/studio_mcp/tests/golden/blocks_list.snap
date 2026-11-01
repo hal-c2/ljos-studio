@@ -9,36 +9,24 @@ expression: value
     "open_world": false,
     "read_only": true
   },
-  "description": "List the project's functional blocks with their contracts; `node_insert` places one by `Module.Name`. Unreadable ones are in `errors`. With `doc`, `types` lists the toolkit types it can place: its imports first, and `node_insert`'s `import` adds a missing one.",
+  "description": "List the project's functional blocks with their contracts; `node_insert` places one by `Module.Name`. Unreadable ones are in `errors`. With `doc`, `types` lists the toolkit types it can place, its imports first.",
   "inputSchema": {
     "properties": {
       "cursor": {
         "description": "From a previous page's `next`.",
-        "type": [
-          "string",
-          "null"
-        ]
+        "type": "string"
       },
       "doc": {
         "description": "Also answer `types`, the toolkit types this document can place.",
-        "type": [
-          "string",
-          "null"
-        ]
+        "type": "string"
       },
       "module": {
         "description": "Only this module's blocks (`App.Media`).",
-        "type": [
-          "string",
-          "null"
-        ]
+        "type": "string"
       },
       "search": {
         "description": "Only blocks and types whose name holds this, in any case.",
-        "type": [
-          "string",
-          "null"
-        ]
+        "type": "string"
       }
     },
     "type": "object"
@@ -53,12 +41,7 @@ expression: value
       "errors": {
         "type": "array"
       },
-      "next": {
-        "type": [
-          "string",
-          "null"
-        ]
-      },
+      "next": {},
       "types": {
         "type": "array"
       }

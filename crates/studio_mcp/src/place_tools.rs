@@ -53,26 +53,22 @@ enum Action {
 struct ArrangeArgs {
     action: Action,
     doc: String,
-    /// For all but `place` and `paste`. A path needs `generation` where the
-    /// action writes.
+    /// For all but `place` and `paste`.
     #[serde(default)]
     nodes: Vec<Address>,
-    /// Needed when a node is named by path.
+    /// For a `path`.
     generation: Option<u64>,
-    /// For `geometry`: leave the siblings out, each one being a read of the
-    /// running app. Who only shows the selection does not snap to them.
+    /// For `geometry`: leave the siblings out (each is a read of the running app).
     #[serde(default)]
     without_siblings: bool,
-    /// For `geometry`: the siblings are the first node's children instead,
-    /// which is what something drawn inside it snaps to.
+    /// For `geometry`: the siblings are the first node's children, for something drawn inside it.
     #[serde(default)]
     within: bool,
     /// For `place`.
     places: Option<Vec<PlaceOne>>,
     /// For `place` and `align`: write into this state, not the object.
     record: Option<RecordInto>,
-    /// For `align`: left, hcenter, right, top, vcenter, bottom, distribute_h,
-    /// distribute_v. One object lines up with its parent.
+    /// For `align`; one object lines up with its parent.
     align: Option<Align>,
     /// For `paste`, into any document. Ids it has are renamed.
     parent: Option<Address>,
@@ -1011,10 +1007,7 @@ pub(crate) fn add(registry: ToolRegistry, studio: &Arc<Mutex<Studio>>) -> ToolRe
     registry.with(
         ToolDef::new::<ArrangeArgs>(
             "node_arrange",
-            "A canvas gesture; each edit one undo step. `geometry`: boxes, drag rules, siblings. \
-             `place`: x/y/size, writing what governs each object; refused `arranged`/`anchored` \
-             where overridden. `align`, `copy`, `paste`, `duplicate`, `remove`, `rename`. `hide`, \
-             `show`, `lock`, `unlock` leave the file alone.",
+            "A canvas gesture, one undo step. `geometry`: boxes, drag rules, siblings. `place`: x/y/size, writing what governs each object. `align`, `copy`, `paste`, `duplicate`, `remove`, `rename`. `hide`, `show`, `lock`, `unlock` leave the file alone.",
         )
         .answers::<ArrangeOut>()
         .requires(Cap::Inspect)

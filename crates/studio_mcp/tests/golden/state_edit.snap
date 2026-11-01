@@ -9,231 +9,112 @@ expression: value
     "open_world": false,
     "read_only": false
   },
-  "description": "Add, rename or remove an object's State; set or remove a value it changes or its `when` (`breakpoint`: the root's width bound); add or remove a Transition; write or take out a flow: a tap on `trigger` goes to `state` or opens a document. Refused with `would_break` if the file would not parse.",
+  "description": "States: add, rename, remove; change a value or the `when` (`breakpoint`: the root's width bound); add or remove a Transition; write or remove a flow (a tap on `trigger` goes to `state` or opens a document). `would_break` if the file would not parse.",
   "inputSchema": {
     "$defs": {
       "Address": {
-        "description": "One of: `node`, a handle the session gave out (`n7`), stable for the session; `id`, the object's `id`; `path`, as `document_tree` prints it (`root/0/contentItem:`), true of the current text only.",
-        "maxProperties": 1,
-        "minProperties": 1,
-        "properties": {
-          "id": {
-            "type": "string"
-          },
-          "node": {
-            "type": "string"
-          },
-          "path": {
-            "type": "string"
-          }
+        "additionalProperties": {
+          "type": "string"
         },
+        "description": "One of `node` (session handle), `id`, `path` (from `document_tree`; this text only).",
         "type": "object"
-      },
-      "LiteralArg": {
-        "anyOf": [
-          {
-            "type": "boolean"
-          },
-          {
-            "type": "number"
-          },
-          {
-            "type": "string"
-          }
+      }
+    },
+    "properties": {
+      "action": {
+        "enum": [
+          "add",
+          "rename",
+          "remove",
+          "add_transition",
+          "remove_transition",
+          "remove_interaction",
+          "change",
+          "when",
+          "interaction"
         ],
-        "description": "A literal a property is set to."
+        "type": "string"
       },
-      "StateAction": {
-        "oneOf": [
-          {
-            "enum": [
-              "add",
-              "rename",
-              "remove",
-              "add_transition",
-              "remove_transition",
-              "remove_interaction"
-            ],
-            "type": "string"
-          },
-          {
-            "const": "change",
-            "description": "Set or remove one value the state changes.",
-            "type": "string"
-          },
-          {
-            "const": "when",
-            "description": "Set or remove the state's `when`.",
-            "type": "string"
-          },
-          {
-            "const": "interaction",
-            "description": "A flow on `trigger`: to `state` or, by `navigator`, to `open`.",
-            "type": "string"
-          }
-        ]
+      "animations": {
+        "description": "`add_transition`: the animations it runs, in QML.",
+        "type": "string"
       },
-      "Target": {
-        "description": "The shape of screen a preview is laid out for.",
+      "binding": {
+        "description": "`change`: an expression (`root.width / 2`).",
+        "type": "string"
+      },
+      "breakpoint": {
+        "description": "`add`, `when`: a preview target whose width bound is the `when`.",
         "enum": [
           "desktop",
           "tablet",
           "phone"
         ],
         "type": "string"
-      }
-    },
-    "properties": {
-      "action": {
-        "$ref": "#/$defs/StateAction"
-      },
-      "animations": {
-        "description": "`add_transition`: the animations it runs, in QML.",
-        "type": [
-          "string",
-          "null"
-        ]
-      },
-      "binding": {
-        "description": "`change`: an expression (`root.width / 2`).",
-        "type": [
-          "string",
-          "null"
-        ]
-      },
-      "breakpoint": {
-        "anyOf": [
-          {
-            "$ref": "#/$defs/Target"
-          },
-          {
-            "type": "null"
-          }
-        ],
-        "description": "`add`, `when`: a preview target whose width bound becomes the `when`\n(`root.width < 600`); not with `when`."
       },
       "doc": {
         "type": "string"
       },
       "dry_run": {
-        "default": false,
         "type": "boolean"
       },
       "from": {
-        "description": "Transitions: the states it runs between; `*` (any) when left out.",
-        "type": [
-          "string",
-          "null"
-        ]
+        "description": "Transitions: the states between; `*` (any) if left out.",
+        "type": "string"
       },
       "generation": {
-        "type": [
-          "integer",
-          "null"
-        ]
+        "type": "integer"
       },
       "name": {
         "description": "`change`: its property (`text`, `anchors.left`).",
-        "type": [
-          "string",
-          "null"
-        ]
+        "type": "string"
       },
       "navigator": {
-        "anyOf": [
-          {
-            "$ref": "#/$defs/Address"
-          },
-          {
-            "type": "null"
-          }
-        ],
+        "$ref": "#/$defs/Address",
         "description": "`interaction`: the `Loader` or `StackView` that opens it."
       },
       "new_name": {
         "description": "`rename`: the new name.",
-        "type": [
-          "string",
-          "null"
-        ]
+        "type": "string"
       },
       "node": {
-        "anyOf": [
-          {
-            "$ref": "#/$defs/Address"
-          },
-          {
-            "type": "null"
-          }
-        ],
+        "$ref": "#/$defs/Address",
         "description": "The object whose states these are; the root when left out."
       },
       "open": {
         "description": "`interaction`: a document beside this one to open, not with `state`.",
-        "type": [
-          "string",
-          "null"
-        ]
+        "type": "string"
       },
       "signal": {
-        "description": "Interactions: its signal (`clicked`), handled as `onClicked`; a\n`TapHandler`'s tap when left out.",
-        "type": [
-          "string",
-          "null"
-        ]
+        "description": "Interactions: its signal (`clicked`); a `TapHandler`'s tap if left out.",
+        "type": "string"
       },
       "state": {
-        "description": "The state's name; every action but the transition ones needs it.",
-        "type": [
-          "string",
-          "null"
-        ]
+        "description": "The state's name; all but the transition actions need it.",
+        "type": "string"
       },
       "target": {
-        "anyOf": [
-          {
-            "$ref": "#/$defs/Address"
-          },
-          {
-            "type": "null"
-          }
-        ],
+        "$ref": "#/$defs/Address",
         "description": "`change`: the object, which must have an id."
       },
       "to": {
-        "type": [
-          "string",
-          "null"
-        ]
+        "type": "string"
       },
       "trigger": {
-        "anyOf": [
-          {
-            "$ref": "#/$defs/Address"
-          },
-          {
-            "type": "null"
-          }
-        ],
+        "$ref": "#/$defs/Address",
         "description": "Interactions: the object tapped."
       },
       "value": {
-        "anyOf": [
-          {
-            "$ref": "#/$defs/LiteralArg"
-          },
-          {
-            "type": "null"
-          }
-        ],
-        "description": "`change`: a literal. With neither this nor `binding`, the value is\nremoved."
+        "description": "`change`: a literal; with neither this nor `binding`, the value is removed.",
+        "type": [
+          "boolean",
+          "number",
+          "string"
+        ]
       },
       "when": {
-        "description": "`add`, `when`: the condition, QML after `when:`. Left out of `when`,\nit removes it.",
-        "type": [
-          "string",
-          "null"
-        ]
+        "description": "`add`, `when`: the condition, QML after `when:`; left out of `when`, removes it.",
+        "type": "string"
       }
     },
     "required": [
@@ -255,30 +136,10 @@ expression: value
       "generation": {
         "type": "integer"
       },
-      "history": {
-        "type": [
-          "integer",
-          "null"
-        ]
-      },
-      "node": {
-        "type": [
-          "string",
-          "null"
-        ]
-      },
-      "rebased_from": {
-        "type": [
-          "integer",
-          "null"
-        ]
-      },
-      "text": {
-        "type": [
-          "string",
-          "null"
-        ]
-      },
+      "history": {},
+      "node": {},
+      "rebased_from": {},
+      "text": {},
       "unchanged": {
         "type": "boolean"
       }
