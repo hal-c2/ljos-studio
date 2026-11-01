@@ -884,7 +884,11 @@ MouseArea {
         }
         function onPreviewChanged() {
             const preview = overlay.workspace.preview
-            const generation = preview !== null ? preview.generation : -1
+            // The boxes are the running app's: a state or a width moves what
+            // is in it with no new text to read.
+            const generation = preview !== null
+                ? [preview.generation, preview.clicks, preview.width, preview.variant].join()
+                : ""
             if (generation !== overlay.seenGeneration) {
                 overlay.seenGeneration = generation
                 if (overlay.writing)
@@ -1001,7 +1005,7 @@ MouseArea {
     // Geometry reads asked and not answered; they answer in order.
     property int reads: 0
     property bool dropWaits: false
-    property int seenGeneration: -1
+    property string seenGeneration: ""
     property string seenChosen: "[]"
 
     // One outline per object; no drawing while nothing is selected.

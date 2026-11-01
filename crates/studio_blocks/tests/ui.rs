@@ -1662,6 +1662,7 @@ fn call_as(w: &mut UiWorld, client: Option<String>, tool: &str, step: &Step) -> 
     window.rest()
 }
 
+#[given(regex = r#"^the person has chosen the target "([^"]+)"$"#)]
 #[when(regex = r#"^the person chooses the target "([^"]+)"$"#)]
 fn chooses_target(w: &mut UiWorld, target: String) -> StepResult {
     let window = w.window()?;
@@ -2124,12 +2125,39 @@ fn file_says(w: &mut UiWorld, name: String, want: String) -> StepResult {
 
 #[then(regex = r#"^the canvas outlines the selection at (\d+), (\d+) sized (\d+) by (\d+)$"#)]
 fn outline_at(w: &mut UiWorld, x: f64, y: f64, width: f64, height: f64) -> StepResult {
+    outline_of(w, "Desktop", x, y, width, height)
+}
+
+#[then(
+    regex = r#"^the frame "([^"]+)" outlines the selection at (\d+), (\d+) sized (\d+) by (\d+)$"#
+)]
+fn frame_outlines(
+    w: &mut UiWorld,
+    target: String,
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
+) -> StepResult {
+    outline_of(w, &target, x, y, width, height)
+}
+
+fn outline_of(
+    w: &mut UiWorld,
+    target: &str,
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
+) -> StepResult {
     let window = w.window()?;
-    let outline = overlay_part(window, "selectionOutline")?;
-    let zoom = window
-        .engine()
-        .read_by_name(overlay_part(window, "overlay")?, "zoom")
-        .to_number();
+    let frame = window.frame(target)?;
+    let part = |name: &str| {
+        ljos_drive::find_below(window.engine(), frame, name)
+            .ok_or_else(|| format!("the frame has no {name}"))
+    };
+    let outline = part("selectionOutline")?;
+    let zoom = window.engine().read_by_name(part("overlay")?, "zoom").to_number();
     let read = |name: &str| window.engine().read_by_name(outline, name).to_number() / zoom;
     let got = (read("x"), read("y"), read("width"), read("height"));
     let close = |a: f64, b: f64| (a - b).abs() < 0.5;

@@ -336,6 +336,7 @@ fn open(studio: &Mutex<Studio>, a: OpenArgs) -> Result<OpenOut, SurfaceError> {
             behind: false,
             clicks: 0,
             shown: None,
+            breakpoint: None,
         });
         previews.write_hidden();
     }
@@ -463,6 +464,13 @@ fn state(studio: &Mutex<Studio>, a: StateArgs) -> Result<StateOut, SurfaceError>
             );
         }
         if let Err(e) = open.host.write(&id, "state", Value::String(show.clone())) {
+            return Err(preview_error(previews.failed(e)));
+        }
+        // Nothing asked for any more: back to what the width turns on.
+        if show.is_empty()
+            && let Some((root, state)) = &open.breakpoint
+            && let Err(e) = open.host.write(root, "state", Value::String(state.clone()))
+        {
             return Err(preview_error(previews.failed(e)));
         }
         open.shown = (!show.is_empty()).then(|| (id.clone(), show));
