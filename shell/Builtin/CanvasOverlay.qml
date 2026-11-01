@@ -492,18 +492,41 @@ MouseArea {
         const row = workspace.inspector.find(r => r.name === "text")
         if (row === undefined)
             return
-        const spelled = workspace.literal(row.value) && /^["'`]/.test(row.value)
-        if (!spelled) {
+        const written = workspace.literal(row.value) && /^["'`]/.test(row.value) ? decoded(row.value) : null
+        if (written === null) {
             told = "This text is an expression: change it in the inspector"
             return
         }
         const size = workspace.inspector.find(r => r.name === "font.pixelSize")
         editing = {
+            doc: workspace.doc,
             node: n.node,
             box: n.window,
             size: size !== undefined && !isNaN(Number(size.value)) ? Number(size.value) : 14,
-            written: JSON.parse('"' + row.value.slice(1, -1).replace(/\\'/g, "'") + '"')
+            written: written
         }
+    }
+
+    // What a QML string says, in any of its quotes. A template with a
+    // placeholder says nothing until it runs: null, as for what cannot be read.
+    function decoded(literal) {
+        const body = literal.slice(1, -1)
+        if (literal[0] === "`" && body.includes("${"))
+            return null
+        const named = {n: "\n", t: "\t", r: "\r", b: "\b", f: "\f", v: "\v", "0": "\0"}
+        let readable = true
+        const text = body.replace(/\\(u\{[0-9a-fA-F]+\}|u[0-9a-fA-F]{4}|x[0-9a-fA-F]{2}|\r?\n|[^])/g, (_, what) => {
+            if (what[0] === "\n" || what[0] === "\r")
+                return ""
+            if (named[what] !== undefined)
+                return named[what]
+            if (what.length > 1)
+                return String.fromCodePoint(parseInt(what.replace(/[ux{}]/g, ""), 16))
+            if (what === "x" || what === "u")
+                readable = false
+            return what
+        })
+        return readable ? text : null
     }
 
     function finishEditing(keep) {
@@ -511,11 +534,13 @@ MouseArea {
         if (was === null)
             return
         const text = canvasText.text
+        const hadKeys = canvasText.activeFocus
         editing = null
-        forceActiveFocus()
+        if (hadKeys)
+            forceActiveFocus()
         if (keep && text !== was.written) {
             workspace.dispatch("binding_set", {
-                doc: workspace.doc,
+                doc: was.doc,
                 node: {node: was.node},
                 name: "text",
                 value: JSON.stringify(text)
@@ -679,6 +704,9 @@ MouseArea {
         // reads again, or an idle window could feed itself and never rest.
         function onChosenChanged() {
             const key = JSON.stringify(overlay.workspace.chosen)
+            // What is typed is the person's: it goes in, on what it was for.
+            if (overlay.editing !== null && overlay.workspace.selected !== overlay.editing.node)
+                overlay.finishEditing(true)
             if (key !== overlay.seenChosen) {
                 overlay.seenChosen = key
                 overlay.told = ""
@@ -750,8 +778,13 @@ MouseArea {
                 }
             }
         }
+        function onDocChanged() {
+            overlay.finishEditing(true)
+        }
         function onRefused(tool, error) {
-            if (tool === "node_move") {
+            if (tool === "node_insert") {
+                overlay.writing_ = null
+            } else if (tool === "node_move") {
                 overlay.endDrop(false)
                 overlay.refetch()
             } else if (tool === "node_arrange") {
@@ -797,7 +830,7 @@ MouseArea {
         writing_ = null
         workspace.dispatch("node_select", {doc: workspace.doc, nodes: [{node: answer.node}]})
         if (text !== null)
-            editing = {node: answer.node, box: text.box, size: text.size, written: text.written}
+            editing = {doc: workspace.doc, node: answer.node, box: text.box, size: text.size, written: text.written}
         return true
     }
     // Geometry reads asked and not answered; they answer in order.
@@ -895,6 +928,10 @@ MouseArea {
             border.color: Colors.accent
         }
         Accessible.name: "Text of the selected object"
+        onActiveFocusChanged: {
+            if (!activeFocus && visible)
+                overlay.finishEditing(true)
+        }
         onVisibleChanged: {
             if (visible) {
                 text = overlay.editing.written

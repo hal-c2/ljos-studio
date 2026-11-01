@@ -30,6 +30,7 @@ Feature: An object of the project's own type says what it takes
 
       Plain {
           property int count: 0
+          readonly property int total: 1
       }
       """
     And Studio's window shows the project
@@ -58,3 +59,13 @@ Feature: An object of the project's own type says what it takes
     When the person sets "id" to "not an id" in the inspector
     Then the file "Main.qml" says "Badge { id: badge;"
     And the inspector's "id" holds "badge"
+
+  Scenario: What only the type can say is not offered
+    When the person selects "Badge badge" in the layers panel
+    Then the inspector has no row "total"
+
+  Scenario: A word in a row with nothing written can be text
+    Given the person has selected "Badge badge" in the layers panel
+    When the person sets "label" to "hi" in the inspector
+    And the person clicks the button "Write hi as text"
+    Then the file "Main.qml" says "label: \"hi\""

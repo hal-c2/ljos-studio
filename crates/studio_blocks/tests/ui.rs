@@ -2210,6 +2210,14 @@ fn writes_on_canvas(w: &mut UiWorld, text: String, key: String) -> StepResult {
     window.rest()
 }
 
+#[given(regex = r#"^the person has typed "(.*)" on the canvas$"#)]
+fn has_typed_on_canvas(w: &mut UiWorld, text: String) -> StepResult {
+    let text = unescape(&text);
+    let window = w.window()?;
+    window.stage.drive().commit(&text).map_err(drive_error)?;
+    window.rest()
+}
+
 #[when(regex = r#"^the person types "([^"]+)" on the canvas$"#)]
 fn types_on_canvas(w: &mut UiWorld, key: String) -> StepResult {
     let window = w.window()?;
@@ -2257,6 +2265,37 @@ fn holds_and_drags(
     window.rest()?;
     w.frame_before = Some(before);
     Ok(())
+}
+
+#[then(regex = r#"^the canvas's text holds "(.*)"$"#)]
+fn canvas_text_holds(w: &mut UiWorld, want: String) -> StepResult {
+    let want = unescape(&want);
+    let tree = w.window()?.tree();
+    let field = find(&tree, &|n| n.name == "Text of the selected object")
+        .ok_or("no text field is open on the canvas")?;
+    (field.value == want)
+        .then_some(())
+        .ok_or_else(|| format!("the canvas's text holds {:?}", field.value))
+}
+
+// A write that fails is what a person meets on a full disk or a read-only
+// checkout, and no gesture can bring it about.
+#[given("the project's folder takes no writes")]
+fn folder_takes_no_writes(w: &mut UiWorld) -> StepResult {
+    set_folder_read_only(w, true)
+}
+
+#[when("the project's folder takes writes again")]
+fn folder_takes_writes(w: &mut UiWorld) -> StepResult {
+    set_folder_read_only(w, false)
+}
+
+fn set_folder_read_only(w: &UiWorld, read_only: bool) -> StepResult {
+    let mut permissions = std::fs::metadata(w.dir.path())
+        .map_err(|e| e.to_string())?
+        .permissions();
+    permissions.set_readonly(read_only);
+    std::fs::set_permissions(w.dir.path(), permissions).map_err(|e| e.to_string())
 }
 
 #[then("the canvas has no text being written")]
@@ -2312,6 +2351,13 @@ fn inspector_has_button(w: &mut UiWorld, name: String) -> StepResult {
     find(&tree, &|n| n.name == name && n.role == "button")
         .map(|_| ())
         .ok_or_else(|| format!("no button {name:?}; the window holds {}", names(&tree)))
+}
+
+#[then(regex = r#"^the inspector has no row "([^"]+)"$"#)]
+fn inspector_no_row(w: &mut UiWorld, name: String) -> StepResult {
+    let tree = w.window()?.tree();
+    find(&tree, &|n| n.name == name && n.role == "textinput")
+        .map_or(Ok(()), |_| Err(format!("the inspector has a row {name:?}")))
 }
 
 #[then(regex = r#"^the inspector has no button "([^"]+)"$"#)]
