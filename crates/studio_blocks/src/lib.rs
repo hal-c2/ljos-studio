@@ -24,7 +24,7 @@ use std::collections::{HashMap, VecDeque};
 use std::hash::Hasher;
 use std::rc::Rc;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 use ljos::item::{self, DisplayListBuilder, ImageHandle, ItemPaint, TextEngine, kurbo};
@@ -82,6 +82,8 @@ struct Context {
     wake_at: std::cell::Cell<Option<Instant>>,
     /// What the last reload said, for a status made after it.
     reload_error: RefCell<String>,
+    /// The threads following a preview's picture that have not ended.
+    followers: Arc<AtomicUsize>,
 }
 
 /// The session a shell binds: its state as plain JS values, and one
@@ -380,6 +382,16 @@ struct Queue {
     following: Option<Arc<AtomicBool>>,
     /// The lists last set, by the property's name.
     given: HashMap<&'static str, Json>,
+}
+
+impl Drop for Queue {
+    /// `followPicture(false)` is not called on a Workspace going away, and the
+    /// thread would go on waiting on the preview for it.
+    fn drop(&mut self) {
+        if let Some(stop) = self.following.take() {
+            stop.store(true, Ordering::SeqCst);
+        }
+    }
 }
 
 /// Looking again after a click. Nothing tells Studio when the app has come to
@@ -753,6 +765,24 @@ fn finish(engine: &Engine, ws: ObjectId, done: Done) {
 const FOLLOW_WAIT_MS: u64 = 30_000;
 const LOOK_AT_MOST_EVERY_MS: u64 = 100;
 
+/// Counts a following thread out, however it ends.
+struct Follower(Arc<AtomicUsize>);
+
+impl Drop for Follower {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
+/// How many threads are following a preview's picture for this Engine's
+/// workspaces.
+pub fn followers(engine: &Engine) -> usize {
+    engine
+        .extension::<Context>()
+        .followers
+        .load(Ordering::SeqCst)
+}
+
 /// Starts waiting on the preview, if wanted and not already waiting. Nothing
 /// polls: the wait answers when the app has drawn.
 fn follow(engine: &Engine, ws: ObjectId) {
@@ -775,9 +805,13 @@ fn follow(engine: &Engine, ws: ObjectId) {
     }
     let post = Platform::of(engine).poster();
     let mine = Arc::clone(&stop);
+    let followers = Arc::clone(&context.followers);
+    followers.fetch_add(1, Ordering::SeqCst);
+    let counted = Arc::clone(&followers);
     let spawned = std::thread::Builder::new()
         .name("studio-picture-watch".to_owned())
         .spawn(move || {
+            let _ended = Follower(counted);
             let mut since = None;
             while !stop.load(Ordering::SeqCst) {
                 let mut args = json!({"wait_ms": FOLLOW_WAIT_MS});
@@ -839,6 +873,7 @@ fn follow(engine: &Engine, ws: ObjectId) {
         });
     if spawned.is_err() {
         // No thread to wait on: the next refresh tries again.
+        followers.fetch_sub(1, Ordering::SeqCst);
         let mut q = queue.borrow_mut();
         if q.following.as_ref().is_some_and(|s| Arc::ptr_eq(s, &mine)) {
             q.following = None;

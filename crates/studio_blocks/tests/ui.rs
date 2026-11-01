@@ -30,6 +30,8 @@ const HEIGHT: f64 = 900.0;
 #[derive(World)]
 #[world(init = Self::new)]
 struct UiWorld {
+    /// A workspace a scenario expects to go.
+    remembered: Option<ObjectId>,
     /// Where the outline was shown, bare of a ghost, in the frames of a flick.
     outlines: Vec<(f64, f64)>,
     dir: tempfile::TempDir,
@@ -141,6 +143,7 @@ fn drive_error(e: DriveError) -> String {
 impl UiWorld {
     fn new() -> Self {
         Self {
+            remembered: None,
             outlines: Vec::new(),
             dir: tempfile::tempdir().expect("a temporary directory"),
             state: tempfile::tempdir().expect("a temporary directory"),
@@ -2474,6 +2477,50 @@ fn opens_again(w: &mut UiWorld) -> StepResult {
     // the same files.
     w.window = None;
     w.open_watched()
+}
+
+#[given(regex = r"^1 thread is following the preview's picture$")]
+fn one_follower(w: &mut UiWorld) -> StepResult {
+    let window = w.window()?;
+    let got = studio_blocks::followers(window.engine());
+    (got == 1)
+        .then_some(())
+        .ok_or_else(|| format!("{got} threads follow the picture"))
+}
+
+#[given("the person has remembered the window's workspace")]
+fn remembers_workspace(w: &mut UiWorld) -> StepResult {
+    w.remembered = Some(w.window()?.workspace);
+    Ok(())
+}
+
+#[then("the remembered workspace is gone")]
+fn remembered_is_gone(w: &mut UiWorld) -> StepResult {
+    let was = w.remembered.ok_or("no workspace was remembered")?;
+    (!w.window()?.engine().is_alive(was))
+        .then_some(())
+        .ok_or_else(|| "the reload kept the workspace, so this says nothing".to_owned())
+}
+
+// A wait on an app that moves ends with its next rest, so this is short;
+// the thread only looks at what stops it when a wait ends.
+#[then(regex = r"^no thread is following the preview's picture$")]
+fn no_follower(w: &mut UiWorld) -> StepResult {
+    let window = w.window()?;
+    let deadline = std::time::Instant::now() + PATIENCE;
+    loop {
+        let got = studio_blocks::followers(window.engine());
+        if got == 0 {
+            return Ok(());
+        }
+        if std::time::Instant::now() >= deadline {
+            return Err(format!(
+                "{got} threads still follow the picture after {PATIENCE:?}"
+            ));
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        window.stage.drive().advance(50).map_err(drive_error)?;
+    }
 }
 
 #[given("the window has taken the change")]
