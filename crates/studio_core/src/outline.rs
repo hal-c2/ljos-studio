@@ -380,6 +380,21 @@ pub fn place_members(source: &str, start: usize) -> Vec<std::ops::Range<usize>> 
         .collect()
 }
 
+/// Where the id of the object starting at `start` is written.
+pub fn id_member(source: &str, start: usize) -> Option<std::ops::Range<usize>> {
+    let allocator = Allocator::default();
+    let parsed = qml_syntax::parse(&allocator, source);
+    object_at(&parsed.document.root, start)?
+        .members
+        .iter()
+        .find_map(|member| match member {
+            QmlMember::Binding(b) if b.name.to_string() == "id" => {
+                Some(b.span.start as usize..b.span.end as usize)
+            }
+            _ => None,
+        })
+}
+
 fn object_at<'o, 'a>(object: &'o QmlObject<'a>, start: usize) -> Option<&'o QmlObject<'a>> {
     if object.span.start as usize == start {
         return Some(object);
