@@ -708,6 +708,17 @@ Panel {
         }
 
         Label {
+            visible: panel.workspace.chosen.length > 1
+            text: visible ? panel.workspace.chosen.length + " selected. This edits the first." : ""
+            color: Colors.textMuted
+            font.pixelSize: Typography.captionSize
+            padding: Spacing.xs
+            Layout.fillWidth: true
+            Accessible.role: Accessible.StaticText
+            Accessible.name: text
+        }
+
+        Label {
             id: refusal
             objectName: "inspectorRefusal"
             color: Colors.danger
