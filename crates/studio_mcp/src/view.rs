@@ -430,6 +430,17 @@ impl Studio {
                     });
                 }
             }
+            // What its type takes, which the person placing it has not read.
+            for name in crate::signals::properties(self.session.store(), doc, &view.text, &node) {
+                if !view.inspector.iter().any(|row| row.name == name) {
+                    view.inspector.push(Shown {
+                        name,
+                        value: String::new(),
+                        colour: false,
+                        expression: false,
+                    });
+                }
+            }
             if let Ok(variants) = self.session.variants(doc, &Address::Node(handle.clone())) {
                 view.states = variants.states;
             }

@@ -145,6 +145,25 @@ Feature: An agent wires a prototype's flow
 
   Rule: A flow handles a signal the object has
 
+    Scenario: What an object's type takes is listed, written or not
+      Given the file "Chip.qml":
+        """qml
+        import QtQuick
+
+        Item { property int count: 0; property string label }
+        """
+      And the file "Main.qml":
+        """qml
+        import QtQuick
+
+        Item { Chip { id: chip; count: 2 } }
+        """
+      When the agent calls the tool "node_inspect" with:
+        """json
+        {"doc": "Main.qml", "node": {"id": "chip"}}
+        """
+      Then the answer's "/takes" is ["count", "label"]
+
     Scenario: An object's signals are listed with their arguments
       Given the agent has called the tool "node_insert" with:
         """json

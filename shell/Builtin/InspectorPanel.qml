@@ -54,7 +54,7 @@ Panel {
                 panel.offered = null
         }
         function onRefused(tool, error) {
-            if (["property_set", "binding_set", "state_edit"].includes(tool))
+            if (["property_set", "binding_set", "state_edit", "node_arrange"].includes(tool))
                 panel.reseed()
             if (tool === "state_edit" && panel.renamedPicked !== "") {
                 panel.pick(panel.renamedPicked, panel.pickedOn, true)
@@ -105,6 +105,19 @@ Panel {
     // kind, as the parser read it, decides, so a typo in a literal row is
     // still refused, not bound.
     function enter(row, text) {
+        // An id is no value: what names it elsewhere has to follow it.
+        if (row.name === "id") {
+            refusal.text = ""
+            if (text.trim() !== row.value) {
+                workspace.dispatch("node_arrange", {
+                    action: "rename",
+                    doc: workspace.doc,
+                    nodes: [{node: workspace.selected}],
+                    name: text.trim()
+                })
+            }
+            return
+        }
         if (picked === "" && row.name !== "id" && row.expression === true && !workspace.literal(text.trim()))
             bind(row.name, text)
         else

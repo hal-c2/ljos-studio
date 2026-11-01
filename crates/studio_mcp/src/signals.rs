@@ -51,6 +51,10 @@ struct Scope {
 struct Found {
     signals: Vec<Signal>,
     properties: Vec<String>,
+    /// What a project file or a type dump declares, which a person has no
+    /// other way to learn: the toolkit's own are in its documentation, and
+    /// there are too many to list on every object.
+    taken: Vec<String>,
 }
 
 impl Found {
@@ -119,6 +123,27 @@ struct Types<'s> {
 /// a derived type's before its base's; `None` when its type is one Studio
 /// finds described nowhere, so that what it has is not known.
 pub fn of(store: &dyn Store, doc: &str, source: &str, node: &Node) -> Option<Vec<Signal>> {
+    let (found, described) = look_up(store, doc, source, node)?;
+    (described == Described::Whole).then(|| found.done())
+}
+
+/// What `node`'s type takes that its project says: the properties its files
+/// and type dumps declare, the nearest first. Known even when what the type
+/// inherits is not.
+pub fn properties(store: &dyn Store, doc: &str, source: &str, node: &Node) -> Vec<String> {
+    let Some((found, _)) = look_up(store, doc, source, node) else {
+        return Vec::new();
+    };
+    let mut seen = Vec::new();
+    for name in found.taken {
+        if !seen.contains(&name) {
+            seen.push(name);
+        }
+    }
+    seen
+}
+
+fn look_up(store: &dyn Store, doc: &str, source: &str, node: &Node) -> Option<(Found, Described)> {
     let mut dumps = DumpedTypes::default();
     for file in crate::blocks::dumps(store) {
         // A dump that does not read is `blocks_list`'s to report; its types
@@ -157,7 +182,8 @@ pub fn of(store: &dyn Store, doc: &str, source: &str, node: &Node) -> Option<Vec
     };
     let mut found = Found::default();
     found.declared(node);
-    (types.lookup(&scope, &node.ty, &mut found, 0) == Described::Whole).then(|| found.done())
+    let described = types.lookup(&scope, &node.ty, &mut found, 0);
+    Some((found, described))
 }
 
 fn dir_of(file: &str) -> &str {
@@ -249,6 +275,9 @@ impl Types<'_> {
             found
                 .properties
                 .extend(ty.properties.iter().map(|p| p.name.clone()));
+            found
+                .taken
+                .extend(ty.properties.iter().map(|p| p.name.clone()));
             if let Some(base) = self.dumps.base_of(ty) {
                 ty = base;
                 continue;
@@ -307,6 +336,7 @@ impl Types<'_> {
             return Described::InPart;
         };
         found.declared(root);
+        found.taken.extend(root.properties.iter().cloned());
         let scope = Scope {
             dir: dir_of(file).to_owned(),
             imports,
