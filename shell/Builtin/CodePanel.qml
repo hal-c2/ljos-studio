@@ -53,12 +53,18 @@ Panel {
             if (tool === "document_edit") {
                 --panel.pending
                 panel.sync()
+                // The band went with the first key, and text that is already
+                // the file's gives no other reason to look again.
+                panel.showSelection()
             }
         }
         function onRefused(tool, error) {
             if (tool === "document_edit") {
                 --panel.pending
                 panel.sync()
+                // The band went with the first key, and text that is already
+                // the file's gives no other reason to look again.
+                panel.showSelection()
             }
         }
     }

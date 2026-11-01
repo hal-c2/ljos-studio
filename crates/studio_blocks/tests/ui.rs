@@ -1047,6 +1047,29 @@ fn inspector_button_disabled(w: &mut UiWorld, name: String) -> StepResult {
         .ok_or_else(|| format!("{name:?} is {:?}", button.states))
 }
 
+#[when(regex = r#"^the person types "(.*)" in the inspector's "([^"]+)" and leaves it$"#)]
+fn types_in_row(w: &mut UiWorld, text: String, name: String) -> StepResult {
+    let text = unescape(&text);
+    let window = w.window()?;
+    let field = window.node("Inspector", Some("textinput"), &name)?;
+    window.click_node(&field)?;
+    let mut driver = window.stage.drive();
+    driver
+        .chord(&Chord::parse("Ctrl+A")?, 0)
+        .map_err(drive_error)?;
+    driver.commit(&text).map_err(drive_error)?;
+    window.rest()
+}
+
+#[then(regex = r#"^the inspector's "([^"]+)" holds "(.*)"$"#)]
+fn row_holds(w: &mut UiWorld, name: String, want: String) -> StepResult {
+    let want = unescape(&want);
+    let field = w.window()?.node("Inspector", Some("textinput"), &name)?;
+    (field.value == want)
+        .then_some(())
+        .ok_or_else(|| format!("the row holds {:?}", field.value))
+}
+
 #[then(regex = r#"^the inspector's new property row holds "(.*)"$"#)]
 fn new_row_holds(w: &mut UiWorld, want: String) -> StepResult {
     let field = w
@@ -1392,6 +1415,28 @@ fn drags_in_frame(
         .drive()
         .release(to, MouseButtons::LEFT)
         .map_err(drive_error)?;
+    window.rest()
+}
+
+/// A hand faster than the press's read of the running app.
+#[when(
+    regex = r#"^the person drags in the frame "([^"]+)" from (\d+), (\d+) to (\d+), (\d+) at once$"#
+)]
+fn drags_in_frame_at_once(
+    w: &mut UiWorld,
+    target: String,
+    x0: f64,
+    y0: f64,
+    x1: f64,
+    y1: f64,
+) -> StepResult {
+    let window = w.window()?;
+    let from = frame_point(window, &target, x0, y0)?;
+    let to = frame_point(window, &target, x1, y1)?;
+    let mut drive = window.stage.drive();
+    drive.press(from, MouseButtons::LEFT).map_err(drive_error)?;
+    drive.move_to(to).map_err(drive_error)?;
+    drive.release(to, MouseButtons::LEFT).map_err(drive_error)?;
     window.rest()
 }
 

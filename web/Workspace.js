@@ -31,6 +31,10 @@ export function serve(studio) {
   for (const ws of live) ws.enqueue({ refresh: true });
 }
 
+// The workspaces of this page, for a check that calls what no gesture reaches
+// on a page with no preview.
+export const workspaces = () => [...live].map((queue) => queue.self);
+
 // The view's parts, as the workspace's properties.
 const PARTS = ["documents", "generation", "text", "layers", "selected", "selection", "inspector", "states", "roles", "flow", "palette", "done", "undone", "problem", "previews", "theme", "tokens", "comments", "leases", "blank", "chosen", "toolkit"];
 
@@ -76,6 +80,11 @@ export const Workspace = defineType("Workspace", QtObject, {
     dispatch(tool, args) {
       this.$queue.enqueue({ tool, args: args ?? {} });
     },
+    // A call that follows from what the person just did: it leaves the refusal
+    // on the line, and says its own only when the line is empty.
+    follow(tool, args) {
+      this.$queue.enqueue({ tool, args: args ?? {}, follows: true });
+    },
     lookAgain() {},
   },
   setup(self) {
@@ -106,6 +115,10 @@ class Queue {
 
   constructor(self) {
     this.#self = self;
+  }
+
+  get self() {
+    return this.#self;
   }
 
   enqueue(job) {
@@ -141,10 +154,10 @@ class Queue {
       this.#publish(served.view(doc), seen);
       if (job.tool) {
         if (answer.error) {
-          this.#give("error", answer.error.message ?? "");
+          if (!job.follows || !untrack(() => self.error)) this.#give("error", answer.error.message ?? "");
           self.refused(job.tool, answer.error);
         } else {
-          this.#give("error", "");
+          if (!job.follows) this.#give("error", "");
           self.answered(job.tool, answer.ok);
         }
       }
