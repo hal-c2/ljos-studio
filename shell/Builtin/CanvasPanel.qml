@@ -623,6 +623,14 @@ Panel {
         handHeld = false
         drawing = tool
         workspace.playing = false
+        // The overlay is disabled under the hand, and the next letter has to
+        // reach someone; it takes the keys back when the hand goes.
+        if (hand) {
+            keysWere = from
+            canvasFocus.forceActiveFocus()
+        } else if (canvasFocus.activeFocus && keysWere !== null) {
+            keysWere.forceActiveFocus()
+        }
         return true
     }
 
