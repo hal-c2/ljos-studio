@@ -46,8 +46,9 @@ Panel {
             // The selection is shared, and what is open was opened on another.
             picker.close()
             // An object removed under an open picker empties the selection,
-            // and what the picker says of that is still to be read.
-            if (panel.workspace.selected !== "")
+            // and what the picker says of that is still to be read. Any other
+            // refusal was about what is gone.
+            if (panel.workspace.selected !== "" || refusal.text !== panel.pickerGone)
                 panel.forgetRefused()
             else
                 panel.offered = null
@@ -166,6 +167,7 @@ Panel {
         pickedOn = ""
         forgetRefused()
     }
+    readonly property string pickerGone: "The object this picker was opened on has gone"
     // A refused value was typed on one object, in one document, into one state;
     // its offer would write it to whatever is there now.
     function forgetRefused() {
@@ -332,11 +334,6 @@ Panel {
         property string name: ""
         // The object it was opened on: the selection can move while it is open.
         property string node: ""
-        // Read when asked: the object can be named again while this is open.
-        readonly property string objectId: {
-            const object = panel.layer(node)
-            return object !== null ? object.id : ""
-        }
         // Showing a state or clicking in play reads the same object: only this
         // picker's own read ends its wait.
         function asks(call) {
@@ -393,7 +390,7 @@ Panel {
         function take(text) {
             written = JSON.stringify(text)
             if (panel.layer(node) === null) {
-                refusal.text = "The object this picker was opened on has gone"
+                refusal.text = panel.pickerGone
                 return
             }
             panel.set(name, written, node)

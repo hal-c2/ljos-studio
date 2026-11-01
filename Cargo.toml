@@ -74,8 +74,6 @@ unsafe_code = "forbid"
 [workspace.lints.clippy]
 all = { level = "warn", priority = -1 }
 
-# What a page downloads: as small as the compiler makes it (`mise run
-# web:build`).
 # QuickJS allows a fixed 512 KiB of stack, measured from where the engine was
 # made. Unoptimised frames of the engine and its toolkit use that up on the way
 # to a binding deep in the shell, which then throws RangeError and keeps its old
@@ -83,6 +81,8 @@ all = { level = "warn", priority = -1 }
 [profile.dev.package."*"]
 opt-level = 1
 
+# What a page downloads: as small as the compiler makes it (`mise run
+# web:build`).
 [profile.web]
 inherits = "release"
 opt-level = "z"

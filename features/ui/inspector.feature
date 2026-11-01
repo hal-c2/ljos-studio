@@ -270,6 +270,16 @@ Feature: The inspector shows colours and every declared property
     Then the inspector has no button "Bind width to parent.width"
     And the window shows no refusal
 
+
+  Scenario: A refusal goes with the object it was about
+    Given the person has selected "Item other" in the layers panel
+    And the person has set "stack" to "cube" in the inspector
+    When an agent calls the tool "node_remove" with:
+      """json
+      {"doc": "Main.qml", "node": {"id": "other"}}
+      """
+    Then the window does not say "cube is not a literal: bind it as an expression"
+
   Scenario: A refused value is forgotten when another document opens
     Given the person has set "width" to "parent.width" in the inspector
     When the person opens "Other.qml" in the documents list
