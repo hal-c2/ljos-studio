@@ -456,9 +456,20 @@ hit that limit.
 - **Fixed:** the canvas says the object has no box and offers no alignment; a
   row holding an expression stays one when edited; a literal row still refuses
   (`features/ui/quick3d.feature`). Driven in a real window off-screen.
-- **Open:** a click on the picture selects the `View3D`, not the model under
-  the pointer, and there are no 3D handles or orbit: a 3D object is chosen in
-  Layers and edited in the inspector.
+- **Then (phase 6):** a click on the picture selects the `Model` under the
+  pointer (Studio casts the ray itself from the scene the preview can read,
+  as Ljós's own `pick` is not usable from outside), and a selected `Model`
+  has move arrows for `x`, `y`, `z`. A drag writes one axis as one undo step
+  and shows the arrow and its value live; an axis an expression sets is
+  refused. Driven in a real window off-screen; pictures in
+  `$S/studio/p6/shots` (`03-picked`, `04-dragging`, `05-dropped`,
+  `06-undone`, `08-hand-after`).
+- **Open:** no orbit and no rotate gizmo (`eulerRotation` is edited in the
+  inspector). The Hand tool over a `View3D` pans the canvas and writes
+  nothing. With the camera looking down z the z axis is a point, so only the
+  x and y arrows show there. A file mesh is not picked (its size is unknown
+  from outside) and an orthographic camera falls back to selecting the
+  view. The web host reads no scene, so there a click still selects the view.
 
 **Phase 5, measured before the review fixes** (machine load 10 to 17 from other
 builds). Selection to inspector, driver's clock advanced between clicks: p50 /

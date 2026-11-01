@@ -198,6 +198,19 @@ are used.
 
 - DECISION: no new tool. A point is another way to name what `node_select`
   selects, and the list stays within 25.
+
+A point on a `View3D` selects the `Model` under it when the host can read
+the scene (the native preview): Studio casts a ray through the camera's
+view against each model's box (`#Cube`, `#Rectangle`, `#Cylinder`, `#Cone`)
+or sphere, and the nearest wins. A file mesh, an orthographic camera or a
+host that reads no scene leave the `View3D` selected.
+
+`node_arrange` `geometry` on a spatial object (a `Model`, a light or a
+camera) has no box; it answers `scene` instead: the view's window box, the
+camera (`eye`), the object's `origin`, `axes` (the scene's vector for one
+unit of `x`, `y`, `z`), `local` as written and `refused` per axis (empty
+where a drag may write). `place` takes `z` as well; it refuses with kind
+`bound` an axis an expression sets, and a `position` set whole.
 - DECISION: the selected object may be in another document (a block's own
   file); the answer's `doc` says which. A place outside the project's
   documents is refused (`not_found`, `details.kind: "not_a_document"`).
