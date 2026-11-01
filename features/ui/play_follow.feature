@@ -84,6 +84,17 @@ Feature: The frame follows what the app draws in play mode
     When 4 seconds pass
     Then the frame "Desktop"'s picture is red at 198, 10
 
+  # The next picture is asked for after the last has landed. Asked for before,
+  # the job lane is never free, and a step waiting for it to be never ends.
+  Scenario: A picture slower than the app moves leaves the window time to rest
+    Given the preview takes 300 ms over each picture
+    And the person has opened "Spin.qml" in the documents list
+    And the person has clicked the button "Play"
+    And 2 seconds have passed
+    And the person has looked at the frame "Desktop"
+    When 2 seconds pass
+    Then the frame "Desktop" has drawn a different picture since
+
   Scenario: A still app in play mode is asked for no pictures
     Given the person has opened "Still.qml" in the documents list
     And the person has clicked the button "Play"
