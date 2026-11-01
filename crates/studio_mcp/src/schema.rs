@@ -134,7 +134,7 @@ fn trim_field(schema: &mut Map<String, Value>, required: bool) {
 /// out, which the `required` list already says: `["string", "null"]` is
 /// `"string"`, and `anyOf: [X, null]` is `X` with the field's own description
 /// beside it. One that must be there says `null` for a reason, such as removing
-/// the value (`trim_required`), and keeps it.
+/// the value (`trim_field`), and keeps it.
 fn not_null(schema: &mut Map<String, Value>) {
     if let Some(Value::Array(types)) = schema.get("type")
         && types.len() == 2
