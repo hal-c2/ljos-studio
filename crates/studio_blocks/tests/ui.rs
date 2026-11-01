@@ -57,6 +57,7 @@ struct UiWorld {
     /// The previews say nothing of where their objects are, as a web host.
     no_places: bool,
     picture_ms: Arc<AtomicU64>,
+    placed_ms: Arc<AtomicU64>,
     /// Where a step left the hand holding the canvas.
     held: Option<Point>,
 }
@@ -64,8 +65,10 @@ struct UiWorld {
 /// A preview that answers everything but `placed`, whose default refuses.
 struct NoPlaces(NativeHost);
 
-/// A preview that spends what a step says (in ms) over each picture.
-struct SlowPictures(NativeHost, Arc<AtomicU64>);
+/// A preview that spends what a step says (in ms) over each picture, and over
+/// saying where its objects are: a stand-in for a slow machine, so that what
+/// is about the order of things does not rest on how fast this build is.
+struct SlowPictures(NativeHost, Arc<AtomicU64>, Arc<AtomicU64>);
 
 impl PreviewHost for SlowPictures {
     fn scene(
@@ -98,6 +101,11 @@ impl PreviewHost for SlowPictures {
 
     fn outline(&mut self) -> Result<String, PreviewError> {
         self.0.outline()
+    }
+
+    fn placed(&mut self, ids: &[String], types: &[String]) -> Result<Vec<Placed>, PreviewError> {
+        std::thread::sleep(Duration::from_millis(self.2.load(Ordering::SeqCst)));
+        self.0.placed(ids, types)
     }
 
     fn rest_watch(&self) -> Option<Box<dyn RestWatch>> {
@@ -136,9 +144,6 @@ impl PreviewHost for SlowPictures {
         self.0.calls_per_second()
     }
 
-    fn placed(&mut self, ids: &[String], types: &[String]) -> Result<Vec<Placed>, PreviewError> {
-        self.0.placed(ids, types)
-    }
 
     fn click(&mut self, at: &Click) -> Result<(), PreviewError> {
         self.0.click(at)
@@ -258,6 +263,7 @@ impl UiWorld {
             asked: 0,
             no_places: false,
             picture_ms: Arc::default(),
+            placed_ms: Arc::default(),
             held: None,
         }
     }
@@ -337,6 +343,7 @@ impl UiWorld {
         let state = self.state.path().join("preview");
         let no_places = self.no_places;
         let picture_ms = Arc::clone(&self.picture_ms);
+        let placed_ms = Arc::clone(&self.placed_ms);
         let studio = Studio::open(self.dir.path())
             .map_err(|e| e.to_string())?
             .with_previews(Arc::new(move |dir| {
@@ -344,7 +351,11 @@ impl UiWorld {
                 if no_places {
                     Box::new(NoPlaces(host))
                 } else {
-                    Box::new(SlowPictures(host, Arc::clone(&picture_ms)))
+                    Box::new(SlowPictures(
+                        host,
+                        Arc::clone(&picture_ms),
+                        Arc::clone(&placed_ms),
+                    ))
                 }
             }));
         let server = Arc::new(StudioServer::new(studio));
@@ -2056,6 +2067,53 @@ fn outline_never_back(w: &mut UiWorld, x: f64, y: f64) -> StepResult {
     }
 }
 
+#[given(
+    regex = r#"^the person has pressed in the frame "([^"]+)" at (\d+), (\d+) and held it at (\d+), (\d+)$"#
+)]
+#[given(
+    regex = r#"^the person has dragged in the frame "([^"]+)" from (\d+), (\d+) to (\d+), (\d+) at once, leaving the read on its way$"#
+)]
+fn drags_leaving_read(
+    w: &mut UiWorld,
+    target: String,
+    x0: f64,
+    y0: f64,
+    x1: f64,
+    y1: f64,
+) -> StepResult {
+    let window = w.window()?;
+    let from = frame_point(window, &target, x0, y0)?;
+    let to = frame_point(window, &target, x1, y1)?;
+    let mut drive = window.stage.drive();
+    drive.press(from, MouseButtons::LEFT).map_err(drive_error)?;
+    drive.move_to(to).map_err(drive_error)?;
+    drive.release(to, MouseButtons::LEFT).map_err(drive_error)?;
+    Ok(())
+}
+
+/// No rest between them: the press's read is on its way when the hand moves.
+#[when(
+    regex = r#"^the person presses in the frame "([^"]+)" at (\d+), (\d+) and at once holds it at (\d+), (\d+)$"#
+)]
+fn holds_in_frame_at_once(
+    w: &mut UiWorld,
+    target: String,
+    x0: f64,
+    y0: f64,
+    x1: f64,
+    y1: f64,
+) -> StepResult {
+    let window = w.window()?;
+    let from = frame_point(window, &target, x0, y0)?;
+    let to = frame_point(window, &target, x1, y1)?;
+    let mut drive = window.stage.drive();
+    drive.press(from, MouseButtons::LEFT).map_err(drive_error)?;
+    drive.move_to(to).map_err(drive_error)?;
+    window.rest()?;
+    w.held = Some(to);
+    Ok(())
+}
+
 #[when(
     regex = r#"^the person presses in the frame "([^"]+)" at (\d+), (\d+) and holds it at (\d+), (\d+)$"#
 )]
@@ -3423,6 +3481,11 @@ fn no_places(w: &mut UiWorld) {
 #[given(regex = r"^the preview takes (\d+) ms over each picture$")]
 fn slow_pictures(w: &mut UiWorld, ms: u64) {
     w.picture_ms.store(ms, Ordering::SeqCst);
+}
+
+#[given(regex = r"^the preview takes (\d+) ms to say where its objects are$")]
+fn slow_places(w: &mut UiWorld, ms: u64) {
+    w.placed_ms.store(ms, Ordering::SeqCst);
 }
 
 #[given("Studio's window runs the person's shell, a copy of its own")]
