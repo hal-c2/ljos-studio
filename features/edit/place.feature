@@ -527,6 +527,26 @@ Feature: Objects are placed by the tools a canvas drag drops through
     And the file "Main.qml" contains "target: a"
     And the file "Main.qml" contains "x: 33"
 
+  @preview
+  Scenario: An align can be recorded into a state rather than the object
+    Given the studio tools are connected with the capabilities "inspect, mutate, run"
+    And the agent has called the tool "state_edit" with:
+      """json
+      {"action": "add", "doc": "Main.qml", "node": {"id": "root"}, "state": "compact"}
+      """
+    And the agent has called the tool "preview_open" with:
+      """json
+      {"doc": "Main.qml"}
+      """
+    When the agent calls the tool "node_arrange" with:
+      """json
+      {"action": "align", "doc": "Main.qml", "nodes": [{"id": "a"}, {"id": "b"}], "align": "top",
+       "record": {"state": "compact", "on": {"id": "root"}}}
+      """
+    Then the file "Main.qml" contains "id: b; x: 100; y: 30;"
+    And the file "Main.qml" contains "target: b"
+    And the file "Main.qml" contains "y: 10"
+
   Scenario: An object without an id cannot be placed into a state
     Given the studio tools are connected
     And the file "Plain.qml":

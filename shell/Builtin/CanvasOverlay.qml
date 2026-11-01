@@ -50,6 +50,8 @@ MouseArea {
     readonly property var selectedOne: nodes.length === 1 && nodes[0].window !== undefined ? nodes[0] : null
     readonly property bool resizable: selectedOne !== null && selectedOne.drag.resize !== "none"
     readonly property int handlesShown: resizable && !playing && ghost === null ? 8 : 0
+    onRecordingChanged: told = ""
+
     // What a drag does, said before and during it.
     readonly property string says: {
         if (workspace.chosen.length === 0 || playing)
@@ -252,6 +254,7 @@ MouseArea {
 
     // Every gesture that sets a value, so all of them follow `recording`.
     function place(places) {
+        told = ""
         const args = {action: "place", doc: workspace.doc, places: places}
         if (recording !== null)
             args.record = recording
@@ -514,6 +517,7 @@ MouseArea {
             const key = JSON.stringify(overlay.workspace.chosen)
             if (key !== overlay.seenChosen) {
                 overlay.seenChosen = key
+                overlay.told = ""
                 overlay.writing = false
                 // Choosing is how a press on another object starts its drag.
                 if (overlay.mode !== "selecting")
@@ -588,8 +592,6 @@ MouseArea {
                 // back to what the preview says.
                 overlay.writing = false
                 overlay.endDrop(false)
-                if (error.code === "invalid_argument" && overlay.recording !== null)
-                    overlay.told = error.message
                 // Read again once only: when the read is what is refused
                 // (a preview gone, or one that cannot say), asking on would
                 // keep an idle window busy for ever.

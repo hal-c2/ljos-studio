@@ -1401,6 +1401,9 @@ fn frame_point(window: &Window, target: &str, x: f64, y: f64) -> Result<Point, S
     Ok(Point::new(bounds.x0 + x * zoom, bounds.y0 + y * zoom))
 }
 
+#[given(
+    regex = r#"^the person has dragged in the frame "([^"]+)" from (\d+), (\d+) to (\d+), (\d+)$"#
+)]
 #[when(regex = r#"^the person drags in the frame "([^"]+)" from (\d+), (\d+) to (\d+), (\d+)$"#)]
 fn drags_in_frame(
     w: &mut UiWorld,
@@ -1749,6 +1752,15 @@ fn window_says(w: &mut UiWorld, want: String) -> StepResult {
     find(&tree, &|n| n.name == want)
         .map(drop)
         .ok_or_else(|| format!("the window does not say {want:?}"))
+}
+
+#[then(regex = r#"^the window does not say "(.*)"$"#)]
+fn window_does_not_say(w: &mut UiWorld, want: String) -> StepResult {
+    let tree = w.window()?.tree();
+    find(&tree, &|n| n.name == want)
+        .is_none()
+        .then_some(())
+        .ok_or_else(|| format!("the window still says {want:?}"))
 }
 
 #[then(regex = r#"^the file "([^"]+)" says "(.*)"$"#)]
@@ -2311,6 +2323,34 @@ fn picture_drawn(window: &Window, target: &str) -> Result<u64, String> {
         ));
     }
     Ok(window.read_json("preview")["picture"].as_u64().unwrap_or(0))
+}
+
+#[then(regex = r#"^the frame "([^"]+)"'s picture is red at (\d+), (\d+)$"#)]
+fn frame_red_at(w: &mut UiWorld, target: String, x: u32, y: u32) -> StepResult {
+    let window = w.window()?;
+    let frame = window.frame(&target)?;
+    let picture = ljos_drive::find_below(window.engine(), frame, "picture")
+        .ok_or("the frame has no picture")?;
+    let node = window
+        .stage
+        .scene
+        .node_of(picture)
+        .ok_or("the picture is not shown")?;
+    let tree = window.stage.scene.render_tree();
+    let image = tree
+        .node(node)
+        .and_then(|n| n.content())
+        .and_then(|c| {
+            c.ops().iter().find_map(|op| match op {
+                DrawOp::Image { image, .. } => Some(image.clone()),
+                _ => None,
+            })
+        })
+        .ok_or("the frame draws no picture")?;
+    let [r, g, b, _] = image.pixel(x, y);
+    (r > 200 && g < 80 && b < 80)
+        .then_some(())
+        .ok_or_else(|| format!("the picture is rgb({r},{g},{b}) there"))
 }
 
 #[then(regex = r#"^the frame "([^"]+)" shows a picture of the preview$"#)]
