@@ -4,6 +4,7 @@
 //! does, by role and name, and click, type and press keys as a person does;
 //! the oracle is the file text, as for the MCP scenarios.
 
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, mpsc};
 use std::time::Duration;
 
@@ -17,7 +18,8 @@ use ljos_mcp_core::{CallCtx, Cap, CapSet};
 use ljos_runtime::SystemClock;
 use serde_json::Value as Json;
 use studio_core::preview::{
-    Declared, LogLine, Picture, PreviewError, PreviewHost, PreviewSpec, Reload, RestWatch, Size,
+    Click, Declared, LogLine, Picture, Placed, PreviewError, PreviewHost, PreviewSpec, Reload,
+    RestWatch, Size,
 };
 use studio_mcp::{Studio, StudioServer};
 use studio_preview::NativeHost;
@@ -44,12 +46,87 @@ struct UiWorld {
     asked: u64,
     /// The previews say nothing of where their objects are, as a web host.
     no_places: bool,
+    picture_ms: Arc<AtomicU64>,
     /// Where a step left the hand holding the canvas.
     held: Option<Point>,
 }
 
 /// A preview that answers everything but `placed`, whose default refuses.
 struct NoPlaces(NativeHost);
+
+/// A preview that spends what a step says (in ms) over each picture.
+struct SlowPictures(NativeHost, Arc<AtomicU64>);
+
+impl PreviewHost for SlowPictures {
+    fn open(&mut self, spec: &PreviewSpec) -> Result<(), PreviewError> {
+        self.0.open(spec)
+    }
+
+    fn reload(&mut self) -> Result<Reload, PreviewError> {
+        self.0.reload()
+    }
+
+    fn alias(&mut self, module: &str, dir: Option<&str>) -> Result<Reload, PreviewError> {
+        self.0.alias(module, dir)
+    }
+
+    fn resize(&mut self, size: Size) -> Result<(), PreviewError> {
+        self.0.resize(size)
+    }
+
+    fn screenshot(&mut self, max_side: u32) -> Result<Picture, PreviewError> {
+        std::thread::sleep(Duration::from_millis(self.1.load(Ordering::SeqCst)));
+        self.0.screenshot(max_side)
+    }
+
+    fn outline(&mut self) -> Result<String, PreviewError> {
+        self.0.outline()
+    }
+
+    fn rest_watch(&self) -> Option<Box<dyn RestWatch>> {
+        self.0.rest_watch()
+    }
+
+    fn read(
+        &mut self,
+        id: &str,
+        names: &[String],
+    ) -> Result<serde_json::Map<String, Json>, PreviewError> {
+        self.0.read(id, names)
+    }
+
+    fn write(&mut self, id: &str, name: &str, value: Json) -> Result<(), PreviewError> {
+        self.0.write(id, name, value)
+    }
+
+    fn logs(&mut self, since: u64) -> Result<(Vec<LogLine>, u64), PreviewError> {
+        self.0.logs(since)
+    }
+
+    fn pick(&mut self, x: f64, y: f64) -> Result<Option<Declared>, PreviewError> {
+        self.0.pick(x, y)
+    }
+
+    fn alive(&mut self) -> Result<(), PreviewError> {
+        self.0.alive()
+    }
+
+    fn close(&mut self) {
+        self.0.close();
+    }
+
+    fn calls_per_second(&self) -> u32 {
+        self.0.calls_per_second()
+    }
+
+    fn placed(&mut self, ids: &[String], types: &[String]) -> Result<Vec<Placed>, PreviewError> {
+        self.0.placed(ids, types)
+    }
+
+    fn click(&mut self, at: &Click) -> Result<(), PreviewError> {
+        self.0.click(at)
+    }
+}
 
 impl PreviewHost for NoPlaces {
     fn open(&mut self, spec: &PreviewSpec) -> Result<(), PreviewError> {
@@ -151,6 +228,7 @@ impl UiWorld {
             looked: 0,
             asked: 0,
             no_places: false,
+            picture_ms: Arc::default(),
             held: None,
         }
     }
@@ -229,6 +307,7 @@ impl UiWorld {
         // temporary directory itself is as open as the umask leaves it.
         let state = self.state.path().join("preview");
         let no_places = self.no_places;
+        let picture_ms = Arc::clone(&self.picture_ms);
         let studio = Studio::open(self.dir.path())
             .map_err(|e| e.to_string())?
             .with_previews(Arc::new(move |dir| {
@@ -236,7 +315,7 @@ impl UiWorld {
                 if no_places {
                     Box::new(NoPlaces(host))
                 } else {
-                    Box::new(host)
+                    Box::new(SlowPictures(host, Arc::clone(&picture_ms)))
                 }
             }));
         let server = Arc::new(StudioServer::new(studio));
@@ -325,6 +404,11 @@ impl Host for SceneHost<'_> {
 /// How long a save may take to reach the window: the watcher's quiet
 /// period and a build of the shell, on a loaded machine.
 const PATIENCE: Duration = Duration::from_secs(30);
+/// How long a step may wait for the window's answers on a loaded machine.
+const REST_PATIENCE: Duration = Duration::from_secs(120);
+/// How long a scenario may take before the run stops and names it: what a
+/// step's own patience cannot reach, a call blocked on a lock.
+const SCENARIO_PATIENCE: Duration = Duration::from_secs(600);
 
 /// The crate's directory as cargo names it to the running test: the shared
 /// compile cache may hand a binary built in another clone of the
@@ -444,9 +528,37 @@ impl Window {
     /// which run off the UI thread, what they publish, and the pictures
     /// they fetch, then the frames that show it.
     fn rest(&mut self) -> StepResult {
-        let mut driver = self.stage.drive();
+        let mut patience = self.patience();
+        let mut driver = self.stage.drive().serving(Some(&mut patience));
         driver.settle().map_err(drive_error)?;
         driver.finish_promised().map_err(drive_error)
+    }
+
+    /// Lets `ms` pass on the test clock, as patient as `rest`.
+    fn advance(&mut self, ms: u64) -> StepResult {
+        let mut patience = self.patience();
+        self.stage
+            .drive()
+            .serving(Some(&mut patience))
+            .advance(ms)
+            .map_err(drive_error)
+    }
+
+    /// Told every few milliseconds while the driver waits on answers. The
+    /// wait itself has no end while answers keep coming, so this ends it,
+    /// saying what it was waiting for; the step fails on the panic.
+    fn patience(&self) -> impl FnMut() + use<> {
+        let platform = Platform::of(&self.stage.engine);
+        let started = std::time::Instant::now();
+        move || {
+            if started.elapsed() > REST_PATIENCE {
+                panic!(
+                    "the window did not come to rest in {REST_PATIENCE:?}: \
+                     still waiting on {} platform answer(s)",
+                    platform.pending()
+                );
+            }
+        }
     }
 
     fn tree(&self) -> AccessibleNode {
@@ -493,7 +605,7 @@ impl Window {
                 .map_err(drive_error)?;
             // A wheel notch eases the list over time; the person waits for
             // it to stop, on the test clock.
-            self.stage.drive().advance(1000).map_err(drive_error)?;
+            self.advance(1000)?;
             let then = at(self)?;
             if then.y0 == now.y0 {
                 break;
@@ -1605,7 +1717,7 @@ fn nudge_then_drag(
 #[when("the canvas has had time to settle")]
 fn canvas_settled(w: &mut UiWorld) -> StepResult {
     let window = w.window()?;
-    window.stage.drive().advance(400).map_err(drive_error)?;
+    window.advance(400)?;
     window.rest()
 }
 
@@ -1838,11 +1950,7 @@ fn nobody_touches(w: &mut UiWorld, seconds: u64) -> StepResult {
     let window = w.window()?;
     window.rest()?;
     let before = window.stage.state.clone();
-    window
-        .stage
-        .drive()
-        .advance(seconds * 1000)
-        .map_err(drive_error)?;
+    window.advance(seconds * 1000)?;
     let after = &window.stage.state;
     window.idle = Some(Idle {
         wake_before: before.wake,
@@ -2120,7 +2228,7 @@ fn goes_on_typing_export_out(w: &mut UiWorld, out: String) -> StepResult {
 #[when("the person pauses typing in the export panel")]
 fn export_typing_pauses(w: &mut UiWorld) -> StepResult {
     let window = w.window()?;
-    window.stage.drive().advance(300).map_err(drive_error)?;
+    window.advance(300)?;
     window.rest()
 }
 
@@ -2378,7 +2486,7 @@ fn frame_drew_another(w: &mut UiWorld, target: String) -> StepResult {
     // the driver's: both have to move. Studio stops looking by itself.
     while window.read("settling") == Value::Bool(true) {
         std::thread::sleep(std::time::Duration::from_millis(100));
-        window.stage.drive().advance(100).map_err(drive_error)?;
+        window.advance(100)?;
         window.rest()?;
     }
     picture_drawn(window, &target)?;
@@ -2394,7 +2502,7 @@ fn let_pass(w: &mut UiWorld, seconds: u64) -> StepResult {
     let window = w.window()?;
     for _ in 0..seconds * 10 {
         std::thread::sleep(std::time::Duration::from_millis(100));
-        window.stage.drive().advance(100).map_err(drive_error)?;
+        window.advance(100)?;
         window.rest()?;
     }
     Ok(())
@@ -2452,6 +2560,11 @@ fn ran_no_frames(w: &mut UiWorld) -> StepResult {
 #[given("the preview does not say where its objects are")]
 fn no_places(w: &mut UiWorld) {
     w.no_places = true;
+}
+
+#[given(regex = r"^the preview takes (\d+) ms over each picture$")]
+fn slow_pictures(w: &mut UiWorld, ms: u64) {
+    w.picture_ms.store(ms, Ordering::SeqCst);
 }
 
 #[given("Studio's window runs the person's shell, a copy of its own")]
@@ -2519,7 +2632,7 @@ fn no_follower(w: &mut UiWorld) -> StepResult {
             ));
         }
         std::thread::sleep(std::time::Duration::from_millis(50));
-        window.stage.drive().advance(50).map_err(drive_error)?;
+        window.advance(50)?;
     }
 }
 
@@ -2669,6 +2782,26 @@ fn perf_export(project: &str) {
     );
 }
 
+/// Told each scenario as it starts. One that outlasts its patience ends the
+/// run with its name: nothing on the Engine's thread can, if that is stuck.
+fn scenario_watch() -> mpsc::Sender<String> {
+    let (tell, told) = mpsc::channel();
+    std::thread::spawn(move || {
+        let mut running = String::new();
+        loop {
+            match told.recv_timeout(SCENARIO_PATIENCE) {
+                Ok(name) => running = name,
+                Err(mpsc::RecvTimeoutError::Disconnected) => return,
+                Err(mpsc::RecvTimeoutError::Timeout) => {
+                    eprintln!("the scenario {running:?} did not end in {SCENARIO_PATIENCE:?}");
+                    std::process::exit(3);
+                }
+            }
+        }
+    });
+    tell
+}
+
 fn main() {
     if let Ok(project) = std::env::var("STUDIO_PERF_EXPORT") {
         perf_export(&project);
@@ -2681,10 +2814,15 @@ fn main() {
         .enable_all()
         .build()
         .expect("a runtime");
+    let watch = scenario_watch();
     runtime.block_on(
         UiWorld::cucumber()
             .max_concurrent_scenarios(1)
             .fail_on_skipped()
+            .before(move |_, _, scenario, _| {
+                let _ = watch.send(scenario.name.clone());
+                Box::pin(async {})
+            })
             // `@web` windows are the shell compiled by ljos-web, driven in a
             // browser (`mise run web:shell`), not this window.
             .filter_run_and_exit(input, |feature, _, scenario| {

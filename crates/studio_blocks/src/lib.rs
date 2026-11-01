@@ -23,8 +23,8 @@ use std::cell::RefCell;
 use std::collections::{HashMap, VecDeque};
 use std::hash::Hasher;
 use std::rc::Rc;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
+use std::sync::{Arc, mpsc};
 use std::time::{Duration, Instant};
 
 use ljos::item::{self, DisplayListBuilder, ImageHandle, ItemPaint, TextEngine, kurbo};
@@ -380,6 +380,8 @@ struct Queue {
     follow_wanted: bool,
     /// What stops the thread waiting on the preview, while there is one.
     following: Option<Arc<AtomicBool>>,
+    /// The follower's looks waiting for the picture to land.
+    look_landed: Vec<mpsc::Sender<()>>,
     /// The lists last set, by the property's name.
     given: HashMap<&'static str, Json>,
 }
@@ -708,6 +710,9 @@ fn finish(engine: &Engine, ws: ObjectId, done: Done) {
             let Some(queue) = queue_of(engine, ws) else {
                 return;
             };
+            for looked in queue.borrow_mut().look_landed.drain(..) {
+                let _ = looked.send(());
+            }
             let picture = picture.and_then(|(w, h, rgba, pixels)| {
                 let image = ImageHandle::from_straight(w, h, rgba).map_err(|e| e.to_string())?;
                 Ok((image, pixels))
@@ -858,7 +863,14 @@ fn follow(engine: &Engine, ws: ObjectId) {
                     continue;
                 }
                 if !stop.load(Ordering::SeqCst) {
-                    post.send(move |engine| look(engine, ws));
+                    // The next look's wait starts when this picture has
+                    // landed: a picture slower than the app moves would
+                    // otherwise have the next asked before it is done, and
+                    // the lane would never be free between them. Without
+                    // a Workspace nothing holds the sender, and this ends.
+                    let (landed, wait) = mpsc::channel();
+                    post.send(move |engine| look(engine, ws, landed));
+                    let _ = wait.recv_timeout(Duration::from_millis(FOLLOW_WAIT_MS));
                 }
             }
             // No preview to wait on: the next one's refresh starts this again.
@@ -882,7 +894,7 @@ fn follow(engine: &Engine, ws: ObjectId) {
 }
 
 /// Asks for the picture again, unless an ask is already waiting.
-fn look(engine: &Engine, ws: ObjectId) {
+fn look(engine: &Engine, ws: ObjectId, landed: mpsc::Sender<()>) {
     if !engine.is_alive(ws) {
         return;
     }
@@ -890,7 +902,8 @@ fn look(engine: &Engine, ws: ObjectId) {
         return;
     };
     let generation = {
-        let q = queue.borrow();
+        let mut q = queue.borrow_mut();
+        q.look_landed.push(landed);
         let waiting = q.jobs.iter().any(|j| matches!(j, Job::Picture { .. }));
         (!waiting).then_some(q.fetched)
     };
