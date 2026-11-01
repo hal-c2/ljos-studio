@@ -54,7 +54,7 @@ documents: export), `run` (start previews). They are granted at launch with
 | 22 | `preview_events` | Since a cursor: opened, reloaded (with ms), reload failed, logs, ended; or wait until its app rests saying something new (`wait_ms`, past `rests`), answering when it wakes next (`wake_in_ms`) and asking the app nothing meanwhile | inspect |
 | 23 | `export` | Write a bundle that `ljos run` starts (`native`) or that ljos-web builds a site from (`web`): the project's QML, theme, assets and own modules with a manifest, never mocks or `.studio/` | fs |
 | 24 | `review` | Add, reply to, resolve, reopen or list design review comments on objects, kept in `.studio/` | inspect (writing: mutate) |
-| 25 | `node_arrange` | What a canvas gesture does: `geometry` (boxes, what a drag does, siblings), `place` (`record` writes into a state), `align`, `copy`, `paste`, `duplicate`, `remove`, `wrap`, `unwrap`, `anchor`; each edit is one undo step, all or none | inspect; mutate to edit |
+| 25 | `node_arrange` | What a canvas gesture does: `geometry` (boxes, what a drag does, siblings), `place` (`record` writes into a state), `align`, `copy`, `paste`, `duplicate`, `remove`, `component_extract` (below), `wrap`, `unwrap`, `anchor`; each edit is one undo step, all or none | inspect; mutate to edit |
 
 A document is a `.qml` file or a `theme.json` of the project outside the
 directories a walk leaves out, judged where its links lead; anything else is
@@ -639,6 +639,33 @@ instead; `not_a_sibling`, `root`, `locked`.
 Each is one undo step. The bar above the canvas has wrap and unwrap; the
 inspector's Layout section has the pin pad, a layout's spacing and columns, and
 wrap.
+
+## Components from a selection
+
+`node_arrange` `component_extract` {nodes: [one], name} writes `Name.qml` beside
+the document, holding what the document imports and the object's text with its
+own id, and leaves `Name { }` in its place with the id and the x, y and anchors,
+which say where it sits rather than what it is. Both files are one undo step:
+undo and redo take both, and an undo that would take away what another writer
+put in the new file is refused with both left as they are. If the new file was
+deleted outside Studio, undo gives back the document alone.
+
+`inner.prop` read from outside becomes `property alias innerProp: inner.prop` on
+the component and `instance.innerProp` where it was read, giving the instance an
+id if it had none; the answer's `aliases` names them. `id` of the object itself
+goes on working as it did. Refused, naming the line and word:
+
+- `reference_out`: an inner id used as a whole (`target: inner`), called or gone
+  through (`inner.f()`, `inner.font.bold`), or read by the place that stays.
+- `reference_in`: the object reads an id or a root property left in the document,
+  an inline component of the document, or its own `parent`.
+- `root`, `exists` (the file is there), `in_component` (inside an inline
+  component), `locked`, and `invalid_argument` for a name that is no type.
+
+Words are told apart by how they are written, without types: a property named
+like an inner id reads as a use and is refused, never rewritten silently. The
+Layout section of the inspector has a name field and the button; the palette's
+project list then offers the new file.
 
 ## Assets
 

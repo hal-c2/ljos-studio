@@ -738,6 +738,35 @@ Panel {
                     }
                 }
             }
+
+            RowLayout {
+                visible: !panel.isRoot && panel.workspace.chosen.length === 1
+                Layout.fillWidth: true
+                spacing: Spacing.xxs
+
+                Field {
+                    id: componentName
+                    placeholderText: "Component name"
+                    Accessible.name: "Component name"
+                    Layout.fillWidth: true
+                    onAccepted: extract.clicked()
+                }
+                IconButton {
+                    id: extract
+                    icon_: "component"
+                    text: "Make component"
+                    enabled: componentName.text !== ""
+                    onClicked: {
+                        panel.workspace.dispatch("node_arrange", {
+                            action: "component_extract",
+                            doc: panel.workspace.doc,
+                            nodes: [{node: panel.workspace.selected}],
+                            name: componentName.text
+                        })
+                        componentName.text = ""
+                    }
+                }
+            }
         }
 
         Section {

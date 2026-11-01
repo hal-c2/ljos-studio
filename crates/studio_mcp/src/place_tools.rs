@@ -16,7 +16,7 @@ use studio_core::scene3d::Handles;
 use studio_core::{Address, Node, NodePath, Op, StateEdit, Step};
 
 use crate::tools::{EditOut, MUTATE};
-use crate::{Studio, error, layout_tools, lock};
+use crate::{Studio, component, error, layout_tools, lock};
 
 /// Siblings told to a canvas for snapping: past this, a parent's guides are
 /// noise and reading them costs more than the frame they serve.
@@ -49,6 +49,8 @@ enum Action {
     Unlock,
     Wrap,
     Unwrap,
+    #[serde(rename = "component_extract")]
+    ComponentExtract,
     Anchor,
 }
 
@@ -96,7 +98,7 @@ struct ArrangeArgs {
     align: Option<Align>,
     /// For `paste`, into any document. Ids it has are renamed.
     parent: Option<Address>,
-    /// For `rename`: the object's new `id`.
+    /// For `rename`: the object's new `id`. For `component_extract`: the new type.
     name: Option<String>,
     /// For `wrap`.
     #[serde(rename = "in")]
@@ -145,6 +147,12 @@ struct ArrangeOut {
     /// `copy`: each object as written.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     copied: Vec<String>,
+    /// `component_extract`: the file it wrote.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    component: Option<String>,
+    /// `component_extract`: what outside reads of the inside became.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    aliases: Vec<String>,
 }
 
 struct GeometryArgs {
@@ -830,6 +838,7 @@ fn arrange(studio: &mut Studio, a: ArrangeArgs) -> Result<ArrangeOut, SurfaceErr
             | Action::Wrap
             | Action::Unwrap
             | Action::Anchor
+            | Action::ComponentExtract
     ) {
         check_unlocked(studio, &a)?;
     }
@@ -990,6 +999,21 @@ fn arrange(studio: &mut Studio, a: ArrangeArgs) -> Result<ArrangeOut, SurfaceErr
                 },
             )
             .map(many)
+        }
+        Action::ComponentExtract => {
+            let name = needed(a.name, "name", "component_extract")?;
+            let [node] = nodes.as_slice() else {
+                return Err(SurfaceError::invalid_argument(
+                    "`component_extract` takes one object",
+                ));
+            };
+            let made = component::extract(studio, &doc, node, &name, generation, a.dry_run)?;
+            Ok(ArrangeOut {
+                edit: Some(made.edit),
+                component: Some(made.component),
+                aliases: made.aliases,
+                ..ArrangeOut::default()
+            })
         }
         Action::Unwrap => {
             layout_tools::unwrap(studio, &doc, &nodes, generation, a.dry_run).map(many)
@@ -1163,7 +1187,7 @@ pub(crate) fn add(registry: ToolRegistry, studio: &Arc<Mutex<Studio>>) -> ToolRe
     registry.with(
         ToolDef::new::<ArrangeArgs>(
             "node_arrange",
-            "A canvas gesture, one undo step. `geometry`: boxes, drag rules, siblings. `place`: x/y/size, writing what governs each object. `align`, `copy`, `paste`, `duplicate`, `remove`, `rename`, `wrap`, `unwrap`, `anchor`. `hide`, `show`, `lock`, `unlock` leave the file alone.",
+            "A canvas gesture, one undo step. `geometry`: boxes, drag rules, siblings. `place`: x/y/size, writing what governs each object. `component_extract`: one object to `name`.qml. `hide`, `show`, `lock`, `unlock` leave the file alone.",
         )
         .answers::<ArrangeOut>()
         .requires(Cap::Inspect)

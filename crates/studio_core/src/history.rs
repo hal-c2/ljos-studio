@@ -30,6 +30,9 @@ pub struct Entry {
     pub inverse: Vec<Change>,
     /// The edit made the document; undoing it removes the file.
     pub created: bool,
+    /// The entry this one is one step with, in another file: undo and redo
+    /// take both, and the lists show the one that is not the new file.
+    pub group: Option<u64>,
     pub(crate) handles_before: Vec<Tracked>,
     /// Also every handle given out on the text after it while that was the
     /// document's text: redo puts each back where it was.
@@ -63,6 +66,10 @@ pub(crate) struct Replayed {
 }
 
 impl Entry {
+    fn is_partner(&self) -> bool {
+        self.group.is_some() && self.created
+    }
+
     fn moved(&mut self, generation: u64, side: u64, rebased: Option<Replayed>) {
         self.generation = generation;
         self.side = side;
@@ -118,6 +125,24 @@ impl History {
         self.done.iter_mut().rev().find(|e| e.doc == doc)
     }
 
+    /// Makes the two newest done entries one step.
+    pub(crate) fn group_newest(&mut self) {
+        if let [.., first, second] = self.done.as_mut_slice() {
+            first.group = Some(second.id);
+            second.group = Some(first.id);
+        }
+    }
+
+    /// The done entry `id`.
+    pub(crate) fn done_entry(&self, id: u64) -> Option<&Entry> {
+        self.done.iter().find(|e| e.id == id)
+    }
+
+    /// The undone entry `id`.
+    pub(crate) fn undone_entry(&self, id: u64) -> Option<&Entry> {
+        self.undone.iter().find(|e| e.id == id)
+    }
+
     /// The last done entry, taken off, and the one it leaves on top.
     pub fn pop_and_top(&mut self) -> (Option<Entry>, Option<&mut Entry>) {
         let last = self.done.pop();
@@ -139,6 +164,11 @@ impl History {
     pub fn forget(&mut self, doc: &str) {
         self.done.retain(|e| e.doc != doc);
         self.undone.retain(|e| e.doc != doc);
+        // What was one step with a file that is gone is a step of its own.
+        let kept: Vec<u64> = self.done.iter().chain(&self.undone).map(|e| e.id).collect();
+        for entry in self.done.iter_mut().chain(&mut self.undone) {
+            entry.group = entry.group.filter(|id| kept.contains(id));
+        }
     }
 
     /// The entry `id` [`Self::peek_undo`] showed has been replayed, leaving
@@ -166,7 +196,7 @@ impl History {
     /// undone ones, next to redo first: what that writer's undo and redo
     /// would take.
     pub fn list_by(&self, author: &str) -> (Vec<EntrySummary>, Vec<EntrySummary>) {
-        let by = |e: &&Entry| takes(e, Some(author));
+        let by = |e: &&Entry| takes(e, Some(author)) && !e.is_partner();
         (
             self.done.iter().filter(by).map(Entry::summary).collect(),
             self.undone
@@ -181,8 +211,17 @@ impl History {
     /// Done (oldest first) and undone (next to redo first).
     pub fn list(&self) -> (Vec<EntrySummary>, Vec<EntrySummary>) {
         (
-            self.done.iter().map(Entry::summary).collect(),
-            self.undone.iter().rev().map(Entry::summary).collect(),
+            self.done
+                .iter()
+                .filter(|e| !e.is_partner())
+                .map(Entry::summary)
+                .collect(),
+            self.undone
+                .iter()
+                .rev()
+                .filter(|e| !e.is_partner())
+                .map(Entry::summary)
+                .collect(),
         )
     }
 }
