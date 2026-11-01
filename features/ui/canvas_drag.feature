@@ -114,12 +114,21 @@ Feature: Objects are moved and resized on the canvas
       | place refused                | Ada holds "a"          | 40, 40  | the person drags in the frame "Desktop" from 40, 40 to 90, 63                           | nothing has happened                            | 8       | the history lists nothing                               |
       | reorder answered             | nothing has happened   | 50, 220 | the person drags in the frame "Desktop" from 50, 220 to 280, 220                        | nothing has happened                            | 8       | the history lists "move"                                |
       | reorder refused              | Ada holds "one"        | 50, 220 | the person drags in the frame "Desktop" from 50, 220 to 280, 220                        | nothing has happened                            | 8       | the history lists nothing                               |
-      | waiting drop reorders        | nothing has happened   | 50, 220 | the person drags in the frame "Desktop" from 50, 220 to 280, 220 at once                | nothing has happened                            | 8       | the history lists "move"                                |
-      | waiting drop changes nothing | nothing has happened   | 50, 220 | the person drags in the frame "Desktop" from 50, 220 to 60, 220 at once                 | nothing has happened                            | 8       | the history lists nothing                               |
+      | waiting drop reorders        | the preview takes 500 ms to say where its objects are | 50, 220 | the person drags in the frame "Desktop" from 50, 220 to 280, 220 at once                | nothing has happened                            | 8       | the history lists "move"                                |
+      | waiting drop changes nothing | the preview takes 500 ms to say where its objects are | 50, 220 | the person drags in the frame "Desktop" from 50, 220 to 60, 220 at once                 | nothing has happened                            | 8       | the history lists nothing                               |
       | drop just after a nudge      | nothing has happened   | 40, 40  | the person presses "Right" and drags in the frame "Desktop" from 41, 40 to 91, 63       | nothing has happened                            | 8       | the file "Main.qml" says "id: a; x: 71; y: 43;"         |
       | drag cancelled               | nothing has happened   | 40, 40  | the person presses in the frame "Desktop" at 40, 40 and holds it at 90, 63              | the window takes the press away                 | 8       | the history lists nothing                               |
       | selection moved in the drag  | nothing has happened   | 40, 40  | the person presses in the frame "Desktop" at 40, 40 and holds it at 90, 63              | an agent selects "b" and the hand lets go       | 8       | the history lists nothing                               |
       | selection moved in the wait  | nothing has happened   | 40, 40  | the person presses in the frame "Desktop" at 40, 40 and holds it at 90, 63              | the drop waits on a read and an agent selects "b" | 8       | the history lists nothing                               |
+
+  # A press is a new gesture: the read of the last drop answering while the
+  # hand is down would otherwise decide that drop with where this drag has got.
+  Scenario: A press ends a drop that was waiting on a read
+    Given the person has clicked the frame "Desktop" at 50, 220
+    And the preview takes 500 ms to say where its objects are
+    And the person has dragged in the frame "Desktop" from 50, 220 to 60, 220 at once, leaving the read on its way
+    When the person presses in the frame "Desktop" at 50, 220 and at once holds it at 280, 220
+    Then the history lists nothing
 
   # The canvas is built on the preview: without one there is no overlay left
   # to hold a ghost. The object the hand holds is still in the file, so the

@@ -354,7 +354,6 @@ impl Workspace {
             let mut q = queue.borrow_mut();
             if let Some(stop) = q.following.take() {
                 stop.stop();
-                // A thread waiting for a picture to land is told by these going.
             }
         }
         Ok(())
@@ -1436,4 +1435,25 @@ fn read_picture(engine: &Engine, obj: ObjectId) -> Rc<dyn ItemPaint> {
             .flatten()
     });
     Rc::new(Picture(image))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A follower waits on these for its picture. One still in line when the
+    /// Workspace goes never runs, and would otherwise hold the follower for
+    /// the whole of its wait. A running one holds the lane until it lands, so
+    /// no scenario can tell this from the thread having been told to stop.
+    #[test]
+    fn a_queue_going_lets_go_of_the_looks_in_line() {
+        let (landed, wait) = mpsc::channel();
+        let mut queue = Queue::default();
+        queue.jobs.push_back(Job::Picture {
+            generation: 0,
+            looks: vec![landed],
+        });
+        drop(queue);
+        assert_eq!(wait.try_recv(), Err(mpsc::TryRecvError::Disconnected));
+    }
 }
