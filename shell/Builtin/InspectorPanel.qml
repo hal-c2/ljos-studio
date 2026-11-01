@@ -73,14 +73,15 @@ Panel {
 
     // Whether a row holds a colour, by its name or by what is written.
     function isColour(row, value) {
-        return row.colour === true || /(^|\.)[a-z]*[cC]olor$/.test(row.name) || /^"#[0-9a-fA-F]{3,8}"$/.test(value)
+        return row.colour === true || /(^|\.)[a-z]*[cC]olor$/.test(row.name) || painted(value) !== ""
     }
 
-    // What a swatch paints: what is written, when that is a colour by itself.
-    // An expression (`Colors.text`) is not read here, so it paints nothing.
+    // What is written, when that is a colour by itself; empty when not. An
+    // expression (`Colors.text`) is not read here. Not "transparent", which
+    // can be written.
     function painted(value) {
         const text = value.replace(/"/g, "")
-        return writesColour(text) && value.charAt(0) === "\"" ? text : "transparent"
+        return writesColour(text) && value.charAt(0) === "\"" ? text : ""
     }
     // The runtime's own reading: what it does not parse would not paint.
     function writesColour(text) {
@@ -232,7 +233,13 @@ Panel {
             }
             if (tool === "preview_state" && picker.waiting && answer.state !== undefined
                     && answer.state[picker.name] !== undefined) {
-                picker.start(String(answer.state[picker.name]))
+                const read = String(answer.state[picker.name])
+                if (panel.writesColour(read)) {
+                    picker.start(read)
+                } else {
+                    picker.waiting = false
+                    refusal.text = read + " is not a colour"
+                }
             }
             if (panel.rowEditing && ["property_set", "binding_set", "state_edit"].includes(tool)) {
                 panel.rowEditing = false
@@ -301,7 +308,7 @@ Panel {
             // Beside the inspector, where it hides none of the rows.
             x = -implicitWidth - Spacing.xs
             y = at.mapToItem(panel, 0, 0).y
-            if (panel.painted(written) !== "transparent") {
+            if (panel.painted(written) !== "") {
                 start(panel.painted(written))
             } else {
                 known = false
@@ -325,7 +332,7 @@ Panel {
         ColumnLayout {
             spacing: Spacing.xxs
             Label {
-                visible: panel.painted(picker.written) === "transparent"
+                visible: picker.written.charAt(0) !== "\"" && panel.painted(picker.written) === ""
                 text: "Worked out by " + picker.written + ": picking replaces it"
                 color: Colors.text
                 font.pixelSize: Typography.captionSize
@@ -418,7 +425,7 @@ Panel {
                     Accessible.name: "Pick " + row.modelData.name
                     onClicked: picker.show(row.modelData.name, value.text, this)
                     contentItem: Rectangle {
-                        color: panel.painted(value.text)
+                        color: panel.painted(value.text) || "transparent"
                         border.color: Colors.outline
                     }
                 }

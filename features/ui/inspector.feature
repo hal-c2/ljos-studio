@@ -102,6 +102,27 @@ Feature: The inspector shows colours and every declared property
     And the file "Main.qml" does not say "maker: 3"
     And the inspector's "maker" holds "Component { Item {} }"
 
+  @preview
+  Scenario: The picker of a value the running app holds that is no colour says so
+    When the person replaces "property var stack" with "property string borderColor: \"nope\"" in the code view
+    And the person selects "Rectangle root" in the layers panel
+    And the person clicks the button "Pick borderColor"
+    Then the window says "nope is not a colour"
+    And the window does not say "Worked out by "nope": picking replaces it"
+    And the colour picker waits on nothing
+
+  Scenario: Text that is no colour has no picker, however it looks
+    When the person replaces "property var stack" with "property string code: \"#12345\"" in the code view
+    And the person selects "Rectangle root" in the layers panel
+    Then the inspector has no button "Pick code"
+
+  Scenario: The colour transparent is written, not worked out
+    When the person replaces "color: \"#ff0000\"" with "color: \"transparent\"" in the code view
+    And the person selects "Rectangle root" in the layers panel
+    And the person clicks the button "Pick color"
+    Then the window does not say "Worked out by "transparent": picking replaces it"
+    And the colour picker holds "transparent"
+
   Scenario: The picker's sliders leave a colour's alpha as it was written
     When the person clicks the button "Pick tint"
     And the person drags the picker's "Brightness" to its middle
@@ -119,4 +140,5 @@ Feature: The inspector shows colours and every declared property
   Scenario: The picker of a colour an expression works out starts from what the preview shows
     When the person clicks the button "Pick accentColor"
     Then the colour picker holds "#00ff00"
+    And the window says "Worked out by Qt.rgba(0, 1, 0, 1): picking replaces it"
     And the file "Main.qml" says "Qt.rgba(0, 1, 0, 1)"
