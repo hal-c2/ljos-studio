@@ -535,6 +535,42 @@ Feature: An object is renamed, hidden and locked through `node_arrange`
       """
     Then the answer's "/outline" contains "Text#footer"
 
+  @preview
+  Scenario: A hidden object stays hidden when an edit of the whole text renames it
+    Given the agent has called the tool "preview_open" with:
+      """json
+      {"doc": "Main.qml"}
+      """
+    And the agent has called the tool "node_arrange" with:
+      """json
+      {"action": "hide", "doc": "Main.qml", "nodes": [{"id": "footer"}]}
+      """
+    When the agent calls the tool "document_edit" with:
+      """json
+      {"doc": "Main.qml", "generation": 1, "text": "import QtQuick\n\nItem {\n    id: root\n    width: 300\n    height: 200\n    Rectangle { id: backdrop; x: 0; width: 300; height: 200 }\n    Text { id: credit; text: \"Footer\" }\n    Text { text: credit.text + \" footer: \" + root.width }\n}\n"}
+      """
+    And the agent calls the tool "preview_screenshot" with:
+      """json
+      {"format": "outline"}
+      """
+    Then the answer's "/outline" does not contain "Text#credit"
+
+  Scenario: A locked object stays locked when an edit of the whole text renames it
+    Given the agent has called the tool "node_arrange" with:
+      """json
+      {"action": "lock", "doc": "Main.qml", "nodes": [{"id": "footer"}]}
+      """
+    When the agent calls the tool "document_edit" with:
+      """json
+      {"doc": "Main.qml", "generation": 1, "text": "import QtQuick\n\nItem {\n    id: root\n    width: 300\n    height: 200\n    Rectangle { id: backdrop; x: 0; width: 300; height: 200 }\n    Text { id: credit; text: \"Footer\" }\n    Text { text: credit.text + \" footer: \" + root.width }\n}\n"}
+      """
+    And the agent calls the tool "node_arrange" with:
+      """json
+      {"action": "remove", "doc": "Main.qml", "nodes": [{"id": "credit"}]}
+      """
+    Then the agent is refused with "not_actionable"
+    And the refusal's "/details/kind" is "locked"
+
   Scenario: A value replaces a property's block
     Given the file "Worked.qml":
       """qml
