@@ -561,6 +561,19 @@ impl Window {
         }
     }
 
+    /// The answer to a gesture's call, as the worker's arrives: for one that
+    /// was on its way when the person did something else.
+    fn answer(&mut self, tool: &str, answer: Json) -> StepResult {
+        let workspace = self.workspace;
+        let engine = &mut self.stage.engine;
+        studio_blocks::Workspace::emit_answered(
+            &Cx::new(engine, workspace),
+            tool.to_owned(),
+            answer,
+        )
+        .map_err(|e| format!("{e:?}"))
+    }
+
     fn tree(&self) -> AccessibleNode {
         ljos_drive::a11y::tree(&self.stage.scene, String::new())
     }
@@ -2172,6 +2185,94 @@ fn enters_colour(w: &mut UiWorld, value: String) -> StepResult {
         .cloned()
         .ok_or_else(|| format!("no colour field; the window holds {}", names(&tree)))?;
     window.enter(&field, &value)
+}
+
+#[when(
+    regex = r#"^the person drags the picker's "([^"]+)" to its middle while an agent selects "([^"]+)"$"#
+)]
+fn drags_picker_while_selecting(w: &mut UiWorld, name: String, other: String) -> StepResult {
+    let window = w.window()?;
+    let tree = window.tree();
+    let slider = find(&tree, &|n| n.name == name && n.role == "slider")
+        .cloned()
+        .ok_or_else(|| format!("no slider {name:?}; the window holds {}", names(&tree)))?;
+    let key = slider.key.ok_or("the slider has no key")?;
+    let mut driver = window.stage.drive();
+    let middle = driver.aim_at_node(key).map_err(|why| format!("{why:?}"))?;
+    driver
+        .press(middle, MouseButtons::LEFT)
+        .map_err(drive_error)?;
+    driver
+        .move_to(Point::new(middle.x - 12.0, middle.y))
+        .map_err(drive_error)?;
+    driver.move_to(middle).map_err(drive_error)?;
+    let doc = window.read_json("doc");
+    let ctx = CallCtx::new(CapSet::of([Cap::Inspect, Cap::Mutate]));
+    window
+        .server
+        .call(
+            "node_select",
+            &ctx,
+            serde_json::json!({"doc": doc, "nodes": [{"id": other}]}),
+        )
+        .map_err(|e| format!("the agent was refused: {}", e.to_value()))?;
+    window.rest()?;
+    window
+        .stage
+        .drive()
+        .release(middle, MouseButtons::LEFT)
+        .map_err(drive_error)?;
+    window.rest()
+}
+
+#[when(
+    regex = r#"^the person clicks the button "([^"]+)" and the preview's answer about "([^"]+)" comes first, saying "([^"]+)"$"#
+)]
+fn late_answer(w: &mut UiWorld, button: String, about: String, says: String) -> StepResult {
+    let window = w.window()?;
+    let tree = window.tree();
+    let node = find(&tree, &|n| n.name == button && n.role == "button")
+        .cloned()
+        .ok_or_else(|| format!("no button {button:?}; the window holds {}", names(&tree)))?;
+    let key = node.key.ok_or("the button has no key")?;
+    let name = button
+        .strip_prefix("Pick ")
+        .ok_or("not a picker's button")?;
+    let mut driver = window.stage.drive();
+    let at = driver.aim_at_node(key).map_err(|why| format!("{why:?}"))?;
+    driver
+        .click(at, MouseButtons::LEFT, 1)
+        .map_err(drive_error)?;
+    let picker = ljos_drive::find_below(window.engine(), window.root, "colourPicker")
+        .ok_or("the window has no colour picker")?;
+    // The driver's click waits for the real answer, so the picker is put
+    // back to waiting for the late one to find it as it would have.
+    window
+        .engine()
+        .write_by_name(picker, "waiting", Value::Bool(true))
+        .map_err(|e| format!("{e:?}"))?;
+    let answer = serde_json::json!({"id": about, "state": {name: says}, "mocked": false});
+    window.answer("preview_state", answer)?;
+    window.rest()
+}
+
+#[then(regex = r#"^the window has no colour picker open$"#)]
+fn no_picker_open(w: &mut UiWorld) -> StepResult {
+    let tree = w.window()?.tree();
+    find(&tree, &|n| n.name == "Colour")
+        .is_none()
+        .then_some(())
+        .ok_or_else(|| "the colour picker is still open".to_owned())
+}
+
+#[then(regex = r#"^the picker's "([^"]+)" can be moved$"#)]
+fn picker_slider_enabled(w: &mut UiWorld, name: String) -> StepResult {
+    let window = w.window()?;
+    let picker = ljos_drive::find_below(window.engine(), window.root, "colourPicker")
+        .ok_or("the window has no colour picker")?;
+    (window.engine().read_by_name(picker, "known") == Value::Bool(true))
+        .then_some(())
+        .ok_or_else(|| format!("the picker's {name:?} stays still: it has no colour to start from"))
 }
 
 #[when(regex = r#"^the person drags the picker's "([^"]+)" to its middle$"#)]

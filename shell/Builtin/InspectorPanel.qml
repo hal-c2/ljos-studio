@@ -53,7 +53,11 @@ Panel {
     signal reseed()
     Connections {
         target: panel.workspace
-        function onSelectedChanged() { panel.reseed() }
+        function onSelectedChanged() {
+            panel.reseed()
+            // The selection is shared, and what is open was opened on another.
+            picker.close()
+        }
         function onRefused(tool, error) {
             if (["property_set", "binding_set", "state_edit"].includes(tool))
                 panel.reseed()
@@ -81,7 +85,7 @@ Panel {
         const text = writtenText(written)
         const colour = text !== null && writesColour(text) ? text : ""
         return {
-            picker: row.colour === true || /(^|\.)[a-z]*[cC]olor$/.test(row.name) || colour.charAt(0) === "#",
+            picker: row.colour === true || /(^|\.)[a-zA-Z]*[cC]olor$/.test(row.name) || colour.charAt(0) === "#",
             paint: colour,
             note: written !== "" && text === null
         }
@@ -100,7 +104,8 @@ Panel {
         }
     }
 
-    function set(name, text) {
+    // On the selected object unless a picker says which it was opened on.
+    function set(name, text, node) {
         if (picked !== "") {
             record(name, text)
             return
@@ -113,7 +118,7 @@ Panel {
         refusal.text = ""
         workspace.dispatch("property_set", {
             doc: workspace.doc,
-            node: {node: workspace.selected},
+            node: {node: node || workspace.selected},
             name: name,
             value: parsed.value
         })
@@ -238,10 +243,15 @@ Panel {
                 panel.adding = false
                 newComment.text = ""
             }
+            // An answer names its object: one on its way when the person opened
+            // this picker on another is not about what the sliders hold.
             if (tool === "preview_state" && picker.waiting && answer.state !== undefined
-                    && answer.state[picker.name] !== undefined) {
+                    && answer.id === picker.objectId && answer.state[picker.name] !== undefined) {
                 const read = String(answer.state[picker.name])
-                if (panel.writesColour(read)) {
+                // The running app has no value for it yet, so any is a start.
+                if (answer.state[picker.name] === null) {
+                    picker.start("#000000")
+                } else if (panel.writesColour(read)) {
                     picker.start(read)
                 } else {
                     picker.waiting = false
@@ -293,6 +303,9 @@ Panel {
         objectName: "colourPicker"
         property var row: ({})
         property string name: ""
+        // The object it was opened on: the selection can move while it is open.
+        property string node: ""
+        property string objectId: ""
         property string written: ""
         property bool waiting: false
         property bool known: false
@@ -315,6 +328,8 @@ Panel {
             picker.row = row
             picker.name = row.name
             picker.written = written
+            picker.node = panel.workspace.selected
+            picker.objectId = panel.selectedId
             // Beside the inspector, where it hides none of the rows.
             x = -implicitWidth - Spacing.xs
             y = at.mapToItem(panel, 0, 0).y
@@ -327,7 +342,7 @@ Panel {
                 waiting = true
                 panel.workspace.dispatch("preview_state", {
                     doc: panel.workspace.doc,
-                    node: {node: panel.workspace.selected},
+                    node: {node: picker.node},
                     read: [name]
                 })
             }
@@ -335,7 +350,7 @@ Panel {
         }
         function take(text) {
             written = JSON.stringify(text)
-            panel.set(name, written)
+            panel.set(name, written, node)
         }
 
         onClosed: waiting = false
