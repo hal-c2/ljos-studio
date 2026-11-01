@@ -239,8 +239,8 @@ struct FindOut {
 #[serde(deny_unknown_fields)]
 struct SelectArgs {
     doc: String,
-    /// Empty clears the selection.
-    #[serde(default)]
+    /// Empty or null clears the selection.
+    #[serde(default, deserialize_with = "list_or_null")]
     nodes: Vec<Address>,
     /// Instead of `nodes`: a point in the open preview of `doc`, in its
     /// logical pixels. Selects the object declared where the preview's
@@ -647,6 +647,16 @@ struct ThemeArgs {
     generation: Option<u64>,
     #[serde(default)]
     dry_run: bool,
+}
+
+/// A list that may be `null`: an agent that has nothing to give often says
+/// so with `null`, and means what an empty list means.
+fn list_or_null<'de, D, T>(d: D) -> Result<Vec<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    Option::<Vec<T>>::deserialize(d).map(Option::unwrap_or_default)
 }
 
 /// A field that is there, `null` or not: `Some(None)` for `null`.

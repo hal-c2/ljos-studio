@@ -57,6 +57,18 @@ Feature: Studio's selection is set by address or by a point in the preview
       """
     Then the answer's "/selection" has 0 entries
 
+  Scenario: A null list clears the selection like an empty one
+    Given the studio tools are connected
+    And the agent has called the tool "node_select" with:
+      """json
+      {"doc": "Main.qml", "nodes": [{"id": "card"}]}
+      """
+    When the agent calls the tool "node_select" with:
+      """json
+      {"doc": "Main.qml", "nodes": null}
+      """
+    Then the answer's "/selection" has 0 entries
+
   Scenario: A point needs a preview of the document
     Given the studio tools are connected
     When the agent calls the tool "node_select" with:

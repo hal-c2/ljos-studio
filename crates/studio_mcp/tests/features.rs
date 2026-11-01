@@ -42,6 +42,8 @@ struct StudioWorld {
     /// project, which the preview watches.
     state: tempfile::TempDir,
     server: Option<StudioServer>,
+    /// The program previews run, when a scenario names one; else `LJOS`.
+    program: Option<std::path::PathBuf>,
     caps: CapSet,
     answer: Option<Result<Value, SurfaceError>>,
     /// The pictures of the last answer.
@@ -120,6 +122,7 @@ impl StudioWorld {
             outside: Vec::new(),
             state: tempfile::tempdir().expect("a temporary directory"),
             server: None,
+            program: None,
             caps: CapSet::of([Cap::Inspect, Cap::Mutate]),
             answer: None,
             images: Vec::new(),
@@ -148,10 +151,15 @@ impl StudioWorld {
             // temporary directory itself is as open as the umask leaves it.
             let state = self.state.path().join("preview");
             let clock: Arc<dyn Timer> = self.clock.clone();
+            let program = self.program.clone();
             let studio = Studio::open_with_timer(self.dir.path(), clock)
                 .map_err(|e| e.to_string())?
                 .with_previews(Arc::new(move |dir| {
-                    Box::new(NativeHost::new(dir, NativeHost::default_program(), &state))
+                    Box::new(NativeHost::new(
+                        dir,
+                        program.clone().unwrap_or_else(NativeHost::default_program),
+                        &state,
+                    ))
                 }));
             self.server = Some(StudioServer::new(studio));
         }
@@ -506,6 +514,15 @@ fn outside_holds(w: &mut StudioWorld, names: String) -> StepResult {
             return Err(format!("`{name}` was written: {text:?}"));
         }
     }
+    Ok(())
+}
+
+#[given(regex = r#"^previews run the program "([^"]*)"$"#)]
+fn previews_run(w: &mut StudioWorld, program: String) -> StepResult {
+    // A server already made keeps the program it was made with, so the next
+    // call makes another over the same files.
+    w.server = None;
+    w.program = Some(w.dir.path().join(program));
     Ok(())
 }
 
