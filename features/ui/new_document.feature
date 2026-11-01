@@ -51,6 +51,34 @@ Feature: A person starts a document in Studio's window
     Then the file "Main.qml" says "import QtQuick"
     And the window shows the document "Main.qml"
 
+  Scenario: A project of one document opens on it
+    Given the file "Main.qml":
+      """qml
+      import QtQuick
+
+      Rectangle {
+          id: root
+      }
+      """
+    And Studio's window shows the project
+    Then the window shows the document "Main.qml"
+
+  Scenario: A project of several documents waits to be told which
+    Given the file "Main.qml":
+      """qml
+      import QtQuick
+
+      Item {}
+      """
+    And the file "Other.qml":
+      """qml
+      import QtQuick
+
+      Item {}
+      """
+    And Studio's window shows the project
+    Then the window shows no document
+
   Scenario: A directory with other files is left as it is
     Given the file "notes.txt":
       """
