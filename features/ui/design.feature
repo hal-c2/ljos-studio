@@ -139,6 +139,17 @@ Feature: Studio's window is laid out to work in
     When the person zooms in with Ctrl and the wheel over the frame "Desktop" at 60, 40
     Then the frame "Desktop" grew, with its point under the pointer still there
 
+  # At the top of the window a tip has no room above its button; kept inside
+  # the window it would lie on the button and take the press meant for it.
+  @preview
+  Scenario: A button at the top of the window takes the press with its tip showing
+    Given the person has opened "Main.qml" in the documents list
+    And the person has selected "Rectangle root" in the layers panel
+    And the person has set "width" to "401" in the inspector
+    When the pointer rests on the button "Undo" until its tip has shown
+    And the person clicks the button "Undo"
+    Then the file "Main.qml" says "width: 400"
+
   @preview
   Scenario: With the hand a click in the frame selects nothing
     Given the person has opened "Main.qml" in the documents list
