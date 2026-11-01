@@ -1357,6 +1357,7 @@ fn inspector_button_disabled(w: &mut UiWorld, name: String) -> StepResult {
         .ok_or_else(|| format!("{name:?} is {:?}", button.states))
 }
 
+#[given(regex = r#"^the person has typed "(.*)" in the inspector's "([^"]+)" and left it$"#)]
 #[when(regex = r#"^the person types "(.*)" in the inspector's "([^"]+)" and leaves it$"#)]
 fn types_in_row(w: &mut UiWorld, text: String, name: String) -> StepResult {
     let text = unescape(&text);

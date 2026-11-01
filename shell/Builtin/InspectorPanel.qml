@@ -142,12 +142,23 @@ Panel {
     }
 
     signal reseed()
+    // What was begun on the object selected before: a write reads the selection
+    // when it is sent, and would land on this one.
+    signal selectionMoved()
+    onSelectionMoved: {
+        newName.text = ""
+        newValue.text = ""
+        componentName.text = ""
+        newComment.text = ""
+    }
     Connections {
         target: panel.workspace
         function onSelectedChanged() {
             panel.reseed()
+            panel.selectionMoved()
             // The selection is shared, and what is open was opened on another.
             picker.close()
+            choiceList.close()
             // An object removed under an open picker empties the selection,
             // and what the picker says of that is still to be read. Any other
             // refusal was about what is gone.
@@ -781,6 +792,10 @@ Panel {
                         Accessible.name: placeRow.modelData.name
                         Layout.fillWidth: true
                         onAccepted: if (text.trim() !== "") panel.set(placeRow.modelData.name, text)
+                        Connections {
+                            target: panel
+                            function onSelectionMoved() { placeValue.text = "" }
+                        }
                     }
                     IconButton {
                         icon_: "link"
@@ -1236,6 +1251,7 @@ Panel {
                     // Once written the handler is a row of Properties, like
                     // anything else the file says.
                     Field {
+                        id: handlerText
                         visible: !panel.workspace.inspector.some(r => r.name === signalRow.handler)
                         placeholderText: "what it does"
                         Accessible.name: "Handle " + signalRow.modelData.name
@@ -1244,6 +1260,10 @@ Panel {
                             if (text.trim() !== "")
                                 panel.bind(signalRow.handler, text)
                             text = ""
+                        }
+                        Connections {
+                            target: panel
+                            function onSelectionMoved() { handlerText.text = "" }
                         }
                     }
                 }
@@ -1272,6 +1292,7 @@ Panel {
                         Accessible.name: "Role " + roleRow.modelData
                     }
                     Field {
+                        id: roleName
                         placeholderText: "property"
                         Accessible.name: "Bind role " + roleRow.modelData + " to"
                         Layout.fillWidth: true
@@ -1280,6 +1301,10 @@ Panel {
                                 return
                             panel.bind(text, "model." + roleRow.modelData)
                             text = ""
+                        }
+                        Connections {
+                            target: panel
+                            function onSelectionMoved() { roleName.text = "" }
                         }
                     }
                 }
