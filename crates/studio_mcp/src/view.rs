@@ -421,7 +421,7 @@ impl Studio {
                     view.inspector.push(Shown {
                         name: name.clone(),
                         value: String::new(),
-                        colour: false,
+                        colour: node.colours.contains(name),
                     });
                 }
             }

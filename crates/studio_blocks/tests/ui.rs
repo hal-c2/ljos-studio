@@ -2133,6 +2133,37 @@ fn inspector_has_no_button(w: &mut UiWorld, name: String) -> StepResult {
         .map_or(Ok(()), |_| Err(format!("a button {name:?}")))
 }
 
+#[then(
+    regex = r#"^the inspector's "([^"]+)" has (a picker|no picker), painted "([^"]*)", with the note "([^"]*)"$"#
+)]
+fn colour_row_offers(
+    w: &mut UiWorld,
+    row: String,
+    picker: String,
+    paint: String,
+    note: String,
+) -> StepResult {
+    let button = format!("Pick {row}");
+    let tree = w.window()?.tree();
+    let Some(swatch) = find(&tree, &|n| n.name == button && n.role == "button").cloned() else {
+        return (picker == "no picker")
+            .then_some(())
+            .ok_or_else(|| format!("no button {button:?}; the window holds {}", names(&tree)));
+    };
+    if picker == "no picker" {
+        return Err(format!("a button {button:?}"));
+    }
+    if swatch.description != paint {
+        return Err(format!("the swatch paints {:?}", swatch.description));
+    }
+    clicks_button(w, button)?;
+    let tree = w.window()?.tree();
+    let says = find(&tree, &|n| n.name.starts_with("Worked out by")).map(|n| n.name.as_str());
+    (says.unwrap_or("") == note)
+        .then_some(())
+        .ok_or_else(|| format!("the picker's note says {says:?}"))
+}
+
 #[when(regex = r#"^the person enters "([^"]*)" in the colour picker$"#)]
 fn enters_colour(w: &mut UiWorld, value: String) -> StepResult {
     let window = w.window()?;
