@@ -1130,16 +1130,15 @@ fn rename(
                 .session
                 .replace_text(doc, generation, None, &text, dry_run)
         }
-        None => studio.session.edit(
-            doc,
-            generation,
-            &Op::SetBinding {
-                node: Address::Node(handle.clone()),
-                name: "id".to_owned(),
-                value: name.to_owned(),
-            },
-            dry_run,
-        ),
+        None => {
+            let text = studio.session.text(doc).map_err(error)?.0.to_owned();
+            let object =
+                studio_core::with_first_id(&text[node.start..node.end], name).map_err(error)?;
+            let text = format!("{}{object}{}", &text[..node.start], &text[node.end..]);
+            studio
+                .session
+                .replace_text(doc, generation, None, &text, dry_run)
+        }
     }
     .map_err(error)?;
     if dry_run {

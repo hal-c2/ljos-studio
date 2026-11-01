@@ -3615,6 +3615,14 @@ fn with_id(text: &str, taken: &[String]) -> Result<String, Error> {
         .map(|n| format!("{stem}{n}"))
         .find(|name| !taken.contains(name))
         .expect("an unused name");
+    with_first_id(text, &name)
+}
+
+/// `text` (an object with no `id`) with `id: <name>` as its first member.
+pub fn with_first_id(text: &str, name: &str) -> Result<String, Error> {
+    let nodes = outline::outline(text)
+        .ok_or_else(|| Error::Invalid("the text to insert is not one QML object".to_owned()))?;
+    let root = &nodes[0];
     // The id goes first, where a reader looks for it: on the brace's line
     // for an object written on one line, else on a line of its own indented
     // like the first member.
