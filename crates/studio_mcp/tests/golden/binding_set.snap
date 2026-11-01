@@ -35,7 +35,10 @@ expression: value
       },
       "value": {
         "description": "QML after the `:` (`parent.width / 2`, `{ count++ }`); `null` removes it. Required.",
-        "type": "string"
+        "type": [
+          "string",
+          "null"
+        ]
       }
     },
     "required": [
