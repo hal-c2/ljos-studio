@@ -856,6 +856,17 @@ fn file_contains(w: &mut StudioWorld, name: String, want: String) -> StepResult 
         .ok_or_else(|| format!("`{name}` does not contain {want:?}:\n{got}"))
 }
 
+#[then(regex = r#"^the file "([^"]+)" contains:$"#)]
+fn file_contains_text(w: &mut StudioWorld, name: String, step: &Step) -> StepResult {
+    let want = docstring(step)?;
+    let want = want.as_str();
+    let got =
+        std::fs::read_to_string(w.dir.path().join(&name)).map_err(|e| format!("`{name}`: {e}"))?;
+    got.contains(want)
+        .then_some(())
+        .ok_or_else(|| format!("`{name}` does not contain {want:?}:\n{got}"))
+}
+
 #[then(regex = r#"^the file "([^"]+)" does not contain "(.*)"$"#)]
 fn file_lacks(w: &mut StudioWorld, name: String, want: String) -> StepResult {
     let got =

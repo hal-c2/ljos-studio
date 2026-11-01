@@ -272,3 +272,21 @@ Feature: Objects are moved and resized on the canvas
     Then the window says "A state cannot change the order of a layout"
     And the file "Main.qml" says "id: one;"
     And the file "Main.qml" does not say "target: one"
+
+  Scenario: A multiple selection is wrapped from the bar above the canvas
+    Given an agent has called the tool "node_select" with:
+      """json
+      {"doc": "Main.qml", "nodes": [{"id": "a"}, {"id": "b"}]}
+      """
+    When the person clicks the button "Wrap in Column"
+    Then the file "Main.qml" says "Column {"
+    And the layers panel lists "Rectangle root, Column column, Rectangle a, Rectangle b, RowLayout row, Rectangle one, Rectangle two"
+
+  Scenario: What only holds its children is taken away from around them
+    Given an agent has called the tool "node_arrange" with:
+      """json
+      {"action": "wrap", "doc": "Main.qml", "nodes": [{"id": "a"}, {"id": "b"}], "in": "Item"}
+      """
+    When the person selects "Item item" in the layers panel
+    And the person clicks the button "Unwrap"
+    Then the file "Main.qml" says "id: a; x: 20; y: 20;"

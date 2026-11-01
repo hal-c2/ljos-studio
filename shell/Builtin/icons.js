@@ -43,6 +43,7 @@ var paths = {
     distributeH: "M2.5 2 V14 M13.5 2 V14 M8 5 V11",
     distributeV: "M2 2.5 H14 M2 13.5 H14 M5 8 H11",
     frame: "M2.5 2.5 H13.5 V13.5 H2.5 Z",
+    unwrap: "M2.5 5 V2.5 H5 M11 2.5 H13.5 V5 M13.5 11 V13.5 H11 M5 13.5 H2.5 V11 M6 6 H10 V10 H6 Z",
     text: "M3 4 V3 H13 V4 M8 3 V13 M6 13 H10",
     image: "M2 3 H14 V13 H2 Z M2 11 L6 7 L10 11 M9 9.5 L11 8 L14 11",
     row: "M2 4 H6.5 V12 H2 Z M9.5 4 H14 V12 H9.5 Z",
