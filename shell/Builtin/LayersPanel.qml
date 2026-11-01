@@ -137,9 +137,11 @@ Panel {
                     anchors.leftMargin: row.leftPadding
                     text: row.modelData.id
                     Accessible.name: "Name of " + row.modelData.label
-                    onVisibleChanged: if (visible) forceActiveFocus()
+                    // What was typed and left is not offered again.
+                    onVisibleChanged: if (visible) { text = row.modelData.id; forceActiveFocus() }
                     // Left open it covers its row, and clicks there would select nothing.
-                    onActiveFocusChanged: if (!activeFocus && panel.naming === row.modelData.node) panel.naming = ""
+                    // Another window taking the focus is a trip, to copy a name.
+                    onActiveFocusChanged: if (!activeFocus && Window.active && panel.naming === row.modelData.node) panel.naming = ""
                     onAccepted: {
                         panel.naming = ""
                         if (text !== row.modelData.id) {
