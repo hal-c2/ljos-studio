@@ -732,6 +732,9 @@ pub(crate) fn error(e: Error) -> SurfaceError {
             studio_core::EditError::NoBinding { .. } => kind(ErrorCode::NotFound, "no_binding"),
             studio_core::EditError::NotAChild(_) => kind(ErrorCode::InvalidArgument, "not_a_child"),
             studio_core::EditError::IntoItself => kind(ErrorCode::InvalidArgument, "into_itself"),
+            studio_core::EditError::BoundWhole { .. } => {
+                kind(ErrorCode::InvalidArgument, "bound_whole")
+            }
         },
     }
 }
