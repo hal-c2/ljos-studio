@@ -45,7 +45,12 @@ Panel {
             panel.reseed()
             // The selection is shared, and what is open was opened on another.
             picker.close()
-            panel.forgetRefused()
+            // An object removed under an open picker empties the selection,
+            // and what the picker says of that is still to be read.
+            if (panel.workspace.selected !== "")
+                panel.forgetRefused()
+            else
+                panel.offered = null
         }
         function onRefused(tool, error) {
             if (["property_set", "binding_set", "state_edit"].includes(tool))
