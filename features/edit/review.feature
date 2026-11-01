@@ -48,6 +48,18 @@ Feature: Design review comments sit on objects, in the sidecar
         }
         """
 
+    Scenario: A comment is by the client that made it unless it says otherwise
+      When a second agent named "Ada" calls the tool "review" with:
+        """json
+        {"action": "add", "doc": "Main.qml", "node": {"id": "title"}, "text": "Too small for a heading"}
+        """
+      Then the answer's "/comment/thread/0/author" is "Ada"
+      When a second agent named "Ada" calls the tool "review" with:
+        """json
+        {"action": "reply", "comment": "c1", "text": "Made it 24", "author": "designer"}
+        """
+      Then the answer's "/comment/thread/1/author" is "designer"
+
     Scenario: A reply and a resolution
       Given the agent has called the tool "review" with:
         """json
