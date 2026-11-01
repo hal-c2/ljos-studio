@@ -467,8 +467,8 @@ than a bundle of either kind (a site built from one, say).
   manifest has no hashes or signature yet.
 - DECISION: a web export is a directory and its manifest, not a site:
   compiling and bundling are ljos-web's, choosing the files and refusing
-  what has no face on the web are Studio's. `export:web:build` runs
-  `ljos-web build-site` on it.
+  what has no face on the web are Studio's. `export:web:build` uses ljos-web's
+  compiler and Vite plugin until `ljos-web build-site` handles a themed bundle.
 - DECISION: `export` writes no history entry; it changes no document.
 
 `review {action, doc?, node?, comment?, text?, author?}` keeps design
