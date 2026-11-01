@@ -297,6 +297,14 @@ Feature: Objects are moved and resized on the canvas
     And the person clicks the button "Wrap in Row"
     Then the layers panel lists "Rectangle root, Row row1, Rectangle a, Rectangle b, RowLayout row, Rectangle one, Rectangle two"
 
+  # The inspector edits the first of what is gathered, and looked as if it
+  # edited them all.
+  Scenario: The inspector says it edits one of what is gathered
+    When the person clicks the frame "Desktop" at 30, 30
+    Then the window does not say "2 selected. This edits the first."
+    When the person clicks the frame "Desktop" at 210, 110 holding Shift
+    Then the window says "2 selected. This edits the first."
+
   Scenario: Objects are gathered with Shift in the layers panel and wrapped together
     Given the person has selected "Rectangle a" in the layers panel
     When the person selects "Rectangle b" in the layers panel holding Shift
