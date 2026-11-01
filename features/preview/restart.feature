@@ -61,6 +61,33 @@ Feature: Another program in a browser's preview starts as a program does
 
   # The mock names a file it does not have: a browser compiles the whole
   # project, so a mock that does not parse stops the live preview as well.
+  # Both hosts: a mock that does not compile is told, and the program that
+  # was running goes on, state and all.
+  Scenario: A broken mock is told and the last good preview stays
+    Given the file "mocks/App/Block/qmldir":
+      """
+      module App.Block
+      Block 1.0 Missing.qml
+      """
+    And the agent has called the tool "preview_open" with:
+      """json
+      {"doc": "Main.qml"}
+      """
+    And the agent has called the tool "preview_state" with:
+      """json
+      {"node": {"id": "root"}, "click": {"id": "card"}}
+      """
+    When the agent calls the tool "preview_open" with:
+      """json
+      {"doc": "Main.qml", "state": "mocked"}
+      """
+    Then the preview shows "Count 1 from the live one"
+    When the agent calls the tool "preview_events" with:
+      """json
+      {"since": 1}
+      """
+    Then the answer's "/events/0/kind" is "reload_failed"
+
   @web
   Scenario: A switch that did not compile starts over when a save mends it
     Given the file "mocks/App/Block/qmldir":
