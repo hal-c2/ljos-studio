@@ -333,6 +333,15 @@ pub trait PreviewHost: Send {
     /// `None` when nothing is there.
     fn pick(&mut self, x: f64, y: f64) -> Result<Option<Declared>, PreviewError>;
 
+    /// The 3D scene the object declared at `at` is, or is in: its camera and
+    /// models, as the running preview places them. `None` for an object that
+    /// is in no `View3D`. A host that cannot read a scene says `None` too, so
+    /// a click on the picture of a view selects the view.
+    fn scene(&mut self, at: &Declared) -> Result<Option<crate::scene3d::Scene>, PreviewError> {
+        let _ = at;
+        Ok(None)
+    }
+
     /// The objects with one of `ids` and, among objects without an id, those
     /// of one of `types`, in scene order. Copies of a delegate are each
     /// listed. A host that cannot tell refuses.

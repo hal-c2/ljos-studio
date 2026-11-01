@@ -62,6 +62,8 @@ pub struct Drag {
 pub struct Wanted {
     pub x: Option<f64>,
     pub y: Option<f64>,
+    /// Depth, of an object of a 3D scene.
+    pub z: Option<f64>,
     pub width: Option<f64>,
     pub height: Option<f64>,
 }
@@ -157,6 +159,55 @@ pub fn drag_of(node: &Node, parent_types: &[&str]) -> Drag {
             format!("A drop replaces the binding of {}", bound.join(", "))
         },
     }
+}
+
+/// Whether objects of this type stand in a 3D scene, which has no box, no
+/// layout and no anchors: placing one writes `x`, `y` and `z`.
+pub fn is_spatial(ty: &str) -> bool {
+    let short = ty.rsplit(['.', '/']).next().unwrap_or(ty);
+    matches!(
+        short,
+        "Model"
+            | "Node"
+            | "PerspectiveCamera"
+            | "OrthographicCamera"
+            | "DirectionalLight"
+            | "PointLight"
+            | "SpotLight"
+    )
+}
+
+/// The bindings that put a spatial `node` at `wanted`'s `x`, `y` and `z`.
+///
+/// # Errors
+/// An axis whose value is an expression, or a `position` set whole: a drop
+/// would replace what the file computes with a number, which a drag of an
+/// arrow cannot mean.
+pub fn bindings_3d(node: &Node, wanted: Wanted) -> Result<Vec<(String, String)>, Refusal> {
+    let label = node.id.as_deref().unwrap_or(&node.ty);
+    let asked = [("x", wanted.x), ("y", wanted.y), ("z", wanted.z)];
+    if asked.iter().any(|(_, v)| v.is_some()) && binding(node, "position").is_some() {
+        return Err(Refusal {
+            kind: "bound",
+            message: format!("`{label}` has its `position` set whole: edit that, not x, y and z"),
+        });
+    }
+    let mut out = Vec::new();
+    for (name, value) in asked {
+        let Some(value) = value else { continue };
+        if let Some(written) = binding(node, name)
+            && !is_number(written)
+        {
+            return Err(Refusal {
+                kind: "bound",
+                message: format!(
+                    "`{label}`'s {name} is `{written}`, an expression: edit it as one"
+                ),
+            });
+        }
+        out.push((name.to_owned(), number(value)));
+    }
+    Ok(out)
 }
 
 const ANCHORS: [&str; 7] = [

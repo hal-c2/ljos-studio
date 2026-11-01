@@ -22,6 +22,7 @@ pub mod outline;
 pub mod place;
 pub mod preview;
 pub mod review;
+pub mod scene3d;
 pub mod slots;
 pub mod states;
 mod store;
@@ -782,7 +783,18 @@ impl Session {
         })
     }
 
-    /// The object whose type name starts at `line`, `column` (one-based,
+    /// Where `node` is declared in `path`: its line and column, one-based, as
+    /// the running preview names an object.
+    ///
+    /// # Errors
+    /// A document that is not held.
+    pub fn declared_where(&mut self, path: &str, node: &Node) -> Result<(usize, usize), Error> {
+        let text = &self.doc(path)?.text;
+        let start = u32::try_from(node.start).unwrap_or(u32::MAX);
+        Ok(qml_syntax::position(text, start))
+    }
+
+    /// The object declared at `line` and `column` (one-based; `column` counted
     /// in characters, as [`qml_syntax::position`] counts) of `path`: the
     /// one declared there, never one enclosing it. A `column` of 0 means
     /// only the line is known, and then the line must hold one object.

@@ -10,8 +10,9 @@ use ljos_mcp_core::{CallCtx, Cap, ErrorCode, SurfaceError, ToolDef, ToolRegistry
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use studio_core::place::{self, Align, Drag, Moving, Rect, Wanted};
-use studio_core::preview::Placed;
+use studio_core::place::{self, Align, Drag, Moving, Rect, Resizing, Wanted};
+use studio_core::preview::{Declared, Placed};
+use studio_core::scene3d::Handles;
 use studio_core::{Address, Node, NodePath, Op, StateEdit, Step};
 
 use crate::tools::{EditOut, MUTATE};
@@ -131,6 +132,23 @@ struct NodeGeometry {
     #[serde(skip_serializing_if = "Option::is_none")]
     window: Option<Rect>,
     drag: Drag,
+    /// An object of a 3D scene has no box: its axes on the view instead.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    scene: Option<Spatial>,
+}
+
+/// A model, a light or a camera on the picture of its view, for the canvas to
+/// draw arrows on and drag along.
+#[derive(Serialize, JsonSchema)]
+struct Spatial {
+    #[serde(flatten)]
+    handles: Handles,
+    /// `x`, `y` and `z` as the file has them.
+    #[schemars(with = "Vec<f64>")]
+    local: [f64; 3],
+    /// Per axis, why a drag cannot write it; empty where it can.
+    #[schemars(with = "Vec<String>")]
+    refused: [String; 3],
 }
 
 #[derive(Serialize, JsonSchema)]
@@ -146,6 +164,8 @@ struct PlaceOne {
     /// In the parent's coordinates. What is left out stays.
     x: Option<f64>,
     y: Option<f64>,
+    /// Of an object of a 3D scene.
+    z: Option<f64>,
     width: Option<f64>,
     height: Option<f64>,
 }
@@ -322,24 +342,34 @@ fn geometry(studio: &mut Studio, a: &GeometryArgs) -> Result<GeometryOut, Surfac
             ),
         ));
     };
-    let nodes = asked
-        .iter()
-        .map(|(handle, node)| {
-            let parent = parent_path(&node.path).and_then(|p| at_path(&tree, &p));
-            let parent_placed = parent.as_ref().and_then(|(h, _)| placed.get(h));
-            let drag = place::drag_of(
-                node,
-                &parent_types(parent.as_ref().map(|(_, n)| n), parent_placed),
-            );
-            let here = placed.get(handle);
-            NodeGeometry {
-                node: handle.clone(),
-                local: here.map(|p| as_written(node, &drag, p.local)),
-                window: here.map(|p| p.window),
-                drag,
-            }
-        })
-        .collect();
+    let mut nodes = Vec::new();
+    for (handle, node) in &asked {
+        let parent = parent_path(&node.path).and_then(|p| at_path(&tree, &p));
+        let parent_placed = parent.as_ref().and_then(|(h, _)| placed.get(h));
+        let mut drag = place::drag_of(
+            node,
+            &parent_types(parent.as_ref().map(|(_, n)| n), parent_placed),
+        );
+        let here = placed.get(handle);
+        let scene = match here {
+            None if place::is_spatial(&node.ty) => spatial(studio, &a.doc, node)?,
+            _ => None,
+        };
+        if scene.is_some() {
+            drag = Drag {
+                moving: Moving::Position,
+                resize: Resizing::None,
+                says: String::new(),
+            };
+        }
+        nodes.push(NodeGeometry {
+            node: handle.clone(),
+            local: here.map(|p| as_written(node, &drag, p.local)),
+            window: here.map(|p| p.window),
+            drag,
+            scene,
+        });
+    }
     Ok(GeometryOut {
         nodes,
         parent: first_parent
@@ -356,6 +386,45 @@ fn geometry(studio: &mut Studio, a: &GeometryArgs) -> Result<GeometryOut, Surfac
             })
             .collect(),
     })
+}
+
+/// `node` of a 3D scene on the picture of its view; `None` where the preview
+/// does not show it (a model with no mesh to see, a camera it is not looking
+/// through, a preview that cannot read a scene).
+fn spatial(studio: &mut Studio, doc: &str, node: &Node) -> Result<Option<Spatial>, SurfaceError> {
+    let (line, column) = studio.session.declared_where(doc, node).map_err(error)?;
+    let at = Declared {
+        file: doc.to_owned(),
+        line: line as u32,
+        column: column as u32,
+    };
+    let Some(scene) = crate::preview_tools::scene(studio, doc, &at)? else {
+        return Ok(None);
+    };
+    let Some(handles) = scene.body(&at).and_then(|b| scene.handles(b)) else {
+        return Ok(None);
+    };
+    let written = |name: &str| node.bindings.iter().find(|b| b.name == name);
+    let whole = written("position").is_some();
+    let mut local = [0.0; 3];
+    let mut refused = [String::new(), String::new(), String::new()];
+    for (i, name) in ["x", "y", "z"].into_iter().enumerate() {
+        match written(name).map(|b| b.value.trim()) {
+            None => {}
+            Some(v) => match v.parse() {
+                Ok(n) => local[i] = n,
+                Err(_) => refused[i] = format!("{name} is `{v}`: an expression"),
+            },
+        }
+        if whole {
+            refused[i] = "position is set whole".to_owned();
+        }
+    }
+    Ok(Some(Spatial {
+        handles,
+        local,
+        refused,
+    }))
 }
 
 /// The edits placing each of `places` asks for, all or none.
@@ -386,7 +455,12 @@ fn place_ops(
         let parent_placed = parent.as_ref().and_then(|(h, _)| placed.get(h));
         let types = parent_types(parent.as_ref().map(|(_, n)| n), parent_placed);
         let now = placed.get(&handle).map(|p| p.local);
-        let bindings = place::bindings_for(&node, &types, now, wanted).map_err(|r| {
+        let placing = if place::is_spatial(&node.ty) {
+            place::bindings_3d(&node, wanted)
+        } else {
+            place::bindings_for(&node, &types, now, wanted)
+        };
+        let bindings = placing.map_err(|r| {
             let kind = if r.kind == "needs_preview" {
                 "no_preview"
             } else {
@@ -746,6 +820,7 @@ fn arrange(studio: &mut Studio, a: ArrangeArgs) -> Result<ArrangeOut, SurfaceErr
                         Wanted {
                             x: p.x,
                             y: p.y,
+                            z: p.z,
                             width: p.width,
                             height: p.height,
                         },
