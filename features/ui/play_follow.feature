@@ -95,6 +95,16 @@ Feature: The frame follows what the app draws in play mode
     When 2 seconds pass
     Then the frame "Desktop" has drawn a different picture since
 
+  Scenario: A click in a picture slower than the app moves leaves the window time to rest
+    Given the preview takes 300 ms over each picture
+    And the person has opened "Spin.qml" in the documents list
+    And the person has clicked the button "Play"
+    And the person has clicked the frame "Desktop" at 100, 100
+    And 2 seconds have passed
+    And the person has looked at the frame "Desktop"
+    When 2 seconds pass
+    Then the frame "Desktop" has drawn a different picture since
+
   Scenario: A still app in play mode is asked for no pictures
     Given the person has opened "Still.qml" in the documents list
     And the person has clicked the button "Play"

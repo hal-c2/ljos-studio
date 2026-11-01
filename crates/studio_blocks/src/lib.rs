@@ -312,7 +312,14 @@ impl Workspace {
             (q.settling.is_some() && !waiting).then_some(q.fetched)
         };
         if let Some(generation) = generation {
-            enqueue(cx.engine, cx.this, Job::Picture { generation });
+            enqueue(
+                cx.engine,
+                cx.this,
+                Job::Picture {
+                    generation,
+                    looks: Vec::new(),
+                },
+            );
         }
         Ok(())
     }
@@ -380,8 +387,6 @@ struct Queue {
     follow_wanted: bool,
     /// What stops the thread waiting on the preview, while there is one.
     following: Option<Arc<AtomicBool>>,
-    /// The follower's looks waiting for the picture to land.
-    look_landed: Vec<mpsc::Sender<()>>,
     /// The lists last set, by the property's name.
     given: HashMap<&'static str, Json>,
 }
@@ -422,7 +427,13 @@ enum Job {
     /// Read the session again.
     Refresh,
     /// Fetch the preview's picture.
-    Picture { generation: u64 },
+    Picture {
+        generation: u64,
+        /// The follower's looks this picture answers. Theirs alone: one
+        /// already being painted when they asked shows the app from before.
+        /// A job dropped unrun drops them, and the follower stops waiting.
+        looks: Vec<mpsc::Sender<()>>,
+    },
 }
 
 /// What a job did, read off the UI thread.
@@ -442,6 +453,7 @@ enum Done {
     },
     Picture {
         generation: u64,
+        looks: Vec<mpsc::Sender<()>>,
         /// Width, height, pixels, and what the pixels hash to.
         picture: Result<(u32, u32, Vec<u8>, u64), String>,
     },
@@ -585,7 +597,7 @@ fn run(server: &StudioServer, writes: &AtomicU64, doc: &str, job: Job) -> Done {
             let (view, seen) = read();
             Done::Refresh { view, seen }
         }
-        Job::Picture { generation } => {
+        Job::Picture { generation, looks } => {
             let args = json!({"format": "png", "max_size": 1280});
             let picture = server
                 .shown_picture(&person(), args)
@@ -604,6 +616,7 @@ fn run(server: &StudioServer, writes: &AtomicU64, doc: &str, job: Job) -> Done {
                 });
             Done::Picture {
                 generation,
+                looks,
                 picture,
             }
         }
@@ -705,12 +718,13 @@ fn finish(engine: &Engine, ws: ObjectId, done: Done) {
         Done::Refresh { view, seen } => publish(engine, ws, view, seen),
         Done::Picture {
             generation,
+            looks,
             picture,
         } => {
             let Some(queue) = queue_of(engine, ws) else {
                 return;
             };
-            for looked in queue.borrow_mut().look_landed.drain(..) {
+            for looked in looks {
                 let _ = looked.send(());
             }
             let picture = picture.and_then(|(w, h, rgba, pixels)| {
@@ -903,13 +917,26 @@ fn look(engine: &Engine, ws: ObjectId, landed: mpsc::Sender<()>) {
     };
     let generation = {
         let mut q = queue.borrow_mut();
-        q.look_landed.push(landed);
-        let waiting = q.jobs.iter().any(|j| matches!(j, Job::Picture { .. }));
-        (!waiting).then_some(q.fetched)
+        let waiting = q.jobs.iter_mut().find_map(|j| match j {
+            Job::Picture { looks, .. } => Some(looks),
+            _ => None,
+        });
+        match waiting {
+            Some(looks) => {
+                looks.push(landed);
+                return;
+            }
+            None => q.fetched,
+        }
     };
-    if let Some(generation) = generation {
-        enqueue(engine, ws, Job::Picture { generation });
-    }
+    enqueue(
+        engine,
+        ws,
+        Job::Picture {
+            generation,
+            looks: vec![landed],
+        },
+    );
 }
 
 fn hash_of(bytes: &[u8]) -> u64 {
@@ -1129,10 +1156,17 @@ fn publish(engine: &Engine, ws: ObjectId, view: View, seen: u64) {
             .borrow()
             .jobs
             .iter()
-            .any(|j| matches!(j, Job::Picture { generation: g } if *g == generation));
+            .any(|j| matches!(j, Job::Picture { generation: g, .. } if *g == generation));
         if !queued {
             queue.borrow_mut().fetched = generation;
-            enqueue(engine, ws, Job::Picture { generation });
+            enqueue(
+                engine,
+                ws,
+                Job::Picture {
+                    generation,
+                    looks: Vec::new(),
+                },
+            );
         }
     }
 }
