@@ -835,6 +835,33 @@ Panel {
                 }
             }
 
+            // Its family only: a Row's children are placed by their numbers,
+            // a RowLayout's by what they say of `Layout`.
+            Flow {
+                visible: panel.isLayout
+                spacing: Spacing.xxs
+                Layout.fillWidth: true
+                Repeater {
+                    model: {
+                        const kinds = panel.selectedType.endsWith("Layout")
+                            ? ["RowLayout", "ColumnLayout", "GridLayout"]
+                            : ["Row", "Column", "Grid", "Flow"]
+                        return kinds.filter(k => k !== panel.selectedType)
+                    }
+                    delegate: TextButton {
+                        required property string modelData
+                        text: modelData
+                        Accessible.name: "Turn into " + modelData
+                        onClicked: panel.workspace.dispatch("node_arrange", {
+                            action: "relayout",
+                            doc: panel.workspace.doc,
+                            nodes: [{node: panel.workspace.selected}],
+                            name: modelData
+                        })
+                    }
+                }
+            }
+
             Row {
                 visible: !panel.isRoot
                 spacing: Spacing.xxs
