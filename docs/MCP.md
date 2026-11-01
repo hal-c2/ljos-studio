@@ -630,9 +630,10 @@ gap they had, `columns` to the widest row. Refused: `not_siblings`, `root`,
 `unwrap` {nodes: [one]} takes a Row, Column, Grid, Flow, Item or layout away
 from around its children: they get their place on the preview, or for an Item
 its numbers added to theirs, or none. Refused: `not_a_layout`, `holds_more`
-(anything of its own but a place: a property, function, handler, `visible`,
-`states`), `referenced` (something reads its id), `reads_parent` (a child's value
-or anchor reads `parent`), `root`, `locked`.
+(anything of its own but a place: a property, function, handler, enum, `visible`,
+`states`, an object acting on a property such as `Behavior on x`), `referenced` (something reads its id), `reads_parent` (a child's value
+or anchor reads `parent`), `needs_preview` (its anchors or an expression put it
+where only a run knows, and no preview is showing), `root`, `locked`.
 
 `relayout` {nodes: [one], name} turns a Row, Column, Grid or Flow into another
 of them, or a `*Layout` into another `*Layout`, writing only the type's name.

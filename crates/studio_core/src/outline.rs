@@ -314,6 +314,21 @@ fn declared_signals(source: &str, object: &QmlObject<'_>) -> Vec<DeclaredSignal>
         .collect()
 }
 
+/// Whether an object has an `id` or a literal `objectName`, so that its key
+/// step is that name and it does not count among its unnamed siblings.
+fn is_named(source: &str, object: &QmlObject<'_>) -> bool {
+    object.members.iter().any(|m| match m {
+        QmlMember::Binding(b) => {
+            let name = b.name.to_string();
+            name == "id"
+                || (name == "objectName"
+                    && matches!(&b.value, QmlBindingValue::Expression(e)
+                        if literal_string(qml_syntax::text(source, e.span())).is_some()))
+        }
+        _ => false,
+    })
+}
+
 /// Whether a string can be written to a property declared with this type, by
 /// QML's name or a type dump's. Every value type qml6 loads a string for takes
 /// one (`"red"`, `"1,2"`, `"1x2"`, a date, a font), as an enum takes a value's
@@ -339,24 +354,10 @@ pub fn takes_string(ty: &str) -> bool {
     !(refuses || ty.starts_with("list<") || ty.starts_with("QQmlListProperty") || ty.ends_with('*'))
 }
 
-/// Whether an object has an `id` or a literal `objectName`, so that its key
-/// step is that name and it does not count among its unnamed siblings.
-fn is_named(source: &str, object: &QmlObject<'_>) -> bool {
-    object.members.iter().any(|m| match m {
-        QmlMember::Binding(b) => {
-            let name = b.name.to_string();
-            name == "id"
-                || (name == "objectName"
-                    && matches!(&b.value, QmlBindingValue::Expression(e)
-                        if literal_string(qml_syntax::text(source, e.span())).is_some()))
-        }
-        _ => false,
-    })
-}
-
-/// The lists of objects the object starting at `start` is given, such as its
-/// `states`. No `Node` lists them, and they are more than where it sits.
-pub fn lists_given(source: &str, start: usize) -> Vec<String> {
+/// What the object starting at `start` holds that no `Node` says and that is
+/// more than where it sits: its lists of objects, such as `states`, its objects
+/// that act on a property of it, and its enums.
+pub fn more_than_a_place(source: &str, start: usize) -> Vec<String> {
     let allocator = Allocator::default();
     let parsed = qml_syntax::parse(&allocator, source);
     let Some(object) = object_at(&parsed.document.root, start) else {
@@ -369,6 +370,8 @@ pub fn lists_given(source: &str, start: usize) -> Vec<String> {
             QmlMember::Binding(b) if matches!(b.value, QmlBindingValue::Objects(_)) => {
                 Some(b.name.to_string())
             }
+            QmlMember::Object(o) => o.on.as_ref().map(|on| format!("{} on {on}", o.type_name)),
+            QmlMember::Enum(e) => Some(format!("enum {}", e.name.name)),
             _ => None,
         })
         .collect()

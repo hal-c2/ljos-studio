@@ -343,6 +343,58 @@ Feature: Objects are put in a layout and taken out again
       | Component.onCompleted: console.log('up')    |
       | Keys.onPressed: {}                          |
       | states: [ State { name: 's' } ]             |
+      | NumberAnimation on x { to: 5 }              |
+      | Behavior on x { NumberAnimation {} }        |
+      | enum Mode { A, B }                          |
+
+  Scenario Outline: With no preview, a wrapper whose place only a run knows is not unwrapped: <what>
+    Given the agent has called the tool "node_insert" with:
+      """json
+      {"doc": "Main.qml", "parent": {"id": "root"}, "text": "<type> { id: box; <what>; Rectangle { id: kid; width: 10; height: 10 } }"}
+      """
+    When the agent calls the tool "node_arrange" with:
+      """json
+      {"action": "unwrap", "doc": "Main.qml", "nodes": [{"id": "box"}]}
+      """
+    Then the agent is refused with "not_actionable"
+    And the refusal's "/details/kind" is "needs_preview"
+    And the file "Main.qml" contains "id: box"
+
+    Examples:
+      | type | what                         |
+      | Item | anchors.right: parent.right  |
+      | Row  | anchors.right: parent.right  |
+      | Item | x: 2 + 3                     |
+
+  @preview
+  Scenario: An anchored Item's children are put back where the preview shows them
+    Given the file "Shown.qml":
+      """qml
+      import QtQuick
+
+      Rectangle {
+          id: root
+          width: 400; height: 300
+          Item {
+              id: box
+              anchors.right: parent.right
+              anchors.bottom: parent.bottom
+              width: 100; height: 100
+              Rectangle { id: kid; x: 5; y: 5; width: 10; height: 10 }
+          }
+      }
+      """
+    And the studio tools are connected with the capabilities "inspect, mutate, run"
+    And the agent has called the tool "preview_open" with:
+      """json
+      {"doc": "Shown.qml", "size": {"width": 400, "height": 300}}
+      """
+    When the agent calls the tool "node_arrange" with:
+      """json
+      {"action": "unwrap", "doc": "Shown.qml", "nodes": [{"id": "box"}]}
+      """
+    Then the file "Shown.qml" contains "x: 305"
+    And the file "Shown.qml" contains "y: 205"
 
   Scenario: What only places goes with the wrapper
     Given the agent has called the tool "node_insert" with:
