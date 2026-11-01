@@ -70,8 +70,11 @@ Feature: The inspector shows colours and every declared property
   Scenario: The picker writes nothing for what is not a colour
     When the person clicks the button "Pick color"
     And the person enters "#12" in the colour picker
+    And the person enters "#12345" in the colour picker
+    And the person enters "gren" in the colour picker
     Then the file "Main.qml" says "#ff0000"
     And the file "Main.qml" does not say "#12"
+    And the file "Main.qml" does not say "gren"
 
   Scenario: The picker writes nothing for the empty field of a colour it could not read
     When the person replaces "import QtQuick" with "import QtQuick\nimport NoSuchModule" in the code view

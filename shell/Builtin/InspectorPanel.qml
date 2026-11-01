@@ -82,8 +82,14 @@ Panel {
         const text = value.replace(/"/g, "")
         return writesColour(text) && value.charAt(0) === "\"" ? text : "transparent"
     }
+    // The runtime's own reading: what it does not parse would not paint.
     function writesColour(text) {
-        return /^(#[0-9a-fA-F]{3,8}|[a-z]+)$/.test(text)
+        try {
+            Qt.color(text)
+            return true
+        } catch (e) {
+            return false
+        }
     }
 
     function set(name, text) {

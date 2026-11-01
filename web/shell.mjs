@@ -104,6 +104,23 @@ await call("follow", "preview_state", followed);
 check("a refused follow-on leaves the refusal on the line", (await status()) === gesture, await status());
 
 if (shot) await page.screenshot({ path: shot });
+// The picker asks the runtime what a colour is, so the browser's runtime
+// has to answer as the native one does.
+await labelled("Rectangle card").click();
+await labelled("Pick color").first().click();
+const colour = labelled("Colour").locator("input");
+const before = await code();
+for (const wrong of ["gren", "#12345"]) {
+  await colour.fill(wrong);
+  await colour.press("Enter");
+}
+await colour.fill("#123");
+await colour.press("Enter");
+await page.waitForFunction(() => window.studio.text("Main.qml").text.includes("#123"), null, { timeout: 5000 }).catch(() => {});
+const after = await code();
+check("the picker writes a colour", after.includes('"#123"') && after !== before, after);
+check("the picker writes nothing for what is not one", !after.includes("gren") && !after.includes("#12345"), after);
+
 check("the page logged no errors", said.length === 0, said);
 await browser.close();
 if (failures.length > 0) {
