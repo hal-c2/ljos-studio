@@ -110,6 +110,7 @@ Item {
                     workspace: workspace
                     recording: inspector.recording
                     onDoneRecording: inspector.pick("", "")
+                    onLayoutAsked: (target, state) => inspector.editLayout(target, state)
                     SplitView.fillHeight: true
                 }
                 CodePanel {

@@ -335,6 +335,38 @@ Panel {
         else if (had)
             show(was, "", follows)
     }
+    // Starts recording into the root's state for a width, making it when it is
+    // not there. A breakpoint compares the root by its id, so a root drawn
+    // without one is named first.
+    function editLayout(target, state) {
+        const root = workspace.layers.length > 0 ? workspace.layers[0] : null
+        if (root === null)
+            return
+        if (state !== "") {
+            pick(state, root.node)
+            return
+        }
+        forgetRefused()
+        if (root.id === "") {
+            let name = "root"
+            const taken = workspace.layers.map(l => l.id)
+            for (let n = 2; taken.indexOf(name) >= 0; n++)
+                name = "root" + n
+            workspace.dispatch("node_arrange", {
+                action: "rename",
+                doc: workspace.doc,
+                nodes: [{node: root.node}],
+                name: name
+            })
+        }
+        picked = target
+        pickedOn = root.node
+        editState({
+            action: workspace.rootStates.some(s => s.name === target) ? "when" : "add",
+            state: target,
+            breakpoint: target
+        })
+    }
     function show(on, state, follows) {
         const object = layer(on)
         if (!workspace.previews || object === null || object.id === "")
