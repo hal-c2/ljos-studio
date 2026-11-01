@@ -9,7 +9,7 @@ use std::sync::{Arc, mpsc};
 use std::time::Duration;
 
 use cucumber::{World, gherkin::Step, given, then, when};
-use ljos::item::{DrawOp, MouseButtons, WheelEvent, kurbo::Point};
+use ljos::item::{DrawOp, MouseButtons, PointerEvent, WheelEvent, kurbo::Point};
 use ljos::prelude::*;
 use ljos::testing::AccessibleNode;
 use ljos_dev::{DevSession, Host, Report};
@@ -1672,6 +1672,47 @@ fn clicks_frame(w: &mut UiWorld, target: String, x: f64, y: f64) -> StepResult {
         .click(at, MouseButtons::LEFT, 1)
         .map_err(drive_error)?;
     window.rest()
+}
+
+/// A click with Shift held, which adds to the selection.
+fn shift_click(window: &mut Window, at: Point) -> StepResult {
+    let shift = ljos_drive::parse_modifiers("Shift")?;
+    let mut driver = window.stage.drive();
+    let t = driver.now();
+    let mut moved = PointerEvent::moved(at.x, at.y, MouseButtons::empty(), t);
+    moved.modifiers = shift;
+    let mut pressed = PointerEvent::press(at.x, at.y, t).with_button(MouseButtons::LEFT);
+    pressed.modifiers = shift;
+    let mut released = PointerEvent::release(at.x, at.y, t).with_button(MouseButtons::LEFT);
+    released.modifiers = shift;
+    driver.send_pointer(&moved);
+    driver.send_pointer(&pressed);
+    // A hand is still down when the selection's answer comes.
+    window.rest()?;
+    let mut driver = window.stage.drive();
+    driver.send_pointer(&released);
+    driver.settle().map_err(drive_error)?;
+    window.rest()
+}
+
+#[when(regex = r#"^the person clicks the frame "([^"]+)" at (\d+), (\d+) holding Shift$"#)]
+fn shift_clicks_frame(w: &mut UiWorld, target: String, x: f64, y: f64) -> StepResult {
+    let window = w.window()?;
+    let at = frame_point(window, &target, x, y)?;
+    shift_click(window, at)
+}
+
+#[when(regex = r#"^the person selects "([^"]+)" in the layers panel holding Shift$"#)]
+fn shift_selects_layer(w: &mut UiWorld, label: String) -> StepResult {
+    let window = w.window()?;
+    let row = window
+        .shown_layers()?
+        .into_iter()
+        .find(|n| n.name == label)
+        .ok_or_else(|| format!("the layers panel lists {:?}", window.layers()))?;
+    let key = row.key.ok_or("the row has no key")?;
+    let at = window.stage.drive().aim_at_node(key).map_err(|why| format!("{why:?}"))?;
+    shift_click(window, at)
 }
 
 /// Where a point of the frame is in the window.

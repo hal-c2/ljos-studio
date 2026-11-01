@@ -179,7 +179,7 @@ Feature: A person wires and plays a prototype's flow in Studio's window
     Given the person has opened the "Flow tab"
     When the person clicks the button "Animate to details"
     Then the flow panel lists the flows "* to details"
-    And the file "Main.qml" says "NumberAnimation"
+    And the file "Main.qml" says "duration: 300"
     When the person clicks the button "Remove flow * to details"
     Then the flow panel lists the flows ""
     And the file "Main.qml" does not say "NumberAnimation"

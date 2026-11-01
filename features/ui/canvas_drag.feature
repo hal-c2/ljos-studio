@@ -282,6 +282,18 @@ Feature: Objects are moved and resized on the canvas
     Then the file "Main.qml" says "Column {"
     And the layers panel lists "Rectangle root, Column column, Rectangle a, Rectangle b, RowLayout row, Rectangle one, Rectangle two"
 
+  Scenario: Objects are gathered with Shift on the canvas and wrapped together
+    When the person clicks the frame "Desktop" at 30, 30
+    And the person clicks the frame "Desktop" at 210, 110 holding Shift
+    And the person clicks the button "Wrap in Row"
+    Then the layers panel lists "Rectangle root, Row row1, Rectangle a, Rectangle b, RowLayout row, Rectangle one, Rectangle two"
+
+  Scenario: Objects are gathered with Shift in the layers panel and wrapped together
+    Given the person has selected "Rectangle a" in the layers panel
+    When the person selects "Rectangle b" in the layers panel holding Shift
+    And the person clicks the button "Wrap in Row"
+    Then the layers panel lists "Rectangle root, Row row1, Rectangle a, Rectangle b, RowLayout row, Rectangle one, Rectangle two"
+
   Scenario: What only holds its children is taken away from around them
     Given an agent has called the tool "node_arrange" with:
       """json
