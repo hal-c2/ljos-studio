@@ -283,6 +283,12 @@ pub trait PreviewHost: Send {
         DEFAULT_CALLS_PER_SECOND
     }
 
+    /// Whether switching a module's mock starts the program over, losing the
+    /// state it had, rather than reloading it in place (`alias`).
+    fn restarts_on_switch(&self) -> bool {
+        false
+    }
+
     /// Starts the preview of `spec`, ending one that runs.
     fn open(&mut self, spec: &PreviewSpec) -> Result<(), PreviewError>;
 

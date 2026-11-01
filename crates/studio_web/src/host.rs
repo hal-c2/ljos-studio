@@ -136,6 +136,10 @@ fn unexpected(call: &str, answer: &Answer) -> PreviewError {
 }
 
 impl<P: Port> PreviewHost for WebPreviewHost<P> {
+    fn restarts_on_switch(&self) -> bool {
+        true
+    }
+
     fn calls_per_second(&self) -> u32 {
         CALLS_PER_SECOND
     }
