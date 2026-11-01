@@ -56,6 +56,8 @@ struct OpenOut {
     mocked: Vec<String>,
     /// A new process was started; false when the open one was changed.
     started: bool,
+    /// False when a mock switch started the app over on a host that cannot keep its state.
+    state_kept: bool,
     ms: f64,
 }
 
@@ -286,6 +288,7 @@ fn open(studio: &Mutex<Studio>, a: OpenArgs) -> Result<OpenOut, SurfaceError> {
         }
     }
     let reuse = previews.open.as_ref().is_some_and(|o| o.doc == a.doc);
+    let mut state_kept = true;
     if reuse {
         let open = previews.open.as_mut().expect("checked");
         let mut reloads = Vec::new();
@@ -294,6 +297,7 @@ fn open(studio: &Mutex<Studio>, a: OpenArgs) -> Result<OpenOut, SurfaceError> {
         let restarted = reloads
             .iter()
             .any(|reload| matches!(reload, Reload::Applied { .. }));
+        state_kept = !(restarted && open.host.restarts_on_switch());
         for reload in reloads {
             previews.record(reload, started_at);
         }
@@ -342,6 +346,7 @@ fn open(studio: &Mutex<Studio>, a: OpenArgs) -> Result<OpenOut, SurfaceError> {
         state,
         mocked: aliases.into_iter().map(|m| m.module).collect(),
         started: !reuse,
+        state_kept,
         ms: elapsed(),
     })
 }

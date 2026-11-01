@@ -75,6 +75,9 @@ expression: value
         "type": "boolean"
       },
       "state": {},
+      "state_kept": {
+        "type": "boolean"
+      },
       "target": {}
     },
     "required": [
@@ -83,6 +86,7 @@ expression: value
       "state",
       "mocked",
       "started",
+      "state_kept",
       "ms"
     ],
     "type": "object"

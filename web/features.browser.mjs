@@ -370,7 +370,8 @@ async function main([app, ...paths]) {
     const feature = parse(readFileSync(file, "utf8"), name);
     console.log(`Feature: ${feature.name}  (${name})`);
     for (const scenario of scenarios(feature)) {
-      if (!scenario.tags.includes("preview")) continue;
+      // `@native`: a native preview's own behaviour (state kept over a switch).
+      if (!scenario.tags.includes("preview") || scenario.tags.includes("native")) continue;
       const page = await chromium.page();
       const said = [];
       page.on("pageerror", (e) => said.push(`page error: ${e.message}`));
