@@ -75,12 +75,13 @@ Panel {
         return {
             picker: row.colour === true || /(^|\.)[a-zA-Z]*[cC]olor$/.test(row.name) || colour.charAt(0) === "#",
             paint: colour,
-            note: written !== "" && text === null
+            note: written !== "" && !workspace.literal(written)
         }
     }
-    // The text a value spells out, or null when it is worked out instead.
+    // The text a value spells out, in any quotes, or null when it spells out
+    // none. The parser says it is a literal; its first character says which.
     function writtenText(value) {
-        return /^"[^"]*"$/.test(value) ? value.slice(1, -1) : null
+        return workspace.literal(value) && /^["'`]/.test(value) ? value.slice(1, -1) : null
     }
     // The runtime's own reading: what it does not parse would not paint.
     function writesColour(text) {
