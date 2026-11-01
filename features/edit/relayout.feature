@@ -80,3 +80,16 @@ Feature: A layout is turned into another kind of layout
       | cards | Rectangle | not_a_layout |
       | cards | RowLayout | other_family |
       | table | Row       | says_other   |
+
+  Scenario: A locked layout keeps its kind
+    Given the agent has called the tool "node_arrange" with:
+      """json
+      {"action": "lock", "doc": "Main.qml", "nodes": [{"id": "cards"}]}
+      """
+    When the agent calls the tool "node_arrange" with:
+      """json
+      {"action": "relayout", "doc": "Main.qml", "nodes": [{"id": "cards"}], "name": "Flow"}
+      """
+    Then the agent is refused with "not_actionable"
+    And the refusal's "/details/kind" is "locked"
+    And the file "Main.qml" contains "Row {"

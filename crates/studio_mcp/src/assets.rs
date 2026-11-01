@@ -172,6 +172,13 @@ pub(crate) fn remove(studio: &Studio, name: &str) -> Result<String, SurfaceError
     if !store.exists(&url) {
         return Err(SurfaceError::not_found(format!("`{url}` does not exist")));
     }
+    // No history holds assets: what is taken out by mistake stays out.
+    if extension_of(bare).and_then(|e| kind_of(&e)).is_none() {
+        return Err(refused(
+            "asset_kind",
+            format!("`{url}` is not an asset: {TAKEN} are taken out"),
+        ));
+    }
     let users: Vec<String> = studio
         .session
         .documents()

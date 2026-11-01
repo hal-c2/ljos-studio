@@ -296,3 +296,74 @@ Feature: Objects are put in a layout and taken out again
       """
     Then the file "Shown.qml" contains "Rectangle { id: one; width: 50; height: 40; x: 20; y: 30 }"
     And the file "Shown.qml" contains "Rectangle { id: two; width: 50; height: 40; x: 75; y: 30 }"
+
+  Scenario: A wrap is refused while a sibling that stays is anchored to what would move
+    Given the agent has called the tool "node_insert" with:
+      """json
+      {"doc": "Main.qml", "parent": {"id": "root"}, "text": "Rectangle { id: beside; anchors.left: a.right }"}
+      """
+    When the agent calls the tool "node_arrange" with:
+      """json
+      {"action": "wrap", "doc": "Main.qml", "nodes": [{"id": "a"}], "in": "Row"}
+      """
+    Then the agent is refused with "not_actionable"
+    And the refusal's "/details/kind" is "anchored_to"
+    And the refusal's message matches "beside"
+    And the file "Main.qml" does not contain "Row"
+
+  Scenario: A declared property reading its parent is refused a wrap too
+    Given the agent has called the tool "node_insert" with:
+      """json
+      {"doc": "Main.qml", "parent": {"id": "root"}, "text": "Rectangle { id: reader; property real w: parent.width }"}
+      """
+    When the agent calls the tool "node_arrange" with:
+      """json
+      {"action": "wrap", "doc": "Main.qml", "nodes": [{"id": "reader"}], "in": "Row"}
+      """
+    Then the agent is refused with "not_actionable"
+    And the refusal's "/details/kind" is "reads_parent"
+
+  Scenario Outline: A wrapper that does more than place is not unwrapped: <what>
+    Given the agent has called the tool "node_insert" with:
+      """json
+      {"doc": "Main.qml", "parent": {"id": "root"}, "text": "Item { id: box; <what>\n Text {} }"}
+      """
+    When the agent calls the tool "node_arrange" with:
+      """json
+      {"action": "unwrap", "doc": "Main.qml", "nodes": [{"id": "box"}]}
+      """
+    Then the agent is refused with "not_actionable"
+    And the refusal's "/details/kind" is "holds_more"
+    And the file "Main.qml" contains "id: box"
+
+    Examples:
+      | what                                        |
+      | visible: false                              |
+      | opacity: 0.5                                |
+      | Component.onCompleted: console.log('up')    |
+      | Keys.onPressed: {}                          |
+      | states: [ State { name: 's' } ]             |
+
+  Scenario: What only places goes with the wrapper
+    Given the agent has called the tool "node_insert" with:
+      """json
+      {"doc": "Main.qml", "parent": {"id": "root"}, "text": "Row { id: box; x: 5; y: 6; width: 100; spacing: 4; Text {} }"}
+      """
+    When the agent calls the tool "node_arrange" with:
+      """json
+      {"action": "unwrap", "doc": "Main.qml", "nodes": [{"id": "box"}]}
+      """
+    Then the file "Main.qml" does not contain "id: box"
+
+  Scenario: A child anchored to the wrapper is not unwrapped
+    Given the agent has called the tool "node_insert" with:
+      """json
+      {"doc": "Main.qml", "parent": {"id": "root"}, "text": "Item { id: box; width: 100; height: 100; Rectangle { anchors.fill: parent } }"}
+      """
+    When the agent calls the tool "node_arrange" with:
+      """json
+      {"action": "unwrap", "doc": "Main.qml", "nodes": [{"id": "box"}]}
+      """
+    Then the agent is refused with "not_actionable"
+    And the refusal's "/details/kind" is "reads_parent"
+    And the file "Main.qml" contains "id: box"
