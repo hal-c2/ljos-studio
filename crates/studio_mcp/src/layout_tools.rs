@@ -4,7 +4,7 @@
 use std::collections::HashMap;
 
 use ljos_mcp_core::SurfaceError;
-use studio_core::place::{self, Known, Wrap};
+use studio_core::place::{self, Change, Known, Pin, Wrap};
 use studio_core::preview::Placed;
 use studio_core::{Address, Node, Op, Step};
 
@@ -394,4 +394,108 @@ fn read_elsewhere(
         .filter(|w| !w.member && &text[w.start..w.end] == id)
         .find(|w| own.is_none_or(|b| w.start < b.start || w.end > b.end))
         .map(|w| text[..w.start].matches('\n').count() + 1))
+}
+
+/// The `anchors.*` of each of `nodes`, with what now disagrees taken away.
+pub(crate) fn anchor(
+    studio: &mut Studio,
+    doc: &str,
+    nodes: &[Address],
+    pin: &Pin,
+    generation: Option<u64>,
+    dry_run: bool,
+) -> Result<ManyOut, SurfaceError> {
+    if pin.fill == Some(true) && pin.center_in == Some(true) {
+        return Err(SurfaceError::invalid_argument(
+            "`fill` and `centerIn` say different things",
+        ));
+    }
+    if nodes.is_empty() {
+        return Err(SurfaceError::invalid_argument("`anchor` needs `nodes`"));
+    }
+    let (tree, _) = studio.session.tree(doc).map_err(error)?;
+    let at = |path| tree.iter().find(|(_, n)| n.path == path).cloned();
+    let mut found = Vec::new();
+    for address in nodes {
+        let (handle, node) = studio.session.resolve(doc, address).map_err(error)?;
+        let Some(parent) = parent_path(&node.path).and_then(at) else {
+            return Err(refused(
+                "root",
+                "the document's root has nothing around it to pin to",
+            ));
+        };
+        found.push((handle, node, parent));
+    }
+    let mut wanted: Vec<(String, Node)> = Vec::new();
+    for (handle, node, parent) in &found {
+        wanted.push((handle.clone(), node.clone()));
+        wanted.push(parent.clone());
+    }
+    let placed = placed_of(studio, doc, &wanted)?.unwrap_or_default();
+    let mut ops = Vec::new();
+    for (handle, node, parent) in &found {
+        let types = parent_types(Some(&parent.1), placed.get(&parent.0));
+        if let Some(by) = place::placer(&types) {
+            let instead = if by.ends_with("Layout") {
+                "use `Layout.alignment` or `Layout.fillWidth`"
+            } else {
+                "use `spacing`, or `node_move` it out"
+            };
+            return Err(refused(
+                "arranged",
+                format!(
+                    "`{}` is placed by its {by}, which anchors would fight: {instead}",
+                    label(node)
+                ),
+            ));
+        }
+        if pin.target != "parent" {
+            let sibling = tree.iter().any(|(_, n)| {
+                n.id.as_deref() == Some(&pin.target)
+                    && n.path != node.path
+                    && parent_path(&n.path).as_ref() == Some(&parent.1.path)
+            });
+            if !sibling {
+                return Err(refused(
+                    "not_a_sibling",
+                    format!(
+                        "`{}` can be pinned to `parent` or a sibling, and `{}` is not one",
+                        label(node),
+                        pin.target
+                    ),
+                ));
+            }
+        }
+        let now = placed.get(handle).map(|p| p.local);
+        let now = Known {
+            x: now.map(|r| r.x),
+            y: now.map(|r| r.y),
+            width: now.map(|r| r.width),
+            height: now.map(|r| r.height),
+        };
+        let address = Address::Node(handle.clone());
+        ops.extend(
+            place::anchoring(node, pin, now)
+                .into_iter()
+                .map(|c| match c {
+                    Change::Set(name, value) => Op::SetBinding {
+                        node: address.clone(),
+                        name,
+                        value,
+                    },
+                    Change::Remove(name) => Op::RemoveBinding {
+                        node: address.clone(),
+                        name,
+                    },
+                }),
+        );
+    }
+    let (outcome, _) = studio
+        .session
+        .edit_many(doc, generation, &ops, "anchor", dry_run)
+        .map_err(error)?;
+    Ok(ManyOut {
+        edit: outcome.into(),
+        nodes: found.into_iter().map(|(handle, ..)| handle).collect(),
+    })
 }

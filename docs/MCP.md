@@ -54,7 +54,7 @@ documents: export), `run` (start previews). They are granted at launch with
 | 22 | `preview_events` | Since a cursor: opened, reloaded (with ms), reload failed, logs, ended; or wait until its app rests saying something new (`wait_ms`, past `rests`), answering when it wakes next (`wake_in_ms`) and asking the app nothing meanwhile | inspect |
 | 23 | `export` | Write a bundle that `ljos run` starts (`native`) or that ljos-web builds a site from (`web`): the project's QML, theme, assets and own modules with a manifest, never mocks or `.studio/` | fs |
 | 24 | `review` | Add, reply to, resolve, reopen or list design review comments on objects, kept in `.studio/` | inspect (writing: mutate) |
-| 25 | `node_arrange` | What a canvas gesture does: `geometry` (boxes, what a drag does, siblings), `place` (`record` writes into a state), `align`, `copy`, `paste`, `duplicate`, `remove`, `wrap`, `unwrap`; each edit is one undo step, all or none | inspect; mutate to edit |
+| 25 | `node_arrange` | What a canvas gesture does: `geometry` (boxes, what a drag does, siblings), `place` (`record` writes into a state), `align`, `copy`, `paste`, `duplicate`, `remove`, `wrap`, `unwrap`, `anchor`; each edit is one undo step, all or none | inspect; mutate to edit |
 
 A document is a `.qml` file or a `theme.json` of the project outside the
 directories a walk leaves out, judged where its links lead; anything else is
@@ -612,6 +612,33 @@ holder in the layers panel and on the canvas ("held by Ada").
 since (refused `conflict` when someone changed the same thing); `all:
 true` takes the newest anyone made, as before. The window's Undo takes the
 person's own. `list` lists every writer's entries.
+
+## Layout tools: wrap, unwrap, anchor
+
+`node_arrange` `wrap` {nodes, in: Row|Column|Grid|Item, spacing?, columns?}
+puts siblings in a new object at their joint box, in reading order. A layout's
+children lose their written x/y; an Item's are counted from its corner and keep
+document order, which is what is drawn over what. `spacing` defaults to the
+gap they had, `columns` to the widest row. Refused: `not_siblings`, `root`,
+`anchored`, `reads_parent`, `locked`.
+
+`unwrap` {nodes: [one]} takes a Row, Column, Grid, Flow, Item or layout away
+from around its children: they get their place on the preview, or for an Item
+its numbers added to theirs, or none. Refused: `not_a_layout`, `holds_more`
+(its own property, function or handler), `referenced` (something reads its id),
+`reads_parent`, `root`.
+
+`anchor` {nodes, fill?, centerIn?, sides?: {left, right, top, bottom}, target?}
+writes `anchors.*` and takes away the x, y, width and height that now disagree.
+A side's value is its margin, null takes it off; `fill` and `centerIn` take
+true or false. An axis let go of keeps its place from the preview when one is
+running. `target` is `parent` (the default) or a sibling's id. Refused:
+`arranged` in a Row, Column, Grid, Flow or `*Layout`, saying what to use
+instead; `not_a_sibling`, `root`, `locked`.
+
+Each is one undo step. The bar above the canvas has wrap and unwrap; the
+inspector's Layout section has the pin pad, a layout's spacing and columns, and
+wrap.
 
 ## Prompts
 

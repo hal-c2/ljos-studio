@@ -38,6 +38,70 @@ Panel {
             rowEditing = false
     }
 
+    readonly property var selectedLayer: {
+        const all = workspace.layers
+        for (let i = 0; i < all.length; i++) {
+            if (all[i].node === workspace.selected)
+                return {at: i, layer: all[i]}
+        }
+        return null
+    }
+    readonly property string selectedType: selectedLayer !== null ? selectedLayer.layer.type : ""
+    readonly property bool isRoot: selectedLayer !== null && selectedLayer.at === 0
+    readonly property bool isLayout: ["Row", "Column", "Grid", "Flow", "RowLayout", "ColumnLayout", "GridLayout"]
+        .indexOf(selectedType) >= 0
+    // The nearest layer above in the list, one less deep, is its parent.
+    readonly property string placedBy: {
+        if (selectedLayer === null)
+            return ""
+        const all = workspace.layers
+        for (let i = selectedLayer.at - 1; i >= 0; i--) {
+            if (all[i].depth < selectedLayer.layer.depth) {
+                const type = all[i].type
+                return ["Row", "Column", "Grid", "Flow", "RowLayout", "ColumnLayout", "GridLayout", "StackLayout"]
+                    .indexOf(type) >= 0 ? type : ""
+            }
+        }
+        return ""
+    }
+    function written(name) {
+        const row = workspace.inspector.find(r => r.name === name)
+        return row !== undefined ? row.value : ""
+    }
+    function isPinned(side) {
+        return written("anchors." + side) !== ""
+    }
+    // The newest boxes the canvas asked for: a new pin keeps the distance the
+    // object has, where one is known.
+    property var seenBox: null
+    property var seenParent: null
+    function margin(side) {
+        const box = seenBox
+        const outer = seenParent
+        if (box === null || outer === null || box.window === undefined)
+            return 0
+        const at = box.window
+        const away = side === "left" ? at.x - outer.x
+            : side === "top" ? at.y - outer.y
+            : side === "right" ? outer.x + outer.width - at.x - at.width
+            : outer.y + outer.height - at.y - at.height
+        return Math.round(away)
+    }
+    function togglePin(side) {
+        const args = {
+            action: "anchor",
+            doc: workspace.doc,
+            nodes: workspace.chosen.map(h => ({node: h}))
+        }
+        if (side === "centerIn") {
+            args.centerIn = !isPinned(side)
+        } else {
+            args.sides = {}
+            args.sides[side] = isPinned(side) ? null : margin(side)
+        }
+        workspace.dispatch("node_arrange", args)
+    }
+
     signal reseed()
     Connections {
         target: panel.workspace
@@ -62,6 +126,10 @@ Panel {
             }
         }
         function onAnswered(tool, answer) {
+            if (tool === "node_arrange" && answer.boxes !== undefined) {
+                panel.seenBox = answer.boxes.length === 1 ? answer.boxes[0] : null
+                panel.seenParent = answer.parent !== undefined ? answer.parent : null
+            }
             if (tool === "state_edit")
                 panel.renamedPicked = ""
         }
@@ -534,6 +602,101 @@ Panel {
             Layout.leftMargin: Spacing.xs
             text: visible ? "Write " + panel.offered.value + " as text" : ""
             onClicked: panel.set(panel.offered.name, JSON.stringify(panel.offered.value))
+        }
+
+        Section {
+            title: "Layout"
+            visible: panel.workspace.selected !== ""
+            Layout.fillWidth: true
+
+            Label {
+                visible: panel.placedBy !== ""
+                text: "It is placed by its " + panel.placedBy
+                color: Colors.textMuted
+                font.pixelSize: Typography.captionSize
+                wrapMode: Text.Wrap
+                Layout.fillWidth: true
+            }
+
+            // Where it sits in the pad is which side it pins.
+            Item {
+                visible: panel.placedBy === "" && !panel.isRoot
+                implicitWidth: 3 * 28
+                implicitHeight: 3 * 28
+                Layout.alignment: Qt.AlignHCenter
+
+                Repeater {
+                    model: [
+                        {side: "top", label: "Pin top", icon: "pinTop", column: 1, row: 0},
+                        {side: "left", label: "Pin left", icon: "pinLeft", column: 0, row: 1},
+                        {side: "centerIn", label: "Pin centre", icon: "pinCentre", column: 1, row: 1},
+                        {side: "right", label: "Pin right", icon: "pinRight", column: 2, row: 1},
+                        {side: "bottom", label: "Pin bottom", icon: "pinBottom", column: 1, row: 2}
+                    ]
+                    delegate: IconButton {
+                        required property var modelData
+                        x: modelData.column * 28
+                        y: modelData.row * 28
+                        icon_: modelData.icon
+                        text: modelData.label
+                        checked: panel.isPinned(modelData.side)
+                        onClicked: panel.togglePin(modelData.side)
+                    }
+                }
+            }
+
+            RowLayout {
+                visible: panel.isLayout
+                spacing: Spacing.xxs
+                Layout.fillWidth: true
+                Repeater {
+                    model: panel.isLayout ? ["spacing", "columns"].filter(n => n === "spacing" || panel.selectedType.startsWith("Grid")) : []
+                    delegate: RowLayout {
+                        required property string modelData
+                        spacing: Spacing.xxs
+                        Label {
+                            text: modelData
+                            color: Colors.textMuted
+                            font.pixelSize: Typography.captionSize
+                        }
+                        Field {
+                            text: panel.written(modelData)
+                            Accessible.name: "Layout " + modelData
+                            Layout.preferredWidth: 56
+                            onAccepted: panel.workspace.dispatch("binding_set", {
+                                doc: panel.workspace.doc,
+                                node: {node: panel.workspace.selected},
+                                name: modelData,
+                                value: text === "" ? null : text
+                            })
+                        }
+                    }
+                }
+            }
+
+            Row {
+                visible: !panel.isRoot
+                spacing: Spacing.xxs
+                Repeater {
+                    model: [
+                        {kind: "Row", icon: "row"},
+                        {kind: "Column", icon: "column"},
+                        {kind: "Grid", icon: "grid"},
+                        {kind: "Item", icon: "frame"}
+                    ]
+                    delegate: IconButton {
+                        required property var modelData
+                        icon_: modelData.icon
+                        text: "Wrap in " + modelData.kind
+                        onClicked: panel.workspace.dispatch("node_arrange", {
+                            action: "wrap",
+                            doc: panel.workspace.doc,
+                            nodes: panel.workspace.chosen.map(h => ({node: h})),
+                            in: modelData.kind
+                        })
+                    }
+                }
+            }
         }
 
         Section {
