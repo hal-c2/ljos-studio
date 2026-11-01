@@ -6,7 +6,7 @@
 
 use std::collections::BTreeMap;
 #[cfg(feature = "fs")]
-use std::io::Write as _;
+use std::io::{Read as _, Write as _};
 #[cfg(feature = "fs")]
 use std::path::{Component, Path, PathBuf};
 use std::sync::Mutex;
@@ -37,6 +37,33 @@ pub trait Store: Send + Sync {
     /// Where `path` really is, relative to the project, with links followed.
     fn resolved(&self, path: &str) -> Result<String, StoreError> {
         Ok(path.to_owned())
+    }
+    /// What `list` has below the directory `dir`; a store with a directory
+    /// tree need not walk all of it.
+    fn list_below(&self, dir: &str, extension: &str) -> Vec<String> {
+        let below = format!("{dir}/");
+        let mut all = self.list(extension);
+        all.retain(|p| p.starts_with(&below));
+        all
+    }
+    /// A file that need not be text (an asset).
+    fn read_bytes(&self, path: &str) -> Result<Vec<u8>, StoreError> {
+        self.read(path).map(String::into_bytes)
+    }
+    /// A store that holds only text refuses bytes that are not.
+    fn write_bytes(&self, path: &str, bytes: &[u8]) -> Result<(), StoreError> {
+        let text = std::str::from_utf8(bytes).map_err(|_| StoreError::Io {
+            path: path.to_owned(),
+            message: "this store holds only text".to_owned(),
+        })?;
+        self.write(path, text)
+    }
+    /// A file's size and at most `most` bytes of its start.
+    fn peek(&self, path: &str, most: usize) -> Result<(u64, Vec<u8>), StoreError> {
+        let mut bytes = self.read_bytes(path)?;
+        let size = bytes.len() as u64;
+        bytes.truncate(most);
+        Ok((size, bytes))
     }
 }
 
@@ -72,6 +99,19 @@ impl Store for Announcing {
     }
     fn resolved(&self, path: &str) -> Result<String, StoreError> {
         self.inner.resolved(path)
+    }
+    fn list_below(&self, dir: &str, extension: &str) -> Vec<String> {
+        self.inner.list_below(dir, extension)
+    }
+    fn read_bytes(&self, path: &str) -> Result<Vec<u8>, StoreError> {
+        self.inner.read_bytes(path)
+    }
+    // Not announced: those told of writes hear of documents, as text.
+    fn write_bytes(&self, path: &str, bytes: &[u8]) -> Result<(), StoreError> {
+        self.inner.write_bytes(path, bytes)
+    }
+    fn peek(&self, path: &str, most: usize) -> Result<(u64, Vec<u8>), StoreError> {
+        self.inner.peek(path, most)
     }
 }
 
@@ -130,6 +170,26 @@ impl FsStore {
             });
         }
         Ok(full)
+    }
+
+    /// Open only if it is a regular file: opening a pipe waits for a writer.
+    fn open_regular(&self, path: &str) -> Result<(std::fs::File, u64), StoreError> {
+        let full = self.confine(path)?;
+        let io = |e: std::io::Error| match e.kind() {
+            std::io::ErrorKind::NotFound => StoreError::Missing(path.to_owned()),
+            _ => StoreError::Io {
+                path: path.to_owned(),
+                message: e.to_string(),
+            },
+        };
+        let meta = std::fs::metadata(&full).map_err(io)?;
+        if !meta.is_file() {
+            return Err(StoreError::Io {
+                path: path.to_owned(),
+                message: "not a regular file".to_owned(),
+            });
+        }
+        Ok((std::fs::File::open(&full).map_err(io)?, meta.len()))
     }
 }
 
@@ -217,6 +277,44 @@ impl Store for FsStore {
     }
 
     fn write(&self, path: &str, text: &str) -> Result<(), StoreError> {
+        self.write_bytes(path, text.as_bytes())
+    }
+
+    fn list_below(&self, dir: &str, extension: &str) -> Vec<String> {
+        let mut out = Vec::new();
+        // A directory that is a link is not walked, as the whole walk does not.
+        if let Ok(full) = self.confine(dir)
+            && full == self.root.join(dir)
+        {
+            walk(&full, &self.root, extension, &mut out);
+        }
+        out.sort();
+        out
+    }
+
+    fn read_bytes(&self, path: &str) -> Result<Vec<u8>, StoreError> {
+        let (mut file, _) = self.open_regular(path)?;
+        let mut bytes = Vec::new();
+        file.read_to_end(&mut bytes).map_err(|e| StoreError::Io {
+            path: path.to_owned(),
+            message: e.to_string(),
+        })?;
+        Ok(bytes)
+    }
+
+    fn peek(&self, path: &str, most: usize) -> Result<(u64, Vec<u8>), StoreError> {
+        let (file, size) = self.open_regular(path)?;
+        let mut bytes = Vec::new();
+        file.take(most as u64)
+            .read_to_end(&mut bytes)
+            .map_err(|e| StoreError::Io {
+                path: path.to_owned(),
+                message: e.to_string(),
+            })?;
+        Ok((size, bytes))
+    }
+
+    fn write_bytes(&self, path: &str, bytes: &[u8]) -> Result<(), StoreError> {
         let full = self.confine(path)?;
         let io = |e: std::io::Error| StoreError::Io {
             path: path.to_owned(),
@@ -242,7 +340,7 @@ impl Store for FsStore {
             .write(true)
             .create_new(true)
             .open(&tmp)
-            .and_then(|mut file| file.write_all(text.as_bytes()))
+            .and_then(|mut file| file.write_all(bytes))
             .map_err(io)?;
         std::fs::rename(&tmp, &full).map_err(io)
     }

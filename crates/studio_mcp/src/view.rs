@@ -157,9 +157,22 @@ pub struct Edge {
     pub signal: String,
 }
 
+/// What a panel shows of an asset; `project_open` answers more, after reading
+/// each file, which a publish after every edit should not.
+#[derive(Clone, Debug, Default, PartialEq, Serialize)]
+pub struct AssetTile {
+    pub name: String,
+    /// From the project's root.
+    pub url: String,
+    /// Where a thumbnail loads it from; empty when it is on no disk.
+    pub file: String,
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Serialize)]
 pub struct View {
     pub documents: Vec<String>,
+    /// The pictures in `assets/`, for the Insert tab.
+    pub assets: Vec<AssetTile>,
     /// The project's directory has nothing in it a walk would list.
     pub blank: bool,
     pub doc: String,
@@ -217,12 +230,32 @@ pub struct Held {
 }
 
 impl Studio {
+    fn asset_tiles(&self) -> Vec<AssetTile> {
+        let dir = self.dir();
+        crate::assets::names(self.session.store())
+            .into_iter()
+            .filter(|(_, kind)| *kind == "image")
+            .map(|(name, _)| {
+                let url = format!("assets/{name}");
+                AssetTile {
+                    file: dir
+                        .as_ref()
+                        .map(|d| format!("file://{}", d.join(&url).display()))
+                        .unwrap_or_default(),
+                    url,
+                    name,
+                }
+            })
+            .collect()
+    }
+
     /// The session as a window showing `doc` sees it now.
     pub fn view(&mut self, doc: &str) -> View {
         let documents = self.session.documents();
         let mut view = View {
             blank: documents.is_empty() && self.session.blank(),
             documents,
+            assets: self.asset_tiles(),
             previews: self
                 .hosts
                 .as_ref()

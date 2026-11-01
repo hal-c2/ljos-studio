@@ -18,6 +18,7 @@ native = ["studio_core/fs", "ljos_mcp_core/server", "dep:notify"]
 http = ["ljos_mcp_core/http"]
 
 [dependencies]
+base64.workspace = true
 studio_core = { path = "../studio_core", default-features = false }
 ljos_mcp_core.workspace = true
 ljos_blocks.workspace = true

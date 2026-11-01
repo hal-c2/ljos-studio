@@ -98,6 +98,9 @@ pub struct Workspace {
     /// The project's documents, as paths from its root.
     #[qml(readonly, notify)]
     pub documents: Json,
+    /// The pictures in the project's `assets/`, for the Insert tab.
+    #[qml(readonly, notify)]
+    pub assets: Json,
     /// The preview's picture may be out of date after a click: the shell
     /// calls `lookAgain` every so often until this is false.
     #[qml(readonly, notify)]
@@ -220,6 +223,7 @@ impl Default for Workspace {
         let none = || Json::Array(Vec::new());
         Self {
             documents: none(),
+            assets: none(),
             settling: false,
             looks: 0,
             blank: false,
@@ -1065,6 +1069,13 @@ fn publish(engine: &Engine, ws: ObjectId, view: View, seen: u64) {
         Workspace::DOCUMENTS,
         "DOCUMENTS",
         to_json(&view.documents),
+        &queue,
+    );
+    give(
+        &cx,
+        Workspace::ASSETS,
+        "ASSETS",
+        to_json(&view.assets),
         &queue,
     );
     let _ = cx.set(Workspace::GENERATION, view.generation as f64);
