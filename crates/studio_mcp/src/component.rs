@@ -305,7 +305,6 @@ fn component_text(
         .collect();
     let indent = indent_at(text, node.start);
     if !outward.aliases.is_empty() {
-        let brace = body.find('{').map_or(body.len(), |n| n + 1);
         let declared: String = outward
             .aliases
             .iter()
@@ -313,7 +312,7 @@ fn component_text(
                 format!("\n{indent}    property alias {name}: {id}.{property}")
             })
             .collect();
-        changes.push((brace..brace, declared));
+        changes.push(alias_insertion(text, node, declared, indent, &changes));
     }
     let object = splice(body, changes);
     let object = dedented(&object, indent);
@@ -321,6 +320,54 @@ fn component_text(
         format!("{object}\n")
     } else {
         format!("{header}\n{object}\n")
+    }
+}
+
+/// Where the aliases go, as a change to the object's text: after the id,
+/// which a reader looks for first, or else after the brace. What is left of
+/// that line stays with what it belongs to: a comment before the aliases, and
+/// members, on a line of their own, after them.
+fn alias_insertion(
+    text: &str,
+    node: &Node,
+    declared: String,
+    indent: &str,
+    removed: &[(Range<usize>, String)],
+) -> (Range<usize>, String) {
+    let body = &text[node.start..node.end];
+    let blanks = |at: usize| {
+        let rest = &body[at..];
+        at + rest.len() - rest.trim_start_matches([' ', '\t']).len()
+    };
+    let at = outline::id_member(text, node.start).map_or_else(
+        || body.find('{').map_or(body.len(), |n| n + 1),
+        |id| {
+            let end = id.end - node.start;
+            let past = blanks(end);
+            if body[past..].starts_with(';') {
+                past + 1
+            } else {
+                end
+            }
+        },
+    );
+    // A member going to the instance is no longer on this line.
+    let mut next = blanks(at);
+    while let Some((range, _)) = removed
+        .iter()
+        .find(|(r, _)| r.start == next && r.end > next)
+    {
+        next = blanks(range.end);
+    }
+    let rest = &body[next..];
+    if rest.starts_with('\n') || rest.is_empty() {
+        (at..at, declared)
+    } else if rest.starts_with("//") {
+        let end = next + rest.find('\n').unwrap_or(rest.len());
+        (end..end, declared)
+    } else {
+        let then = if rest.starts_with('}') { "" } else { "    " };
+        (at..blanks(at), format!("{declared}\n{indent}{then}"))
     }
 }
 

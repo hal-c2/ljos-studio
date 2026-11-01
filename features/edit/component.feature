@@ -197,6 +197,101 @@ Feature: An object becomes a component of the project
     And the file "Reads.qml" contains "// label.text in a comment stays"
     And the file "Reads.qml" contains "text: card.labelText + \" label.text \" + card.width"
 
+  Scenario: An alias is declared after the id, which stays first
+    Given the file "Reads.qml":
+      """qml
+      import QtQuick
+
+      Item {
+          Rectangle {
+              id: card
+              Text {
+                  id: label
+                  text: "Hi"
+              }
+          }
+          Text {
+              text: label.text
+          }
+      }
+      """
+    When the agent calls the tool "node_arrange" with:
+      """json
+      {"action": "component_extract", "doc": "Reads.qml", "nodes": [{"id": "card"}], "name": "Card"}
+      """
+    Then the file "Card.qml" is:
+      """qml
+      import QtQuick
+
+      Rectangle {
+          id: card
+          property alias labelText: label.text
+          Text {
+              id: label
+              text: "Hi"
+          }
+      }
+      """
+
+  Scenario: An alias does not take the comment on the id's line
+    Given the file "Reads.qml":
+      """qml
+      import QtQuick
+
+      Item {
+          Rectangle {
+              id: card // the card
+              Text {
+                  id: label
+                  text: "Hi"
+              }
+          }
+          Text {
+              text: label.text
+          }
+      }
+      """
+    When the agent calls the tool "node_arrange" with:
+      """json
+      {"action": "component_extract", "doc": "Reads.qml", "nodes": [{"id": "card"}], "name": "Card"}
+      """
+    Then the file "Card.qml" is:
+      """qml
+      import QtQuick
+
+      Rectangle {
+          id: card // the card
+          property alias labelText: label.text
+          Text {
+              id: label
+              text: "Hi"
+          }
+      }
+      """
+
+  Scenario: An object written on one line still takes an alias
+    Given the file "Reads.qml":
+      """qml
+      import QtQuick
+
+      Item {
+          Rectangle { id: card; color: "gold"; Text { id: label; text: "Hi" } }
+          Text { text: label.text }
+      }
+      """
+    When the agent calls the tool "node_arrange" with:
+      """json
+      {"action": "component_extract", "doc": "Reads.qml", "nodes": [{"id": "card"}], "name": "Card"}
+      """
+    Then the file "Card.qml" is:
+      """qml
+      import QtQuick
+
+      Rectangle { id: card;
+          property alias labelText: label.text
+          color: "gold"; Text { id: label; text: "Hi" } }
+      """
+
   Scenario: An instance read through an alias gets an id if it had none
     Given the file "Reads.qml":
       """qml
