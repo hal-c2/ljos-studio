@@ -49,6 +49,27 @@ enum Action {
     Unlock,
     Wrap,
     Unwrap,
+    Anchor,
+}
+
+// What `anchor` does to each side: a margin pins it, null takes it off. Said
+// in `docs/MCP.md`, not here: the list of tools has a size it keeps to.
+#[derive(Default, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct Sides {
+    #[serde(default, deserialize_with = "stated")]
+    left: Option<Option<f64>>,
+    #[serde(default, deserialize_with = "stated")]
+    right: Option<Option<f64>>,
+    #[serde(default, deserialize_with = "stated")]
+    top: Option<Option<f64>>,
+    #[serde(default, deserialize_with = "stated")]
+    bottom: Option<Option<f64>>,
+}
+
+/// Serde reads null as a field left out, and here they differ.
+fn stated<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<Option<f64>>, D::Error> {
+    Option::<f64>::deserialize(d).map(Some)
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -69,7 +90,7 @@ struct ArrangeArgs {
     within: bool,
     /// For `place`.
     places: Option<Vec<PlaceOne>>,
-    /// For `place` and `align`: write into this state, not the object.
+    /// For `place`, `align`: write into this state.
     record: Option<RecordInto>,
     /// For `align`; one object lines up with its parent.
     align: Option<Align>,
@@ -77,18 +98,27 @@ struct ArrangeArgs {
     parent: Option<Address>,
     /// For `rename`: the object's new `id`.
     name: Option<String>,
-    /// For `wrap`: the layout to put them in.
+    /// For `wrap`.
     #[serde(rename = "in")]
     wrap_in: Option<Wrap>,
-    /// For `wrap`; without it a Row or Column keeps the gap they had.
+    /// For `wrap`.
     spacing: Option<f64>,
-    /// For `wrap` in a Grid; without it, what its widest row has.
+    /// For `wrap` in a Grid.
     columns: Option<u32>,
+    /// For `anchor`.
+    fill: Option<bool>,
+    /// For `anchor`.
+    #[serde(rename = "centerIn")]
+    center_in: Option<bool>,
+    /// For `anchor`: null unpins.
+    sides: Option<Sides>,
+    /// For `anchor`: `parent` or a sibling's id.
+    target: Option<String>,
     #[serde(default)]
     dry_run: bool,
 }
 
-/// The state a gesture is recorded into, and the object that holds it.
+// The state a gesture is recorded into, and the object that holds it.
 #[derive(Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct RecordInto {
@@ -100,16 +130,16 @@ struct RecordInto {
 struct ArrangeOut {
     #[serde(flatten, skip_serializing_if = "Option::is_none")]
     edit: Option<EditOut>,
-    /// The objects placed or put, in the order asked for.
+    /// In the order asked for.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     nodes: Vec<String>,
     /// `geometry`: each object asked for.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     boxes: Vec<NodeGeometry>,
-    /// `geometry`: the first object's parent, in window coordinates.
+    /// `geometry`: the first one's parent, in the window.
     #[serde(skip_serializing_if = "Option::is_none")]
     parent: Option<Rect>,
-    /// `geometry`: the parent's other children, for guides.
+    /// `geometry`: the parent's other children.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     siblings: Vec<Sibling>,
     /// `copy`: each object as written.
@@ -134,8 +164,7 @@ struct GeometryOut {
 #[derive(Serialize, JsonSchema)]
 struct NodeGeometry {
     node: String,
-    /// In the parent's coordinates; absent when the preview has no such
-    /// object (a `Loader` not loaded, a state that hides it).
+    /// In the parent's coordinates; absent when the preview has no such object.
     #[serde(skip_serializing_if = "Option::is_none")]
     local: Option<Rect>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -795,7 +824,12 @@ fn arrange(studio: &mut Studio, a: ArrangeArgs) -> Result<ArrangeOut, SurfaceErr
     check_paths(studio, &a)?;
     if matches!(
         a.action,
-        Action::Place | Action::Align | Action::Remove | Action::Wrap | Action::Unwrap
+        Action::Place
+            | Action::Align
+            | Action::Remove
+            | Action::Wrap
+            | Action::Unwrap
+            | Action::Anchor
     ) {
         check_unlocked(studio, &a)?;
     }
@@ -960,6 +994,19 @@ fn arrange(studio: &mut Studio, a: ArrangeArgs) -> Result<ArrangeOut, SurfaceErr
         Action::Unwrap => {
             layout_tools::unwrap(studio, &doc, &nodes, generation, a.dry_run).map(many)
         }
+        Action::Anchor => {
+            let sides = a.sides.unwrap_or_default();
+            let pin = place::Pin {
+                fill: a.fill,
+                center_in: a.center_in,
+                left: sides.left,
+                right: sides.right,
+                top: sides.top,
+                bottom: sides.bottom,
+                target: a.target.unwrap_or_else(|| "parent".to_owned()),
+            };
+            layout_tools::anchor(studio, &doc, &nodes, &pin, generation, a.dry_run).map(many)
+        }
         Action::Duplicate | Action::Remove => {
             let args = NodesArgs {
                 doc,
@@ -1116,7 +1163,7 @@ pub(crate) fn add(registry: ToolRegistry, studio: &Arc<Mutex<Studio>>) -> ToolRe
     registry.with(
         ToolDef::new::<ArrangeArgs>(
             "node_arrange",
-            "A canvas gesture, one undo step. `geometry`: boxes, drag rules, siblings. `place`: x/y/size, writing what governs each object. `align`, `copy`, `paste`, `duplicate`, `remove`, `rename`. `hide`, `show`, `lock`, `unlock` leave the file alone.",
+            "A canvas gesture, one undo step. `geometry`: boxes, drag rules, siblings. `place`: x/y/size, writing what governs each object. `align`, `copy`, `paste`, `duplicate`, `remove`, `rename`, `wrap`, `unwrap`, `anchor`. `hide`, `show`, `lock`, `unlock` leave the file alone.",
         )
         .answers::<ArrangeOut>()
         .requires(Cap::Inspect)

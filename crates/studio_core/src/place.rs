@@ -453,7 +453,7 @@ fn axis(
     Ok(())
 }
 
-/// How `node_arrange` `align` lines objects up.
+// How `node_arrange` `align` lines objects up.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum Align {
@@ -547,7 +547,186 @@ fn distributed(boxes: &[Rect], horizontal: bool) -> Vec<(f64, f64)> {
     out
 }
 
-/// How `node_arrange` `wrap` lays out what it wraps.
+/// What `node_arrange` `anchor` asks of an object's anchors. Left out, a thing
+/// stays; `Some(false)` and `Some(None)` take it off.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Pin {
+    pub fill: Option<bool>,
+    pub center_in: Option<bool>,
+    pub left: Option<Option<f64>>,
+    pub right: Option<Option<f64>>,
+    pub top: Option<Option<f64>>,
+    pub bottom: Option<Option<f64>>,
+    /// `parent` or a sibling's id.
+    pub target: String,
+}
+
+/// One change an edit makes to an object's bindings.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Change {
+    Set(String, String),
+    Remove(String),
+}
+
+const SIDE_MARGINS: [&str; 4] = [
+    "anchors.leftMargin",
+    "anchors.rightMargin",
+    "anchors.topMargin",
+    "anchors.bottomMargin",
+];
+
+/// One axis of an anchoring: its two sides, its centre, what holds its place
+/// and size.
+struct PinAxis<'a> {
+    near: &'a str,
+    far: &'a str,
+    centre: &'a str,
+    place: &'a str,
+    size: &'a str,
+    asked_near: Option<Option<f64>>,
+    asked_far: Option<Option<f64>>,
+    known_place: Option<f64>,
+    known_size: Option<f64>,
+}
+
+/// The changes that make `node` pinned as `pin` says, with nothing left over
+/// that disagrees. An axis let go of keeps what `now` knows, so the object
+/// stays where it was seen.
+pub fn anchoring(node: &Node, pin: &Pin, now: Known) -> Vec<Change> {
+    let mut out = Vec::new();
+    let drop = |out: &mut Vec<Change>, name: &str| {
+        if binding(node, name).is_some() {
+            out.push(Change::Remove(name.to_owned()));
+        }
+    };
+    if pin.fill == Some(true) {
+        for name in ANCHORS.iter().chain(&SIDE_MARGINS) {
+            drop(&mut out, name);
+        }
+        for name in ["x", "y", "width", "height"] {
+            drop(&mut out, name);
+        }
+        out.push(Change::Set("anchors.fill".to_owned(), pin.target.clone()));
+        return out;
+    }
+    if pin.center_in == Some(true) {
+        drop(&mut out, "anchors.fill");
+        for name in ANCHORS.iter().chain(&SIDE_MARGINS) {
+            if *name != "anchors.centerIn" {
+                drop(&mut out, name);
+            }
+        }
+        drop(&mut out, "x");
+        drop(&mut out, "y");
+        out.push(Change::Set(
+            "anchors.centerIn".to_owned(),
+            pin.target.clone(),
+        ));
+        return out;
+    }
+    let had_fill = binding(node, "anchors.fill").is_some();
+    let had_centre = binding(node, "anchors.centerIn").is_some();
+    let lets_go = |asked: Option<bool>, had: bool| had && (asked == Some(false) || pin.sides());
+    let fill_goes = lets_go(pin.fill, had_fill);
+    let centre_goes = lets_go(pin.center_in, had_centre);
+    if fill_goes {
+        drop(&mut out, "anchors.fill");
+    }
+    if centre_goes {
+        drop(&mut out, "anchors.centerIn");
+    }
+    let axes = [
+        PinAxis {
+            near: "left",
+            far: "right",
+            centre: "anchors.horizontalCenter",
+            place: "x",
+            size: "width",
+            asked_near: pin.left,
+            asked_far: pin.right,
+            known_place: now.x,
+            known_size: now.width,
+        },
+        PinAxis {
+            near: "top",
+            far: "bottom",
+            centre: "anchors.verticalCenter",
+            place: "y",
+            size: "height",
+            asked_near: pin.top,
+            asked_far: pin.bottom,
+            known_place: now.y,
+            known_size: now.height,
+        },
+    ];
+    for axis in &axes {
+        let pinned = |side: &str| binding(node, &format!("anchors.{side}")).is_some();
+        let had_both = fill_goes || (pinned(axis.near) && pinned(axis.far));
+        let held_before = fill_goes
+            || centre_goes
+            || pinned(axis.near)
+            || pinned(axis.far)
+            || binding(node, axis.centre).is_some();
+        let mut after = 0;
+        for (side, asked) in [(axis.near, axis.asked_near), (axis.far, axis.asked_far)] {
+            let name = format!("anchors.{side}");
+            let margin = format!("anchors.{side}Margin");
+            match asked {
+                Some(Some(by)) => {
+                    after += 1;
+                    out.push(Change::Set(name, format!("{}.{side}", pin.target)));
+                    if by != 0.0 || binding(node, "anchors.margins").is_some() {
+                        out.push(Change::Set(margin, number(by)));
+                    } else {
+                        drop(&mut out, &margin);
+                    }
+                }
+                Some(None) => {
+                    drop(&mut out, &name);
+                    drop(&mut out, &margin);
+                }
+                None => after += usize::from(pinned(side)),
+            }
+        }
+        let asked = axis.asked_near.is_some() || axis.asked_far.is_some();
+        if !asked && !fill_goes && !centre_goes {
+            continue;
+        }
+        if after > 0 {
+            drop(&mut out, axis.centre);
+            drop(&mut out, axis.place);
+        }
+        if after == 2 {
+            drop(&mut out, axis.size);
+            continue;
+        }
+        if after == 0
+            && held_before
+            && binding(node, axis.centre).is_none()
+            && binding(node, axis.place).is_none()
+            && let Some(place) = axis.known_place
+        {
+            out.push(Change::Set(axis.place.to_owned(), number(place)));
+        }
+        if had_both
+            && binding(node, axis.size).is_none()
+            && let Some(size) = axis.known_size
+        {
+            out.push(Change::Set(axis.size.to_owned(), number(size)));
+        }
+    }
+    out
+}
+
+impl Pin {
+    fn sides(&self) -> bool {
+        [self.left, self.right, self.top, self.bottom]
+            .iter()
+            .any(|side| matches!(side, Some(Some(_))))
+    }
+}
+
+// How `node_arrange` `wrap` lays out what it wraps.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, JsonSchema)]
 pub enum Wrap {
     Row,
