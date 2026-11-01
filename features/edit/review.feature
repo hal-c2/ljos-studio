@@ -412,9 +412,9 @@ Feature: Design review comments sit on objects, in the sidecar
         """json
         {"version": 1, "comments": [{"id": "c1", "doc": "Main.qml", "anchor": {"key": [{"Id": "title"}], "path": "root/0", "line": 5, "type": "Text", "id": "title"}, "thread": [{"text": "Too small", "at": 1}, {"text": "Agreed", "at": 2}]}]}
         """
-      And the agent calls the tool "binding_set" with:
+      And the agent calls the tool "node_arrange" with:
         """json
-        {"doc": "Main.qml", "node": {"id": "title"}, "name": "id", "value": "heading"}
+        {"doc": "Main.qml", "action": "rename", "nodes": [{"id": "title"}], "name": "heading"}
         """
       When the agent calls the tool "review" with:
         """json

@@ -46,13 +46,13 @@ Feature: Studio's window is laid out to work in
     When the person clicks the button "Right panels"
     Then the window has no pane "Inspector"
     When the person clicks the button "Show code"
-    Then the window has no pane "Code"
+    Then the window has no pane "Code of Main.qml"
     When the person clicks the button "Left panels"
     And the person clicks the button "Right panels"
     And the person clicks the button "Show code"
     Then the window has a pane "Layers"
     And the window has a pane "Inspector"
-    And the window has a pane "Code"
+    And the window has a pane "Code of Main.qml"
 
   Scenario: The look turns dark and back, and the button says which is next
     When the person clicks the button "Dark look"

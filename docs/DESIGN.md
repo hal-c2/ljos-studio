@@ -1133,6 +1133,10 @@ studio_blocks --test ui` for the panel):
     compiled first.
 36. Controls without an installed Qt (request 13): a site importing
     `QtQuick.Controls` cannot be built where Qt is not.
+37. The scene of a `View3D` readable in a page, as the native inspector reads
+    it: the view's box, the camera's position, rotation and field of view, and
+    each model's scene position, rotation, scale and source. Until then a click
+    on a `View3D` in the browser selects the view and a model has no arrows.
 
 **Request to ljos-ui:** a way for `Ljos.Design` to take a `theme.json`
 without Rust (its palette's seed and overrides as QML can be given them),
