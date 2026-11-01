@@ -10,13 +10,13 @@ use ljos_mcp_core::{CallCtx, Cap, ErrorCode, SurfaceError, ToolDef, ToolRegistry
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use studio_core::place::{self, Align, Drag, Moving, Rect, Resizing, Wanted};
+use studio_core::place::{self, Align, Drag, Moving, Rect, Resizing, Wanted, Wrap};
 use studio_core::preview::{Declared, Placed};
 use studio_core::scene3d::Handles;
 use studio_core::{Address, Node, NodePath, Op, StateEdit, Step};
 
 use crate::tools::{EditOut, MUTATE};
-use crate::{Studio, error, lock};
+use crate::{Studio, error, layout_tools, lock};
 
 /// Siblings told to a canvas for snapping: past this, a parent's guides are
 /// noise and reading them costs more than the frame they serve.
@@ -47,6 +47,8 @@ enum Action {
     Show,
     Lock,
     Unlock,
+    Wrap,
+    Unwrap,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -75,6 +77,13 @@ struct ArrangeArgs {
     parent: Option<Address>,
     /// For `rename`: the object's new `id`.
     name: Option<String>,
+    /// For `wrap`: the layout to put them in.
+    #[serde(rename = "in")]
+    wrap_in: Option<Wrap>,
+    /// For `wrap`; without it a Row or Column keeps the gap they had.
+    spacing: Option<f64>,
+    /// For `wrap` in a Grid; without it, what its widest row has.
+    columns: Option<u32>,
     #[serde(default)]
     dry_run: bool,
 }
@@ -170,9 +179,9 @@ struct PlaceOne {
     height: Option<f64>,
 }
 
-struct ManyOut {
-    edit: EditOut,
-    nodes: Vec<String>,
+pub(crate) struct ManyOut {
+    pub(crate) edit: EditOut,
+    pub(crate) nodes: Vec<String>,
 }
 
 struct AlignArgs {
@@ -198,22 +207,22 @@ struct PasteArgs {
     dry_run: bool,
 }
 
-fn refused(kind: &str, message: impl Into<String>) -> SurfaceError {
+pub(crate) fn refused(kind: &str, message: impl Into<String>) -> SurfaceError {
     SurfaceError::new(ErrorCode::NotActionable, message).with_details(json!({ "kind": kind }))
 }
 
-fn parent_path(path: &NodePath) -> Option<NodePath> {
+pub(crate) fn parent_path(path: &NodePath) -> Option<NodePath> {
     (!path.0.is_empty()).then(|| NodePath(path.0[..path.0.len() - 1].to_vec()))
 }
 
-fn short(ty: &str) -> &str {
+pub(crate) fn short(ty: &str) -> &str {
     ty.rsplit('.').next().unwrap_or(ty)
 }
 
 /// The objects the preview of `doc` has of `nodes`, by handle; the first copy
 /// of a delegate speaks for all, since a file has one declaration of them.
 /// `None` when no preview of it is showing.
-fn placed_of(
+pub(crate) fn placed_of(
     studio: &mut Studio,
     doc: &str,
     nodes: &[(String, Node)],
@@ -256,13 +265,16 @@ fn placed_of(
 }
 
 /// The object at `path`, with its handle.
-fn at_path(tree: &[(String, Node)], path: &NodePath) -> Option<(String, Node)> {
+pub(crate) fn at_path(tree: &[(String, Node)], path: &NodePath) -> Option<(String, Node)> {
     tree.iter().find(|(_, n)| n.path == *path).cloned()
 }
 
 /// The types of what places `node`: the file's, and the preview's too when it
 /// is known, since a component of the project can be a layout underneath.
-fn parent_types<'a>(parent: Option<&'a Node>, placed: Option<&'a Placed>) -> Vec<&'a str> {
+pub(crate) fn parent_types<'a>(
+    parent: Option<&'a Node>,
+    placed: Option<&'a Placed>,
+) -> Vec<&'a str> {
     let mut types: Vec<&str> = parent.iter().map(|p| p.ty.as_str()).collect();
     if let Some(placed) = placed {
         types.extend(placed.types.iter().map(String::as_str));
@@ -598,7 +610,7 @@ fn copied(
     Ok(out)
 }
 
-fn taken_ids(studio: &mut Studio, doc: &str) -> Result<Vec<String>, SurfaceError> {
+pub(crate) fn taken_ids(studio: &mut Studio, doc: &str) -> Result<Vec<String>, SurfaceError> {
     let (tree, _) = studio.session.tree(doc).map_err(error)?;
     Ok(tree.into_iter().filter_map(|(_, n)| n.id).collect())
 }
@@ -781,7 +793,10 @@ fn needed<T>(field: Option<T>, name: &str, action: &str) -> Result<T, SurfaceErr
 
 fn arrange(studio: &mut Studio, a: ArrangeArgs) -> Result<ArrangeOut, SurfaceError> {
     check_paths(studio, &a)?;
-    if matches!(a.action, Action::Place | Action::Align | Action::Remove) {
+    if matches!(
+        a.action,
+        Action::Place | Action::Align | Action::Remove | Action::Wrap | Action::Unwrap
+    ) {
         check_unlocked(studio, &a)?;
     }
     let doc = a.doc;
@@ -925,6 +940,25 @@ fn arrange(studio: &mut Studio, a: ArrangeArgs) -> Result<ArrangeOut, SurfaceErr
             }
             studio.watchers.tell();
             Ok(ArrangeOut::default())
+        }
+        Action::Wrap => {
+            let how = needed(a.wrap_in, "in", "wrap")?;
+            layout_tools::wrap(
+                studio,
+                &layout_tools::WrapArgs {
+                    doc,
+                    nodes,
+                    how,
+                    spacing: a.spacing,
+                    columns: a.columns,
+                    generation,
+                    dry_run: a.dry_run,
+                },
+            )
+            .map(many)
+        }
+        Action::Unwrap => {
+            layout_tools::unwrap(studio, &doc, &nodes, generation, a.dry_run).map(many)
         }
         Action::Duplicate | Action::Remove => {
             let args = NodesArgs {

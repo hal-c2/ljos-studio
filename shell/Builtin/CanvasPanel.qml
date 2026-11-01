@@ -22,6 +22,16 @@ Panel {
     // has its own, and one changing does not speak for the others.
     property int framesWithoutBoxes: 0
     readonly property bool hasBoxes: framesWithoutBoxes === 0
+    // What only holds its children can be taken away from around them.
+    readonly property var wrappers: ["Row", "Column", "Grid", "Flow", "Item", "RowLayout", "ColumnLayout", "GridLayout"]
+    readonly property string chosenType: {
+        const all = workspace.layers
+        for (let i = 0; i < all.length; i++) {
+            if (all[i].node === workspace.selected)
+                return all[i].type
+        }
+        return ""
+    }
     title: "Canvas"
     clip: true
 
@@ -349,7 +359,7 @@ Panel {
     FloatBar {
         anchors.horizontalCenter: parent.horizontalCenter
         y: Spacing.xs
-        visible: alignments.count > 0
+        visible: alignments.count > 0 || wraps.count > 0 || unwrapping.visible
 
         Repeater {
             id: alignments
@@ -381,6 +391,41 @@ Panel {
                     panel.workspace.dispatch("node_arrange", args)
                 }
             }
+        }
+
+        // A wrap needs no boxes: without them it goes by what the file says.
+        Repeater {
+            id: wraps
+            model: panel.workspace.chosen.length === 0 || panel.playing ? [] : [
+                {kind: "Row", icon: "row"},
+                {kind: "Column", icon: "column"},
+                {kind: "Grid", icon: "grid"},
+                {kind: "Item", icon: "frame"}
+            ]
+            delegate: IconButton {
+                required property var modelData
+                icon_: modelData.icon
+                text: "Wrap in " + modelData.kind
+                onClicked: panel.workspace.dispatch("node_arrange", {
+                    action: "wrap",
+                    doc: panel.workspace.doc,
+                    nodes: panel.workspace.chosen.map(h => ({node: h})),
+                    in: modelData.kind
+                })
+            }
+        }
+
+        IconButton {
+            id: unwrapping
+            icon_: "unwrap"
+            text: "Unwrap"
+            visible: !panel.playing && panel.workspace.chosen.length === 1
+                && panel.wrappers.indexOf(panel.chosenType) >= 0
+            onClicked: panel.workspace.dispatch("node_arrange", {
+                action: "unwrap",
+                doc: panel.workspace.doc,
+                nodes: [{node: panel.workspace.chosen[0]}]
+            })
         }
     }
 

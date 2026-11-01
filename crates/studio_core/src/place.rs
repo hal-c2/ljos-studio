@@ -76,6 +76,11 @@ pub struct Refusal {
     pub message: String,
 }
 
+/// The short name of the type that places its children, among `types`.
+pub fn placer<'a>(types: &[&'a str]) -> Option<&'a str> {
+    arranger(types).map(|(_, name)| name)
+}
+
 /// How the parent's type places its children, by the short name of any of
 /// its types.
 fn arranger<'a>(parent_types: &[&'a str]) -> Option<(Arranger, &'a str)> {
@@ -210,6 +215,11 @@ pub fn bindings_3d(node: &Node, wanted: Wanted) -> Result<Vec<(String, String)>,
     Ok(out)
 }
 
+/// Whether anchors say where `node` is.
+pub fn anchored(node: &Node) -> bool {
+    binding(node, "anchors.fill").is_some() || ANCHORS.iter().any(|a| binding(node, a).is_some())
+}
+
 const ANCHORS: [&str; 7] = [
     "anchors.left",
     "anchors.right",
@@ -232,7 +242,7 @@ pub fn number(value: f64) -> String {
 
 /// `value` as a margin moved by `by`: a literal stays one; an expression (a
 /// token, say) goes on being read, offset.
-fn moved(value: Option<&str>, by: f64) -> String {
+pub fn moved(value: Option<&str>, by: f64) -> String {
     match value {
         None => number(by),
         Some(v) => match v.parse::<f64>() {
@@ -537,6 +547,152 @@ fn distributed(boxes: &[Rect], horizontal: bool) -> Vec<(f64, f64)> {
     out
 }
 
+/// How `node_arrange` `wrap` lays out what it wraps.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, JsonSchema)]
+pub enum Wrap {
+    Row,
+    Column,
+    Grid,
+    Item,
+}
+
+/// What is known of a free object's box: from the preview, else what is
+/// written. An x or y nobody wrote is 0; a size nobody wrote is its own.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Known {
+    pub x: Option<f64>,
+    pub y: Option<f64>,
+    pub width: Option<f64>,
+    pub height: Option<f64>,
+}
+
+/// What the numbers of a wrap come to.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct WrapPlan {
+    /// Indices into the boxes, in the order they go into the layout.
+    pub order: Vec<usize>,
+    pub x: Option<f64>,
+    pub y: Option<f64>,
+    pub width: Option<f64>,
+    pub height: Option<f64>,
+    pub spacing: Option<f64>,
+    pub columns: Option<u32>,
+}
+
+/// Lays out a wrap of `boxes`, given in document order. An order that needs a
+/// place nobody knows stays the document's, as does an Item's, where the order
+/// is what is drawn over what.
+pub fn wrap_plan(
+    boxes: &[Known],
+    how: Wrap,
+    spacing: Option<f64>,
+    columns: Option<u32>,
+) -> WrapPlan {
+    let least = |of: fn(&Known) -> Option<f64>| {
+        boxes
+            .iter()
+            .map(of)
+            .collect::<Option<Vec<f64>>>()
+            .and_then(|v| v.into_iter().reduce(f64::min))
+    };
+    let (x, y) = (least(|b| b.x), least(|b| b.y));
+    let far = |at: fn(&Known) -> Option<f64>, size: fn(&Known) -> Option<f64>| {
+        boxes
+            .iter()
+            .map(|b| Some(at(b)? + size(b)?))
+            .collect::<Option<Vec<f64>>>()
+            .and_then(|v| v.into_iter().reduce(f64::max))
+    };
+    let mut order: Vec<usize> = (0..boxes.len()).collect();
+    let mut gap = None;
+    let mut across = None;
+    match how {
+        Wrap::Row if x.is_some() => {
+            order.sort_by(|&a, &b| boxes[a].x.partial_cmp(&boxes[b].x).expect("numbers"));
+            gap = even_gap(&order, boxes, |b| b.x, |b| b.width);
+        }
+        Wrap::Column if y.is_some() => {
+            order.sort_by(|&a, &b| boxes[a].y.partial_cmp(&boxes[b].y).expect("numbers"));
+            gap = even_gap(&order, boxes, |b| b.y, |b| b.height);
+        }
+        Wrap::Grid if x.is_some() && y.is_some() => {
+            let (read, first_row) = reading_order(boxes);
+            order = read;
+            across = Some(first_row);
+        }
+        _ => {}
+    }
+    WrapPlan {
+        order,
+        x,
+        y,
+        width: (how == Wrap::Item)
+            .then(|| Some(far(|b| b.x, |b| b.width)? - x?))
+            .flatten(),
+        height: (how == Wrap::Item)
+            .then(|| Some(far(|b| b.y, |b| b.height)? - y?))
+            .flatten(),
+        spacing: if how == Wrap::Item {
+            None
+        } else {
+            spacing.or(gap)
+        },
+        columns: if how == Wrap::Grid {
+            columns.or(across)
+        } else {
+            None
+        },
+    }
+}
+
+/// The gap that keeps `order`'s ends about where they were, in whole pixels;
+/// none where they overlap, which no spacing would keep.
+fn even_gap(
+    order: &[usize],
+    boxes: &[Known],
+    at: fn(&Known) -> Option<f64>,
+    size: fn(&Known) -> Option<f64>,
+) -> Option<f64> {
+    let gaps = order
+        .windows(2)
+        .map(|w| Some(at(&boxes[w[1]])? - at(&boxes[w[0]])? - size(&boxes[w[0]])?))
+        .collect::<Option<Vec<f64>>>()?;
+    if gaps.is_empty() {
+        return None;
+    }
+    let mean = gaps.iter().sum::<f64>() / gaps.len() as f64;
+    (mean > 0.0).then(|| mean.round())
+}
+
+/// `boxes` by rows, top to bottom and left to right, with how many the widest
+/// row has. A box starts a new row once it is below the middle of the row's
+/// first, so a line slightly out of true still reads as one line.
+fn reading_order(boxes: &[Known]) -> (Vec<usize>, u32) {
+    let mut by_y: Vec<usize> = (0..boxes.len()).collect();
+    by_y.sort_by(|&a, &b| boxes[a].y.partial_cmp(&boxes[b].y).expect("numbers"));
+    let mut rows: Vec<Vec<usize>> = Vec::new();
+    let mut row_ends = f64::NEG_INFINITY;
+    for i in by_y {
+        let y = boxes[i].y.unwrap_or(0.0);
+        match rows.last_mut() {
+            Some(row) if y < row_ends => row.push(i),
+            _ => {
+                rows.push(vec![i]);
+                row_ends = y + boxes[i].height.unwrap_or(0.0) / 2.0;
+            }
+        }
+    }
+    let widest = rows.iter().map(Vec::len).max().unwrap_or(1);
+    let order = rows
+        .into_iter()
+        .flat_map(|mut row| {
+            row.sort_by(|&a, &b| boxes[a].x.partial_cmp(&boxes[b].x).expect("numbers"));
+            row
+        })
+        .collect();
+    (order, u32::try_from(widest).unwrap_or(u32::MAX))
+}
+
 /// `text` (one object as written) with every id in `ids` that `taken` holds
 /// renamed to one nothing else has, and what its own text says of them
 /// following. The new names go into `taken`.
@@ -569,53 +725,81 @@ pub fn with_id_renamed(text: &str, old: &str, new: &str) -> String {
 /// Replaces the identifiers `renames` names, outside strings and comments,
 /// where one is a name of an object: not `foo.inner` and not a member `inner:`.
 fn renamed(text: &str, renames: &[(String, String)]) -> String {
-    let bytes = text.as_bytes();
     let mut out = String::with_capacity(text.len());
+    let mut from = 0;
+    for word in code_words(text) {
+        let name = &text[word.start..word.end];
+        if let Some((_, new)) = renames.iter().find(|(old, _)| old == name)
+            && !word.member
+        {
+            out.push_str(&text[from..word.start]);
+            out.push_str(new);
+            from = word.end;
+        }
+    }
+    out.push_str(&text[from..]);
+    out
+}
+
+/// A word of code: not in a string or a comment.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Word {
+    pub start: usize,
+    pub end: usize,
+    /// It names a member (`foo.inner`, `inner:`), not something in scope.
+    pub member: bool,
+}
+
+/// The words of code in `text`, in order.
+pub fn code_words(text: &str) -> Vec<Word> {
+    let mut words = Vec::new();
+    collect_words(text, 0, &mut words);
+    words
+}
+
+/// Whether `value`, code as written, reads `name` from its scope.
+pub fn reads(value: &str, name: &str) -> bool {
+    code_words(value)
+        .iter()
+        .any(|w| !w.member && &value[w.start..w.end] == name)
+}
+
+fn collect_words(text: &str, base: usize, words: &mut Vec<Word>) {
+    let bytes = text.as_bytes();
     let mut i = 0;
     while i < bytes.len() {
         let c = bytes[i];
         match c {
             // Its text is text, but what is in `${}` is code.
             b'`' => {
-                out.push('`');
                 i += 1;
-                let mut from = i;
                 while i < bytes.len() && bytes[i] != b'`' {
                     if bytes[i] == b'\\' {
                         i += 2;
                     } else if bytes[i] == b'$' && bytes.get(i + 1) == Some(&b'{') {
                         let end = expression_end(bytes, i + 2);
-                        out.push_str(&text[from..i + 2]);
-                        out.push_str(&renamed(&text[i + 2..end], renames));
+                        collect_words(&text[i + 2..end], base + i + 2, words);
                         i = end;
-                        from = i;
                     } else {
                         i += 1;
                     }
                 }
                 i = (i + 1).min(bytes.len());
-                out.push_str(&text[from..i]);
             }
             b'"' | b'\'' => {
-                let start = i;
                 i += 1;
                 while i < bytes.len() && bytes[i] != c {
                     i += if bytes[i] == b'\\' { 2 } else { 1 };
                 }
                 i = (i + 1).min(bytes.len());
-                out.push_str(&text[start..i]);
             }
             b'/' if bytes.get(i + 1) == Some(&b'/') => {
-                let end = text[i..].find('\n').map_or(bytes.len(), |n| i + n);
-                out.push_str(&text[i..end]);
-                i = end;
+                i = text[i..].find('\n').map_or(bytes.len(), |n| i + n);
             }
             b'/' if bytes.get(i + 1) == Some(&b'*') => {
-                let end = text[i + 2..]
+                i = text[i + 2..]
                     .find("*/")
                     .map_or(bytes.len(), |n| i + 2 + n + 2);
-                out.push_str(&text[i..end]);
-                i = end;
             }
             c if c == b'_' || c == b'$' || c.is_ascii_alphabetic() => {
                 let start = i;
@@ -624,23 +808,17 @@ fn renamed(text: &str, renames: &[(String, String)]) -> String {
                 {
                     i += 1;
                 }
-                let word = &text[start..i];
                 let before = text[..start].trim_end().as_bytes().last().copied();
                 let after = text[i..].trim_start().as_bytes().first().copied();
-                let member = before == Some(b'.') || (after == Some(b':') && before != Some(b'?'));
-                match renames.iter().find(|(old, _)| old == word) {
-                    Some((_, new)) if !member => out.push_str(new),
-                    _ => out.push_str(word),
-                }
+                words.push(Word {
+                    start: base + start,
+                    end: base + i,
+                    member: before == Some(b'.') || (after == Some(b':') && before != Some(b'?')),
+                });
             }
-            _ => {
-                let len = text[i..].chars().next().map_or(1, char::len_utf8);
-                out.push_str(&text[i..i + len]);
-                i += len;
-            }
+            _ => i += text[i..].chars().next().map_or(1, char::len_utf8),
         }
     }
-    out
 }
 
 /// Where the `}` is that closes the expression starting at `i`, past what
