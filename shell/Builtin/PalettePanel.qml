@@ -37,6 +37,10 @@ Panel {
         "BorderImage", "Canvas", "Button", "CheckBox", "RadioButton", "Switch", "Slider",
         "ProgressBar", "SpinBox", "TextField", "TextArea", "ComboBox", "Label", "ToolButton"]
     readonly property string needle: search.text.toLowerCase()
+    // A picture is a decode and a live button, so a folder of nine hundred
+    // shows its first few and the search reaches the rest.
+    readonly property var assetsFound: workspace.assets.filter(a => a.name.toLowerCase().includes(needle))
+    readonly property int assetsAtOnce: 24
     // A string, which changes only when the list does: `toolkit` is a new
     // value at each publish, and rebuilding the buttons would drop a press.
     readonly property string toolkit: JSON.stringify(workspace.toolkit)
@@ -203,10 +207,10 @@ Panel {
                 IconButton {
                     icon_: "plus"
                     text: "Place " + row.modelData.name
-                    enabled: panel.workspace.selected !== ""
+                    enabled: panel.target !== ""
                     onClicked: panel.workspace.dispatch("node_insert", {
                         doc: panel.workspace.doc,
-                        parent: {node: panel.workspace.selected},
+                        parent: {node: panel.target},
                         block: row.modelData.module + "." + row.modelData.name
                     })
                 }
@@ -284,16 +288,26 @@ Panel {
                 title: "Assets"
                 width: parent.width
 
+                Label {
+                    visible: panel.assetsFound.length > panel.assetsAtOnce
+                    Layout.fillWidth: true
+                    wrapMode: Text.Wrap
+                    color: Colors.textMuted
+                    font.pixelSize: Typography.captionSize
+                    text: (panel.assetsFound.length - panel.assetsAtOnce) + " more: search for their names"
+                    Accessible.role: Accessible.StaticText
+                    Accessible.name: text
+                }
+
                 Flow {
                     Layout.fillWidth: true
                     spacing: Spacing.xxs
 
                     Repeater {
-                        model: panel.workspace.assets
+                        model: panel.assetsFound.slice(0, panel.assetsAtOnce)
                         delegate: AbstractButton {
                             id: picture
                             required property var modelData
-                            visible: modelData.name.toLowerCase().includes(panel.needle)
                             text: modelData.name
                             Accessible.name: "Place " + modelData.name
                             Accessible.role: Accessible.Button

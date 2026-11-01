@@ -117,6 +117,17 @@ Feature: A person composes a shell in Studio's window
       }
       """
 
+  Scenario: With nothing selected a block goes into the document's root
+    Given the person has opened "Main.qml" in the documents list
+    When the person places "Player" from the palette
+    Then the file "Main.qml" says "Player { id: player1 }"
+
+  Scenario: A placed block says what it takes without being asked
+    Given the person has opened "Main.qml" in the documents list
+    And the person has placed "Player" from the palette
+    When the person selects "Player player1" in the layers panel
+    Then the inspector has the button "Bind source"
+
   Scenario: A block from the palette is placed into the selected object
     Given the person has opened "Main.qml" in the documents list
     And the person has selected "Item root" in the layers panel

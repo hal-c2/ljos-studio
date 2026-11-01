@@ -91,6 +91,10 @@ pub const BUILTIN: &[(&str, &str)] = &[
         include_str!("../../../shell/Builtin/TokensPanel.qml"),
     ),
     (
+        "TypeSketch.qml",
+        include_str!("../../../shell/Builtin/TypeSketch.qml"),
+    ),
+    (
         "Toolbar.qml",
         include_str!("../../../shell/Builtin/Toolbar.qml"),
     ),

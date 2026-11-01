@@ -376,14 +376,27 @@ impl Types<'_> {
     fn qmldir_file(&self, uri: &str, name: &str) -> Option<String> {
         self.qmldirs.get(uri)?.iter().find_map(|(qmldir, text)| {
             // `Name 1.0 File.qml`, or `Name File.qml` without a version.
-            let file = text.lines().map(str::split_whitespace).find_map(|words| {
-                let words: Vec<&str> = words.collect();
+            // A block is announced in a comment, with its category and summary
+            // after the file.
+            let file = text.lines().find_map(|line| {
+                if let Some(block) = line.trim_start().strip_prefix("# block ") {
+                    let words: Vec<&str> = block.split_whitespace().collect();
+                    return match words.as_slice() {
+                        [n, _, file, ..] if *n == name && file.ends_with(".qml") => {
+                            Some(file.to_string())
+                        }
+                        _ => None,
+                    };
+                }
+                let words: Vec<&str> = line.split_whitespace().collect();
                 match words.as_slice() {
-                    [n, file] | [n, _, file] if *n == name && file.ends_with(".qml") => Some(*file),
+                    [n, file] | [n, _, file] if *n == name && file.ends_with(".qml") => {
+                        Some(file.to_string())
+                    }
                     _ => None,
                 }
             })?;
-            crate::blocks::join(dir_of(qmldir), file)
+            crate::blocks::join(dir_of(qmldir), &file)
         })
     }
 
