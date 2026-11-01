@@ -698,6 +698,7 @@ impl Session {
                         key: node.key.clone(),
                         ty: node.ty.clone(),
                         span: Some((node.start, node.end)),
+                        head: None,
                     };
                     given.push(t.clone());
                     doc.tracked.push(t);
@@ -3173,10 +3174,29 @@ fn place(doc: &mut Document, mut leads: Vec<Lead>) {
         let found = find_by_key(nodes, &t.key)
             .and_then(|n| nodes.iter().position(|m| m.path == n.path))
             .filter(|&at| !taken[at]);
-        placed[i] = Some(found.map(|at| {
+        if let Some(at) = found {
             taken[at] = true;
-            nodes[at].path.clone()
-        }));
+            placed[i] = Some(Some(nodes[at].path.clone()));
+        }
+    }
+    // An object no key names, its `id` renamed by a text written over it, is
+    // where its start was.
+    for (i, t) in doc.tracked.iter().enumerate() {
+        if placed[i].is_some() {
+            continue;
+        }
+        let Some(head) = t.head else { continue };
+        if let Some(at) = nodes
+            .iter()
+            .position(|n| n.start == head && n.ty == t.ty)
+            .filter(|&at| !taken[at])
+        {
+            taken[at] = true;
+            placed[i] = Some(Some(nodes[at].path.clone()));
+        }
+    }
+    for p in &mut placed {
+        p.get_or_insert(None);
     }
     for (t, path) in doc.tracked.iter_mut().zip(placed) {
         t.path = path.flatten();
@@ -3195,8 +3215,12 @@ fn refresh(t: &mut Tracked, nodes: &[Node]) {
             t.key = node.key.clone();
             t.ty = node.ty.clone();
             t.span = Some((node.start, node.end));
+            t.head = None;
         }
-        None => t.span = None,
+        None => {
+            t.span = None;
+            t.head = None;
+        }
     }
 }
 
