@@ -51,6 +51,74 @@ pub use log::{LEASE_LIFE_MS, LEASE_TTL_MS, LeaseView};
 /// Who wrote a change found in the file: nobody Studio knows.
 pub const OUTSIDE: &str = "outside Studio";
 
+/// A block's line in its module's `qmldir`: what undo takes back and redo
+/// puts back, around whatever else was written to the file since.
+#[derive(Clone, Debug)]
+pub(crate) struct Declared {
+    qmldir: String,
+    module: String,
+    line: String,
+}
+
+impl Declared {
+    fn of(path: &str) -> Result<Self, Error> {
+        let (dir, file) = path.rsplit_once('/').ok_or_else(|| {
+            Error::Invalid(format!(
+                "a block is in a module's directory, and `{path}` is in none"
+            ))
+        })?;
+        let name = file.strip_suffix(".qml").unwrap_or(file);
+        if !name.starts_with(|c: char| c.is_ascii_uppercase())
+            || !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+        {
+            return Err(Error::Invalid(format!(
+                "`{name}` is no type's name: start it with a capital"
+            )));
+        }
+        if !dir.split('/').all(|part| {
+            part.starts_with(|c: char| c.is_ascii_alphabetic())
+                && part.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+        }) {
+            return Err(Error::Invalid(format!("`{dir}` is no module's name")));
+        }
+        Ok(Self {
+            qmldir: format!("{dir}/qmldir"),
+            module: format!("module {}", dir.replace('/', ".")),
+            line: format!("# block {name} 1.0 {file}"),
+        })
+    }
+
+    fn write(&self, store: &dyn Store) -> Result<(), Error> {
+        let text = match store.exists(&self.qmldir) {
+            true => store.read(&self.qmldir)?,
+            false => format!("{}\n", self.module),
+        };
+        let gap = if text.is_empty() || text.ends_with('\n') {
+            ""
+        } else {
+            "\n"
+        };
+        store.write(&self.qmldir, &format!("{text}{gap}{}\n", self.line))?;
+        Ok(())
+    }
+
+    /// A `qmldir` left with only the module line it would be made with goes,
+    /// a module with nothing in it being nobody's.
+    fn take_back(&self, store: &dyn Store) -> Result<(), Error> {
+        if !store.exists(&self.qmldir) {
+            return Ok(());
+        }
+        let text = store.read(&self.qmldir)?;
+        let kept: Vec<&str> = text.lines().filter(|l| *l != self.line).collect();
+        if kept == [self.module.as_str()] {
+            store.remove(&self.qmldir)?;
+        } else {
+            store.write(&self.qmldir, &format!("{}\n", kept.join("\n")))?;
+        }
+        Ok(())
+    }
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error(transparent)]
@@ -1319,6 +1387,7 @@ impl Session {
             inverse: diff(&after, &before),
             created: false,
             group: None,
+            declares: None,
             handles_before: saved.tracked,
             handles_after,
             change: None,
@@ -1851,6 +1920,59 @@ impl Session {
     }
 
     /// A new document with `text`.
+    /// Creates `path` as [`Session::create`] does and declares it a block in
+    /// the `qmldir` beside it, as one undo step. The directory is the module
+    /// of a `qmldir` that does not say, the file's name the block's.
+    pub fn create_block(
+        &mut self,
+        path: &str,
+        text: &str,
+        dry_run: bool,
+    ) -> Result<Outcome, Error> {
+        let declared = Declared::of(path)?;
+        let qmldir = match self.store.exists(&declared.qmldir) {
+            true => Some(self.store.read(&declared.qmldir)?),
+            false => None,
+        };
+        if qmldir
+            .as_deref()
+            .is_some_and(|t| t.lines().any(|l| l == declared.line))
+        {
+            return Err(Error::Invalid(format!(
+                "`{}` already declares `{}`",
+                declared.qmldir, declared.line
+            )));
+        }
+        let outcome = self.create(path, text, dry_run)?;
+        if dry_run {
+            return Ok(outcome);
+        }
+        if let Err(e) = declared.write(self.store.as_ref()) {
+            self.replay_new_away(&outcome.doc)?;
+            return Err(e);
+        }
+        if let Some(entry) = self.history.latest_mut(&outcome.doc) {
+            entry.declares = Some(declared);
+            entry.label = "create block".to_owned();
+        }
+        Ok(outcome)
+    }
+
+    /// Takes back the document just created, whose entry is on top.
+    fn replay_new_away(&mut self, doc: &str) -> Result<(), Error> {
+        let entry = self
+            .history
+            .peek_undo(None)
+            .filter(|e| e.doc == doc && e.created)
+            .cloned();
+        if let Some(entry) = entry {
+            self.replay(&entry, false)?;
+            self.history.pop_and_top();
+            self.wrote(&entry.doc);
+        }
+        Ok(())
+    }
+
     pub fn create(&mut self, path: &str, text: &str, dry_run: bool) -> Result<Outcome, Error> {
         let path = &self.canonical(path)?;
         match self.sync(path) {
@@ -1898,6 +2020,7 @@ impl Session {
             }],
             created: true,
             group: None,
+            declares: None,
             handles_before: Vec::new(),
             handles_after: Vec::new(),
             change: None,
@@ -2054,6 +2177,7 @@ impl Session {
                 }],
                 created: true,
                 group: None,
+                declares: None,
                 handles_before: Vec::new(),
                 handles_after: Vec::new(),
                 change: None,
@@ -2199,6 +2323,7 @@ impl Session {
             inverse: diff(&after, &before),
             created: false,
             group: None,
+            declares: None,
             handles_before,
             handles_after: next.tracked.clone(),
             change,
@@ -2408,6 +2533,9 @@ impl Session {
                 }],
             )?;
             self.store.remove(&path)?;
+            if let Some(declared) = &entry.declares {
+                declared.take_back(self.store.as_ref())?;
+            }
             self.retire(&path);
             let on_it: Vec<String> = self.review.as_ref().map_or_else(Vec::new, |r| {
                 r.comments
@@ -2427,6 +2555,9 @@ impl Session {
             doc.tracked = entry.handles_after.clone();
             let generation = doc.generation;
             self.store.write(&path, &text)?;
+            if let Some(declared) = &entry.declares {
+                declared.write(self.store.as_ref())?;
+            }
             self.docs.insert(path.clone(), doc);
             self.remade(&path);
             return Ok((generation, side(&text), None));

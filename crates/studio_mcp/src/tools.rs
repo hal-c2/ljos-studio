@@ -122,6 +122,9 @@ struct NewArgs {
     /// How `data` is kept: `json` (the default), or `list`.
     #[serde(default)]
     model: DataModel,
+    /// Also declare it a functional block in the `qmldir` beside it.
+    #[serde(default)]
+    block: bool,
     #[serde(default)]
     dry_run: bool,
 }
@@ -1489,7 +1492,7 @@ fn edits(studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
             ToolDef::new::<NewArgs>(
                 "document_new",
                 "Create a QML document from `text`, or from a JSON file's records (`data`). Refused if it \
-                 exists or does not parse. Undo removes it.",
+                 exists or does not parse. `block` declares it in the `qmldir` beside it. Undo removes it.",
             )
             .answers::<EditOut>()
             .requires(Cap::Mutate)
@@ -1514,10 +1517,13 @@ fn edits(studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
                         }
                         (None, None) => NEW_DOCUMENT.to_owned(),
                     };
-                    studio
-                        .session
-                        .create(&a.doc, &text, a.dry_run)
-                        .map(EditOut::from)
+                    let session = &mut studio.session;
+                    if a.block {
+                        session.create_block(&a.doc, &text, a.dry_run)
+                    } else {
+                        session.create(&a.doc, &text, a.dry_run)
+                    }
+                    .map(EditOut::from)
                         .map_err(error)
                 }
             }),

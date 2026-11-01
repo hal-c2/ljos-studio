@@ -521,6 +521,10 @@ comment is not made and the sidecar on disk is what Studio holds now.
 
 What changed, for an agent: no tool was added (24 of the 25 budgeted).
 
+- `document_new` with `block: true` also declares the document in the
+  `qmldir` beside it, `# block Name 1.0 File.qml`, making that `qmldir` with the
+  directory as its module if there is none. One undo takes back the file and
+  that line, leaving what else was written to the `qmldir`.
 - `document_new` with `data` writes a `JsonListModel` by default; `model:
   "list"` writes the `ListModel` copy it wrote before.
 - `node_inspect` answers `signals`, and a model's `source` for a
