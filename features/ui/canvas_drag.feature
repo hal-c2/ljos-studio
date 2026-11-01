@@ -81,6 +81,13 @@ Feature: Objects are moved and resized on the canvas
     Then the file "Main.qml" says "id: two;"
     And the history lists "move"
 
+  Scenario: A flick's outline does not go back while the drop is on its way
+    Given the person has clicked the frame "Desktop" at 40, 40
+    When the person flicks in the frame "Desktop" from 40, 40 to 90, 63, watching the outline
+    Then the file "Main.qml" says "id: a; x: 70; y: 43;"
+    And the outline was never shown back at 20, 20 once the hand let go
+    And the canvas outlines the selection at 70, 43 sized 50 by 50
+
   Scenario: Arrow keys nudge, shift by ten
     Given the person has clicked the frame "Desktop" at 40, 40
     When the person presses "Right"

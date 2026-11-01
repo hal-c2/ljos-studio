@@ -29,6 +29,9 @@ MouseArea {
     // The box a drag shows; kept after a drop until the new geometry answers,
     // so the outline does not jump back for the length of a reload.
     property var ghost: null
+    // A drop's write is on its way: a read asked before it, the press's, says
+    // the old box and is no reason to let go of the ghost.
+    property bool dropping: false
     property real guideX: -1
     property real guideY: -1
     property var snapXs: []
@@ -308,6 +311,7 @@ MouseArea {
         mode = ""
         guideX = -1
         guideY = -1
+        dropping = wrote
         if (!wrote)
             ghost = null
     }
@@ -356,6 +360,7 @@ MouseArea {
     onPressed: (mouse) => {
         forceActiveFocus()
         dropWaits = false
+        dropping = false
         if (playing)
             return
         pressedAt = Qt.point(mouse.x, mouse.y)
@@ -499,6 +504,7 @@ MouseArea {
                             overlay.dropWaits = false
                             // An agent may have emptied the selection meanwhile.
                             if (overlay.selectedOne === null || !overlay.dropReorder()) {
+                                overlay.dropping = false
                                 overlay.ghost = null
                                 overlay.refetch()
                             }
@@ -510,7 +516,7 @@ MouseArea {
                     overlay.nodes = answer.boxes !== undefined ? answer.boxes : []
                     overlay.parentBox = answer.parent !== undefined ? answer.parent : null
                     overlay.siblings = answer.siblings !== undefined ? answer.siblings : []
-                    overlay.ghost = overlay.dragging ? overlay.ghost : null
+                    overlay.ghost = overlay.dragging || overlay.dropping ? overlay.ghost : null
                     // The hand may be ahead of the siblings it snaps to.
                     if (overlay.mode === "moving" || overlay.mode === "resizing")
                         overlay.startSnaps()
@@ -522,6 +528,8 @@ MouseArea {
                 } else if (overlay.writing) {
                     settled.restart()
                 } else {
+                    // The read asked now is the first that can say the new box.
+                    overlay.dropping = false
                     overlay.refetch()
                 }
             }
@@ -533,6 +541,7 @@ MouseArea {
                 // A refused read leaves nothing to draw; a refused drop goes
                 // back to what the preview says.
                 overlay.writing = false
+                overlay.dropping = false
                 overlay.ghost = null
                 // Read again once only: when the read is what is refused
                 // (a preview gone, or one that cannot say), asking on would
