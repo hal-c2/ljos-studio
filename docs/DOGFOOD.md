@@ -389,6 +389,36 @@ Studio, `budgets` and the preview's `ljos` are all release builds, taken
 | Idle for 5 s | 0 % CPU | 0 ms CPU, 0 wakes, 0 frames | | | within |
 | Drag, engine work per pointer move, p50 / p95 / max | | 34 / 45 / 418 us | | | no paint in it |
 
+**Re-measured 2026-11-01 on the Ljós pin f5266a91** (release `studio`, `budgets` and
+`ljos`; times of day 13:06-13:13, the machine's load average beside each run,
+because other builds shared it). Stock project, p50 / p95 / max:
+
+| Path | Load about 7 | Load about 18 |
+|---|---|---|
+| Cold start (200 files) | 61.8 / 86.3 / 86.3 ms | 79.0 / 93.0 / 93.0 ms |
+| Selection to inspector | 10.2 / 14.1 / 16.2 ms | 16.2 / 19.5 / 19.9 ms |
+| Edit to picture, one per 250 ms | 21.1 / 24.4 / 24.9 ms | 20.8 / 26.6 / 27.1 ms |
+| Theme-set to picture | not taken | 14.1 / 15.6 / 17.5 ms |
+| Drag, engine work per move | 37 / 55 / 721 us | 34 / 57 / 440 us |
+| Watched window left alone 5 s | 0 ms CPU, 0 wakes, 0 frames | same |
+
+`samples/site` at load 16: cold start 79.9 / 93.1 ms; edit to picture 31.6 / 46.5 / 58.1 ms.
+`samples/notes` at load 18: cold start 64.0 / 77.6 ms; edit to picture 29.0 / 735 / 1523 ms.
+The notes tail is three saves whose rename into place took 708, 1451 and 744 ms on
+the data drive, while the same edit's text write, reload and picture took 6 to
+25 ms: the file system, not Studio. One more run (load 9) read slower in every row
+(selection 30.6 / 48.8 ms) with the same code, so a single run under load says
+little; the load-7 and load-18 runs bracket it.
+
+Two harness faults surfaced and are fixed: the tokens step never opened the
+Tokens tab (the sidebar is tabbed now), and `budgets sample` clicked a Documents
+row the list had clipped, which landed below it; it scrolls to the row first.
+
+**A focused TextField in a headless preview** wakes the main thread about twice
+a second (46 and 40 wakes in 20 s, with and without `--watch`) for the cursor's
+blink, against none for the same program unfocused; CPU time was 1 tick in 20 s.
+It is Ljós's, not Studio's (`ljos-requests.md`, p6c-gaps 2).
+
 **The drag.** Dragging `card0` 150 moves across a release window, in the
 desktop:cua sandbox with software GL (llvmpipe, a headless sway output). The
 figure is the wall-clock time between frames, read by a `FrameAnimation` in a

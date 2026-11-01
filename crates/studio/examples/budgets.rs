@@ -48,7 +48,7 @@ use ljos::item::MouseButtons;
 use ljos::prelude::*;
 use ljos::testing::AccessibleNode;
 use ljos_dev::{DevSession, Host, Report};
-use ljos_drive::{Chord, Stage};
+use ljos_drive::{Chord, Stage, Wheel};
 use ljos_runtime::SystemClock;
 use studio_core::preview::{
     Declared, LogLine, Picture, Placed, PreviewError, PreviewHost, PreviewSpec, Reload, Size,
@@ -822,6 +822,11 @@ impl Window {
     /// from Enter until the frame draws the preview's reload, one per
     /// `pace`.
     fn token_edits(&mut self, rounds: usize, pace: Duration) -> anyhow::Result<Vec<Duration>> {
+        // The sidebar shows one panel at a time; the tokens' is behind a tab.
+        let tab = find(&self.tree(), &|n| n.name == "Tokens tab" && n.key.is_some())
+            .cloned()
+            .ok_or_else(|| anyhow!("no tokens tab in the window"))?;
+        self.click(&tab)?;
         let filter = self.node_with("Tokens", "Filter tokens", |n| n.role == "textinput")?;
         self.enter(&filter, "Colors.canvas")?;
         let mut edits = Vec::new();
@@ -942,7 +947,40 @@ impl Window {
 
     fn open_document(&mut self, doc: &str) -> anyhow::Result<()> {
         let row = self.node("Documents", doc)?;
-        self.click(&row)?;
+        let key = row.key.ok_or(anyhow!("the row has no key"))?;
+        // The list shows a few rows and clips the rest, and a click on a clipped
+        // row lands on what lies below: scroll to it a wheel notch at a time, as
+        // a person does.
+        let bounds = |scene: &ljos_quick::QuickScene, test: &dyn Fn(&str, bool) -> bool| {
+            let mut found = None;
+            scene.accessibility_tree().walk(|k, _, d| {
+                if found.is_none() && test(&d.name, k == key) {
+                    let b = d.bounds;
+                    found = Some(ljos::item::kurbo::Rect::new(b.x0, b.y0, b.x1, b.y1));
+                }
+            });
+            found
+        };
+        let shown = bounds(&self.stage.scene, &|name, _| name == "Documents")
+            .ok_or(anyhow!("no list of documents in the window"))?;
+        let mut seen = None;
+        for _ in 0..200 {
+            let now = bounds(&self.stage.scene, &|_, is_row| is_row)
+                .ok_or(anyhow!("{doc:?} is not in the list"))?;
+            if now.y0 >= shown.y0 && now.y1 <= shown.y1 {
+                seen = Some(now);
+                break;
+            }
+            let notch = if now.y1 > shown.y1 { -1.0 } else { 1.0 };
+            let mut driver = self.stage.drive();
+            driver.wheel(shown.center(), Wheel::Notches(0.0, notch))?;
+            driver.advance(1000)?;
+        }
+        let seen = seen.ok_or(anyhow!("the wheel does not bring {doc:?} into view"))?;
+        self.stage
+            .drive()
+            .click(seen.center(), MouseButtons::LEFT, 1)?;
+        self.rest()?;
         let shown = self
             .stage
             .engine
