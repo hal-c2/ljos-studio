@@ -283,6 +283,13 @@ impl Workspace {
         Ok(())
     }
 
+    /// Whether `text` is a literal as QML reads one. The inspector asks before
+    /// it writes, and a call could only answer after.
+    #[qml(invokable)]
+    fn literal(_cx: &Cx, text: String) -> Result<bool, EngineError> {
+        Ok(studio_core::is_literal_text(&text))
+    }
+
     /// `dispatch` for a call that follows from what the person just did and
     /// is no gesture of its own: it leaves the refusal on the window's line,
     /// and says its own refusal only when that line is empty.

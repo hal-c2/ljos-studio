@@ -379,6 +379,29 @@ fn binding(source: &str, name: String, span: qml_syntax::Span, declared: bool) -
     }
 }
 
+/// Whether `text`, all of it, is what QML reads as a literal: the same answer
+/// a binding written that way gets.
+pub fn is_literal_text(text: &str) -> bool {
+    const BEFORE: &str = "Item { a: ";
+    let source = format!("{BEFORE}{text}\n}}");
+    let allocator = qml_syntax::Allocator::default();
+    let parsed = qml_syntax::parse(&allocator, &source);
+    if !parsed.is_ok() {
+        return false;
+    }
+    let [QmlMember::Binding(binding)] = parsed.document.root.members.as_slice() else {
+        return false;
+    };
+    let QmlBindingValue::Expression(e) = &binding.value else {
+        return false;
+    };
+    // `1\n b: 2` and `1 // why` parse too: the value has to be all there is.
+    let span = e.span();
+    is_literal(e)
+        && span.start as usize == BEFORE.len()
+        && span.end as usize == BEFORE.len() + text.len()
+}
+
 fn is_literal(e: &qml_syntax::js::Expression<'_>) -> bool {
     use qml_syntax::js;
     match e {
@@ -417,6 +440,41 @@ pub(crate) fn literal_string(value: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_literal_in_any_of_qmls_forms_is_all_of_the_text() {
+        for good in [
+            "1",
+            ".7",
+            "0x20",
+            "-1",
+            "+1",
+            "1e3",
+            "true",
+            "null",
+            "'world'",
+            "\"world\"",
+            "`world`",
+        ] {
+            assert!(is_literal_text(good), "{good}");
+        }
+        for bad in [
+            "",
+            "cube",
+            "1 + 1",
+            "`${a}`",
+            "Qt.red",
+            "undefined",
+            "1\n b: 2",
+            "1 }\nItem {",
+            "1 // why",
+            "{ return 1 }",
+            "Item {}",
+            "[1]",
+        ] {
+            assert!(!is_literal_text(bad), "{bad}");
+        }
+    }
 
     #[test]
     fn groups_are_bindings_not_objects() {

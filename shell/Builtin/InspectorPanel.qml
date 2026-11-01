@@ -1,5 +1,5 @@
 // The selected object's bindings as written, and the properties it declares
-// without a value. A value is set as a literal (`property_set`); "Bind" sets
+// without a value. A value is set as a literal (`binding_set`, as written); "Bind" sets
 // it as an expression (`binding_set`). The last row adds a property not yet
 // bound. A colour has a swatch, which opens a picker.
 //
@@ -26,18 +26,6 @@ Panel {
     id: panel
     required property Workspace workspace
     title: "Inspector"
-
-    // A literal as a script writes one: a number, a string in quotes,
-    // true, false or null. Anything else is an expression, for "Bind".
-    function literal(text) {
-        try {
-            const value = JSON.parse(text)
-            if (value === null || ["boolean", "number", "string"].indexOf(typeof value) >= 0)
-                return {ok: true, value: value}
-        } catch (e) {
-        }
-        return {ok: false}
-    }
 
     // The new-property row's edit: answered, the row is emptied for the next.
     property bool rowEditing: false
@@ -109,7 +97,7 @@ Panel {
     // kind, as the parser read it, decides, so a typo in a literal row is
     // still refused, not bound.
     function enter(row, text) {
-        if (picked === "" && row.name !== "id" && row.expression === true && !literal(text).ok)
+        if (picked === "" && row.name !== "id" && row.expression === true && !workspace.literal(text.trim()))
             bind(row.name, text)
         else
             set(row.name, text)
@@ -121,17 +109,19 @@ Panel {
             record(name, text, node)
             return
         }
-        const parsed = literal(text)
-        if (!parsed.ok) {
+        // The parser's word on what QML reads as a literal, and written as typed:
+        // `0x20` stays `0x20`. An expression is for "Bind".
+        const typed = text.trim()
+        if (!workspace.literal(typed)) {
             refusal.text = text + " is not a literal: bind it as an expression"
             return
         }
         refusal.text = ""
-        workspace.dispatch("property_set", {
+        workspace.dispatch("binding_set", {
             doc: workspace.doc,
             node: {node: node || workspace.selected},
             name: name,
-            value: parsed.value
+            value: typed === "null" ? null : typed
         })
     }
 
