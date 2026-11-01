@@ -153,4 +153,16 @@ Feature: An agent sets properties and bindings
       """json
       {"doc": "Main.qml", "node": {"id": "label"}, "name": "font", "value": null}
       """
-    Then the file "Main.qml" does not say "font.pixelSize"
+    Then the file "Main.qml" is:
+      """qml
+      import QtQuick
+
+      Item {
+          id: root
+          font { bold: true }
+
+          Text {
+              id: label
+          }
+      }
+      """
