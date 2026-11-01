@@ -85,6 +85,39 @@ Feature: The inspector shows colours and every declared property
       | width      | 0x10    |
       | x          | -1      |
 
+  Scenario Outline: A literal typed in any of QML's forms is written as typed
+    When the person replaces "width: 100" with "<name>: <written>" in the code view
+    And the person sets "<name>" to "<typed>" in the inspector
+    Then the file "Main.qml" says "<name>: <typed>"
+    And the window does not say "<typed> is not a literal: bind it as an expression"
+    And the window shows no refusal
+
+    Examples:
+      | name       | written | typed   |
+      | objectName | 'hello' | 'world' |
+      | opacity    | .5      | .7      |
+      | width      | 0x10    | 0x20    |
+
+  Scenario Outline: Enter on a row's own text changes nothing
+    When the person replaces "width: 100" with "<name>: <written>" in the code view
+    And the person sets "<name>" to "<written>" in the inspector
+    Then the file "Main.qml" says "<name>: <written>"
+    And the window does not say "<written> is not a literal: bind it as an expression"
+    And the window shows no refusal
+    When the person clicks the button "Undo"
+    Then the file "Main.qml" says "width: 100"
+
+    Examples:
+      | name       | written |
+      | objectName | 'hello' |
+      | opacity    | .5      |
+      | width      | 0x10    |
+
+  Scenario: A row holding an expression stays one when another is typed
+    When the person replaces "width: 100" with "width: 50 + 50" in the code view
+    And the person sets "width" to "60 + 60" in the inspector
+    Then the file "Main.qml" says "width: 60 + 60"
+
   Scenario: The picker writes nothing for what is not a colour
     When the person clicks the button "Pick color"
     And the person enters "#12" in the colour picker

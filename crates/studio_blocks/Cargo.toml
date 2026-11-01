@@ -9,6 +9,7 @@ repository.workspace = true
 publish.workspace = true
 
 [dependencies]
+studio_core = { path = "../studio_core" }
 studio_mcp = { path = "../studio_mcp" }
 ljos.workspace = true
 ljos_mcp_core.workspace = true
@@ -24,7 +25,6 @@ ljos_a11y.workspace = true
 ljos_dev.workspace = true
 ljos_quick.workspace = true
 ljos_runtime.workspace = true
-studio_core = { path = "../studio_core" }
 studio_preview = { path = "../studio_preview" }
 cucumber.workspace = true
 regex.workspace = true

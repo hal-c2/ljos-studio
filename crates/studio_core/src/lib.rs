@@ -33,7 +33,7 @@ pub use address::{Address, PathChange, parse_path};
 pub use flows::{Goal, Interaction};
 pub use history::{Entry, EntrySummary};
 pub use models::Model;
-pub use outline::{Binding, DeclaredSignal, Import, Node};
+pub use outline::{Binding, DeclaredSignal, Import, Node, is_literal_text};
 pub use qml_edit::{Change, Error as EditError, NodePath, Step};
 pub use review::{Anchor, Comment, Note};
 pub use slots::Mode;

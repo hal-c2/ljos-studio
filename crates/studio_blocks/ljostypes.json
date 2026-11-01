@@ -411,6 +411,16 @@
               "returnType": "void"
             },
             {
+              "name": "literal",
+              "parameters": [
+                {
+                  "name": "text",
+                  "type": "string"
+                }
+              ],
+              "returnType": "bool"
+            },
+            {
               "name": "follow",
               "parameters": [
                 {

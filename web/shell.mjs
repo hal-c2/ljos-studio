@@ -104,6 +104,17 @@ await call("follow", "preview_state", followed);
 check("a refused follow-on leaves the refusal on the line", (await status()) === gesture, await status());
 
 if (shot) await page.screenshot({ path: shot });
+// Whether a row's text is a literal is the parser's answer here too.
+await labelled("Rectangle card").click();
+await width.fill("0x20");
+await width.press("Enter");
+await page.waitForFunction(() => window.studio.text("Main.qml").text.includes("width: 0x20"), null, { timeout: 5000 }).catch(() => {});
+check("a literal in QML's own form is written as typed", (await code()).includes("width: 0x20"), await code());
+await width.fill("cube");
+await width.press("Enter");
+await labelled("cube is not a literal: bind it as an expression").first().waitFor({ timeout: 5000 }).catch(() => {});
+check("what is no literal is refused", !(await code()).includes("cube"), await code());
+
 // The picker asks the runtime what a colour is, so the browser's runtime
 // has to answer as the native one does.
 await labelled("Rectangle card").click();
