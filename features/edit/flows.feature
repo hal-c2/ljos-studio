@@ -177,6 +177,10 @@ Feature: An agent wires a prototype's flow
         """json
         {"name": "clicked", "arguments": [{"name": "mouse", "type": "QtObject"}], "change": false}
         """
+      And the answer's "/offers" has the entry:
+        """json
+        {"name": "cursorShape", "type": "CursorShape"}
+        """
       And the answer's "/signals" has the entry:
         """json
         {"name": "widthChanged", "arguments": [], "change": true}

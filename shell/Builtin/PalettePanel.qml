@@ -426,11 +426,10 @@ Panel {
                                 contentItem: Column {
                                     spacing: Spacing.xxs
                                     topPadding: Spacing.xs
-                                    Icon {
+                                    TypeSketch {
                                         anchors.horizontalCenter: parent.horizontalCenter
-                                        name: panel.typeIcon(tile.modelData.name)
-                                        size: 24
-                                        color: tile.enabled ? Colors.text : Colors.textDisabled
+                                        kind: panel.typeIcon(tile.modelData.name)
+                                        ink: tile.enabled ? Colors.text : Colors.textDisabled
                                     }
                                     Text {
                                         width: parent.width

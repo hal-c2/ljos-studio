@@ -993,6 +993,13 @@ fn sets(w: &mut UiWorld, name: String, value: String) -> StepResult {
     }
 }
 
+#[when(regex = r#"^the person enters "([^"]+)" as the new property in the inspector$"#)]
+fn enters_new_property(w: &mut UiWorld, name: String) -> StepResult {
+    let window = w.window()?;
+    let field = window.node("Inspector", Some("textinput"), "New property")?;
+    window.enter(&field, &name)
+}
+
 #[then(regex = r#"^the inspector offers the field "([^"]+)"$"#)]
 fn offers_field(w: &mut UiWorld, name: String) -> StepResult {
     w.window()?

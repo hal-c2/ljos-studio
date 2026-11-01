@@ -175,6 +175,22 @@ Feature: A person wires and plays a prototype's flow in Studio's window
     Then the flow panel lists the flows "flipped card to details"
     And the history lists "flipped card to details"
 
+  Scenario: A state animates when it is reached
+    Given the person has opened the "Flow tab"
+    When the person clicks the button "Animate to details"
+    Then the flow panel lists the flows "* to details"
+    And the file "Main.qml" says "NumberAnimation"
+    When the person clicks the button "Remove flow * to details"
+    Then the flow panel lists the flows ""
+    And the file "Main.qml" does not say "NumberAnimation"
+
+  @preview
+  Scenario: A state is shown on the canvas from its name
+    Given the person has opened the "Flow tab"
+    And the person has looked at the frame "Desktop"
+    When the person clicks the button "Show details"
+    Then the frame "Desktop" has drawn a different picture since
+
   Scenario: A wire is taken out
     Given the person has selected "Rectangle card" in the layers panel
     And the person has opened the "Flow tab"

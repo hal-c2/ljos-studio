@@ -197,6 +197,8 @@ pub struct View {
     pub roles: Vec<String>,
     /// The selected object's signals, as `node_inspect` lists them.
     pub signals: Vec<crate::signals::Signal>,
+    /// What the selected object can be given, as `node_inspect` lists it.
+    pub offers: Vec<crate::signals::Offer>,
     pub flow: Flow,
     pub palette: Vec<Offered>,
     /// The toolkit types the document can place, by module.
@@ -487,7 +489,9 @@ impl Studio {
             if let Ok(Some(model)) = self.session.model(doc, &Address::Node(handle.clone())) {
                 view.roles = model.roles;
             }
-            view.signals = says.signals.unwrap_or_default();
+            view.signals = crate::signals::of(self.session.store(), doc, &view.text, &node)
+                .unwrap_or_default();
+            view.offers = crate::signals::offers(self.session.store(), doc, &view.text, &node);
             view.selected = handle;
         }
         view

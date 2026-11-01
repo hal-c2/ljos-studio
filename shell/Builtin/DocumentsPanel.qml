@@ -26,11 +26,17 @@ Panel {
             workspace.dispatch("preview_open", {doc: doc})
     }
 
-    function make(name) {
-        const doc = name.endsWith(".qml") ? name : name + ".qml"
+    function make(name, block) {
+        let doc = name.endsWith(".qml") ? name : name + ".qml"
+        // A block belongs to a module, which is its directory.
+        if (block === true && doc.indexOf("/") < 0)
+            doc = "Blocks/" + doc
         refusal = ""
         making = doc
-        workspace.dispatch("document_new", {doc: doc})
+        const args = {doc: doc}
+        if (block === true)
+            args.block = true
+        workspace.dispatch("document_new", args)
     }
 
     function firstLook() {
@@ -74,7 +80,7 @@ Panel {
             spacing: Spacing.xxs
             Field {
                 id: nameField
-                width: maker.width - newButton.width - Spacing.xxs
+                width: maker.width - newButton.width - newBlock.width - 2 * Spacing.xxs
                 placeholderText: "Name"
                 Accessible.name: "New document's name"
                 onAccepted: newButton.clicked()
@@ -85,6 +91,13 @@ Panel {
                 Accessible.name: "New document"
                 enabled: nameField.text !== ""
                 onClicked: panel.make(nameField.text)
+            }
+            TextButton {
+                id: newBlock
+                text: "Block"
+                Accessible.name: "New block"
+                enabled: nameField.text !== ""
+                onClicked: panel.make(nameField.text, true)
             }
         }
         Label {

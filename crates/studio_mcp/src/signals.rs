@@ -47,8 +47,23 @@ struct Scope {
     imports: Vec<Import>,
 }
 
+/// A property a person can give the object a value of, and what it can be.
+#[derive(Clone, Debug, PartialEq, Serialize, JsonSchema)]
+pub struct Offer {
+    /// As written: `wrapMode`, or `font.weight` for a part of a value.
+    pub name: String,
+    /// The type of the value, without its module; empty where only the name is known.
+    #[serde(rename = "type")]
+    pub ty: String,
+    /// The values of its enum as a file writes them: `Text.WordWrap`.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[schemars(default)]
+    pub values: Vec<String>,
+}
+
 #[derive(Default)]
 struct Found {
+    offers: Vec<Offer>,
     signals: Vec<Signal>,
     properties: Vec<String>,
     /// What a project file or a type dump declares, which a person has no
@@ -136,10 +151,43 @@ pub struct TypeSays {
     pub not_text: Vec<String>,
 }
 
-/// All that of `node` of the document `doc`, whose text is `source`.
-pub fn described(store: &dyn Store, doc: &str, source: &str, node: &Node) -> TypeSays {
-    let Some((mut found, whole)) = look_up(store, doc, source, node) else {
-        return TypeSays::default();
+/// What `node`'s type can be given, nearest first, whether written or not:
+/// a person should not need the documentation open to find a property's name,
+/// nor the spelling of its values.
+pub fn offers(store: &dyn Store, doc: &str, source: &str, node: &Node) -> Vec<Offer> {
+    let Some((found, _)) = look_up(store, doc, source, node) else {
+        return Vec::new();
+    };
+    let mut seen: Vec<Offer> = Vec::new();
+    for name in found.taken {
+        if !seen.iter().any(|o| o.name == name) {
+            seen.push(Offer {
+                name,
+                ty: String::new(),
+                values: Vec::new(),
+            });
+        }
+    }
+    for offer in found.offers {
+        if !seen.iter().any(|o| o.name == offer.name) {
+            seen.push(offer);
+        }
+    }
+    seen
+}
+
+/// What `node`'s type takes that its project says: the properties its files
+/// and type dumps declare, the nearest first. Known even when what the type
+/// inherits is not.
+pub fn not_text(store: &dyn Store, doc: &str, source: &str, node: &Node) -> Vec<String> {
+    look_up(store, doc, source, node)
+        .map(|(found, _)| found.not_text)
+        .unwrap_or_default()
+}
+
+pub fn properties(store: &dyn Store, doc: &str, source: &str, node: &Node) -> Vec<String> {
+    let Some((found, _)) = look_up(store, doc, source, node) else {
+        return Vec::new();
     };
     let mut takes: Vec<String> = Vec::new();
     for name in &found.taken {
@@ -259,6 +307,7 @@ impl Types<'_> {
         match qt_signals::module(uri).and_then(|m| m.type_named(name)) {
             Some(ty) => {
                 toolkit(ty, found);
+                found.offers.extend(crate::toolkit::offers(uri, name));
                 Described::Whole
             }
             None => Described::Not,
@@ -312,8 +361,9 @@ impl Types<'_> {
                 module = m.clone();
             }
             return match qt_signals::module(&module).and_then(|m| m.type_named(base)) {
-                Some(base) => {
-                    toolkit(base, found);
+                Some(found_base) => {
+                    toolkit(found_base, found);
+                    found.offers.extend(crate::toolkit::offers(&module, base));
                     true
                 }
                 None => false,

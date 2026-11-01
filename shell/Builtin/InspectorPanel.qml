@@ -109,11 +109,36 @@ Panel {
         }
         if (side === "centerIn") {
             args.centerIn = !isPinned(side)
+        } else if (side === "fill") {
+            args.fill = !isPinned(side)
         } else {
             args.sides = {}
             args.sides[side] = isPinned(side) ? null : margin(side)
         }
         workspace.dispatch("node_arrange", args)
+    }
+
+    function offer(name) {
+        const found = workspace.offers.find(o => o.name === name)
+        return found !== undefined ? found : null
+    }
+    function choices(name) {
+        const found = offer(name)
+        return found !== null && found.values !== undefined ? found.values : []
+    }
+    // The properties the name typed so far could be, not those already
+    // written: the first few, since this is a nudge and not a reference.
+    function namesOffered(typed, focused) {
+        const word = typed.toLowerCase()
+        if (word === "" && !focused)
+            return []
+        if (offer(typed) !== null)
+            return []
+        const rows = workspace.inspector
+        return workspace.offers
+            .filter(o => o.name.toLowerCase().indexOf(word) >= 0
+                         && !rows.some(r => r.name === o.name))
+            .slice(0, 6)
     }
 
     signal reseed()
@@ -231,7 +256,8 @@ Panel {
         // Only a colour starts with `#`: no expression does, so it needs no asking.
         const trimmed = text.trim()
         const typed = /^#[0-9a-fA-F]+$/.test(trimmed) ? '"' + trimmed + '"' : trimmed
-        if (!workspace.literal(typed)) {
+        // One of the property's own values needs no asking either.
+        if (!workspace.literal(typed) && choices(name).indexOf(typed) < 0) {
             // The field goes back to what the file says; what was typed is
             // kept for the button under the refusal, which is what it asks for.
             offered = {name: name, value: typed, asText: heldText}
@@ -427,6 +453,45 @@ Panel {
             name: name,
             value: text
         })
+    }
+
+    // The values of an enum, for the row that opened it.
+    Popup {
+        id: choiceList
+        property string name: ""
+        property var values: []
+        width: 200
+        padding: Spacing.xxs
+        Accessible.role: Accessible.List
+        Accessible.name: "Choices"
+
+        function show(name, at) {
+            choiceList.name = name
+            values = panel.choices(name)
+            const place = at.mapToItem(panel, 0, at.height)
+            x = Math.max(0, Math.min(place.x, panel.width - width))
+            y = place.y
+            open()
+        }
+
+        contentItem: ColumnLayout {
+            spacing: 0
+
+            Repeater {
+                model: choiceList.values
+                delegate: TextButton {
+                    required property string modelData
+                    Layout.fillWidth: true
+                    text: modelData.split(".").pop()
+                    Accessible.name: "Choose " + modelData + " for " + choiceList.name
+                    onClicked: {
+                        choiceList.close()
+                        panel.fromRow(() => panel.set(choiceList.name, modelData))
+                        newName.text = newName.text === choiceList.name ? "" : newName.text
+                    }
+                }
+            }
+        }
     }
 
     // Hue, saturation and value, or the hex a person has from elsewhere.
@@ -649,7 +714,8 @@ Panel {
                         {side: "left", label: "Pin left", icon: "pinLeft", column: 0, row: 1},
                         {side: "centerIn", label: "Pin centre", icon: "pinCentre", column: 1, row: 1},
                         {side: "right", label: "Pin right", icon: "pinRight", column: 2, row: 1},
-                        {side: "bottom", label: "Pin bottom", icon: "pinBottom", column: 1, row: 2}
+                        {side: "bottom", label: "Pin bottom", icon: "pinBottom", column: 1, row: 2},
+                        {side: "fill", label: "Fill parent", icon: "frame", column: 2, row: 2}
                     ]
                     delegate: IconButton {
                         required property var modelData
@@ -823,9 +889,35 @@ Panel {
                         }
                     }
                     IconButton {
+                        visible: panel.choices(row.modelData.name).length > 0
+                        icon_: "chevronDown"
+                        text: "Choices for " + row.modelData.name
+                        onClicked: choiceList.show(row.modelData.name, this)
+                    }
+                    IconButton {
                         icon_: "link"
                         text: "Bind " + row.modelData.name
                         onClicked: panel.bind(row.modelData.name, value.text)
+                    }
+                }
+            }
+
+            Flow {
+                Layout.fillWidth: true
+                spacing: Spacing.xxs
+                visible: offeredRows.count > 0
+
+                Repeater {
+                    id: offeredRows
+                    model: panel.namesOffered(newName.text, newName.activeFocus)
+                    delegate: TextButton {
+                        required property var modelData
+                        text: modelData.name
+                        Accessible.name: "Offer " + modelData.name
+                        onClicked: {
+                            newName.text = modelData.name
+                            newValue.forceActiveFocus()
+                        }
                     }
                 }
             }
@@ -847,6 +939,12 @@ Panel {
                     Accessible.name: "New value"
                     Layout.fillWidth: true
                     onAccepted: add.clicked()
+                }
+                IconButton {
+                    visible: panel.choices(newName.text).length > 0
+                    icon_: "chevronDown"
+                    text: "Choices for new property"
+                    onClicked: choiceList.show(newName.text, this)
                 }
             }
             RowLayout {

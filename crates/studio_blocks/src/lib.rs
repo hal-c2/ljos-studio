@@ -152,6 +152,10 @@ pub struct Workspace {
     /// change signal.
     #[qml(readonly, notify)]
     pub signals: Json,
+    /// What the selected object can be given: `name`, `type` and, for an
+    /// enum, `values` as a file writes them.
+    #[qml(readonly, notify)]
+    pub offers: Json,
     /// The open document's flow: `states`, the root's, the base state
     /// (`""`) first, and `edges`, each `kind` (`transition` or
     /// `interaction`), `from` (`*` for any), `to`, `label`, and an
@@ -238,6 +242,7 @@ impl Default for Workspace {
             states: none(),
             roles: none(),
             signals: none(),
+            offers: none(),
             flow: json!({"states": [], "edges": []}),
             palette: none(),
             toolkit: none(),
@@ -1124,6 +1129,7 @@ fn publish(engine: &Engine, ws: ObjectId, view: View, seen: u64) {
         to_json(&view.signals),
         &queue,
     );
+    give(&cx, Workspace::OFFERS, "OFFERS", to_json(&view.offers), &queue);
     give(&cx, Workspace::FLOW, "FLOW", to_json(&view.flow), &queue);
     give(
         &cx,

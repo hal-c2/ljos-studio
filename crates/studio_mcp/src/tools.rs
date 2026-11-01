@@ -334,6 +334,9 @@ struct Inspected {
     /// What its type takes that the project says: the properties its files
     /// and type dumps declare, written here or not.
     takes: Vec<String>,
+    /// Every property it can be given, nearest first, with the values of
+    /// those that are enums.
+    offers: Vec<crate::signals::Offer>,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -1732,8 +1735,11 @@ fn edits(studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
                     let interactions = studio.session.interactions(&doc, &a.node).map_err(error)?;
                     let model = studio.session.model(&doc, &a.node).map_err(error)?;
                     let source = studio.session.text(&doc).map_err(error)?.0.to_owned();
-                    let crate::signals::TypeSays { signals, takes, .. } =
-                        crate::signals::described(studio.session.store(), &doc, &source, &node);
+                    let signals = crate::signals::of(studio.session.store(), &doc, &source, &node);
+                    let takes =
+                        crate::signals::properties(studio.session.store(), &doc, &source, &node);
+                    let offers =
+                        crate::signals::offers(studio.session.store(), &doc, &source, &node);
                     let (tree, generation) = studio.session.tree(&doc).map_err(error)?;
                     let parent_path = (!node.path.0.is_empty())
                         .then(|| studio_core::NodePath(node.path.0[..node.path.0.len() - 1].to_vec()));
@@ -1776,6 +1782,7 @@ fn edits(studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
                         model,
                         signals,
                         takes,
+                        offers,
                     })
                 }
             }),
