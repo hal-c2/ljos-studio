@@ -147,6 +147,8 @@ pub struct TypeSays {
     /// declare that may be written from outside, the nearest first. Known even
     /// when what the type inherits is not.
     pub takes: Vec<String>,
+    /// Those of them no string can be written to.
+    pub not_text: Vec<String>,
     /// What it can be given, nearest first, whether written or not: a person
     /// should not need the documentation open to find a property's name, nor
     /// the spelling of its values.
@@ -155,7 +157,7 @@ pub struct TypeSays {
 
 /// All that of `node` of the document `doc`, whose text is `source`.
 pub fn described(store: &dyn Store, doc: &str, source: &str, node: &Node) -> TypeSays {
-    let Some((found, whole)) = look_up(store, doc, source, node) else {
+    let Some((mut found, whole)) = look_up(store, doc, source, node) else {
         return TypeSays::default();
     };
     let mut takes: Vec<String> = Vec::new();
@@ -178,6 +180,7 @@ pub fn described(store: &dyn Store, doc: &str, source: &str, node: &Node) -> Typ
         }
     }
     TypeSays {
+        not_text: std::mem::take(&mut found.not_text),
         signals: (whole == Described::Whole).then(|| found.done()),
         takes,
         offers,

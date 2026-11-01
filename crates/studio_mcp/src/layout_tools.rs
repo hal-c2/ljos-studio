@@ -302,7 +302,7 @@ pub(crate) fn unwrap(
     let lists = studio
         .session
         .text(doc)
-        .map(|(text, _)| studio_core::outline::lists_given(text, wrapper.start))
+        .map(|(text, _)| studio_core::outline::more_than_a_place(text, wrapper.start))
         .map_err(error)?;
     // Only what places may go with it.
     let own: Vec<&str> = wrapper
@@ -358,6 +358,13 @@ pub(crate) fn unwrap(
     let types = parent_types(Some(&outer.1), placed.get(&outer.0));
     let free_outside = place::placer(&types).is_none();
     let free_inside = short(&wrapper.ty) == "Item";
+    // Anchors or an expression put the wrapper where only a run knows.
+    let anchored = wrapper
+        .bindings
+        .iter()
+        .any(|b| b.name.starts_with("anchors."));
+    let run_knows =
+        |axis: &str| anchored || written(&wrapper, axis).is_some_and(|x| x.parse::<f64>().is_err());
     let mut ops = Vec::new();
     for (k, (child, node)) in children.iter().enumerate() {
         let child_address = Address::Node(child.clone());
@@ -371,7 +378,18 @@ pub(crate) fn unwrap(
         }
         let shown = shown_in(&placed, child, placed.get(&outer.0));
         for (axis, live) in [("x", shown.map(|s| s.0)), ("y", shown.map(|s| s.1))] {
-            let value = if free_inside {
+            if run_knows(axis) && live.is_none() {
+                return Err(refused(
+                    "needs_preview",
+                    format!(
+                        "where `{}` is depends on a run: open a preview of `{doc}` first",
+                        label(&wrapper)
+                    ),
+                ));
+            }
+            let value = if run_knows(axis) {
+                live.map(place::number)
+            } else if free_inside {
                 // An Item's own numbers are as true as the file is: they hold
                 // with no preview, and with one that has yet to reload.
                 let origin: Option<f64> = written(&wrapper, axis).unwrap_or("0").parse().ok();
@@ -380,8 +398,7 @@ pub(crate) fn unwrap(
                         Some(written(node, axis).unwrap_or("0")),
                         origin,
                     )),
-                    Some(_) => None,
-                    None => live.map(place::number),
+                    _ => None,
                 }
             } else {
                 live.map(place::number)

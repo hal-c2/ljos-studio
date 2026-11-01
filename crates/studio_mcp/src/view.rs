@@ -657,7 +657,13 @@ fn utf16(text: &str, byte: usize) -> usize {
 /// A path as a `file:` URL: what a path may hold and a URL may not is escaped,
 /// and a drive's path starts with one more slash.
 fn file_url(path: &std::path::Path) -> String {
-    let path = path.to_string_lossy().replace('\\', "/");
+    let path = path.to_string_lossy();
+    // Only Windows's paths are divided by it; elsewhere a name may hold one.
+    let path = if cfg!(windows) {
+        path.replace('\\', "/")
+    } else {
+        path.into_owned()
+    };
     let mut url = String::from("file://");
     if !path.starts_with('/') {
         url.push('/');
@@ -684,6 +690,9 @@ mod tests {
             file_url(Path::new("/a b/c#d?e.png")),
             "file:///a%20b/c%23d%3Fe.png"
         );
+        #[cfg(windows)]
         assert_eq!(file_url(Path::new("C:\\p\\a.png")), "file:///C:/p/a.png");
+        #[cfg(not(windows))]
+        assert_eq!(file_url(Path::new("/a\\b.png")), "file:///a%5Cb.png");
     }
 }
