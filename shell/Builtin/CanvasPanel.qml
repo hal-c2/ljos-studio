@@ -16,7 +16,10 @@ Panel {
     required property Workspace workspace
     // Whether the selection can be lined up; the overlay is a frame's, in a
     // delegate the toolbar cannot name.
-    property bool hasBoxes: true
+    // How many frames' overlays say their selection has no box: each frame
+    // has its own, and one changing does not speak for the others.
+    property int framesWithoutBoxes: 0
+    readonly property bool hasBoxes: framesWithoutBoxes === 0
     title: "Canvas"
 
     // Until the person zooms, the frame fits: a desktop frame in a panel
@@ -136,8 +139,8 @@ Panel {
                             workspace: panel.workspace
                         }
                         CanvasOverlay {
-                            onHasBoxesChanged: panel.hasBoxes = hasBoxes
-                            Component.onDestruction: panel.hasBoxes = true
+                            onHasBoxesChanged: panel.framesWithoutBoxes += hasBoxes ? -1 : 1
+                            Component.onDestruction: if (!hasBoxes) panel.framesWithoutBoxes -= 1
                             objectName: "overlay"
                             anchors.fill: parent
                             workspace: panel.workspace
