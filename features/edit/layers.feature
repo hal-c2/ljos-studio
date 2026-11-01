@@ -66,6 +66,37 @@ Feature: An object is renamed, hidden and locked through `node_arrange`
       """
     Then the file "Main.qml" contains "id: line"
 
+  Scenario: An object's new id goes first, where a reader looks for it
+    Given the file "Page.qml":
+      """qml
+      import QtQuick
+
+      Item {
+          width: 300
+          states: [
+              State { name: "open" }
+          ]
+          Text { text: "Hi" }
+      }
+      """
+    When the agent calls the tool "node_arrange" with:
+      """json
+      {"action": "rename", "doc": "Page.qml", "nodes": [{"path": "root"}], "name": "page", "generation": 1}
+      """
+    Then the file "Page.qml" is:
+      """qml
+      import QtQuick
+
+      Item {
+          id: page
+          width: 300
+          states: [
+              State { name: "open" }
+          ]
+          Text { text: "Hi" }
+      }
+      """
+
   Scenario Outline: A name that cannot be an id is refused
     When the agent calls the tool "node_arrange" with:
       """json
