@@ -54,6 +54,16 @@ Feature: A person places a 3D view from the palette
     When the person selects "View3D view3D1" in the layers panel
     Then the inspector has the button "Align Left"
 
+  @preview
+  Scenario: A selection with one object that has a box keeps the line-up buttons
+    Given the person has searched the palette for "View3D"
+    And the person has placed "View3D" from the palette
+    When an agent calls the tool "node_select" with:
+      """json
+      {"doc": "Main.qml", "nodes": [{"id": "view3D1"}, {"path": "root/0/2"}]}
+      """
+    Then the inspector has the button "Align Left"
+
   Scenario: A material's colour is picked in its own row
     Given the person has searched the palette for "View3D"
     And the person has placed "View3D" from the palette
