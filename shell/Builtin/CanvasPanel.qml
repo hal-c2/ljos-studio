@@ -63,6 +63,7 @@ Panel {
     // The state the inspector is recording into; null for none. What the
     // canvas sets goes there, as what the inspector sets does.
     property var recording: null
+    signal layoutAsked(string target, string state)
     signal doneRecording()
     property bool dragging: false
     property string says: ""
@@ -279,6 +280,17 @@ Panel {
                             font.pixelSize: Typography.captionSize
                             Accessible.role: Accessible.StaticText
                             Accessible.name: text
+                        }
+                        // The state this frame's width turns on, to draw in; a
+                        // layout for a width is that state, not a second file.
+                        TextButton {
+                            readonly property string target: frame.modelData.target.toLowerCase()
+                            anchors.verticalCenter: parent.verticalCenter
+                            visible: target !== "" && panel.recording === null
+                            text: frame.modelData.variant !== ""
+                                  ? "Edit " + target + " layout"
+                                  : target.charAt(0).toUpperCase() + target.slice(1) + " layout"
+                            onClicked: panel.layoutAsked(target, frame.modelData.variant)
                         }
                     }
                     Label {
