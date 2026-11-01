@@ -107,7 +107,7 @@ Panel {
     // On the selected object unless a picker says which it was opened on.
     function set(name, text, node) {
         if (picked !== "") {
-            record(name, text)
+            record(name, text, node)
             return
         }
         const parsed = literal(text)
@@ -186,12 +186,13 @@ Panel {
 
     // What a state changes is written with the object's id: there is no other
     // way for a `PropertyChanges` to name it.
-    function record(name, text) {
-        if (selectedId === "") {
+    function record(name, text, node) {
+        const object = layer(node || workspace.selected)
+        if (object === null || object.id === "") {
             refusal.text = "A state names the object it changes: give this one an id"
             return
         }
-        change(selectedId, name, text)
+        change(object.id, name, text)
     }
 
     // The value the picked state gives the selected object's property.
@@ -305,7 +306,11 @@ Panel {
         property string name: ""
         // The object it was opened on: the selection can move while it is open.
         property string node: ""
-        property string objectId: ""
+        // Read when asked: the object can be named again while this is open.
+        readonly property string objectId: {
+            const object = panel.layer(node)
+            return object !== null ? object.id : ""
+        }
         property string written: ""
         property bool waiting: false
         property bool known: false
@@ -329,7 +334,6 @@ Panel {
             picker.name = row.name
             picker.written = written
             picker.node = panel.workspace.selected
-            picker.objectId = panel.selectedId
             // Beside the inspector, where it hides none of the rows.
             x = -implicitWidth - Spacing.xs
             y = at.mapToItem(panel, 0, 0).y
@@ -350,6 +354,10 @@ Panel {
         }
         function take(text) {
             written = JSON.stringify(text)
+            if (panel.layer(node) === null) {
+                refusal.text = "The object this picker was opened on has gone"
+                return
+            }
             panel.set(name, written, node)
         }
 

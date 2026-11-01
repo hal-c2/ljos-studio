@@ -2191,6 +2191,25 @@ fn enters_colour(w: &mut UiWorld, value: String) -> StepResult {
     regex = r#"^the person drags the picker's "([^"]+)" to its middle while an agent selects "([^"]+)"$"#
 )]
 fn drags_picker_while_selecting(w: &mut UiWorld, name: String, other: String) -> StepResult {
+    let doc = w.window()?.read_json("doc");
+    let args = serde_json::json!({"doc": doc, "nodes": [{"id": other}]});
+    drags_picker_while(w, &name, "node_select", args)
+}
+
+#[when(
+    regex = r#"^the person drags the picker's "([^"]+)" to its middle while an agent calls "([^"]+)" with '(.+)'$"#
+)]
+fn drags_picker_while_calling(
+    w: &mut UiWorld,
+    name: String,
+    tool: String,
+    args: String,
+) -> StepResult {
+    let args = serde_json::from_str(&args).map_err(|e| format!("{e}"))?;
+    drags_picker_while(w, &name, &tool, args)
+}
+
+fn drags_picker_while(w: &mut UiWorld, name: &str, tool: &str, args: Json) -> StepResult {
     let window = w.window()?;
     let tree = window.tree();
     let slider = find(&tree, &|n| n.name == name && n.role == "slider")
@@ -2206,15 +2225,10 @@ fn drags_picker_while_selecting(w: &mut UiWorld, name: String, other: String) ->
         .move_to(Point::new(middle.x - 12.0, middle.y))
         .map_err(drive_error)?;
     driver.move_to(middle).map_err(drive_error)?;
-    let doc = window.read_json("doc");
     let ctx = CallCtx::new(CapSet::of([Cap::Inspect, Cap::Mutate]));
     window
         .server
-        .call(
-            "node_select",
-            &ctx,
-            serde_json::json!({"doc": doc, "nodes": [{"id": other}]}),
-        )
+        .call(tool, &ctx, args)
         .map_err(|e| format!("the agent was refused: {}", e.to_value()))?;
     window.rest()?;
     window
