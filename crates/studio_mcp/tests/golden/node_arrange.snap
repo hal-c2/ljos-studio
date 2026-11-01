@@ -9,7 +9,7 @@ expression: value
     "open_world": false,
     "read_only": false
   },
-  "description": "A canvas gesture, one undo step. `geometry`: boxes, drag rules, siblings. `place`: x/y/size, writing what governs each object. `align`, `copy`, `paste`, `duplicate`, `remove`, `rename`, `wrap`, `unwrap`, `anchor`. `hide`, `show`, `lock`, `unlock` leave the file alone.",
+  "description": "A canvas gesture, one undo step. `geometry`: boxes, drag rules, siblings. `place`: x/y/size, writing what governs each object. `component_extract`: one object to `name`.qml. `hide`, `show`, `lock`, `unlock` leave the file alone.",
   "inputSchema": {
     "$defs": {
       "Address": {
@@ -37,6 +37,7 @@ expression: value
           "unlock",
           "wrap",
           "unwrap",
+          "component_extract",
           "anchor"
         ],
         "type": "string"
@@ -88,7 +89,7 @@ expression: value
         "type": "string"
       },
       "name": {
-        "description": "For `rename`: the object's new `id`.",
+        "description": "For `rename`: the object's new `id`. For `component_extract`: the new type.",
         "type": "string"
       },
       "nodes": {
@@ -195,8 +196,10 @@ expression: value
   "name": "node_arrange",
   "outputSchema": {
     "properties": {
+      "aliases": {},
       "boxes": {},
       "changes": {},
+      "component": {},
       "copied": {},
       "doc": {},
       "generation": {},

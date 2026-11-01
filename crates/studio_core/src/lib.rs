@@ -1318,6 +1318,7 @@ impl Session {
             forward: changes.clone(),
             inverse: diff(&after, &before),
             created: false,
+            group: None,
             handles_before: saved.tracked,
             handles_after,
             change: None,
@@ -1807,6 +1808,48 @@ impl Session {
         Ok(change.range)
     }
 
+    /// A new document `new_path` holding `new_text`, and `doc`'s text replaced
+    /// by `text`, as one undo step labelled `label`. Nothing stays of either
+    /// if the other can't be written.
+    pub fn create_with_edit(
+        &mut self,
+        new_path: &str,
+        new_text: &str,
+        doc: &str,
+        text: &str,
+        label: &str,
+        dry_run: bool,
+    ) -> Result<Outcome, Error> {
+        let edit = self.replace_text(doc, None, None, text, true)?;
+        let made = self.create(new_path, new_text, dry_run)?;
+        if dry_run {
+            return Ok(edit);
+        }
+        let outcome = match self.replace_text(doc, None, None, text, false) {
+            Ok(outcome) => outcome,
+            Err(e) => {
+                let entry = self
+                    .history
+                    .peek_undo(None)
+                    .filter(|e| e.doc == made.doc && e.created)
+                    .cloned();
+                if let Some(entry) = entry {
+                    self.replay(&entry, false)?;
+                    self.history.pop_and_top();
+                    self.wrote(&entry.doc);
+                }
+                return Err(e);
+            }
+        };
+        self.history.group_newest();
+        for path in [&made.doc, &outcome.doc] {
+            if let Some(entry) = self.history.latest_mut(path) {
+                entry.label = label.to_owned();
+            }
+        }
+        Ok(outcome)
+    }
+
     /// A new document with `text`.
     pub fn create(&mut self, path: &str, text: &str, dry_run: bool) -> Result<Outcome, Error> {
         let path = &self.canonical(path)?;
@@ -1854,6 +1897,7 @@ impl Session {
                 replacement: String::new(),
             }],
             created: true,
+            group: None,
             handles_before: Vec::new(),
             handles_after: Vec::new(),
             change: None,
@@ -2009,6 +2053,7 @@ impl Session {
                     replacement: String::new(),
                 }],
                 created: true,
+                group: None,
                 handles_before: Vec::new(),
                 handles_after: Vec::new(),
                 change: None,
@@ -2153,6 +2198,7 @@ impl Session {
             forward,
             inverse: diff(&after, &before),
             created: false,
+            group: None,
             handles_before,
             handles_after: next.tracked.clone(),
             change,
@@ -2193,10 +2239,22 @@ impl Session {
     fn undo_by(&mut self, author: Option<&str>) -> Result<EntrySummary, Error> {
         // A change made outside Studio goes on top here and is what is
         // undone: the entry below it has offsets on a text the file left.
-        while let Some(doc) = self.history.peek_undo(author).map(|e| e.doc.clone()) {
-            match self.sync(&doc) {
+        while let Some(top) = self.history.peek_undo(author) {
+            let doc = top.doc.clone();
+            let partner = top
+                .group
+                .and_then(|id| self.history.done_entry(id))
+                .map(|e| e.doc.clone());
+            match self.sync(&doc).and_then(|()| match &partner {
+                Some(other) => self.sync(other).map_err(|e| match e {
+                    Error::Store(StoreError::Missing(_)) => Error::Exists(other.clone()),
+                    e => e,
+                }),
+                None => Ok(()),
+            }) {
                 Ok(()) => break,
                 Err(Error::Store(StoreError::Missing(_))) => self.history.forget(&doc),
+                Err(Error::Exists(gone)) => self.history.forget(&gone),
                 Err(e) => return Err(e),
             }
         }
@@ -2205,12 +2263,42 @@ impl Session {
             .peek_undo(author)
             .cloned()
             .ok_or(Error::NothingTo("undo"))?;
+        let partner = entry
+            .group
+            .and_then(|id| self.history.done_entry(id))
+            .cloned();
+        if let Some(partner) = partner.as_ref().filter(|p| p.created) {
+            // Before anything moves: this is the usual reason it can't.
+            self.check_unmakeable(partner)?;
+        }
         // It moves only once it has happened: a write that failed leaves it
         // to be tried again, and the lists still say where the file is.
         let (generation, side, rebased) = self.replay(&entry, false)?;
         self.history
             .commit_undo(entry.id, generation, side, rebased);
         self.wrote(&entry.doc);
+        if let Some(partner) = partner {
+            match self.replay(&partner, false) {
+                Ok((generation, side, rebased)) => {
+                    self.history
+                        .commit_undo(partner.id, generation, side, rebased);
+                    self.wrote(&partner.doc);
+                }
+                Err(e) => {
+                    // One step happens whole, so the first goes back.
+                    let moved = self
+                        .history
+                        .undone_entry(entry.id)
+                        .cloned()
+                        .expect("just undone");
+                    let (generation, side, rebased) = self.replay(&moved, true)?;
+                    self.history
+                        .commit_redo(entry.id, generation, side, rebased);
+                    self.wrote(&entry.doc);
+                    return Err(e);
+                }
+            }
+        }
         Ok(entry.summary())
     }
 
@@ -2246,11 +2334,53 @@ impl Session {
             .peek_redo(author)
             .cloned()
             .ok_or(Error::NothingTo("redo"))?;
+        let partner = entry
+            .group
+            .and_then(|id| self.history.undone_entry(id))
+            .cloned();
+        if let Some(partner) = partner.as_ref().filter(|p| !p.created) {
+            self.sync(&partner.doc)?;
+        }
         let (generation, side, rebased) = self.replay(&entry, true)?;
         self.history
             .commit_redo(entry.id, generation, side, rebased);
         self.wrote(&entry.doc);
+        if let Some(partner) = partner {
+            match self.replay(&partner, true) {
+                Ok((generation, side, rebased)) => {
+                    self.history
+                        .commit_redo(partner.id, generation, side, rebased);
+                    self.wrote(&partner.doc);
+                }
+                Err(e) => {
+                    // One step happens whole, so the first goes back.
+                    let moved = self
+                        .history
+                        .done_entry(entry.id)
+                        .cloned()
+                        .expect("just redone");
+                    let (generation, side, rebased) = self.replay(&moved, false)?;
+                    self.history
+                        .commit_undo(entry.id, generation, side, rebased);
+                    self.wrote(&entry.doc);
+                    return Err(e);
+                }
+            }
+        }
         Ok(entry.summary())
+    }
+
+    /// Taking the document `entry` made away takes what others wrote with it.
+    fn check_unmakeable(&mut self, entry: &Entry) -> Result<(), Error> {
+        let path = &entry.doc;
+        if side(&self.doc(path)?.text) == entry.side {
+            return Ok(());
+        }
+        let latest = self.logs.get(path).and_then(|l| l.latest()).cloned();
+        Err(match latest {
+            Some(e) => conflict(path, &e, None),
+            None => Error::Invalid(format!("`{path}` changed since it was made")),
+        })
     }
 
     /// Brings the file and the document to that side of `entry`, for the
@@ -2269,14 +2399,7 @@ impl Session {
         if entry.created && !forward {
             let doc = self.doc(&path)?;
             let (generation, len) = (doc.generation, doc.text.len());
-            if side(&doc.text) != entry.side {
-                // Taking the document away takes what others wrote with it.
-                let latest = self.logs.get(&path).and_then(|l| l.latest()).cloned();
-                return Err(match latest {
-                    Some(e) => conflict(&path, &e, None),
-                    None => Error::Invalid(format!("`{path}` changed since it was made")),
-                });
-            }
+            self.check_unmakeable(entry)?;
             self.check_leased_ranges(
                 &path,
                 &[Change {

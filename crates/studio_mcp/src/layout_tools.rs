@@ -65,7 +65,7 @@ fn known(node: &Node, placed: Option<&Placed>) -> Known {
 }
 
 /// A word for a new object's id: the type's, numbered once it is taken.
-fn fresh_id(stem: &str, taken: &[String]) -> String {
+pub(crate) fn fresh_id(stem: &str, taken: &[String]) -> String {
     std::iter::once(stem.to_owned())
         .chain((1..).map(|n| format!("{stem}{n}")))
         .find(|name| !taken.contains(name))

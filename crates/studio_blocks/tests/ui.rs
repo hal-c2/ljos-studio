@@ -1061,6 +1061,17 @@ fn imports_asset(w: &mut UiWorld, path: String) -> StepResult {
     window.click_node(&button)
 }
 
+#[when(regex = r#"^the person makes a component "([^"]+)" of the selection$"#)]
+fn makes_component(w: &mut UiWorld, name: String) -> StepResult {
+    let window = w.window()?;
+    let field = window.node("Inspector", Some("textinput"), "Component name")?;
+    window.click_shown(&field)?;
+    window.stage.drive().commit(&name).map_err(drive_error)?;
+    window.rest()?;
+    let button = window.node("Inspector", None, "Make component")?;
+    window.click_node(&button)
+}
+
 #[given(regex = r#"^the person has searched the palette for "([^"]*)"$"#)]
 #[when(regex = r#"^the person searches the palette for "([^"]*)"$"#)]
 fn searches_palette(w: &mut UiWorld, text: String) -> StepResult {

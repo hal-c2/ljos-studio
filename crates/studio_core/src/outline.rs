@@ -354,6 +354,50 @@ fn is_named(source: &str, object: &QmlObject<'_>) -> bool {
     })
 }
 
+/// Where the x, y and anchors of the object starting at `start` are written,
+/// whichever way, each member whole, in order. They say where it sits in its
+/// parent, not what it is.
+pub fn place_members(source: &str, start: usize) -> Vec<std::ops::Range<usize>> {
+    let allocator = Allocator::default();
+    let parsed = qml_syntax::parse(&allocator, source);
+    let Some(object) = object_at(&parsed.document.root, start) else {
+        return Vec::new();
+    };
+    let places = |name: &str| {
+        name == "x" || name == "y" || name == "anchors" || name.starts_with("anchors.")
+    };
+    object
+        .members
+        .iter()
+        .filter_map(|member| match member {
+            QmlMember::Binding(b) if places(&b.name.to_string()) => Some(b.span),
+            QmlMember::Object(inner) if is_group(inner) && places(&inner.type_name.to_string()) => {
+                Some(inner.span)
+            }
+            _ => None,
+        })
+        .map(|span| span.start as usize..span.end as usize)
+        .collect()
+}
+
+fn object_at<'o, 'a>(object: &'o QmlObject<'a>, start: usize) -> Option<&'o QmlObject<'a>> {
+    if object.span.start as usize == start {
+        return Some(object);
+    }
+    let in_value = |value: &'o QmlBindingValue<'a>| match value {
+        QmlBindingValue::Object(inner) => object_at(inner, start),
+        QmlBindingValue::Objects(list) => list.iter().find_map(|o| object_at(o, start)),
+        _ => None,
+    };
+    object.members.iter().find_map(|member| match member {
+        QmlMember::Object(inner) => object_at(inner, start),
+        QmlMember::Binding(b) => in_value(&b.value),
+        QmlMember::Property(p) => p.value.as_ref().and_then(in_value),
+        QmlMember::InlineComponent(c) => object_at(&c.object, start),
+        _ => None,
+    })
+}
+
 pub(crate) fn collect_bindings(
     source: &str,
     object: &QmlObject<'_>,

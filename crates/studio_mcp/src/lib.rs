@@ -8,6 +8,7 @@
 
 mod assets;
 mod blocks;
+mod component;
 #[cfg(feature = "http")]
 pub mod endpoint;
 pub mod export;
