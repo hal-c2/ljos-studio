@@ -55,6 +55,7 @@ struct Found {
     /// other way to learn: the toolkit's own are in its documentation, and
     /// there are too many to list on every object.
     taken: Vec<String>,
+    not_text: Vec<String>,
 }
 
 impl Found {
@@ -130,6 +131,12 @@ pub fn of(store: &dyn Store, doc: &str, source: &str, node: &Node) -> Option<Vec
 /// What `node`'s type takes that its project says: the properties its files
 /// and type dumps declare, the nearest first. Known even when what the type
 /// inherits is not.
+pub fn not_text(store: &dyn Store, doc: &str, source: &str, node: &Node) -> Vec<String> {
+    look_up(store, doc, source, node)
+        .map(|(found, _)| found.not_text)
+        .unwrap_or_default()
+}
+
 pub fn properties(store: &dyn Store, doc: &str, source: &str, node: &Node) -> Vec<String> {
     let Some((found, _)) = look_up(store, doc, source, node) else {
         return Vec::new();
@@ -275,6 +282,12 @@ impl Types<'_> {
             found
                 .properties
                 .extend(ty.properties.iter().map(|p| p.name.clone()));
+            found.not_text.extend(
+                ty.properties
+                    .iter()
+                    .filter(|p| !studio_core::outline::holds_text(&p.ty))
+                    .map(|p| p.name.clone()),
+            );
             found.taken.extend(
                 ty.properties
                     .iter()
@@ -339,6 +352,7 @@ impl Types<'_> {
             return Described::InPart;
         };
         found.declared(root);
+        found.not_text.extend(root.not_text.iter().cloned());
         found.taken.extend(
             root.properties
                 .iter()

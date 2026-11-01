@@ -22,6 +22,7 @@ Feature: An object of the project's own type says what it takes
 
       Rectangle {
           property string label: "new"
+          property int count: 0
       }
       """
     And the file "Badge.qml":
@@ -63,6 +64,11 @@ Feature: An object of the project's own type says what it takes
   Scenario: What only the type can say is not offered
     When the person selects "Badge badge" in the layers panel
     Then the inspector has no row "total"
+
+  Scenario: A number's row with nothing written does not offer a word as text
+    Given the person has selected "Badge badge" in the layers panel
+    When the person sets "count" to "hi" in the inspector
+    Then the inspector has no button "Write hi as text"
 
   Scenario: A word in a row with nothing written can be text
     Given the person has selected "Badge badge" in the layers panel

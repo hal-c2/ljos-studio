@@ -50,11 +50,33 @@ Feature: Drawing on the canvas and writing text where it is
     When the person clicks the button "Undo"
     Then the file "Main.qml" does not say "x: 30"
 
+  Scenario: A drawn text and what is written on it are two undo steps
+    Given the person has clicked the button "Draw text"
+    And the person has dragged in the frame "Desktop" from 30, 100 to 130, 130
+    And the person has typed "Welcome" on the canvas
+    When the person clicks the button "Undo"
+    Then the file "Main.qml" does not say "Welcome"
+    And the file "Main.qml" says "x: 30"
+    When the person clicks the button "Undo"
+    Then the file "Main.qml" does not say "x: 30"
+
   Scenario: Drawn inside a container, the object belongs to it
     Given the person has clicked the button "Draw rectangle"
     When the person drags in the frame "Desktop" from 220, 120 to 260, 150
     Then the file "Main.qml" says "Rectangle {\n            id: rectangle1\n            x: 20\n            y: 20\n            width: 40\n            height: 30\n"
     And the layers panel has "Rectangle rectangle1" selected
+
+  # A picture filling the window is what a hero starts from: nothing can be
+  # dragged on it, and that must not stop a drawing over it.
+  Scenario: A drawing over an object filling its parent goes in the parent
+    Given an agent has called the tool "node_insert" with:
+      """json
+      {"doc": "Main.qml", "parent": {"id": "root"}, "text": "Image { id: hero; anchors.fill: parent }", "id": false}
+      """
+    And the person has selected "Image hero" in the layers panel
+    And the person has clicked the button "Draw text"
+    When the person drags in the frame "Desktop" from 30, 100 to 130, 160
+    Then the file "Main.qml" says "    Text {\n        id: text1\n        x: 30\n        y: 100"
 
   Scenario: A drawing snaps to what is there and shows the guide
     Given the person has clicked the button "Draw rectangle"
@@ -135,6 +157,14 @@ Feature: Drawing on the canvas and writing text where it is
     And the person presses "R"
     And the person drags in the frame "Desktop" from 30, 100 to 130, 160
     Then the file "Main.qml" says "x: 30\n        y: 100\n        width: 100\n        height: 60\n"
+
+  Scenario: A letter while Space is held leaves Space to pan
+    Given the person has clicked the frame "Desktop" at 300, 20
+    When the person holds "Space"
+    And the person presses "V"
+    And the person lets go of "Space"
+    And the person holds "Space" and drags in the frame "Desktop" from 60, 40 to 100, 70
+    Then the frame "Desktop" has moved
 
   Scenario: After the Hand button a letter still picks the tool
     Given the person has clicked the button "Hand"
