@@ -68,3 +68,8 @@ Feature: A person reads and sets tokens in Studio's window
     When the person presses "Ctrl+Z"
     Then the file "theme.json" does not exist
     And the tokens panel shows "Spacing.md: 16"
+
+  Scenario: The seed's hue is picked from its colours
+    Given the person has opened the "Tokens tab"
+    When the person clicks the button "Hue 120"
+    Then the file "theme.json" says "120"

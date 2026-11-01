@@ -61,6 +61,29 @@ Panel {
         anchors.margins: Spacing.xs
         spacing: Spacing.xxs
 
+        // The one colour a theme starts from, which the roles are worked out
+        // of. A hue is a place on a wheel, so it is picked from one.
+        Row {
+            id: hues
+            Layout.fillWidth: true
+            Repeater {
+                model: 24
+                delegate: AbstractButton {
+                    id: hueTile
+                    required property int index
+                    readonly property int hue: index * 15
+                    width: hues.width / 24
+                    height: 20
+                    Accessible.role: Accessible.Button
+                    Accessible.name: "Hue " + hue
+                    onClicked: panel.set({kind: "number", token: "Colors.seedHue"}, "", String(hue))
+                    background: Rectangle {
+                        color: Qt.hsla(hueTile.hue / 360, 0.7, 0.55, 1)
+                    }
+                }
+            }
+        }
+
         Field {
             id: filter
             placeholderText: "Filter tokens"
@@ -118,7 +141,7 @@ Panel {
                         text: "Aa"
                         color: Colors.text
                         font.pixelSize: /size/i.test(row.modelData.token)
-                            ? Math.max(10, Math.min(28, Number(row.modelData.value))) : Typography.bodySize
+                            ? Math.max(10, Number(row.modelData.value)) : Typography.bodySize
                         font.weight: /weight/i.test(row.modelData.token)
                             ? Number(row.modelData.value) : Typography.bodyWeight
                         Accessible.ignored: true
@@ -145,40 +168,46 @@ Panel {
                     }
                 }
 
-                Repeater {
-                    model: row.colour ? ["light", "dark"] : []
-                    delegate: RowLayout {
-                        id: variantRow
-                        required property string modelData
-                        readonly property string shown: row.modelData[modelData]
-                        Layout.fillWidth: true
-                        spacing: Spacing.xxs
+                // Light and dark side by side: a role is read as a pair, and
+                // a row each pushed the list out of any panel's height.
+                RowLayout {
+                    visible: row.colour
+                    Layout.fillWidth: true
+                    spacing: Spacing.xs
 
-                        Rectangle {
-                            implicitWidth: 20
-                            implicitHeight: 20
-                            radius: 4
-                            color: variantRow.shown
-                            // A swatch the colour of the panel still shows.
-                            border.width: 1
-                            border.color: Colors.border
-                            Accessible.role: Accessible.Graphic
-                            Accessible.name: row.modelData.token + " " + variantRow.modelData + " swatch"
-                        }
-                        Label {
-                            text: variantRow.modelData
-                            color: Colors.textMuted
-                            font.pixelSize: Typography.captionSize
-                            Layout.preferredWidth: 28
-                        }
-                        Field {
-                            text: variantRow.shown
-                            Accessible.name: row.modelData.token + " " + variantRow.modelData
+                    Repeater {
+                        model: row.colour ? ["light", "dark"] : []
+                        delegate: RowLayout {
+                            id: variantRow
+                            required property string modelData
+                            readonly property string shown: row.modelData[modelData]
                             Layout.fillWidth: true
-                            onAccepted: {
-                                const typed = text
-                                text = Qt.binding(() => variantRow.shown)
-                                panel.set(row.modelData, variantRow.modelData, typed)
+                            Layout.preferredWidth: 1
+                            spacing: Spacing.xxs
+
+                            Rectangle {
+                                implicitWidth: 24
+                                implicitHeight: 24
+                                radius: 4
+                                color: variantRow.shown
+                                // A swatch the colour of the panel still shows.
+                                border.width: 1
+                                border.color: Colors.border
+                                Accessible.role: Accessible.Graphic
+                                Accessible.name: row.modelData.token + " " + variantRow.modelData + " swatch"
+                            }
+                            Field {
+                                text: variantRow.shown
+                                Accessible.name: row.modelData.token + " " + variantRow.modelData
+                                Layout.fillWidth: true
+                                Layout.minimumWidth: 40
+                                ToolTip.visible: hovered
+                                ToolTip.text: variantRow.modelData
+                                onAccepted: {
+                                    const typed = text
+                                    text = Qt.binding(() => variantRow.shown)
+                                    panel.set(row.modelData, variantRow.modelData, typed)
+                                }
                             }
                         }
                     }

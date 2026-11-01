@@ -22,6 +22,18 @@ Feature: A person starts a document in Studio's window
     And the history lists "create"
     And the window shows the document "Page.qml"
 
+  Scenario: The panel makes a functional block and opens it
+    Given the file "Main.qml":
+      """qml
+      import QtQuick
+      Item {}
+      """
+    And Studio's window shows the project
+    When the person enters "Hero" as the new document's name
+    And the person clicks the button "New block"
+    Then the file "Blocks/qmldir" says "Hero 1.0 Hero.qml"
+    And the window shows the document "Blocks/Hero.qml"
+
   Scenario: A name already taken is refused where the person typed it
     Given the file "Main.qml":
       """qml
