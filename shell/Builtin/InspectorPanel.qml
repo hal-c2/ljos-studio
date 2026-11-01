@@ -71,17 +71,24 @@ Panel {
     // goes back to it if the rename is refused.
     property string renamedPicked: ""
 
-    // Whether a row holds a colour, by its name or by what is written.
-    function isColour(row, value) {
-        return row.colour === true || /(^|\.)[a-z]*[cC]olor$/.test(row.name) || painted(value) !== ""
+    // What a row offers of colour: all of the swatch, the picker and its note
+    // follow this, and features/ui/inspector.feature's table says what each
+    // kind of row gets. The row's type or name says it is meant to be a colour,
+    // which the runtime cannot: "red" is a fine colour and a fine label. So
+    // text only earns a picker by itself when it is `#`, a written colour by
+    // any reading.
+    function colourRow(row, written) {
+        const text = writtenText(written)
+        const colour = text !== null && writesColour(text) ? text : ""
+        return {
+            picker: row.colour === true || /(^|\.)[a-z]*[cC]olor$/.test(row.name) || colour.charAt(0) === "#",
+            paint: colour,
+            note: written !== "" && text === null
+        }
     }
-
-    // What is written, when that is a colour by itself; empty when not. An
-    // expression (`Colors.text`) is not read here. Not "transparent", which
-    // can be written.
-    function painted(value) {
-        const text = value.replace(/"/g, "")
-        return writesColour(text) && value.charAt(0) === "\"" ? text : ""
+    // The text a value spells out, or null when it is worked out instead.
+    function writtenText(value) {
+        return /^"[^"]*"$/.test(value) ? value.slice(1, -1) : null
     }
     // The runtime's own reading: what it does not parse would not paint.
     function writesColour(text) {
@@ -284,6 +291,7 @@ Panel {
     Popup {
         id: picker
         objectName: "colourPicker"
+        property var row: ({})
         property string name: ""
         property string written: ""
         property bool waiting: false
@@ -302,14 +310,17 @@ Panel {
             waiting = false
             known = true
         }
-        function show(name, written, at) {
-            picker.name = name
+        function show(row, written, at) {
+            refusal.text = ""
+            picker.row = row
+            picker.name = row.name
             picker.written = written
             // Beside the inspector, where it hides none of the rows.
             x = -implicitWidth - Spacing.xs
             y = at.mapToItem(panel, 0, 0).y
-            if (panel.painted(written) !== "") {
-                start(panel.painted(written))
+            const paint = panel.colourRow(row, written).paint
+            if (paint !== "") {
+                start(paint)
             } else {
                 known = false
                 hex.text = ""
@@ -332,7 +343,7 @@ Panel {
         ColumnLayout {
             spacing: Spacing.xxs
             Label {
-                visible: picker.written.charAt(0) !== "\"" && panel.painted(picker.written) === ""
+                visible: panel.colourRow(picker.row, picker.written).note
                 text: "Worked out by " + picker.written + ": picking replaces it"
                 color: Colors.text
                 font.pixelSize: Typography.captionSize
@@ -418,14 +429,17 @@ Panel {
                     elide: Text.ElideRight
                 }
                 Button {
-                    visible: panel.isColour(row.modelData, value.text)
+                    id: swatch
+                    readonly property var kind: panel.colourRow(row.modelData, value.text)
+                    visible: kind.picker
                     Layout.preferredWidth: 24
                     Layout.preferredHeight: 24
                     padding: 0
                     Accessible.name: "Pick " + row.modelData.name
-                    onClicked: picker.show(row.modelData.name, value.text, this)
+                    Accessible.description: kind.paint
+                    onClicked: picker.show(row.modelData, value.text, this)
                     contentItem: Rectangle {
-                        color: panel.painted(value.text) || "transparent"
+                        color: swatch.kind.paint || "transparent"
                         border.color: Colors.outline
                     }
                 }

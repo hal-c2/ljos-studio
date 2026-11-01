@@ -34,6 +34,9 @@ pub struct Node {
     /// signal, `nameChanged`.
     #[serde(skip)]
     pub properties: Vec<String>,
+    /// Those of them of type `color`, which says so with no value too.
+    #[serde(skip)]
+    pub colours: Vec<String>,
     /// The functions it declares.
     #[serde(skip)]
     pub functions: Vec<String>,
@@ -185,6 +188,20 @@ fn walk(
             .iter()
             .filter_map(|m| match m {
                 QmlMember::Property(p) => Some(p.name.name.to_string()),
+                _ => None,
+            })
+            .collect(),
+        colours: object
+            .members
+            .iter()
+            .filter_map(|m| match m {
+                QmlMember::Property(p)
+                    if p.type_name
+                        .as_ref()
+                        .is_some_and(|t| t.name.to_string() == "color") =>
+                {
+                    Some(p.name.name.to_string())
+                }
                 _ => None,
             })
             .collect(),

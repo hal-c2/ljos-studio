@@ -112,9 +112,50 @@ Feature: The inspector shows colours and every declared property
     And the colour picker waits on nothing
 
   Scenario: Text that is no colour has no picker, however it looks
-    When the person replaces "property var stack" with "property string code: \"#12345\"" in the code view
+    When the person replaces "property var stack" with "property string code: \"#12345\"\n    property string label: \"red\"\n    property string objectTag: \"orange\"" in the code view
+    And the person replaces "color: \"#ff0000\"" with "color: \"transparent\"" in the code view
     And the person selects "Rectangle root" in the layers panel
     Then the inspector has no button "Pick code"
+    And the inspector has no button "Pick label"
+    And the inspector has no button "Pick objectTag"
+    And the inspector has the button "Pick color"
+
+  # Every kind of row, and what it gets. The type or a `*color` name says a
+  # row is meant to be a colour; text alone says so only as a `#` value that
+  # the runtime reads. The swatch paints what is written by itself, and the
+  # note is for what an expression works out.
+  Scenario Outline: A row offers what its kind of value calls for: <kind>
+    When the person replaces "property var stack" with "<declaration>" in the code view
+    And the person selects "Rectangle root" in the layers panel
+    Then the inspector's "<row>" has <picker>, painted "<swatch>", with the note "<note>"
+
+    Examples:
+      | kind                        | declaration                               | row         | picker    | swatch      | note                                                   |
+      | declared colour             | property color shade: "#336699"           | shade       | a picker  | #336699     |                                                        |
+      | declared colour, named      | property color shade: "red"               | shade       | a picker  | red         |                                                        |
+      | declared colour, empty      | property color shade                      | shade       | a picker  |             |                                                        |
+      | colour by name              | property var borderColor: "red"           | borderColor | a picker  | red         |                                                        |
+      | colour by name, transparent | property var borderColor: "transparent"   | borderColor | a picker  | transparent |                                                        |
+      | colour by name, empty       | property var borderColor                  | borderColor | a picker  |             |                                                        |
+      | colour by name, not one     | property string borderColor: "nope"       | borderColor | a picker  |             |                                                        |
+      | hex text                    | property string code: "#123456"           | code        | a picker  | #123456     |                                                        |
+      | not quite hex text          | property string code: "#12345"            | code        | no picker |             |                                                        |
+      | colour-name text            | property string label: "red"              | label       | no picker |             |                                                        |
+      | not a colour                | property string label: "nope"             | label       | no picker |             |                                                        |
+      | number                      | property int size: 3                      | size        | no picker |             |                                                        |
+      | expression                  | property int size: 1 + 1                  | size        | no picker |             |                                                        |
+      | colour by expression        | property color shade: Qt.rgba(0, 1, 0, 1) | shade       | a picker  |             | Worked out by Qt.rgba(0, 1, 0, 1): picking replaces it |
+      | colour-named expression     | property var borderColor: Colors.text     | borderColor | a picker  |             | Worked out by Colors.text: picking replaces it         |
+
+  @preview
+  Scenario: A new picker does not keep what the last one refused
+    When the person replaces "property var stack" with "property string borderColor: \"nope\"" in the code view
+    And the person selects "Rectangle root" in the layers panel
+    And the person clicks the button "Pick borderColor"
+    Then the window says "nope is not a colour"
+    When the person clicks the button "Pick tint"
+    Then the window does not say "nope is not a colour"
+    And the colour picker holds "#80ff0000"
 
   Scenario: The colour transparent is written, not worked out
     When the person replaces "color: \"#ff0000\"" with "color: \"transparent\"" in the code view
