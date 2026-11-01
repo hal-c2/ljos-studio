@@ -2383,8 +2383,9 @@ fn other_call_answer(w: &mut UiWorld, button: String) -> StepResult {
     let (_, on) = picker_waiting(window, &button)?;
     let answer = serde_json::json!({"id": "a", "state": {}, "mocked": false});
     let asked = serde_json::json!({"node": {"node": on}, "show": "open"});
-    window.answer("preview_state", answer, asked)?;
-    window.rest()
+    // No rest: the read this picker really sent is on its way, and a preview
+    // slow enough answers it inside one, which rightly ends the wait.
+    window.answer("preview_state", answer, asked)
 }
 
 #[when(
