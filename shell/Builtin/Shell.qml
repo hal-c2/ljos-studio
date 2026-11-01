@@ -109,6 +109,7 @@ Item {
                 CanvasPanel {
                     workspace: workspace
                     recording: inspector.recording
+                    onDoneRecording: inspector.pick("", "")
                     SplitView.fillHeight: true
                 }
                 CodePanel {

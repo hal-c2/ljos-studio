@@ -45,6 +45,7 @@ Panel {
             panel.reseed()
             // The selection is shared, and what is open was opened on another.
             picker.close()
+            panel.forgetRefused()
         }
         function onRefused(tool, error) {
             if (["property_set", "binding_set", "state_edit"].includes(tool))
@@ -158,6 +159,13 @@ Panel {
     onPickedDocChanged: {
         picked = ""
         pickedOn = ""
+        forgetRefused()
+    }
+    // A refused value was typed on one object, in one document, into one state;
+    // its offer would write it to whatever is there now.
+    function forgetRefused() {
+        refusal.text = ""
+        offered = null
     }
 
     function layer(node) {
@@ -175,6 +183,8 @@ Panel {
     // With `follows` this comes after an edit, whose refusal it leaves alone;
     // without it, it is the person's own gesture.
     function pick(name, on, follows) {
+        if (!follows)
+            forgetRefused()
         const was = pickedOn
         const had = picked !== ""
         picked = name
@@ -250,16 +260,13 @@ Panel {
     property bool adding: false
     Connections {
         target: panel.workspace
-        function onAnswered(tool, answer) {
+        function onAnswered(tool, answer, asked) {
             if (tool === "review" && panel.adding) {
                 panel.adding = false
                 newComment.text = ""
             }
-            // An answer names its object: one on its way when the person opened
-            // this picker on another is not about what the sliders hold.
-            if (tool === "preview_state" && picker.waiting
-                    && (answer.state === undefined || answer.id === picker.objectId)) {
-                const value = answer.state !== undefined ? answer.state[picker.name] : undefined
+            if (tool === "preview_state" && picker.asks(asked)) {
+                const value = answer.state[picker.name]
                 const read = value !== undefined ? String(value) : null
                 // The running app has no value for it yet, so any is a start.
                 if (value === null) {
@@ -278,12 +285,12 @@ Panel {
                 newValue.text = ""
             }
         }
-        function onRefused(tool, error) {
+        function onRefused(tool, error, asked) {
             if (tool === "review")
                 panel.adding = false
             // The reason is on the window's error line; the sliders go on from
             // grey, since picking replaces what could not be read.
-            if (tool === "preview_state" && picker.waiting)
+            if (tool === "preview_state" && picker.asks(asked))
                 picker.unread()
             panel.rowEditing = false
         }
@@ -324,6 +331,12 @@ Panel {
         readonly property string objectId: {
             const object = panel.layer(node)
             return object !== null ? object.id : ""
+        }
+        // Showing a state or clicking in play reads the same object: only this
+        // picker's own read ends its wait.
+        function asks(call) {
+            return waiting && call.read !== undefined && call.read.includes(name)
+                && call.node.node === node
         }
         property string written: ""
         property bool waiting: false
@@ -418,6 +431,7 @@ Panel {
             }
             Slider {
                 id: saturation
+                objectName: "pickerSaturation"
                 enabled: picker.known
                 Accessible.name: "Saturation"
                 onPressedChanged: if (!pressed) picker.take(picker.chosen.toString())
@@ -430,6 +444,7 @@ Panel {
             }
             Slider {
                 id: brightness
+                objectName: "pickerBrightness"
                 enabled: picker.known
                 Accessible.name: "Brightness"
                 onPressedChanged: if (!pressed) picker.take(picker.chosen.toString())
@@ -670,26 +685,6 @@ Panel {
                         panel.editState({action: "add", state: newState.text})
                         newState.text = ""
                     }
-                }
-            }
-
-            RowLayout {
-                visible: panel.picked !== ""
-                Layout.fillWidth: true
-                spacing: Spacing.xxs
-
-                Label {
-                    text: "Editing state " + panel.picked
-                    color: Colors.text
-                    font.weight: Typography.bodyStrongWeight
-                    Accessible.role: Accessible.StaticText
-                    Accessible.name: text
-                    Layout.fillWidth: true
-                }
-                TextButton {
-                    text: "Done"
-                    Accessible.name: "Done editing state"
-                    onClicked: panel.pick("", "")
                 }
             }
 

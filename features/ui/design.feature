@@ -109,6 +109,20 @@ Feature: Studio's window is laid out to work in
     And the button "Select" is off
 
   @preview
+  Scenario: With the hand a drag in the frame moves the view
+    Given the person has opened "Main.qml" in the documents list
+    And the person has clicked the button "Hand"
+    When the person drags with the hand in the frame "Desktop" from 60, 40 by 40, 30
+    Then the frame "Desktop" has moved by 40, 30
+    And the file "Main.qml" says "x: 20; y: 20"
+
+  @preview
+  Scenario: Ctrl and the wheel zoom about the pointer
+    Given the person has opened "Main.qml" in the documents list
+    When the person zooms in with Ctrl and the wheel over the frame "Desktop" at 60, 40
+    Then the frame "Desktop" grew, with its point under the pointer still there
+
+  @preview
   Scenario: With the hand a click in the frame selects nothing
     Given the person has opened "Main.qml" in the documents list
     And the person has clicked the button "Hand"

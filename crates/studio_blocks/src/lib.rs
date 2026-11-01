@@ -257,14 +257,16 @@ impl Default for Workspace {
 
 #[qml_impl]
 impl Workspace {
-    /// A gesture's tool call was answered: the tool's name and its answer.
+    /// A gesture's tool call was answered: the tool's name, its answer, and
+    /// what it was asked, for a panel that must know the answer is to its call.
     #[qml(signal)]
-    fn answered(tool: String, answer: Json);
+    fn answered(tool: String, answer: Json, asked: Json);
 
     /// A gesture's tool call was refused: the tool's name and the error
-    /// (`code`, `message`, `details`) an agent would be given.
+    /// (`code`, `message`, `details`) an agent would be given, and what it was
+    /// asked.
     #[qml(signal)]
-    fn refused(tool: String, error: Json);
+    fn refused(tool: String, error: Json, asked: Json);
 
     /// Calls the Studio tool `tool` with `args`. Calls run in the order
     /// they were made, one at a time, off the UI thread; `answered` or
@@ -515,9 +517,9 @@ fn pump(engine: &Engine, ws: ObjectId) {
     let server = context.server.borrow().clone();
     let Some(server) = server else {
         queue.borrow_mut().busy = false;
-        if let Job::Call { tool, .. } = job {
+        if let Job::Call { tool, args, .. } = job {
             let error = json!({"code": "unavailable", "message": "no Studio session is served"});
-            let _ = Workspace::emit_refused(&Cx::new(engine, ws), tool, error);
+            let _ = Workspace::emit_refused(&Cx::new(engine, ws), tool, error, args);
         }
         return;
     };
@@ -527,7 +529,7 @@ fn pump(engine: &Engine, ws: ObjectId) {
     // of what prefetches.
     let kept = job.clone();
     let called = match &job {
-        Job::Call { tool, .. } => Some(tool.clone()),
+        Job::Call { tool, args, .. } => Some((tool.clone(), args.clone())),
         _ => None,
     };
     let refreshing = matches!(job, Job::Refresh);
@@ -550,9 +552,9 @@ fn pump(engine: &Engine, ws: ObjectId) {
                     let message = panic.message().to_owned();
                     let _ = engine.set(ws, Workspace::ERROR, message.clone());
                     // Whoever asked is still waiting for the answer.
-                    if let Some(tool) = called {
+                    if let Some((tool, args)) = called {
                         let error = json!({"code": "internal", "message": message});
-                        let _ = Workspace::emit_refused(&Cx::new(engine, ws), tool, error);
+                        let _ = Workspace::emit_refused(&Cx::new(engine, ws), tool, error, args);
                     }
                 }
             }
@@ -705,7 +707,7 @@ fn finish(engine: &Engine, ws: ObjectId, done: Done) {
                     if gesture {
                         let _ = cx.set(Workspace::ERROR, String::new());
                     }
-                    let _ = Workspace::emit_answered(&cx, tool, answer);
+                    let _ = Workspace::emit_answered(&cx, tool, answer, args);
                 }
                 Err(error) => {
                     let free = || {
@@ -718,7 +720,7 @@ fn finish(engine: &Engine, ws: ObjectId, done: Done) {
                         let message = error["message"].as_str().unwrap_or_default().to_owned();
                         let _ = cx.set(Workspace::ERROR, message);
                     }
-                    let _ = Workspace::emit_refused(&cx, tool, error);
+                    let _ = Workspace::emit_refused(&cx, tool, error, args);
                 }
             }
         }
