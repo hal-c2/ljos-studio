@@ -71,6 +71,7 @@ check("undo takes it back", (await code()).includes("width: 120") && !(await cod
 
 // The tokens panel: a role filtered into view, set from its field, is the
 // `theme_set` call, written into the theme file beside the document.
+await labelled("Tokens tab").click();
 await labelled("Filter tokens").locator("input").fill("Spacing.md");
 const md = labelled("Spacing.md").locator("input");
 await md.waitFor({ timeout: 5000 }).catch(() => {});
@@ -105,6 +106,7 @@ check("a refused follow-on leaves the refusal on the line", (await status()) ===
 
 if (shot) await page.screenshot({ path: shot });
 // Whether a row's text is a literal is the parser's answer here too.
+await labelled("Design tab").click();
 await labelled("Rectangle card").click();
 await width.fill("0x20");
 await width.press("Enter");
