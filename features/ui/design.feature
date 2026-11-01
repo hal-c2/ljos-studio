@@ -123,6 +123,23 @@ Feature: Studio's window is laid out to work in
     Then the frame "Desktop" grew, with its point under the pointer still there
 
   @preview
+  Scenario: With the hand the wheel still moves the view
+    Given the person has opened "Main.qml" in the documents list
+    And the person has clicked the button "Hand"
+    And the person has selected "Rectangle root" in the layers panel
+    When the person turns the wheel over the canvas
+    And the person sets "width" to "401" in the inspector
+    Then the frame "Desktop" has moved
+    And the frame "Desktop" has kept its size
+
+  @preview
+  Scenario: With the hand Ctrl and the wheel still zoom about the pointer
+    Given the person has opened "Main.qml" in the documents list
+    And the person has clicked the button "Hand"
+    When the person zooms in with Ctrl and the wheel over the frame "Desktop" at 60, 40
+    Then the frame "Desktop" grew, with its point under the pointer still there
+
+  @preview
   Scenario: With the hand a click in the frame selects nothing
     Given the person has opened "Main.qml" in the documents list
     And the person has clicked the button "Hand"

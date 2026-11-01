@@ -2023,6 +2023,24 @@ fn canvas_says(w: &mut UiWorld, want: String) -> StepResult {
         .ok_or_else(|| format!("the canvas says {got:?}"))
 }
 
+#[then("the canvas's words are clear of its recording bar")]
+fn hint_clear_of_bar(w: &mut UiWorld) -> StepResult {
+    let window = w.window()?;
+    let engine = window.engine();
+    let part =
+        |name: &str| ljos_drive::find_below(engine, window.root, name).ok_or(format!("no {name}"));
+    let (hint, bar) = (part("canvasHint")?, part("recordingBar")?);
+    if !engine.read_by_name(bar, "visible").to_boolean() {
+        return Err("the recording bar is not showing".to_owned());
+    }
+    let hint_bottom = engine.read_by_name(hint, "y").to_number()
+        + engine.read_by_name(hint, "height").to_number();
+    let bar_top = engine.read_by_name(bar, "y").to_number();
+    (hint_bottom <= bar_top)
+        .then_some(())
+        .ok_or_else(|| format!("the words end at {hint_bottom}, the bar starts at {bar_top}"))
+}
+
 #[when(regex = r#"^nobody touches the window for (\d+) seconds?$"#)]
 fn nobody_touches(w: &mut UiWorld, seconds: u64) -> StepResult {
     let window = w.window()?;

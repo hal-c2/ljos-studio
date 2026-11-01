@@ -68,6 +68,14 @@ Feature: Objects are moved and resized on the canvas
     When the person presses in the frame "Desktop" at 40, 40 and holds it at 218, 60
     Then the canvas shows a x guide at 200
 
+  Scenario: What a drag says stays clear of the bar saying which state it goes into
+    Given the person has selected "Rectangle root" in the layers panel
+    And the person has added the state "compact" in the inspector
+    And the person has picked the state "compact" in the inspector
+    When the person clicks the frame "Desktop" at 50, 220
+    Then the canvas says "The RowLayout places it: a drag changes its order"
+    And the canvas's words are clear of its recording bar
+
   Scenario: Dragging in a layout says so and changes the order
     When the person clicks the frame "Desktop" at 50, 220
     Then the canvas says "The RowLayout places it: a drag changes its order"

@@ -208,6 +208,18 @@ Panel {
             acceptedModifiers: Qt.ControlModifier
             onWheel: (event) => panel.zoomBy(event.angleDelta.y / 120, event.x, event.y)
         }
+        // A view that is not interactive takes no wheel of its own, and the
+        // hand must not cost the wheel its pan.
+        WheelHandler {
+            enabled: panel.panning
+            acceptedModifiers: Qt.NoModifier
+            onWheel: (event) => {
+                panel.panned = true
+                panel.moveView(
+                    Math.max(0, Math.min(flick.contentX - event.angleDelta.x, flick.contentWidth - flick.width)),
+                    Math.max(0, Math.min(flick.contentY - event.angleDelta.y, flick.contentHeight - flick.height)))
+            }
+        }
 
         Column {
             id: frames
@@ -364,6 +376,8 @@ Panel {
     // Here and not in the inspector: the inspector can be folded or behind a
     // tab, and a drag still goes into the state. This is where it takes effect.
     FloatBar {
+        id: recordingBar
+        objectName: "recordingBar"
         anchors.left: parent.left
         anchors.bottom: parent.bottom
         anchors.margins: Spacing.xs
@@ -459,7 +473,9 @@ Panel {
     Label {
         objectName: "canvasHint"
         x: Spacing.xs
-        y: parent.height - height - Spacing.md
+        // Above the bar when there is one: a drag's text comes just when the
+        // bar saying where the drag goes matters.
+        y: (recordingBar.visible ? recordingBar.y : parent.height - Spacing.md + Spacing.xs) - height - Spacing.xs
         visible: text !== ""
         text: panel.says
         color: Colors.text
