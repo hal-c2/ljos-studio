@@ -1129,7 +1129,13 @@ fn publish(engine: &Engine, ws: ObjectId, view: View, seen: u64) {
         to_json(&view.signals),
         &queue,
     );
-    give(&cx, Workspace::OFFERS, "OFFERS", to_json(&view.offers), &queue);
+    give(
+        &cx,
+        Workspace::OFFERS,
+        "OFFERS",
+        to_json(&view.offers),
+        &queue,
+    );
     give(&cx, Workspace::FLOW, "FLOW", to_json(&view.flow), &queue);
     give(
         &cx,

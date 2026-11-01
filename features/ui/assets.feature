@@ -37,6 +37,14 @@ Feature: The Insert tab offers the project's pictures
     Then the palette offers "badge.svg"
     And the palette does not offer "logo.svg"
 
+  Scenario: A folder of many pictures shows some, and the search reaches the rest
+    Given 30 files the bundle holds
+    And Studio's window shows the project
+    And the person has opened "Main.qml" in the documents list
+    Then the palette says "8 more: search for their names"
+    When the person searches the palette for "0029"
+    Then the palette offers "an-asset-with-a-name-long-enough-to-count-0029.svg"
+
   Scenario: A file of the project is imported from the panel
     Given the file "incoming/new.svg":
       """

@@ -744,10 +744,17 @@ Panel {
                         Layout.preferredWidth: 72
                     }
                     Field {
+                        id: placeValue
                         placeholderText: Math.round(placeRow.modelData.at)
                         Accessible.name: placeRow.modelData.name
                         Layout.fillWidth: true
                         onAccepted: if (text.trim() !== "") panel.set(placeRow.modelData.name, text)
+                    }
+                    IconButton {
+                        icon_: "link"
+                        text: "Bind " + placeRow.modelData.name
+                        enabled: placeValue.text.trim() !== ""
+                        onClicked: panel.bind(placeRow.modelData.name, placeValue.text)
                     }
                 }
             }
