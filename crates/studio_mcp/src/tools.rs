@@ -1331,6 +1331,17 @@ fn edit(
 /// Sets a binding. A property the object declares with a value has its value
 /// there: a binding beside it would set it twice, which the app refuses. An
 /// alias has its target there, which stays.
+/// What names an object elsewhere has to follow its id, and a string written
+/// as an id names nothing.
+fn not_an_id(name: &str) -> Result<(), SurfaceError> {
+    if name == "id" {
+        return Err(SurfaceError::invalid_argument(
+            "an id is changed by `node_arrange`'s `rename`, which takes what reads it along",
+        ));
+    }
+    Ok(())
+}
+
 fn set(
     studio: &Mutex<Studio>,
     doc: &str,
@@ -1880,6 +1891,7 @@ fn edits(studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
             typed({
                 let studio = s();
                 move |_, a: PropertyArgs| {
+                    not_an_id(&a.name)?;
                     let op = match a.value.0 {
                         None => Op::RemoveBinding {
                             node: a.node,
@@ -1907,6 +1919,7 @@ fn edits(studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
             typed({
                 let studio = s();
                 move |_, a: BindingArgs| {
+                    not_an_id(&a.name)?;
                     let op = match a.value.0 {
                         None => Op::RemoveBinding {
                             node: a.node,
