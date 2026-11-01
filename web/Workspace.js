@@ -36,7 +36,7 @@ export function serve(studio) {
 export const workspaces = () => [...live].map((queue) => queue.self);
 
 // The view's parts, as the workspace's properties.
-const PARTS = ["documents", "generation", "text", "layers", "selected", "selection", "inspector", "states", "roles", "flow", "palette", "done", "undone", "problem", "previews", "theme", "tokens", "comments", "leases", "blank", "chosen", "toolkit"];
+const PARTS = ["documents", "generation", "text", "layers", "selected", "selection", "inspector", "states", "roles", "flow", "palette", "done", "undone", "problem", "previews", "theme", "tokens", "comments", "leases", "blank", "chosen", "toolkit", "offers", "assets", "signals"];
 
 export const Workspace = defineType("Workspace", QtObject, {
   properties: {
@@ -67,6 +67,11 @@ export const Workspace = defineType("Workspace", QtObject, {
     leases: [],
     blank: typed(kinds.bool, false),
     chosen: [],
+    assets: [],
+    signals: [],
+    offers: [],
+    // A click on the canvas is a click on the running app. The shell sets it.
+    playing: typed(kinds.bool, false),
     toolkit: [],
     rootStates: [],
     // The page's preview is the page's own, so nothing here is ever waiting
