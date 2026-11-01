@@ -76,6 +76,13 @@ all = { level = "warn", priority = -1 }
 
 # What a page downloads: as small as the compiler makes it (`mise run
 # web:build`).
+# QuickJS allows a fixed 512 KiB of stack, measured from where the engine was
+# made. Unoptimised frames of the engine and its toolkit use that up on the way
+# to a binding deep in the shell, which then throws RangeError and keeps its old
+# value: every debug gate would judge a window no release build ever shows.
+[profile.dev.package."*"]
+opt-level = 1
+
 [profile.web]
 inherits = "release"
 opt-level = "z"
