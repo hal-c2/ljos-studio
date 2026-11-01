@@ -34,12 +34,19 @@ expression: value
         "type": "object"
       },
       "value": {
-        "description": "`null` removes the binding. Required.",
-        "type": [
-          "boolean",
-          "number",
-          "string"
-        ]
+        "anyOf": [
+          {
+            "type": [
+              "boolean",
+              "number",
+              "string"
+            ]
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "description": "`null` removes the binding. Required."
       }
     },
     "required": [

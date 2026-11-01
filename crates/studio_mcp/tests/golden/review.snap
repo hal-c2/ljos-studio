@@ -38,7 +38,7 @@ expression: value
         "additionalProperties": {
           "type": "string"
         },
-        "description": "The object (`add`; `list` filters by it, with `doc`).",
+        "description": "The object (`add`; `list` filters by it, with `doc`). One of `node` (session handle), `id`, `path` (from `document_tree`; this text only).",
         "type": "object"
       },
       "text": {

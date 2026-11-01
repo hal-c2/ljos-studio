@@ -78,6 +78,7 @@ Feature: A shell under edit runs in a preview
       And the answer's "/state" is "live"
       And the preview shows "Stopped"
 
+    @native
     Scenario: A program that cannot start is a refusal and the session lives on
       Given previews run the program "no-such-ljos"
       When the agent calls the tool "preview_open" with:

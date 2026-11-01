@@ -61,6 +61,10 @@ fn full_schema<O: JsonSchema>() -> Map<String, Value> {
 /// Removes what no call depends on: the server refuses unknown arguments and
 /// bad numbers whatever the schema says.
 fn trim(schema: &mut Map<String, Value>) {
+    trim_field(schema, false);
+}
+
+fn trim_field(schema: &mut Map<String, Value>, required: bool) {
     schema.remove("title");
     schema.remove("format");
     schema.remove("minimum");
@@ -84,12 +88,30 @@ fn trim(schema: &mut Map<String, Value>) {
     schema.remove("minProperties");
     schema.remove("maxProperties");
     merge_choices(schema);
-    not_null(schema);
+    if !required {
+        not_null(schema);
+    }
+    let must: Vec<String> = schema
+        .get("required")
+        .and_then(Value::as_array)
+        .map(|r| {
+            r.iter()
+                .filter_map(Value::as_str)
+                .map(str::to_owned)
+                .collect()
+        })
+        .unwrap_or_default();
     for (key, value) in schema.iter_mut() {
         // Under these the keys are names, and a field may be called `title`.
         if key == "properties" || key == "$defs" {
             if let Value::Object(named) = value {
-                named.values_mut().for_each(trim_value);
+                for (name, field) in named.iter_mut() {
+                    if let (true, Value::Object(field)) = (must.contains(name), &mut *field) {
+                        trim_field(field, key == "properties");
+                    } else {
+                        trim_value(field);
+                    }
+                }
                 // A named type's note restates the fields that use it; only
                 // an address is used bare, so it keeps how it is written.
                 if key == "$defs" {
@@ -108,12 +130,15 @@ fn trim(schema: &mut Map<String, Value>) {
     }
 }
 
-/// A field that may be `null` is one that may be left out, which the
-/// `required` list already says: `["string", "null"]` is `"string"`, and
-/// `anyOf: [X, null]` is `X` with the field's own description beside it.
+/// A field that may be `null` and need not be there is one that may be left
+/// out, which the `required` list already says: `["string", "null"]` is
+/// `"string"`, and `anyOf: [X, null]` is `X` with the field's own description
+/// beside it. One that must be there says `null` for a reason, such as removing
+/// the value (`trim_required`), and keeps it.
 fn not_null(schema: &mut Map<String, Value>) {
     if let Some(Value::Array(types)) = schema.get("type")
         && types.len() == 2
+        && types.iter().any(|t| t == "null")
         && let Some(other) = types.iter().find(|t| *t != "null").cloned()
     {
         schema.insert("type".to_owned(), other);
@@ -186,8 +211,17 @@ fn inline_refs(value: &mut Value, defs: &Map<String, Value>, once: &[&String]) {
             if let Some(Value::Object(def)) = named {
                 map.remove("$ref");
                 for (key, v) in def {
-                    // The field's own note beats the type's.
-                    map.entry(key.clone()).or_insert_with(|| v.clone());
+                    // The field's own note comes first, and the type's may be
+                    // all that says how the field is written.
+                    match (key.as_str(), map.get_mut(key), v) {
+                        ("description", Some(Value::String(own)), Value::String(note)) => {
+                            own.push(' ');
+                            own.push_str(note);
+                        }
+                        _ => {
+                            map.entry(key.clone()).or_insert_with(|| v.clone());
+                        }
+                    }
                 }
             }
             map.values_mut().for_each(|v| inline_refs(v, defs, once));
@@ -286,4 +320,51 @@ fn field_only(field: &Value) -> Value {
     }
     not_null(&mut out);
     Value::Object(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn trimmed(schema: Value) -> Value {
+        let Value::Object(mut schema) = schema else {
+            unreachable!()
+        };
+        trim(&mut schema);
+        inline_single_use(&mut schema);
+        Value::Object(schema)
+    }
+
+    #[test]
+    fn a_field_that_must_be_there_keeps_its_null() {
+        let schema = trimmed(json!({
+            "properties": {
+                "value": {"type": ["string", "null"]},
+                "note": {"type": ["string", "null"]},
+                "either": {"type": ["string", "number"]}
+            },
+            "required": ["value"]
+        }));
+        assert_eq!(
+            schema["properties"]["value"]["type"],
+            json!(["string", "null"])
+        );
+        assert_eq!(schema["properties"]["note"]["type"], json!("string"));
+        assert_eq!(
+            schema["properties"]["either"]["type"],
+            json!(["string", "number"])
+        );
+    }
+
+    #[test]
+    fn a_type_written_where_it_is_used_keeps_both_notes() {
+        let schema = trimmed(json!({
+            "properties": {"node": {"$ref": "#/$defs/Address", "description": "The object."}},
+            "$defs": {"Address": {"type": "object", "description": "Named by `id` or `path`."}}
+        }));
+        assert_eq!(
+            schema["properties"]["node"]["description"],
+            json!("The object. Named by `id` or `path`.")
+        );
+    }
 }

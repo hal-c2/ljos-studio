@@ -868,19 +868,17 @@ fn follow(engine: &Engine, ws: ObjectId) {
         .spawn(move || {
             // A wait here is dropped when told to stop, which needs a
             // reactor of its own to be driven on.
-            let Ok(runtime) = tokio::runtime::Builder::new_current_thread()
+            let runtime = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
                 .build()
-            else {
-                return;
-            };
+                .ok();
             let mut since = None;
-            while !stop.is_stopped() {
+            while let Some(runtime) = runtime.as_ref().filter(|_| !stop.is_stopped()) {
                 let mut args = json!({"wait_ms": FOLLOW_WAIT_MS});
                 if let Some(since) = since {
                     args["rests"] = json!(since);
                 }
-                let Some(reply) = wait_on_preview(&runtime, &weak, args, &stop) else {
+                let Some(reply) = wait_on_preview(runtime, &weak, args, &stop) else {
                     break;
                 };
                 let held = since;
@@ -902,7 +900,7 @@ fn follow(engine: &Engine, ws: ObjectId) {
                         if let Some(since) = since {
                             args["rests"] = json!(since);
                         }
-                        let Some(reply) = wait_on_preview(&runtime, &weak, args, &stop) else {
+                        let Some(reply) = wait_on_preview(runtime, &weak, args, &stop) else {
                             break;
                         };
                         since = reply["rests"].as_u64();
