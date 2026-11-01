@@ -927,7 +927,13 @@ fn the_file(w: &mut UiWorld, name: String, step: &Step) -> StepResult {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
-    std::fs::write(path, file_text(step)?).map_err(|e| e.to_string())
+    // Whole or not at all: `fs::write` truncates first, and the shell's watcher
+    // can wake in between and read a file with nothing in it. The new text
+    // waits outside the project, where no watcher sees it.
+    let scratch = w.dir.path().parent().ok_or("the project has no parent")?;
+    let mut text = tempfile::NamedTempFile::new_in(scratch).map_err(|e| e.to_string())?;
+    std::io::Write::write_all(&mut text, file_text(step)?.as_bytes()).map_err(|e| e.to_string())?;
+    text.persist(path).map(drop).map_err(|e| e.to_string())
 }
 
 #[given(regex = r"^(\d+) more documents$")]
