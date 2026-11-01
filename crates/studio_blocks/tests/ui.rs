@@ -32,6 +32,8 @@ const HEIGHT: f64 = 900.0;
 #[derive(World)]
 #[world(init = Self::new)]
 struct UiWorld {
+    /// Where a frame was before the wheel turned.
+    frame_before: Option<ljos::item::kurbo::Rect>,
     /// A workspace a scenario expects to go.
     remembered: Option<ObjectId>,
     /// Where the outline was shown, bare of a ghost, in the frames of a flick.
@@ -220,6 +222,7 @@ fn drive_error(e: DriveError) -> String {
 impl UiWorld {
     fn new() -> Self {
         Self {
+            frame_before: None,
             remembered: None,
             outlines: Vec::new(),
             dir: tempfile::tempdir().expect("a temporary directory"),
@@ -639,8 +642,35 @@ impl Window {
         self.rest()
     }
 
+    /// Brings a panel behind a tab to the front, as a person has to before
+    /// using it: a panel not shown is not in the tree.
+    fn open_panel(&mut self, panel: &str) -> StepResult {
+        let tab = match panel {
+            "Palette" => "Insert tab",
+            "Layers" | "Documents" => "Layers tab",
+            "Inspector" => "Design tab",
+            "Tokens" => "Tokens tab",
+            "Flow" => "Flow tab",
+            _ => return Ok(()),
+        };
+        let tree = self.tree();
+        if find(&tree, &|n| n.name == panel && n.role != "label").is_some() {
+            return Ok(());
+        }
+        let Some(node) = find(&tree, &|n| n.name == tab && n.key.is_some()).cloned() else {
+            return Ok(());
+        };
+        self.click_node(&node)
+    }
+
     /// The node named `name` inside the one named `within`.
-    fn node(&self, within: &str, role: Option<&str>, name: &str) -> Result<AccessibleNode, String> {
+    fn node(
+        &mut self,
+        within: &str,
+        role: Option<&str>,
+        name: &str,
+    ) -> Result<AccessibleNode, String> {
+        self.open_panel(within)?;
         let tree = self.tree();
         let container = find(&tree, &|n| n.name == within && n.role != "label")
             .ok_or_else(|| format!("no {within:?} in the window"))?;
@@ -720,7 +750,8 @@ impl Window {
     }
 
     /// The rows the layers panel shows, in order.
-    fn shown_layers(&self) -> Result<Vec<AccessibleNode>, String> {
+    fn shown_layers(&mut self) -> Result<Vec<AccessibleNode>, String> {
+        self.open_panel("Layers")?;
         let tree = self.tree();
         let list = find(&tree, &|n| n.name == "Layers" && n.role == "list")
             .ok_or("no layers list in the window")?;
@@ -1106,7 +1137,8 @@ fn lists_states(w: &mut UiWorld, names: String) -> StepResult {
 }
 
 /// The states the inspector shows a button for, in order.
-fn shown_states(window: &Window) -> Result<Vec<String>, String> {
+fn shown_states(window: &mut Window) -> Result<Vec<String>, String> {
+    window.open_panel("Inspector")?;
     let tree = window.tree();
     let inspector = find(&tree, &|n| n.name == "Inspector" && n.role != "label")
         .ok_or("no inspector in the window")?;
@@ -1124,7 +1156,8 @@ fn shown_states(window: &Window) -> Result<Vec<String>, String> {
 
 /// The names in the panel `within` that start with `prefix`, without it,
 /// in order.
-fn shown_with(window: &Window, within: &str, prefix: &str) -> Result<Vec<String>, String> {
+fn shown_with(window: &mut Window, within: &str, prefix: &str) -> Result<Vec<String>, String> {
+    window.open_panel(within)?;
     let tree = window.tree();
     let panel = find(&tree, &|n| n.name == within && n.role != "label")
         .ok_or_else(|| format!("no {within:?} in the window"))?;
@@ -1295,6 +1328,7 @@ fn opens_wire_box(w: &mut UiWorld) -> StepResult {
 /// scrolling the list to it as a person does.
 #[when(regex = r#"^the person picks the signal "([^"]+)" to wire in the flow panel$"#)]
 fn picks_signal(w: &mut UiWorld, signal: String) -> StepResult {
+    w.window()?.open_panel("Flow")?;
     if wire_row(w.window()?, &signal).is_none() {
         opens_wire_box(w)?;
     }
@@ -2048,6 +2082,7 @@ fn tokens_show(w: &mut UiWorld, name: String, value: String) -> StepResult {
 fn tokens_say(w: &mut UiWorld, pattern: String) -> StepResult {
     let pattern = regex::Regex::new(&pattern).map_err(|e| e.to_string())?;
     let window = w.window()?;
+    window.open_panel("Tokens")?;
     let tree = window.tree();
     let panel = find(&tree, &|n| n.name == "Tokens" && n.role != "label")
         .ok_or("no tokens panel in the window")?;
@@ -3208,4 +3243,119 @@ fn main() {
                 tags.clone().any(|t| t == "ui") && !tags.any(|t| t == "web")
             }),
     );
+}
+
+#[given(regex = r#"^the person has opened the "([^"]+) tab"$"#)]
+#[when(regex = r#"^the person opens the "([^"]+) tab"$"#)]
+fn opens_tab(w: &mut UiWorld, tab: String) -> StepResult {
+    let window = w.window()?;
+    let tree = window.tree();
+    let name = format!("{tab} tab");
+    let node = find(&tree, &|n| n.name == name && n.key.is_some())
+        .cloned()
+        .ok_or_else(|| format!("no {name:?}; the window holds {}", names(&tree)))?;
+    window.click_node(&node)
+}
+
+#[then(regex = r#"^the window has no pane "([^"]+)"$"#)]
+fn has_no_pane(w: &mut UiWorld, name: String) -> StepResult {
+    let tree = w.window()?.tree();
+    match find(&tree, &|n| n.name == name && n.role == "pane") {
+        None => Ok(()),
+        Some(_) => Err(format!("the window still has a pane {name:?}")),
+    }
+}
+
+#[then(regex = r#"^the window has a button "([^"]+)"$"#)]
+fn has_button(w: &mut UiWorld, name: String) -> StepResult {
+    let tree = w.window()?.tree();
+    find(&tree, &|n| n.name == name && n.role == "button")
+        .map(drop)
+        .ok_or_else(|| format!("no button {name:?}; the window holds {}", names(&tree)))
+}
+
+/// Where the frame for `target` is drawn; its button and label share the name.
+fn frame_bounds(window: &Window, target: &str) -> Result<ljos::item::kurbo::Rect, String> {
+    window
+        .bounds(&|role, name| name == target && role != "button" && role != "label")
+        .ok_or_else(|| format!("no frame {target:?} drawn in the window"))
+}
+
+#[when("the person turns the wheel over the canvas")]
+fn wheel_over_canvas(w: &mut UiWorld) -> StepResult {
+    let window = w.window()?;
+    let before = frame_bounds(window, "Desktop")?;
+    window
+        .stage
+        .drive()
+        .wheel(before.center(), Wheel::Notches(0.0, -1.0))
+        .map_err(drive_error)?;
+    window.stage.drive().advance(1000).map_err(drive_error)?;
+    window.rest()?;
+    w.frame_before = Some(before);
+    Ok(())
+}
+
+#[then(regex = r#"^the frame "([^"]+)" has moved$"#)]
+fn frame_moved(w: &mut UiWorld, target: String) -> StepResult {
+    let before = w.frame_before.ok_or("no place noted")?;
+    let now = frame_bounds(w.window()?, &target)?;
+    if (now.y0 - before.y0).abs() < 1.0 && (now.x0 - before.x0).abs() < 1.0 {
+        return Err(format!("the frame stayed at {now:?}"));
+    }
+    Ok(())
+}
+
+#[then(regex = r#"^the frame "([^"]+)" has kept its size$"#)]
+fn frame_kept_size(w: &mut UiWorld, target: String) -> StepResult {
+    let before = w.frame_before.ok_or("no place noted")?;
+    let now = frame_bounds(w.window()?, &target)?;
+    if (now.width() - before.width()).abs() > 0.5 || (now.height() - before.height()).abs() > 0.5 {
+        return Err(format!("the frame went from {before:?} to {now:?}"));
+    }
+    Ok(())
+}
+
+#[when("the person zooms in with the button")]
+fn zooms_in(w: &mut UiWorld) -> StepResult {
+    w.frame_before = Some(frame_bounds(w.window()?, "Desktop")?);
+    clicks_button(w, "Zoom in".to_owned())
+}
+
+#[then(regex = r#"^the middle of the view shows the same place of the frame "([^"]+)"$"#)]
+fn zoom_kept_middle(w: &mut UiWorld, target: String) -> StepResult {
+    let before = w.frame_before.ok_or("no place noted")?;
+    let window = w.window()?;
+    let now = frame_bounds(window, &target)?;
+    if now.width() <= before.width() {
+        return Err(format!("the frame did not grow: {before:?} to {now:?}"));
+    }
+    let view = window
+        .bounds(&|role, name| role == "pane" && name == "Canvas")
+        .ok_or("no canvas pane")?
+        .center();
+    let place =
+        |r: ljos::item::kurbo::Rect| ((view.x - r.x0) / r.width(), (view.y - r.y0) / r.height());
+    let (was, is) = (place(before), place(now));
+    if (was.0 - is.0).abs() > 0.01 || (was.1 - is.1).abs() > 0.01 {
+        return Err(format!(
+            "the view's middle was at {was:?} of the frame, now {is:?}"
+        ));
+    }
+    Ok(())
+}
+
+#[then("the inspector asks for something to be selected")]
+fn inspector_asks(w: &mut UiWorld) -> StepResult {
+    let window = w.window()?;
+    window.open_panel("Inspector")?;
+    let tree = window.tree();
+    find(&tree, &|n| n.name == "Select something to edit it")
+        .map(drop)
+        .ok_or_else(|| {
+            format!(
+                "the inspector does not ask; the window holds {}",
+                names(&tree)
+            )
+        })
 }

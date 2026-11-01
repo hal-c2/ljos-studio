@@ -75,6 +75,21 @@ Panel {
         workspace.dispatch("node_move", args)
     }
 
+    // What kind of thing a row is at a glance; a type of the project's own is
+    // a component.
+    function typeIcon(type) {
+        const known = {
+            Text: "text", Label: "text", TextField: "text", TextArea: "text",
+            Image: "image", Row: "row", RowLayout: "row", Column: "column",
+            ColumnLayout: "column", Grid: "grid", GridLayout: "grid", Flow: "grid",
+            Rectangle: "frame", Item: "frame", Flickable: "frame", Pane: "frame",
+            Button: "control", ToolButton: "control", CheckBox: "control", Switch: "control",
+            Slider: "control", ListView: "list", GridView: "grid", Repeater: "list",
+            View3D: "cube", Model: "cube", Node: "cube"
+        }
+        return known[type] || "component"
+    }
+
     function arrange(action, node) {
         workspace.dispatch("node_arrange", {
             action: action,
@@ -107,8 +122,31 @@ Panel {
                 id: row
                 required property var modelData
                 width: ListView.view.width
-                leftPadding: Spacing.xs + modelData.depth * Spacing.md
+                implicitHeight: 28
+                topPadding: 0
+                bottomPadding: 0
+                leftPadding: Spacing.xs + modelData.depth * Spacing.sm
+                rightPadding: trailing.width + Spacing.xxs
                 text: modelData.label
+                contentItem: RowLayout {
+                    spacing: Spacing.xxs
+                    Icon {
+                        name: panel.typeIcon(row.modelData.type)
+                        color: row.highlighted ? Colors.accent : Colors.textMuted
+                    }
+                    Text {
+                        text: row.text
+                        color: Colors.text
+                        font.pixelSize: Typography.captionSize
+                        font.weight: row.highlighted ? Typography.bodyStrongWeight : Typography.bodyWeight
+                        elide: Text.ElideRight
+                        Layout.fillWidth: true
+                    }
+                }
+                background: Rectangle {
+                    color: row.highlighted ? Colors.surfaceSelected
+                        : row.hovered ? Colors.surfaceHover : "transparent"
+                }
                 Accessible.name: modelData.label
                 highlighted: panel.workspace.chosen.indexOf(modelData.node) >= 0
                 opacity: modelData.hidden ? 0.5 : 1
@@ -131,7 +169,7 @@ Panel {
                     }
                 }
 
-                TextField {
+                Field {
                     visible: panel.naming === row.modelData.node
                     anchors.fill: parent
                     anchors.leftMargin: row.leftPadding
@@ -176,41 +214,49 @@ Panel {
                 }
 
                 Row {
+                    id: trailing
                     anchors.right: parent.right
-                    anchors.rightMargin: Spacing.xs
+                    anchors.rightMargin: Spacing.xxs
                     anchors.verticalCenter: parent.verticalCenter
-                    spacing: Spacing.xs
+                    spacing: 0
 
                     Label {
                         objectName: "held"
                         visible: row.modelData.held !== ""
+                        anchors.verticalCenter: parent.verticalCenter
                         text: "held by " + row.modelData.held
                         color: Colors.text
                         font.pixelSize: Typography.captionSize
+                        rightPadding: Spacing.xxs
                         Accessible.role: Accessible.StaticText
                         Accessible.name: row.modelData.label + " held by " + row.modelData.held
                     }
                     Label {
                         visible: row.modelData.comments > 0
+                        anchors.verticalCenter: parent.verticalCenter
                         text: String(row.modelData.comments)
                         color: Colors.text
+                        font.pixelSize: Typography.captionSize
+                        rightPadding: Spacing.xxs
                         Accessible.role: Accessible.StaticText
                         Accessible.name: row.modelData.comments
                                          + (row.modelData.comments === 1 ? " comment on " : " comments on ")
                                          + row.modelData.label
                     }
                     // The preview finds what it hides by its id.
-                    ToolButton {
+                    IconButton {
                         visible: row.modelData.id !== ""
-                        text: row.modelData.hidden ? "Show" : "Hide"
-                        font.pixelSize: Typography.captionSize
-                        Accessible.name: text + " " + row.modelData.label
+                        implicitWidth: 24
+                        implicitHeight: 24
+                        icon_: row.modelData.hidden ? "eyeOff" : "eye"
+                        text: (row.modelData.hidden ? "Show" : "Hide") + " " + row.modelData.label
                         onClicked: panel.arrange(row.modelData.hidden ? "show" : "hide", row.modelData.node)
                     }
-                    ToolButton {
-                        text: row.modelData.locked ? "Unlock" : "Lock"
-                        font.pixelSize: Typography.captionSize
-                        Accessible.name: text + " " + row.modelData.label
+                    IconButton {
+                        implicitWidth: 24
+                        implicitHeight: 24
+                        icon_: row.modelData.locked ? "lock" : "unlock"
+                        text: (row.modelData.locked ? "Unlock" : "Lock") + " " + row.modelData.label
                         onClicked: panel.arrange(row.modelData.locked ? "unlock" : "lock", row.modelData.node)
                     }
                 }
@@ -219,24 +265,28 @@ Panel {
 
         RowLayout {
             Layout.fillWidth: true
-            spacing: Spacing.xxs
+            Layout.margins: Spacing.xxs
+            spacing: 2
 
-            Button {
+            IconButton {
+                icon_: "up"
                 text: "Move up"
-                Accessible.name: text
                 enabled: panel.layer !== null && panel.layer.index !== null && panel.layer.index > 0
                 onClicked: panel.move(-1)
             }
-            Button {
+            IconButton {
+                icon_: "down"
                 text: "Move down"
-                Accessible.name: text
                 enabled: panel.layer !== null && panel.layer.index !== null
                          && panel.layer.index < panel.siblings - 1
                 onClicked: panel.move(1)
             }
-            Button {
+            Item {
+                Layout.fillWidth: true
+            }
+            IconButton {
+                icon_: "trash"
                 text: "Remove"
-                Accessible.name: text
                 enabled: panel.layer !== null && panel.layer.parent !== ""
                 onClicked: panel.workspace.dispatch("node_remove", {
                     doc: panel.workspace.doc,

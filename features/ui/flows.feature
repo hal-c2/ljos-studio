@@ -103,6 +103,7 @@ Feature: A person wires and plays a prototype's flow in Studio's window
 
   Scenario: The selection is wired to go to a state
     Given the person has selected "Rectangle card" in the layers panel
+    Given the person has opened the "Flow tab"
     When the person clicks the button "Tap selection to go to details"
     Then the flow panel lists the flows "tapped card to details"
     And the history lists "tapped card to details"
@@ -154,6 +155,7 @@ Feature: A person wires and plays a prototype's flow in Studio's window
       """
     And the person has selected "MouseArea area" in the layers panel
     Then the inspector lists the signals "pressAndHold, pressed, released, clicked, doubleClicked, positionChanged, entered, exited, canceled, wheel"
+    Given the person has opened the "Flow tab"
     When the person picks the signal "clicked" to wire in the flow panel
     And the person clicks the button "On clicked of selection go to details"
     Then the flow panel lists the flows "clicked area to details"
@@ -161,6 +163,7 @@ Feature: A person wires and plays a prototype's flow in Studio's window
 
   Scenario: The flow panel still answers when the selection's signals change with its list open
     Given the person has selected "Rectangle card" in the layers panel
+    And the person has opened the "Flow tab"
     And the person has opened the list of what to wire in the flow panel
     When an agent calls the tool "document_edit" with:
       """json
@@ -174,6 +177,7 @@ Feature: A person wires and plays a prototype's flow in Studio's window
 
   Scenario: A wire is taken out
     Given the person has selected "Rectangle card" in the layers panel
+    And the person has opened the "Flow tab"
     And the person has clicked the button "Tap selection to go to details"
     When the person clicks the button "Remove flow tapped card to details"
     Then the flow panel lists the flows ""
@@ -182,6 +186,7 @@ Feature: A person wires and plays a prototype's flow in Studio's window
   @preview
   Scenario: In play mode a click in the frame plays the flow
     Given the person has selected "Rectangle card" in the layers panel
+    And the person has opened the "Flow tab"
     And the person has clicked the button "Tap selection to go to details"
     And the person has clicked the button "Play"
     When the person clicks the frame "Desktop" at 50, 150
@@ -192,6 +197,7 @@ Feature: A person wires and plays a prototype's flow in Studio's window
   @preview
   Scenario: A click in play mode shows in the frame's picture
     Given the person has selected "Rectangle card" in the layers panel
+    And the person has opened the "Flow tab"
     And the person has clicked the button "Tap selection to go to details"
     And the person has clicked the button "Play"
     And the person has looked at the frame "Desktop"
@@ -203,6 +209,7 @@ Feature: A person wires and plays a prototype's flow in Studio's window
   @preview
   Scenario: In play mode a click plays the flow at the very point clicked
     Given the person has selected "Rectangle card" in the layers panel
+    And the person has opened the "Flow tab"
     And the person has clicked the button "Tap selection to go to details"
     And an agent has called the tool "node_insert" with:
       """json

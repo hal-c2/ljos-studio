@@ -113,7 +113,7 @@ Panel {
                             text: node.name
                             color: Colors.text
                         }
-                        Button {
+                        TextButton {
                             text: "+"
                             enabled: panel.workspace.selected !== ""
                             Accessible.name: panel.trigger === "tapped"
@@ -153,7 +153,7 @@ Panel {
                     Accessible.role: Accessible.StaticText
                     Accessible.name: "Flow edge " + edge.modelData.label
                 }
-                Button {
+                TextButton {
                     visible: edge.modelData.kind === "interaction"
                     text: "Remove"
                     Accessible.name: "Remove flow " + edge.modelData.label

@@ -42,6 +42,7 @@ Item {
         spacing: 0
 
         Toolbar {
+            id: toolbar
             workspace: workspace
             onExportRequested: exporter.show()
             Layout.fillWidth: true
@@ -49,31 +50,61 @@ Item {
 
         SplitView {
             orientation: Qt.Horizontal
+            handle: Rectangle {
+                implicitWidth: 5
+                color: SplitHandle.hovered || SplitHandle.pressed ? Colors.border : Colors.surfacePressed
+            }
             Layout.fillWidth: true
             Layout.fillHeight: true
 
-            SplitView {
-                orientation: Qt.Vertical
+            // What the document is made of, and what can go in it.
+            ColumnLayout {
+                visible: toolbar.leftOpen
+                spacing: 0
                 SplitView.preferredWidth: 260
-                SplitView.minimumWidth: 160
+                SplitView.minimumWidth: 200
 
-                DocumentsPanel {
-                    workspace: workspace
-                    SplitView.preferredHeight: 220
+                TabStrip {
+                    id: leftTabs
+                    tabs: ["Layers", "Insert"]
+                    Layout.fillWidth: true
                 }
-                LayersPanel {
-                    workspace: workspace
-                    SplitView.fillHeight: true
+                ColumnLayout {
+                    visible: leftTabs.current === 0
+                    spacing: 0
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+
+                    Section {
+                        title: "Documents"
+                        Layout.fillWidth: true
+                        DocumentsPanel {
+                            workspace: workspace
+                            Layout.fillWidth: true
+                            Layout.preferredHeight: 150
+                        }
+                    }
+                    LayersPanel {
+                        workspace: workspace
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                    }
                 }
-                FlowPanel {
+                PalettePanel {
+                    visible: leftTabs.current === 1
                     workspace: workspace
-                    SplitView.preferredHeight: 220
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
                 }
             }
 
             SplitView {
                 orientation: Qt.Vertical
                 SplitView.fillWidth: true
+                handle: Rectangle {
+                    implicitHeight: 5
+                    color: SplitHandle.hovered || SplitHandle.pressed ? Colors.border : Colors.surfacePressed
+                }
 
                 CanvasPanel {
                     workspace: workspace
@@ -81,28 +112,43 @@ Item {
                     SplitView.fillHeight: true
                 }
                 CodePanel {
+                    visible: toolbar.codeOpen
                     workspace: workspace
-                    SplitView.preferredHeight: 260
+                    SplitView.preferredHeight: 180
+                    SplitView.minimumHeight: 80
                 }
             }
 
-            SplitView {
-                orientation: Qt.Vertical
+            // What the selection is, and what the document's look and flow are.
+            ColumnLayout {
+                visible: toolbar.rightOpen
+                spacing: 0
                 SplitView.preferredWidth: 300
-                SplitView.minimumWidth: 200
+                SplitView.minimumWidth: 220
 
+                TabStrip {
+                    id: rightTabs
+                    tabs: ["Design", "Tokens", "Flow"]
+                    Layout.fillWidth: true
+                }
                 InspectorPanel {
                     id: inspector
+                    visible: rightTabs.current === 0
                     workspace: workspace
-                    SplitView.fillHeight: true
-                }
-                PalettePanel {
-                    workspace: workspace
-                    SplitView.preferredHeight: 200
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
                 }
                 TokensPanel {
+                    visible: rightTabs.current === 1
                     workspace: workspace
-                    SplitView.preferredHeight: 240
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                }
+                FlowPanel {
+                    visible: rightTabs.current === 2
+                    workspace: workspace
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
                 }
             }
         }
@@ -110,11 +156,15 @@ Item {
         // The person's own last refusal, until the next gesture is answered.
         Label {
             objectName: "status"
-            Accessible.role: Accessible.StaticText
+            Accessible.role: Accessible.StatusBar
             Accessible.name: "Status"
             padding: Spacing.xs
             text: workspace.error !== "" ? workspace.error : workspace.problem
             color: Colors.text
+            font.pixelSize: Typography.captionSize
+            background: Rectangle {
+                color: Colors.surfaceRaised
+            }
             visible: text !== ""
             Layout.fillWidth: true
         }

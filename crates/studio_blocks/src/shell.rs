@@ -14,6 +14,36 @@ pub const WINDOW: (&str, &str) = ("Window.qml", include_str!("../../../shell/Win
 /// Studio's own shell, by its path from `Builtin/`.
 pub const BUILTIN: &[(&str, &str)] = &[
     (
+        "Field.qml",
+        include_str!("../../../shell/Builtin/Field.qml"),
+    ),
+    (
+        "FloatBar.qml",
+        include_str!("../../../shell/Builtin/FloatBar.qml"),
+    ),
+    (
+        "Hairline.qml",
+        include_str!("../../../shell/Builtin/Hairline.qml"),
+    ),
+    ("Icon.qml", include_str!("../../../shell/Builtin/Icon.qml")),
+    (
+        "IconButton.qml",
+        include_str!("../../../shell/Builtin/IconButton.qml"),
+    ),
+    (
+        "Section.qml",
+        include_str!("../../../shell/Builtin/Section.qml"),
+    ),
+    (
+        "TabStrip.qml",
+        include_str!("../../../shell/Builtin/TabStrip.qml"),
+    ),
+    (
+        "TextButton.qml",
+        include_str!("../../../shell/Builtin/TextButton.qml"),
+    ),
+    ("icons.js", include_str!("../../../shell/Builtin/icons.js")),
+    (
         "CanvasOverlay.qml",
         include_str!("../../../shell/Builtin/CanvasOverlay.qml"),
     ),
