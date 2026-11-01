@@ -290,21 +290,34 @@ export async function launch(app) {
       }
     };
   });
+  // A request that fails is the scenario's evidence, not the run's end: one a
+  // page outlives must not take every other scenario down with it, and one a
+  // page needs fails that scenario, whose report then names it.
+  const dropped = [];
   await context.route(`${ORIGIN}/**`, async (route) => {
     const request = route.request();
     const url = new URL(request.url());
-    if (url.pathname.startsWith("/preview/") || url.pathname === "/compile") {
-      const headers = { ...request.headers(), origin: served.url.replace(/\/$/, "") };
-      delete headers.host;
-      const response = await route.fetch({ url: `${served.url.replace(/\/$/, "")}${url.pathname}${url.search}`, headers });
-      return route.fulfill({ response, headers: { ...response.headers(), ...ISOLATED } });
+    try {
+      if (url.pathname.startsWith("/preview/") || url.pathname === "/compile") {
+        // A connection of its own: Playwright otherwise reuses one, which the
+        // server may close for idling just as the next request goes out.
+        const headers = { ...request.headers(), origin: served.url.replace(/\/$/, ""), connection: "close" };
+        delete headers.host;
+        const response = await route.fetch({ url: `${served.url.replace(/\/$/, "")}${url.pathname}${url.search}`, headers });
+        return await route.fulfill({ response, headers: { ...response.headers(), ...ISOLATED } });
+      }
+      const body = url.pathname === "/index.html" ? PAGE : readFileSync(join(here, url.pathname));
+      return await route.fulfill({ status: 200, headers: { "content-type": TYPES[extname(url.pathname)] ?? "application/octet-stream", ...ISOLATED }, body });
+    } catch (e) {
+      dropped.push(`${request.method()} ${url.pathname}: ${String(e.message).split("\n")[0]}`);
+      await route.abort().catch(() => {});
     }
-    const body = url.pathname === "/index.html" ? PAGE : readFileSync(join(here, url.pathname));
-    return route.fulfill({ status: 200, headers: { "content-type": TYPES[extname(url.pathname)] ?? "application/octet-stream", ...ISOLATED }, body });
   });
   return {
     // What the compiler refused, in order, since the server started.
     compiled: served.compiled,
+    // The requests that got no answer, in order, each with why.
+    dropped,
     async page() {
       const page = await context.newPage();
       await page.goto(`${ORIGIN}/index.html`);
@@ -339,6 +352,7 @@ async function main([app, ...paths]) {
       let failed = null;
       const began = performance.now();
       const compiledFrom = chromium.compiled.length;
+      const droppedFrom = chromium.dropped.length;
       // A name two features share is keyed with its file.
       const key = WAITING.has(`${name}: ${scenario.name}`) ? `${name}: ${scenario.name}` : scenario.name;
       const probe = WAITING.get(key)?.probe;
@@ -371,7 +385,8 @@ async function main([app, ...paths]) {
       if (verdict) {
         counts.failed += 1;
         failures.push(`${scenario.name}: ${verdict}`);
-        console.log(`  ✘ ${scenario.name}\n      ${verdict}${said.length ? `\n      ${said.join("\n      ")}` : ""}`);
+        const evidence = [...said, ...chromium.dropped.slice(droppedFrom).map((d) => `no answer to ${d}`)];
+        console.log(`  ✘ ${scenario.name}\n      ${verdict}${evidence.length ? `\n      ${evidence.join("\n      ")}` : ""}`);
       } else if (waits !== undefined) {
         counts.waiting += 1;
         console.log(`  ⏸ ${scenario.name}  (waits on ljos-web request ${waits.request})`);
@@ -383,6 +398,7 @@ async function main([app, ...paths]) {
   }
   for (const name of WAITING.keys()) if (!seen.has(name) && paths.length === 0) failures.push(`WAITING names \`${name}\`, which is no @preview scenario`);
   console.log(`\n${counts.passed + counts.failed + counts.waiting} scenarios (${counts.passed} passed, ${counts.waiting} waiting on ljos-web, ${counts.failed} failed), ${counts.steps} steps passed`);
+  for (const d of chromium.dropped) console.log(`no answer to ${d}`);
   if (process.env.FEATURES_TIMES) console.log(JSON.stringify(times));
   await chromium.close();
   if (failures.length > 0) process.exitCode = 1;

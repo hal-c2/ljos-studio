@@ -45,7 +45,8 @@ pub enum Request {
         changed: BTreeMap<String, Option<String>>,
     },
     /// Import `module` from `dir` (`null`: from where it would be found)
-    /// and reload with `changed`, keeping state.
+    /// and start over with `changed`: another module's code is another
+    /// program, so the old one's state says nothing of it.
     Alias {
         module: String,
         dir: Option<String>,
