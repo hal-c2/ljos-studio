@@ -1051,15 +1051,35 @@ Panel {
             Repeater {
                 id: signalList
                 model: panel.workspace.signals.filter(s => !s.change)
-                delegate: Label {
+                delegate: ColumnLayout {
+                    id: signalRow
                     required property var modelData
-                    text: modelData.name + "(" + modelData.arguments
-                        .map(a => a.type === "" ? a.name : a.name + ": " + a.type).join(", ") + ")"
-                    color: Colors.text
-                    elide: Text.ElideRight
+                    readonly property string handler: "on" + modelData.name[0].toUpperCase() + modelData.name.slice(1)
                     Layout.fillWidth: true
-                    Accessible.role: Accessible.StaticText
-                    Accessible.name: "Signal " + modelData.name
+                    spacing: Spacing.xxs
+
+                    Label {
+                        text: signalRow.modelData.name + "(" + signalRow.modelData.arguments
+                            .map(a => a.type === "" ? a.name : a.name + ": " + a.type).join(", ") + ")"
+                        color: Colors.text
+                        elide: Text.ElideRight
+                        Layout.fillWidth: true
+                        Accessible.role: Accessible.StaticText
+                        Accessible.name: "Signal " + signalRow.modelData.name
+                    }
+                    // Once written the handler is a row of Properties, like
+                    // anything else the file says.
+                    Field {
+                        visible: !panel.workspace.inspector.some(r => r.name === signalRow.handler)
+                        placeholderText: "what it does"
+                        Accessible.name: "Handle " + signalRow.modelData.name
+                        Layout.fillWidth: true
+                        onAccepted: {
+                            if (text.trim() !== "")
+                                panel.bind(signalRow.handler, text)
+                            text = ""
+                        }
+                    }
                 }
             }
         }
