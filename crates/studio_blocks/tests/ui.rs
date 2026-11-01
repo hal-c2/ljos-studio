@@ -41,6 +41,8 @@ struct UiWorld {
     looked: u64,
     /// The previews say nothing of where their objects are, as a web host.
     no_places: bool,
+    /// Where a step left the hand holding the canvas.
+    held: Option<Point>,
 }
 
 /// A preview that answers everything but `placed`, whose default refuses.
@@ -140,6 +142,7 @@ impl UiWorld {
             window: None,
             looked: 0,
             no_places: false,
+            held: None,
         }
     }
 
@@ -1443,6 +1446,179 @@ fn drags_in_frame_at_once(
     window.rest()
 }
 
+#[given("nothing has happened")]
+#[when("nothing has happened")]
+fn nothing_happened(_: &mut UiWorld) {}
+
+/// What an agent asks in a table's row, where a doc string cannot go.
+fn agent_call(w: &mut UiWorld, client: Option<&str>, tool: &str, args: Json) -> StepResult {
+    let window = w.window()?;
+    let ctx = CallCtx {
+        client: client.map(str::to_owned),
+        ..CallCtx::new(CapSet::of([Cap::Inspect, Cap::Mutate]))
+    };
+    window
+        .server
+        .call(tool, &ctx, args)
+        .map_err(|e| format!("the agent was refused: {}", e.to_value()))?;
+    window.rest()
+}
+
+#[given(regex = r#"^Ada holds "([^"]+)"$"#)]
+fn ada_holds(w: &mut UiWorld, id: String) -> StepResult {
+    let args = serde_json::json!({"doc": "Main.qml", "nodes": [{"id": id}], "hold": true});
+    agent_call(w, Some("Ada"), "node_select", args)
+}
+
+#[when(regex = r#"^an agent selects "([^"]+)"$"#)]
+fn agent_selects(w: &mut UiWorld, id: String) -> StepResult {
+    let args = serde_json::json!({"doc": "Main.qml", "nodes": [{"id": id}]});
+    agent_call(w, None, "node_select", args)
+}
+
+/// The hand comes up where the hold left it.
+fn lets_go(w: &mut UiWorld) -> StepResult {
+    let to = w.held.ok_or("no hand is holding the canvas")?;
+    let window = w.window()?;
+    window
+        .stage
+        .drive()
+        .release(to, MouseButtons::LEFT)
+        .map_err(drive_error)?;
+    window.rest()
+}
+
+#[when(regex = r#"^an agent selects "([^"]+)" and the hand lets go$"#)]
+fn agent_selects_then_go(w: &mut UiWorld, id: String) -> StepResult {
+    agent_selects(w, id)?;
+    lets_go(w)
+}
+
+/// A read that answers before the agent's selection is heard cannot show
+/// the order this is about, so the overlay is put where a slow read leaves it.
+#[when(regex = r#"^the drop waits on a read and an agent selects "([^"]+)"$"#)]
+fn drop_waits_then_select(w: &mut UiWorld, id: String) -> StepResult {
+    let window = w.window()?;
+    let overlay = overlay_part(window, "overlay")?;
+    let engine = window.engine();
+    for (name, value) in [
+        ("mode", Value::from("")),
+        ("dropping", Value::Bool(true)),
+        ("dropWaits", Value::Bool(true)),
+        ("reads", Value::Int(1)),
+    ] {
+        engine
+            .write_by_name(overlay, name, value)
+            .map_err(|e| e.to_string())?;
+    }
+    agent_selects(w, id)
+}
+
+#[then("the canvas has gone with the preview")]
+fn canvas_gone(w: &mut UiWorld) -> StepResult {
+    let window = w.window()?;
+    match overlay_part(window, "overlay") {
+        Err(_) => Ok(()),
+        Ok(_) => Err("the canvas is still there".to_owned()),
+    }
+}
+
+#[when("the preview closes")]
+fn preview_closes(w: &mut UiWorld) -> StepResult {
+    let window = w.window()?;
+    let studio = window.server.studio();
+    let close = studio
+        .lock()
+        .map_err(|_| "the studio's lock is poisoned")?
+        .preview_closer();
+    close();
+    window.rest()
+}
+
+#[when("the preview closes and the hand lets go")]
+fn preview_closes_then_go(w: &mut UiWorld) -> StepResult {
+    preview_closes(w)?;
+    lets_go(w)
+}
+
+#[when("the window takes the press away")]
+fn press_taken(w: &mut UiWorld) -> StepResult {
+    let window = w.window()?;
+    let overlay = overlay_part(window, "overlay")?;
+    window
+        .engine()
+        .emit_by_name(overlay, "canceled", &[])
+        .map_err(|e| e.to_string())?;
+    window.rest()
+}
+
+#[when(
+    regex = r#"^the person lets a drag go in the frame "([^"]+)" from (\d+), (\d+) to (\d+), (\d+), not waiting$"#
+)]
+fn drag_not_waiting(
+    w: &mut UiWorld,
+    target: String,
+    x0: f64,
+    y0: f64,
+    x1: f64,
+    y1: f64,
+) -> StepResult {
+    let window = w.window()?;
+    let from = frame_point(window, &target, x0, y0)?;
+    let to = frame_point(window, &target, x1, y1)?;
+    let mut drive = window.stage.drive();
+    drive.press(from, MouseButtons::LEFT).map_err(drive_error)?;
+    drive.move_to(to).map_err(drive_error)?;
+    drive.release(to, MouseButtons::LEFT).map_err(drive_error)?;
+    Ok(())
+}
+
+#[when(
+    regex = r#"^the person presses "([^"]+)" and drags in the frame "([^"]+)" from (\d+), (\d+) to (\d+), (\d+)$"#
+)]
+fn nudge_then_drag(
+    w: &mut UiWorld,
+    chord: String,
+    target: String,
+    x0: f64,
+    y0: f64,
+    x1: f64,
+    y1: f64,
+) -> StepResult {
+    presses(w, chord)?;
+    drags_in_frame(w, target, x0, y0, x1, y1)
+}
+
+/// Past the wait after a key press before the overlay reads again.
+#[when("the canvas has had time to settle")]
+fn canvas_settled(w: &mut UiWorld) -> StepResult {
+    let window = w.window()?;
+    window.stage.drive().advance(400).map_err(drive_error)?;
+    window.rest()
+}
+
+#[then("no ghost is left on the canvas")]
+fn no_ghost(w: &mut UiWorld) -> StepResult {
+    let window = w.window()?;
+    let overlay = overlay_part(window, "overlay")?;
+    let engine = window.engine();
+    let dropping = engine.read_by_name(overlay, "dropping");
+    let ghost = engine.read_by_name(overlay, "ghost");
+    if ghost != Value::Null || dropping != Value::Bool(false) {
+        return Err(format!(
+            "ghost {ghost:?} still shown, dropping {dropping:?}"
+        ));
+    }
+    let frame = window.frame("Desktop")?;
+    if let Some(outline) = ljos_drive::find_below(engine, frame, "selectionOutline") {
+        let opacity = engine.read_by_name(outline, "opacity").to_number();
+        if opacity != 1.0 {
+            return Err(format!("the outline is still dim, at {opacity}"));
+        }
+    }
+    Ok(())
+}
+
 /// Each frame's outline while nothing covers it: where a person saw it.
 struct OutlineWatch {
     overlay: ObjectId,
@@ -1541,7 +1717,9 @@ fn holds_in_frame(
         .map_err(drive_error)?;
     window.rest()?;
     window.stage.drive().move_to(to).map_err(drive_error)?;
-    window.rest()
+    window.rest()?;
+    w.held = Some(to);
+    Ok(())
 }
 
 fn overlay_part(window: &Window, name: &str) -> Result<ObjectId, String> {
