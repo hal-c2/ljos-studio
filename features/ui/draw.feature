@@ -92,3 +92,33 @@ Feature: Drawing on the canvas and writing text where it is
     When the person double-clicks the frame "Desktop" at 25, 65
     Then the canvas says "This text is an expression: change it in the inspector"
     And the canvas has no text being written
+
+  Scenario: A letter picks the tool while the canvas has the keys
+    Given the person has clicked the frame "Desktop" at 300, 20
+    When the person presses "R"
+    And the person drags in the frame "Desktop" from 30, 100 to 130, 160
+    Then the file "Main.qml" says "x: 30; y: 100; width: 100; height: 60;"
+
+  Scenario: V puts the tool down again
+    Given the person has clicked the frame "Desktop" at 300, 20
+    And the person has pressed "R"
+    When the person presses "V"
+    And the person drags in the frame "Desktop" from 30, 100 to 130, 160
+    Then the file "Main.qml" does not say "x: 30; y: 100"
+
+  Scenario: Holding space moves the view, and letting go gives back the tool
+    Given the person has clicked the frame "Desktop" at 300, 20
+    When the person holds "Space" and drags in the frame "Desktop" from 60, 40 to 100, 70
+    Then the frame "Desktop" has moved
+    And the file "Main.qml" does not say "x: 340"
+    And the button "Select" is on
+
+  Scenario: A letter written in a field is not a tool
+    Given the person has double-clicked the frame "Desktop" at 25, 25
+    When the person types "R" on the canvas
+    Then the button "Select" is on
+
+  Scenario: With the hand a drag moves the view
+    Given the person has clicked the button "Hand"
+    When the person holds "Alt" and drags in the frame "Desktop" from 60, 40 to 100, 70
+    Then the frame "Desktop" has moved

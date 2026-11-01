@@ -2171,6 +2171,7 @@ fn double_clicks_layer(w: &mut UiWorld, name: String) -> StepResult {
     window.rest()
 }
 
+#[given(regex = r#"^the person has double-clicked the frame "([^"]+)" at (\d+), (\d+)$"#)]
 #[when(regex = r#"^the person double-clicks the frame "([^"]+)" at (\d+), (\d+)$"#)]
 fn double_clicks_frame(w: &mut UiWorld, target: String, x: f64, y: f64) -> StepResult {
     let window = w.window()?;
@@ -2201,6 +2202,55 @@ fn writes_on_canvas(w: &mut UiWorld, text: String, key: String) -> StepResult {
     window.rest()?;
     window.stage.drive().chord(&chord, 0).map_err(drive_error)?;
     window.rest()
+}
+
+#[when(regex = r#"^the person types "([^"]+)" on the canvas$"#)]
+fn types_on_canvas(w: &mut UiWorld, key: String) -> StepResult {
+    let window = w.window()?;
+    let chord = Chord::parse(&key)?;
+    window.stage.drive().chord(&chord, 0).map_err(drive_error)?;
+    window.rest()
+}
+
+#[when(
+    regex = r#"^the person holds "([^"]+)" and drags in the frame "([^"]+)" from (\d+), (\d+) to (\d+), (\d+)$"#
+)]
+fn holds_and_drags(
+    w: &mut UiWorld,
+    key: String,
+    target: String,
+    from_x: f64,
+    from_y: f64,
+    to_x: f64,
+    to_y: f64,
+) -> StepResult {
+    let window = w.window()?;
+    let before = frame_bounds(window, &target)?;
+    let from = frame_point(window, &target, from_x, from_y)?;
+    let to = frame_point(window, &target, to_x, to_y)?;
+    let chord = Chord::parse(&key)?;
+    window.stage.drive().key_down(&chord).map_err(drive_error)?;
+    window.rest()?;
+    window
+        .stage
+        .drive()
+        .press(from, MouseButtons::LEFT)
+        .map_err(drive_error)?;
+    window.rest()?;
+    // In the steps a hand makes: a view starts following past a threshold.
+    let aside = Point::new((from.x + to.x) / 2.0, (from.y + to.y) / 2.0);
+    window.stage.drive().move_to(aside).map_err(drive_error)?;
+    window.stage.drive().move_to(to).map_err(drive_error)?;
+    window
+        .stage
+        .drive()
+        .release(to, MouseButtons::LEFT)
+        .map_err(drive_error)?;
+    window.rest()?;
+    window.stage.drive().key_up(&chord).map_err(drive_error)?;
+    window.rest()?;
+    w.frame_before = Some(before);
+    Ok(())
 }
 
 #[then("the canvas has no text being written")]
