@@ -45,7 +45,7 @@ expression: value
         "$ref": "#/$defs/Action"
       },
       "author": {
-        "description": "Who says it.",
+        "description": "Who says it; the caller's own name if absent.",
         "type": [
           "string",
           "null"
