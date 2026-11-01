@@ -560,7 +560,7 @@ impl Studio {
     /// its breakpoint. Only the condition `state_edit` writes for a
     /// breakpoint is read as one: any other `when` is the app's own logic,
     /// which only running it can answer.
-    fn variant(&mut self, doc: &str, width: u32) -> Option<String> {
+    pub(crate) fn variant(&mut self, doc: &str, width: u32) -> Option<String> {
         let root = Address::Path("root".to_owned());
         let (_, node) = self.session.resolve(doc, &root).ok()?;
         let condition = Target::of_width(width).condition(&node.id?);
