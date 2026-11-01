@@ -138,11 +138,21 @@ Panel {
                     text: row.modelData.id
                     Accessible.name: "Name of " + row.modelData.label
                     // What was typed and left is not offered again.
-                    onVisibleChanged: if (visible) { text = row.modelData.id; forceActiveFocus() }
+                    // Hidden, it would keep the keys, and the next Return would name the row left.
+                    onVisibleChanged: {
+                        if (visible) {
+                            text = row.modelData.id
+                            forceActiveFocus()
+                        } else {
+                            focus = false
+                        }
+                    }
                     // Left open it covers its row, and clicks there would select nothing.
                     // Another window taking the focus is a trip, to copy a name.
                     onActiveFocusChanged: if (!activeFocus && Window.active && panel.naming === row.modelData.node) panel.naming = ""
                     onAccepted: {
+                        if (!visible)
+                            return
                         panel.naming = ""
                         if (text !== row.modelData.id) {
                             panel.workspace.dispatch("node_arrange", {

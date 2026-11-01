@@ -547,6 +547,37 @@ Feature: Objects are placed by the tools a canvas drag drops through
     And the file "Main.qml" contains "target: b"
     And the file "Main.qml" contains "y: 10"
 
+  @preview
+  Scenario: Aligning a 3D object says it has no box
+    Given the file "Scene.qml":
+      """qml
+      import QtQuick
+      import QtQuick3D
+
+      Item {
+          id: root
+          width: 320; height: 240
+          Rectangle { id: flat; x: 10; y: 10; width: 40; height: 40 }
+          View3D {
+              anchors.fill: parent
+              PerspectiveCamera { z: 300 }
+              Model { id: cube; source: "#Cube" }
+          }
+      }
+      """
+    And the studio tools are connected with the capabilities "inspect, mutate, run"
+    And the agent has called the tool "preview_open" with:
+      """json
+      {"doc": "Scene.qml"}
+      """
+    When the agent calls the tool "node_arrange" with:
+      """json
+      {"action": "align", "doc": "Scene.qml", "nodes": [{"id": "flat"}, {"id": "cube"}], "align": "top"}
+      """
+    Then the agent is refused with "not_actionable"
+    And the refusal's "/details/kind" is "not_shown"
+    And the refusal's message matches "has no box"
+
   Scenario: An object without an id cannot be placed into a state
     Given the studio tools are connected
     And the file "Plain.qml":

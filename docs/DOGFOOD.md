@@ -430,7 +430,7 @@ hit that limit.
   the pointer, and there are no 3D handles or orbit: a 3D object is chosen in
   Layers and edited in the inspector.
 
-**Phase 5, at the final commit** (7d77044, machine load 10 to 17 from other
+**Phase 5, measured before the review fixes** (machine load 10 to 17 from other
 builds). Selection to inspector, driver's clock advanced between clicks: p50 /
 p95 / max 10.1 / 11.3 / 15.9 ms, and 14.8 / 16.7 / 18.0 at load 17. Edit to picture, one per 250 ms: stock
 22.4 ms p50 on the data drive, whose p95 of 904.1 is a stalled rename; with the

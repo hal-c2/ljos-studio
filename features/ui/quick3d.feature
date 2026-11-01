@@ -46,6 +46,14 @@ Feature: A person places a 3D view from the palette
     Then the window says "This object has no box on the canvas"
     And the inspector has no button "Align Left"
 
+  @preview
+  Scenario: The line-up buttons come back with an object that has a box
+    Given the person has searched the palette for "View3D"
+    And the person has placed "View3D" from the palette
+    And the person has selected "Model" in the layers panel
+    When the person selects "View3D view3D1" in the layers panel
+    Then the inspector has the button "Align Left"
+
   Scenario: A material's colour is picked in its own row
     Given the person has searched the palette for "View3D"
     And the person has placed "View3D" from the palette
