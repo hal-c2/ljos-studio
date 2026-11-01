@@ -299,10 +299,17 @@ fn open(studio: &Mutex<Studio>, a: OpenArgs) -> Result<OpenOut, SurfaceError> {
         let open = previews.open.as_mut().expect("checked");
         let mut reloads = Vec::new();
         let changed = change(open, size, target, state, &aliases, &mut reloads);
+        // A mock switched in starts the app again, with everything showing.
+        let restarted = reloads
+            .iter()
+            .any(|reload| matches!(reload, Reload::Applied { .. }));
         for reload in reloads {
             previews.record(reload, started_at);
         }
         changed.map_err(|e| preview_error(previews.failed(e)))?;
+        if restarted {
+            previews.write_hidden();
+        }
     } else {
         // One preview at a time: the last one ends before the next starts.
         if let Some(mut last) = previews.open.take() {

@@ -2133,7 +2133,7 @@ fn inspector_has_no_button(w: &mut UiWorld, name: String) -> StepResult {
         .map_or(Ok(()), |_| Err(format!("a button {name:?}")))
 }
 
-#[when(regex = r#"^the person enters "([^"]+)" in the colour picker$"#)]
+#[when(regex = r#"^the person enters "([^"]*)" in the colour picker$"#)]
 fn enters_colour(w: &mut UiWorld, value: String) -> StepResult {
     let window = w.window()?;
     let tree = window.tree();
@@ -2141,6 +2141,39 @@ fn enters_colour(w: &mut UiWorld, value: String) -> StepResult {
         .cloned()
         .ok_or_else(|| format!("no colour field; the window holds {}", names(&tree)))?;
     window.enter(&field, &value)
+}
+
+#[when(regex = r#"^the person drags the picker's "([^"]+)" to its middle$"#)]
+fn drags_picker_slider(w: &mut UiWorld, name: String) -> StepResult {
+    let window = w.window()?;
+    let tree = window.tree();
+    let slider = find(&tree, &|n| n.name == name && n.role == "slider")
+        .cloned()
+        .ok_or_else(|| format!("no slider {name:?}; the window holds {}", names(&tree)))?;
+    let key = slider.key.ok_or("the slider has no key")?;
+    let mut driver = window.stage.drive();
+    let middle = driver.aim_at_node(key).map_err(|why| format!("{why:?}"))?;
+    driver
+        .press(middle, MouseButtons::LEFT)
+        .map_err(drive_error)?;
+    // Past the threshold, as a hand goes: the end is the slider's middle.
+    let start = Point::new(middle.x - 12.0, middle.y);
+    driver.move_to(start).map_err(drive_error)?;
+    driver.move_to(middle).map_err(drive_error)?;
+    driver
+        .release(middle, MouseButtons::LEFT)
+        .map_err(drive_error)?;
+    window.rest()
+}
+
+#[then(regex = r#"^the colour picker waits on nothing$"#)]
+fn picker_waits_on_nothing(w: &mut UiWorld) -> StepResult {
+    let window = w.window()?;
+    let picker = ljos_drive::find_below(window.engine(), window.root, "colourPicker")
+        .ok_or("the window has no colour picker")?;
+    (window.engine().read_by_name(picker, "waiting") == Value::Bool(false))
+        .then_some(())
+        .ok_or_else(|| "the colour picker still waits for the preview".to_owned())
 }
 
 #[then(regex = r#"^the colour picker holds "([^"]+)"$"#)]

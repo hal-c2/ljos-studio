@@ -263,6 +263,37 @@ impl Fixture {
 }
 
 #[test]
+fn a_window_hears_after_a_renamed_object_is_hidden_under_its_new_id() {
+    let f = Fixture::new();
+    f.call("preview_open", json!({ "doc": "Shell.qml" }))
+        .unwrap();
+    f.call(
+        "node_arrange",
+        json!({ "action": "hide", "doc": "Shell.qml", "nodes": [{ "id": "shell" }] }),
+    )
+    .unwrap();
+    let seen = f.seen.clone();
+    f.server.studio().lock().unwrap().watch(Arc::new(move || {
+        seen.lock().unwrap().calls.push("told".to_owned());
+    }));
+    f.calls();
+    f.call(
+        "node_arrange",
+        json!({ "action": "rename", "doc": "Shell.qml", "nodes": [{ "id": "shell" }], "name": "heading", "generation": 1 }),
+    )
+    .unwrap();
+    let calls = f.calls();
+    let wrote = calls
+        .iter()
+        .position(|c| c == "write heading.visible=false")
+        .unwrap_or_else(|| panic!("never written: {calls:?}"));
+    assert!(
+        calls[wrote..].iter().any(|c| c == "told"),
+        "nobody told after the write: {calls:?}"
+    );
+}
+
+#[test]
 fn a_preview_opens_on_a_target_with_its_mocks() {
     let f = Fixture::new();
     let out = f

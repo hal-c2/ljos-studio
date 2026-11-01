@@ -1276,6 +1276,72 @@ fn edit(
         .map_err(error)
 }
 
+/// Sets a binding. A property the object declares with a value has its value
+/// there: a binding beside it would set it twice, which the app refuses. An
+/// alias has its target there, which stays.
+fn set(
+    studio: &Mutex<Studio>,
+    doc: &str,
+    generation: Option<u64>,
+    op: &Op,
+    dry_run: bool,
+) -> Result<EditOut, SurfaceError> {
+    let (node, name, value) = match op {
+        Op::SetBinding { node, name, value } => (node, name, Some(value)),
+        Op::RemoveBinding { node, name } => (node, name, None),
+        _ => return edit(studio, doc, generation, op, dry_run),
+    };
+    let mut studio = lock(studio);
+    // An address that names nothing is the edit's to refuse, as it refuses it.
+    let object = studio
+        .session
+        .resolve(doc, node)
+        .ok()
+        .map(|(_, object)| object);
+    let declared = object
+        .iter()
+        .flat_map(|object| &object.bindings)
+        .find(|b| b.declared && !b.alias && b.name == *name);
+    let Some(declared) = declared else {
+        return studio
+            .session
+            .edit(doc, generation, op, dry_run)
+            .map(EditOut::from)
+            .map_err(error);
+    };
+    // DECISION: refused, not replaced. It would throw away an object and its
+    // members for a value, which `Component` and the like do not even take.
+    if declared.holds_objects {
+        return Err(SurfaceError::new(
+            ErrorCode::NotActionable,
+            format!("`{name}` holds an object: change it in the code"),
+        )
+        .with_details(json!({ "kind": "holds_objects" })));
+    }
+    // The edit would answer that there is no such binding, beside a row that
+    // shows it. A declaration is not a binding to take away.
+    let Some(value) = value else {
+        return Err(SurfaceError::new(
+            ErrorCode::NotActionable,
+            format!("`{name}` is declared with this value: take it away in the code"),
+        )
+        .with_details(json!({ "kind": "declared" })));
+    };
+    // Whether the value can be written at all, and by this writer.
+    studio
+        .session
+        .edit(doc, generation, op, true)
+        .map_err(error)?;
+    // The range is of the current text: an older generation has to read again.
+    let current = studio.session.text(doc).map_err(error)?.1;
+    let range = (generation.is_none_or(|g| g == current)).then_some(declared.start..declared.end);
+    studio
+        .session
+        .replace_text(doc, generation, range, value, dry_run)
+        .map(EditOut::from)
+        .map_err(error)
+}
+
 pub(crate) fn registry(studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
     let registry = crate::place_tools::add(edits(studio), studio);
     let registry = crate::preview_tools::add(registry, studio);
@@ -1789,7 +1855,7 @@ fn edits(studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
                             value: literal(value).to_qml(),
                         },
                     };
-                    edit(&studio, &a.doc, a.generation, &op, a.dry_run)
+                    set(&studio, &a.doc, a.generation, &op, a.dry_run)
                 }
             }),
         )
@@ -1816,7 +1882,7 @@ fn edits(studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
                             value,
                         },
                     };
-                    edit(&studio, &a.doc, a.generation, &op, a.dry_run)
+                    set(&studio, &a.doc, a.generation, &op, a.dry_run)
                 }
             }),
         )
