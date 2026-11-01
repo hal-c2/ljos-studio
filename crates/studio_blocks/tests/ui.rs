@@ -3345,6 +3345,76 @@ fn zoom_kept_middle(w: &mut UiWorld, target: String) -> StepResult {
     Ok(())
 }
 
+#[when(regex = r"^the person zooms in with the button (\d+) times$")]
+fn zooms_in_times(w: &mut UiWorld, times: u32) -> StepResult {
+    w.frame_before = Some(frame_bounds(w.window()?, "Desktop")?);
+    for _ in 0..times {
+        clicks_button(w, "Zoom in".to_owned())?;
+    }
+    Ok(())
+}
+
+#[when("the person pans the canvas with the middle button")]
+fn pans_with_middle(w: &mut UiWorld) -> StepResult {
+    let window = w.window()?;
+    let before = frame_bounds(window, "Desktop")?;
+    let from = before.center();
+    let to = Point::new(from.x + 40.0, from.y + 30.0);
+    window
+        .stage
+        .drive()
+        .press(from, MouseButtons::MIDDLE)
+        .map_err(drive_error)?;
+    window.rest()?;
+    window.stage.drive().move_to(to).map_err(drive_error)?;
+    window
+        .stage
+        .drive()
+        .release(to, MouseButtons::MIDDLE)
+        .map_err(drive_error)?;
+    window.rest()?;
+    w.frame_before = Some(before);
+    Ok(())
+}
+
+#[then(regex = r#"^the frame "([^"]+)" is back where it was$"#)]
+fn frame_back(w: &mut UiWorld, target: String) -> StepResult {
+    let before = w.frame_before.ok_or("no place noted")?;
+    let now = frame_bounds(w.window()?, &target)?;
+    if (now.y0 - before.y0).abs() > 1.0 || (now.x0 - before.x0).abs() > 1.0 {
+        return Err(format!("the frame went from {before:?} to {now:?}"));
+    }
+    Ok(())
+}
+
+#[then(regex = r#"^the button "([^"]+)" is (on|off)$"#)]
+fn button_state(w: &mut UiWorld, name: String, state: String) -> StepResult {
+    let tree = w.window()?.tree();
+    let button = find(&tree, &|n| n.name == name && n.role == "button")
+        .ok_or_else(|| format!("no button {name:?}; the window holds {}", names(&tree)))?;
+    let on = button.states.iter().any(|s| s == "checked");
+    (on == (state == "on"))
+        .then_some(())
+        .ok_or_else(|| format!("{name:?} reads {:?}", button.states))
+}
+
+#[then("the colour picker goes on from grey, with no reading in its hex")]
+fn picker_from_grey(w: &mut UiWorld) -> StepResult {
+    let window = w.window()?;
+    let tree = window.tree();
+    let hex = find(&tree, &|n| n.name == "Colour" && n.key.is_some())
+        .ok_or_else(|| format!("no colour field; the window holds {}", names(&tree)))?;
+    if !hex.value.is_empty() {
+        return Err(format!("the hex holds {:?}", hex.value));
+    }
+    let slider = find(&tree, &|n| n.role == "slider" && n.name == "Hue")
+        .ok_or_else(|| format!("no sliders; the window holds {}", names(&tree)))?;
+    if slider.states.iter().any(|s| s == "disabled") {
+        return Err("the sliders are off".into());
+    }
+    Ok(())
+}
+
 #[then("the inspector asks for something to be selected")]
 fn inspector_asks(w: &mut UiWorld) -> StepResult {
     let window = w.window()?;

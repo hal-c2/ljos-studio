@@ -66,33 +66,77 @@ Panel {
         return out.join(", ")
     }
 
+    // Whether the person has moved the view since it was last centred: then
+    // nothing but Fit takes it back.
+    property bool panned: false
+    // The view is being moved by this panel, not by the person.
+    property bool placing: false
+    function moveView(x, y) {
+        placing = true
+        flick.contentX = x
+        flick.contentY = y
+        placing = false
+    }
+
     // The middle of the view, in the view's own coordinates, unless the wheel
-    // says otherwise: the point under the pointer stays under the pointer.
-    function zoomBy(notches, atX, atY) {
+    // says otherwise: the point under the pointer stays under the pointer. Only
+    // the frame scales; the lines above it stay their size.
+    function zoomTo(wanted, atX, atY) {
         const x = atX === undefined ? flick.width / 2 : atX
         const y = atY === undefined ? flick.height / 2 : atY
         const before = zoom
+        const above = frames.height - (preview === null ? 0 : preview.height * before)
         const onX = (flick.contentX + x - reach) / before
-        const onY = (flick.contentY + y - reach) / before
-        chosenZoom = Math.min(8, Math.max(0.125, zoom * Math.pow(1.25, notches)))
+        const onY = (flick.contentY + y - reach - above) / before
+        chosenZoom = Math.min(8, Math.max(0.125, wanted))
         fitted = false
-        flick.contentX = onX * chosenZoom + reach - x
-        flick.contentY = onY * chosenZoom + reach - y
+        moveView(onX * chosenZoom + reach - x, onY * chosenZoom + reach + above - y)
+    }
+    // From a centred frame the corner stays put, so a frame too big for the
+    // view at its real size shows its start rather than its middle.
+    function actualSize() {
+        if (fitted && !panned) {
+            const above = frames.height - (preview === null ? 0 : preview.height * zoom)
+            zoomTo(1, panel.reach - flick.contentX, panel.reach + above - flick.contentY)
+        } else {
+            zoomTo(1)
+        }
+    }
+    function zoomBy(notches, atX, atY) {
+        zoomTo(zoom * Math.pow(1.25, notches), atX, atY)
     }
 
     function centre() {
-        flick.contentX = reach + (frames.width - flick.width) / 2
-        flick.contentY = reach + (frames.height - flick.height) / 2
+        moveView(reach + (frames.width - flick.width) / 2, reach + (frames.height - flick.height) / 2)
     }
-    onZoomChanged: if (fitted) Qt.callLater(centre)
-    onReachChanged: Qt.callLater(centre)
-    onFittedChanged: if (fitted) Qt.callLater(centre)
-    onPreviewChanged: if (fitted) Qt.callLater(centre)
+    function fitNow() {
+        fitted = true
+        panned = false
+        centre()
+    }
+    function centreIfUntouched() {
+        if (fitted && !panned)
+            centre()
+    }
+    // A new picture is a new `preview` whose frame has not changed: only a
+    // frame of another size is a reason to centre.
+    readonly property string frameSize: preview === null ? "" : preview.width + "x" + preview.height
+    onFrameSizeChanged: Qt.callLater(centreIfUntouched)
+    onZoomChanged: Qt.callLater(centreIfUntouched)
+    onFittedChanged: if (fitted) Qt.callLater(centreIfUntouched)
+    // The canvas grew or shrank round the frame: what is in view stays there.
+    property real reachWas: 0
+    onReachChanged: {
+        const by = reach - reachWas
+        reachWas = reach
+        if (fitted && !panned)
+            Qt.callLater(centre)
+        else
+            moveView(flick.contentX + by, flick.contentY + by)
+    }
 
     // A step back from the panels and from the frame on it.
     fill: Colors.surfaceHover
-
-    // Dots that travel with the canvas and grow with it, below the frame.
 
     // The middle button pans wherever it presses, over the frame too.
     MouseArea {
@@ -105,8 +149,8 @@ Panel {
             fromY = flick.contentY + mouse.y
         }
         onPositionChanged: (mouse) => {
-            flick.contentX = fromX - mouse.x
-            flick.contentY = fromY - mouse.y
+            panel.panned = true
+            panel.moveView(fromX - mouse.x, fromY - mouse.y)
         }
     }
 
@@ -152,6 +196,8 @@ Panel {
         boundsBehavior: Flickable.StopAtBounds
         contentWidth: frames.width + 2 * panel.reach
         contentHeight: frames.height + 2 * panel.reach
+        onContentXChanged: if (!panel.placing) panel.panned = true
+        onContentYChanged: if (!panel.placing) panel.panned = true
 
         WheelHandler {
             acceptedModifiers: Qt.ControlModifier
@@ -163,6 +209,9 @@ Panel {
             x: panel.reach
             y: panel.reach
             spacing: Spacing.xs
+            // The frame arrives after the preview that asks for it.
+            onWidthChanged: panel.centreIfUntouched()
+            onHeightChanged: panel.centreIfUntouched()
 
             // One frame per target the document runs on; a session runs
             // one preview at a time. A count, not the preview: `preview` is a
@@ -318,14 +367,22 @@ Panel {
             text: "Select"
             checkable: true
             checked: !panel.hand
-            onClicked: panel.hand = false
+            // A click toggles a checkable button and ends its binding, and
+            // clicking the tool in use is not putting it down.
+            onClicked: {
+                panel.hand = false
+                checked = Qt.binding(() => !panel.hand)
+            }
         }
         IconButton {
             icon_: "hand"
             text: "Hand"
             checkable: true
             checked: panel.hand
-            onClicked: panel.hand = true
+            onClicked: {
+                panel.hand = true
+                checked = Qt.binding(() => panel.hand)
+            }
         }
         IconButton {
             icon_: "play"
@@ -356,10 +413,7 @@ Panel {
             text: Math.round(panel.zoom * 100) + "%"
             font.pixelSize: Typography.captionSize
             Accessible.name: "Actual size"
-            onClicked: {
-                panel.chosenZoom = 1
-                panel.fitted = false
-            }
+            onClicked: panel.actualSize()
         }
         IconButton {
             icon_: "plus"
@@ -369,7 +423,7 @@ Panel {
         IconButton {
             icon_: "fit"
             text: "Fit"
-            onClicked: panel.fitted = true
+            onClicked: panel.fitNow()
         }
     }
 
@@ -389,14 +443,11 @@ Panel {
     // `preview_screenshot` takes a size.
     Shortcut {
         sequence: "Ctrl+0"
-        onActivated: panel.fitted = true
+        onActivated: panel.fitNow()
     }
     Shortcut {
         sequence: "Ctrl+1"
-        onActivated: {
-            panel.chosenZoom = 1
-            panel.fitted = false
-        }
+        onActivated: panel.actualSize()
     }
     Shortcut {
         sequences: ["Ctrl+=", "Ctrl++"]

@@ -161,6 +161,7 @@ Feature: The inspector shows colours and every declared property
     Then the window says "nope is not a colour"
     And the window does not say "Worked out by "nope": picking replaces it"
     And the colour picker waits on nothing
+    And the colour picker goes on from grey, with no reading in its hex
 
   Scenario: Text that is no colour has no picker, however it looks
     When the person replaces "property var stack" with "property string code: \"#12345\"\n    property string label: \"red\"\n    property string objectTag: \"orange\"" in the code view
@@ -242,9 +243,16 @@ Feature: The inspector shows colours and every declared property
     And the person clicks the button "Pick accentColor"
     Then the window shows a refusal that says "top"
     And the colour picker waits on nothing
+    And the colour picker goes on from grey, with no reading in its hex
 
   Scenario: The picker of a colour an expression works out starts from what the preview shows
     When the person clicks the button "Pick accentColor"
     Then the colour picker holds "#00ff00"
     And the window says "Worked out by Qt.rgba(0, 1, 0, 1): picking replaces it"
     And the file "Main.qml" says "Qt.rgba(0, 1, 0, 1)"
+
+  Scenario: A refused value can be bound as the refusal says
+    When the person sets "width" to "parent.width" in the inspector
+    And the person clicks the button "Bind width to parent.width"
+    Then the file "Main.qml" says "width: parent.width"
+    And the window shows no refusal

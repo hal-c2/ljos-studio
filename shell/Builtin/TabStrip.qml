@@ -32,7 +32,11 @@ Rectangle {
                 Accessible.role: Accessible.PageTab
                 implicitHeight: 36
                 implicitWidth: label.implicitWidth + 2 * Spacing.xs
-                onClicked: strip.current = index
+                onClicked: {
+                    strip.current = index
+                    // A click toggles a checkable button and ends its binding.
+                    checked = Qt.binding(() => shown)
+                }
 
                 Text {
                     id: label
