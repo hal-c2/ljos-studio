@@ -10,7 +10,7 @@ import { test } from "node:test";
 import { TAG, VERSION } from "./preview.js";
 import { servePreview } from "./page.js";
 
-function page({ throwing }) {
+function page({ throwing, inspecting = true }) {
   const mounted = new Set();
   const counts = { mounted: 0, remade: 0, told: 0 };
   const listeners = [];
@@ -30,7 +30,7 @@ function page({ throwing }) {
       if (!mounted.has(root)) throw new Error("only a root mounted with { reloadable: true } can be reloaded");
       counts.remade += 1;
     },
-    inspect: () => ({ outline: () => ({ text: "the root" }) }),
+    inspect: inspecting ? () => ({ outline: () => ({ text: "the root" }) }) : undefined,
     tell: () => (counts.told += 1),
     compile: async () => ({ component: {}, base: "/p/" }),
     window: { console, addEventListener: (_, f) => listeners.push(f), location: { href: "http://page/" } },
@@ -80,5 +80,43 @@ test("the inspector does not answer for a root that is gone", async () => {
   assert.equal((await ask({ call: "outline" })).answer, "outline");
   throwing = true;
   await ask(opened);
-  assert.equal((await ask({ call: "outline" })).answer, "not_supported");
+  const answer = await ask({ call: "outline" });
+  assert.equal(answer.answer, "refused");
+  assert.equal(answer.code, "not_running");
+});
+
+const inspecting = [
+  { call: "screenshot", max_side: 10 },
+  { call: "outline" },
+  { call: "read", id: "a", names: ["x"] },
+  { call: "write", id: "a", name: "x", value: 1 },
+  { call: "click", id: "a" },
+  { call: "pick", x: 1, y: 1 },
+];
+
+test("an app that failed on a switch is not_running to all that ask of it, until a save mends it", async () => {
+  let throwing = false;
+  const { ask } = page({ throwing: () => throwing });
+  await ask(opened);
+  throwing = true;
+  await ask({ call: "alias", module: "App", dir: "mocks/App", changed: {} });
+  for (const request of inspecting) {
+    const answer = await ask(request);
+    assert.deepEqual([request.call, answer.answer, answer.code], [request.call, "refused", "not_running"]);
+    assert.match(answer.message, /failed to start/);
+    assert.equal(answer.ljos_web_request, undefined);
+  }
+  throwing = false;
+  assert.equal((await ask({ call: "reload", changed: {} })).outcome, "applied");
+  assert.equal((await ask({ call: "outline" })).answer, "outline");
+});
+
+test("a running page built without the inspector still waits on ljos-web", async () => {
+  const { ask } = page({ throwing: () => false, inspecting: false });
+  await ask(opened);
+  for (const request of inspecting) {
+    const answer = await ask(request);
+    assert.deepEqual([request.call, answer.answer], [request.call, "not_supported"]);
+    assert.equal(typeof answer.ljos_web_request, "number");
+  }
 });

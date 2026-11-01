@@ -4,7 +4,8 @@
 // A page given QML text runs it through a Compiler (`compiler.js`); without
 // one `open` answers that it could not start. What is asked of the running
 // app is `ljos-web/inspect`'s to answer. A page built without it refuses as
-// `not_supported`, never with a made-up answer.
+// `not_supported`, never with a made-up answer. One whose app failed to start
+// has nothing to answer for, and says that instead: a save can mend it.
 
 import { TAG, VERSION } from "./preview.js";
 
@@ -65,6 +66,14 @@ export function servePreview({ element, mount, reload: remade, inspect, tell, co
   }
 
   const waiting = (call, why, request) => ({ answer: "not_supported", message: `${call}: ${why}`, ljos_web_request: request });
+
+  // No inspector to ask. A page that compiles and has no root has an app that
+  // failed to start, which no ljos-web request will change; the save that mends
+  // it starts it again.
+  const unanswered = (call, why, request) =>
+    compile && !running
+      ? { answer: "refused", code: "not_running", message: `${call}: the app failed to start; saving a fix starts it again` }
+      : waiting(call, why, request);
 
   // What the compiler said, as one message a person reads.
   const said = (diagnostics) =>
@@ -189,28 +198,28 @@ export function servePreview({ element, mount, reload: remade, inspect, tell, co
       return { answer: "done" };
     },
     async screenshot(r) {
-      if (!inspector) return waiting("screenshot", "a page cannot draw its DOM into a picture; ljos-web has no capture of a mounted root", 2);
+      if (!inspector) return unanswered("screenshot", "a page cannot draw its DOM into a picture; ljos-web has no capture of a mounted root", 2);
       const taken = await inspector.screenshot({ max_size: r.max_side });
       if (taken.error) return { answer: "refused", code: taken.error, message: taken.message };
       let text = "";
       for (let at = 0; at < taken.png.length; at += 0x8000) text += String.fromCharCode(...taken.png.subarray(at, at + 0x8000));
       return { answer: "picture", png: btoa(text), width: taken.width, height: taken.height };
     },
-    outline: () => (inspector ? { answer: "outline", text: inspector.outline().text } : waiting("outline", "ljos-web exposes no tree of a mounted root's objects", 3)),
+    outline: () => (inspector ? { answer: "outline", text: inspector.outline().text } : unanswered("outline", "ljos-web exposes no tree of a mounted root's objects", 3)),
     read(r) {
-      if (!inspector) return waiting("read", "ljos-web keeps a component's ids private to its context", 4);
+      if (!inspector) return unanswered("read", "ljos-web keeps a component's ids private to its context", 4);
       const values = inspector.read(r.id, r.names);
       return values ? { answer: "values", values } : { answer: "no_object", id: r.id };
     },
     write(r) {
-      if (!inspector) return waiting("write", "ljos-web keeps a component's ids private to its context", 4);
+      if (!inspector) return unanswered("write", "ljos-web keeps a component's ids private to its context", 4);
       if (inspector.write(r.id, r.name, r.value)) return { answer: "done" };
       // Both come back false, and only one of them means the object is not there.
       if (!inspector.find(r.id)) return { answer: "no_object", id: r.id };
       return { answer: "refused", code: "no_property", message: `\`${r.id}\` has no property \`${r.name}\`` };
     },
     click(r) {
-      if (!inspector) return waiting("click", "ljos-web keeps a component's ids private to its context", 4);
+      if (!inspector) return unanswered("click", "ljos-web keeps a component's ids private to its context", 4);
       const done = inspector.click(r.at ? { at: r.at } : r.id);
       if (done.error === "not_found") return { answer: "no_object", id: r.id };
       if (done.error) return { answer: "refused", code: done.error, message: done.message };
@@ -221,7 +230,7 @@ export function servePreview({ element, mount, reload: remade, inspect, tell, co
       return { answer: "logs", lines: logs.slice(first), next: dropped + logs.length };
     },
     pick(r) {
-      if (!inspector) return waiting("pick", "ljos-web's objects and elements carry no place in the QML they were declared in", 5);
+      if (!inspector) return unanswered("pick", "ljos-web's objects and elements carry no place in the QML they were declared in", 5);
       const source = inspector.pick(r.x, r.y)?.source;
       return { answer: "picked", declared: source ? { ...source, file: inProject(source.file) } : null };
     },

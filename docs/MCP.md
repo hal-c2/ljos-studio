@@ -172,6 +172,9 @@ shows it; the watcher's quiet time is not on that path.
   preview tool through `ljos-web/inspect`. A page built without it refuses
   `not_actionable` with `details.kind: "not_supported"`, never with a
   made-up answer.
+  One whose app failed to start refuses `not_actionable` with
+  `details.kind: "refused"` and `details.code: "not_running"`: no ljos-web
+  request will change that, and a save that mends it starts it again.
 - DECISION: a preview in a browser keeps the app's state over a reload, as
   `--watch` does; a file read as data is told to what reads it, nothing
   compiled; switching a block between live and mocked starts the app again,
