@@ -120,34 +120,43 @@ struct Types<'s> {
     qmldirs: HashMap<String, Vec<(String, String)>>,
 }
 
-/// Every signal `node` of the document `doc` (whose text is `source`) has,
-/// a derived type's before its base's; `None` when its type is one Studio
-/// finds described nowhere, so that what it has is not known.
-pub fn of(store: &dyn Store, doc: &str, source: &str, node: &Node) -> Option<Vec<Signal>> {
-    let (found, described) = look_up(store, doc, source, node)?;
-    (described == Described::Whole).then(|| found.done())
+/// What Studio can say of `node`'s type, all from the one lookup, which reads
+/// every type dump and `qmldir` of the project.
+#[derive(Default)]
+pub struct TypeSays {
+    /// Every signal it has, a derived type's before its base's; `None` when
+    /// its type is one Studio finds described nowhere, so that what it has is
+    /// not known.
+    pub signals: Option<Vec<Signal>>,
+    /// What its project says it takes: the properties its files and type dumps
+    /// declare that may be written from outside, the nearest first. Known even
+    /// when what the type inherits is not.
+    pub takes: Vec<String>,
+    /// Those of them no string can be written to.
+    pub not_text: Vec<String>,
 }
 
-/// What `node`'s type takes that its project says: the properties its files
-/// and type dumps declare, the nearest first. Known even when what the type
-/// inherits is not.
-pub fn not_text(store: &dyn Store, doc: &str, source: &str, node: &Node) -> Vec<String> {
-    look_up(store, doc, source, node)
-        .map(|(found, _)| found.not_text)
-        .unwrap_or_default()
-}
-
-pub fn properties(store: &dyn Store, doc: &str, source: &str, node: &Node) -> Vec<String> {
-    let Some((found, _)) = look_up(store, doc, source, node) else {
-        return Vec::new();
+/// All that of `node` of the document `doc`, whose text is `source`.
+pub fn described(store: &dyn Store, doc: &str, source: &str, node: &Node) -> TypeSays {
+    let Some((mut found, whole)) = look_up(store, doc, source, node) else {
+        return TypeSays::default();
     };
-    let mut seen = Vec::new();
-    for name in found.taken {
-        if !seen.contains(&name) {
-            seen.push(name);
+    let mut takes: Vec<String> = Vec::new();
+    for name in &found.taken {
+        if !takes.contains(name) {
+            takes.push(name.clone());
         }
     }
-    seen
+    TypeSays {
+        not_text: std::mem::take(&mut found.not_text),
+        signals: (whole == Described::Whole).then(|| found.done()),
+        takes,
+    }
+}
+
+/// `described`'s signals alone.
+pub fn of(store: &dyn Store, doc: &str, source: &str, node: &Node) -> Option<Vec<Signal>> {
+    described(store, doc, source, node).signals
 }
 
 fn look_up(store: &dyn Store, doc: &str, source: &str, node: &Node) -> Option<(Found, Described)> {
@@ -285,7 +294,7 @@ impl Types<'_> {
             found.not_text.extend(
                 ty.properties
                     .iter()
-                    .filter(|p| !studio_core::outline::holds_text(&p.ty))
+                    .filter(|p| !studio_core::outline::takes_string(&p.ty))
                     .map(|p| p.name.clone()),
             );
             found.taken.extend(

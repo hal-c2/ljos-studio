@@ -216,7 +216,7 @@ fn walk(
             .filter_map(|m| match m {
                 QmlMember::Property(p) => {
                     let ty = qml_syntax::text(source, p.type_name.as_ref()?.span);
-                    (!holds_text(ty)).then(|| p.name.name.to_string())
+                    (!takes_string(ty)).then(|| p.name.name.to_string())
                 }
                 _ => None,
             })
@@ -315,20 +315,28 @@ fn declared_signals(source: &str, object: &QmlObject<'_>) -> Vec<DeclaredSignal>
 }
 
 /// Whether a string can be written to a property declared with this type, by
-/// QML's name or a type dump's. What only a run knows, such as an alias, may.
-pub fn holds_text(ty: &str) -> bool {
-    matches!(
+/// QML's name or a type dump's. Every value type qml6 loads a string for takes
+/// one (`"red"`, `"1,2"`, `"1x2"`, a date, a font), as an enum takes a value's
+/// name, so only those that refuse one are listed. An object type refuses one
+/// too, but its name reads like an enum's, so it is still offered.
+pub fn takes_string(ty: &str) -> bool {
+    let refuses = matches!(
         ty,
-        "string"
-            | "url"
-            | "var"
-            | "variant"
-            | "alias"
-            | "QString"
-            | "QUrl"
-            | "QVariant"
-            | "QJSValue"
-    )
+        "int"
+            | "uint"
+            | "qint32"
+            | "quint32"
+            | "qlonglong"
+            | "qulonglong"
+            | "real"
+            | "qreal"
+            | "double"
+            | "float"
+            | "bool"
+            | "matrix4x4"
+            | "QMatrix4x4"
+    );
+    !(refuses || ty.starts_with("list<") || ty.starts_with("QQmlListProperty") || ty.ends_with('*'))
 }
 
 /// Whether an object has an `id` or a literal `objectName`, so that its key

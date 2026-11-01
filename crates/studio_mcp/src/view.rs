@@ -436,11 +436,11 @@ impl Studio {
                 }
             }
             // What its type takes, which the person placing it has not read.
-            let not_text = crate::signals::not_text(self.session.store(), doc, &view.text, &node);
-            for name in crate::signals::properties(self.session.store(), doc, &view.text, &node) {
+            let says = crate::signals::described(self.session.store(), doc, &view.text, &node);
+            for name in says.takes {
                 if !view.inspector.iter().any(|row| row.name == name) {
                     view.inspector.push(Shown {
-                        not_text: not_text.contains(&name),
+                        not_text: says.not_text.contains(&name),
                         name,
                         value: String::new(),
                         colour: false,
@@ -454,8 +454,7 @@ impl Studio {
             if let Ok(Some(model)) = self.session.model(doc, &Address::Node(handle.clone())) {
                 view.roles = model.roles;
             }
-            view.signals = crate::signals::of(self.session.store(), doc, &view.text, &node)
-                .unwrap_or_default();
+            view.signals = says.signals.unwrap_or_default();
             view.selected = handle;
         }
         view
