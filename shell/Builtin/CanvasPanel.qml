@@ -40,6 +40,8 @@ Panel {
     property bool hand: false
     // In play a press is the app's, whichever tool waits for after.
     readonly property bool panning: hand && !playing
+    // What a drag on the frame draws; "" selects and moves.
+    property string drawing: ""
     readonly property real zoom: fitted ? Math.max(0.125, fit) : chosenZoom
     property bool playing: false
     onPlayingChanged: workspace.followPicture(playing)
@@ -307,6 +309,8 @@ Panel {
                             zoom: panel.zoom
                             playing: panel.playing
                             recording: panel.recording
+                            drawing: panel.drawing
+                            onDrawn: panel.drawing = ""
                             onDraggingChanged: panel.dragging = dragging
                             onSaysChanged: panel.says = says
                             Component.onCompleted: refetch()
@@ -409,12 +413,13 @@ Panel {
             icon_: "select"
             text: "Select"
             checkable: true
-            checked: !panel.hand
+            checked: !panel.hand && panel.drawing === ""
             // A click toggles a checkable button and ends its binding, and
             // clicking the tool in use is not putting it down.
             onClicked: {
                 panel.hand = false
-                checked = Qt.binding(() => !panel.hand)
+                panel.drawing = ""
+                checked = Qt.binding(() => !panel.hand && panel.drawing === "")
             }
         }
         IconButton {
@@ -424,15 +429,42 @@ Panel {
             checked: panel.hand
             onClicked: {
                 panel.hand = true
+                panel.drawing = ""
                 checked = Qt.binding(() => panel.hand)
             }
         }
+        Hairline {}
+        Repeater {
+            model: [
+                {label: "Draw rectangle", icon: "frame", kind: "Rectangle"},
+                {label: "Draw text", icon: "text", kind: "Text"}
+            ]
+            delegate: IconButton {
+                required property var modelData
+                icon_: modelData.icon
+                text: modelData.label
+                checkable: true
+                checked: panel.drawing === modelData.kind
+                onClicked: {
+                    panel.hand = false
+                    panel.playing = false
+                    panel.drawing = panel.drawing === modelData.kind ? "" : modelData.kind
+                    checked = Qt.binding(() => panel.drawing === modelData.kind)
+                    canvasFocus.forceActiveFocus()
+                }
+            }
+        }
+        Hairline {}
         IconButton {
             icon_: "play"
             text: "Play"
             checkable: true
             checked: panel.playing
-            onClicked: panel.playing = checked
+            onClicked: {
+                panel.playing = !panel.playing
+                panel.drawing = ""
+                checked = Qt.binding(() => panel.playing)
+            }
         }
     }
 
@@ -482,6 +514,12 @@ Panel {
         font.pixelSize: Typography.captionSize
         Accessible.role: Accessible.StaticText
         Accessible.name: text
+    }
+
+    // The tool is picked with the pointer on a button: Escape still puts it down.
+    Item {
+        id: canvasFocus
+        Keys.onEscapePressed: panel.drawing = ""
     }
 
     // Zoom is the panel's own: it changes no file and no agent needs it, since

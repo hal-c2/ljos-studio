@@ -1958,6 +1958,7 @@ fn window_does_not_say(w: &mut UiWorld, want: String) -> StepResult {
 
 #[then(regex = r#"^the file "([^"]+)" says "(.*)"$"#)]
 fn file_says(w: &mut UiWorld, name: String, want: String) -> StepResult {
+    let want = unescape(&want);
     let got = std::fs::read_to_string(w.dir.path().join(&name)).map_err(|e| e.to_string())?;
     got.contains(&want)
         .then_some(())
@@ -2168,6 +2169,48 @@ fn double_clicks_layer(w: &mut UiWorld, name: String) -> StepResult {
         .click(at, MouseButtons::LEFT, 2)
         .map_err(drive_error)?;
     window.rest()
+}
+
+#[when(regex = r#"^the person double-clicks the frame "([^"]+)" at (\d+), (\d+)$"#)]
+fn double_clicks_frame(w: &mut UiWorld, target: String, x: f64, y: f64) -> StepResult {
+    let window = w.window()?;
+    let at = frame_point(window, &target, x, y)?;
+    window
+        .stage
+        .drive()
+        .click(at, MouseButtons::LEFT, 1)
+        .map_err(drive_error)?;
+    // The first click's selection and its box come back before the second,
+    // as they do between a person's two clicks.
+    window.rest()?;
+    window
+        .stage
+        .drive()
+        .click(at, MouseButtons::LEFT, 1)
+        .map_err(drive_error)?;
+    window.rest()
+}
+
+#[when(regex = r#"^the person writes "(.*)" on the canvas and presses "([^"]+)"$"#)]
+fn writes_on_canvas(w: &mut UiWorld, text: String, key: String) -> StepResult {
+    let text = unescape(&text);
+    let window = w.window()?;
+    let chord = Chord::parse(&key)?;
+    // What was there is selected when the field opens: typing replaces it.
+    window.stage.drive().commit(&text).map_err(drive_error)?;
+    window.rest()?;
+    window.stage.drive().chord(&chord, 0).map_err(drive_error)?;
+    window.rest()
+}
+
+#[then("the canvas has no text being written")]
+fn no_canvas_text(w: &mut UiWorld) -> StepResult {
+    let window = w.window()?;
+    let field = overlay_part(window, "canvasText")?;
+    if window.engine().read_by_name(field, "visible").to_boolean() {
+        return Err("a text field is open on the canvas".into());
+    }
+    Ok(())
 }
 
 #[when(regex = r#"^the person enters "([^"]+)" as the layer's name$"#)]
