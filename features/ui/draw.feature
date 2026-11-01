@@ -32,7 +32,7 @@ Feature: Drawing on the canvas and writing text where it is
   Scenario: A rectangle is drawn where the hand dragged
     Given the person has clicked the button "Draw rectangle"
     When the person drags in the frame "Desktop" from 30, 100 to 130, 160
-    Then the file "Main.qml" says "x: 30; y: 100; width: 100; height: 60;"
+    Then the file "Main.qml" says "    Rectangle {\n        id: rectangle1\n        x: 30\n        y: 100\n        width: 100\n        height: 60\n"
     And the file "Main.qml" says "// The card."
     And the canvas outlines the selection at 30, 100 sized 100 by 60
 
@@ -40,19 +40,19 @@ Feature: Drawing on the canvas and writing text where it is
     Given the person has clicked the button "Draw rectangle"
     And the person has dragged in the frame "Desktop" from 30, 100 to 130, 160
     When the person drags in the frame "Desktop" from 60, 120 to 80, 140
-    Then the file "Main.qml" does not say "x: 30; y: 100"
-    And the file "Main.qml" says "width: 100; height: 60;"
+    Then the file "Main.qml" does not say "x: 30"
+    And the file "Main.qml" says "width: 100\n        height: 60\n"
 
   Scenario: A drawing is one undo step
     Given the person has clicked the button "Draw rectangle"
     And the person has dragged in the frame "Desktop" from 30, 100 to 130, 160
     When the person clicks the button "Undo"
-    Then the file "Main.qml" does not say "x: 30; y: 100"
+    Then the file "Main.qml" does not say "x: 30"
 
   Scenario: Drawn inside a container, the object belongs to it
     Given the person has clicked the button "Draw rectangle"
     When the person drags in the frame "Desktop" from 220, 120 to 260, 150
-    Then the file "Main.qml" says "Rectangle { id: rectangle1; x: 20; y: 20; width: 40; height: 30;"
+    Then the file "Main.qml" says "Rectangle {\n            id: rectangle1\n            x: 20\n            y: 20\n            width: 40\n            height: 30\n"
     And the layers panel has "Rectangle rectangle1" selected
 
   Scenario: A drawing snaps to what is there and shows the guide
@@ -63,20 +63,20 @@ Feature: Drawing on the canvas and writing text where it is
   Scenario: A click with the tool places an object of a usable size
     Given the person has clicked the button "Draw rectangle"
     When the person clicks the frame "Desktop" at 30, 100
-    Then the file "Main.qml" says "x: 30; y: 100; width: 100; height: 100;"
+    Then the file "Main.qml" says "x: 30\n        y: 100\n        width: 100\n        height: 100\n"
 
   Scenario: Escape puts the tool down without writing
     Given the person has clicked the frame "Desktop" at 300, 20
     And the person has clicked the button "Draw rectangle"
     When the person presses "Escape"
     And the person drags in the frame "Desktop" from 30, 100 to 130, 160
-    Then the file "Main.qml" does not say "x: 30; y: 100"
+    Then the file "Main.qml" does not say "x: 30"
 
   Scenario: Text drawn is written straight away
     Given the person has clicked the button "Draw text"
     And the person has dragged in the frame "Desktop" from 30, 100 to 130, 130
     When the person writes "Welcome" on the canvas and presses "Return"
-    Then the file "Main.qml" says "x: 30; y: 100; width: 100; text: \"Welcome\";"
+    Then the file "Main.qml" says "x: 30\n        y: 100\n        width: 100\n        text: \"Welcome\"\n"
 
   Scenario: Double-clicking text writes on it, leaving its line otherwise as it was
     When the person double-clicks the frame "Desktop" at 25, 25
@@ -97,14 +97,14 @@ Feature: Drawing on the canvas and writing text where it is
     Given the person has clicked the frame "Desktop" at 300, 20
     When the person presses "R"
     And the person drags in the frame "Desktop" from 30, 100 to 130, 160
-    Then the file "Main.qml" says "x: 30; y: 100; width: 100; height: 60;"
+    Then the file "Main.qml" says "x: 30\n        y: 100\n        width: 100\n        height: 60\n"
 
   Scenario: V puts the tool down again
     Given the person has clicked the frame "Desktop" at 300, 20
     And the person has pressed "R"
     When the person presses "V"
     And the person drags in the frame "Desktop" from 30, 100 to 130, 160
-    Then the file "Main.qml" does not say "x: 30; y: 100"
+    Then the file "Main.qml" does not say "x: 30"
 
   Scenario: Holding space moves the view, and letting go gives back the tool
     Given the person has clicked the frame "Desktop" at 300, 20

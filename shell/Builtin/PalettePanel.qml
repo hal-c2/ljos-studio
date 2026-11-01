@@ -24,9 +24,18 @@ Panel {
     }
     readonly property var selectedLayer: layer(workspace.selected)
     // The selection, or the root: a new document has nothing selected and a
-    // first object must still go somewhere.
-    readonly property string target: workspace.selected !== "" ? workspace.selected
-        : (workspace.layers.length > 0 ? workspace.layers[0].node : "")
+    // first object must still go somewhere. A type that draws its own content
+    // shows nothing put inside it, so what is placed goes beside it.
+    readonly property string target: {
+        const picked = selectedLayer
+        if (picked === null)
+            return workspace.layers.length > 0 ? workspace.layers[0].node : ""
+        const bare = picked.type.split(".").pop()
+        return picked.parent !== "" && panel.drawsItsOwn.includes(bare) ? picked.parent : picked.node
+    }
+    readonly property var drawsItsOwn: ["Text", "TextInput", "TextEdit", "Image", "AnimatedImage",
+        "BorderImage", "Canvas", "Button", "CheckBox", "RadioButton", "Switch", "Slider",
+        "ProgressBar", "SpinBox", "TextField", "TextArea", "ComboBox", "Label", "ToolButton"]
     readonly property string needle: search.text.toLowerCase()
     // A string, which changes only when the list does: `toolkit` is a new
     // value at each publish, and rebuilding the buttons would drop a press.

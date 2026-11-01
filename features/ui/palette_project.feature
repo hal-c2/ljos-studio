@@ -21,6 +21,15 @@ Feature: The palette offers the project's own components
 
       Rectangle { width: 80; height: 24; color: "gold" }
       """
+    And the file "Page.qml":
+      """qml
+      import QtQuick
+
+      Item {
+          id: page
+          Text { id: heading; text: "Hi" }
+      }
+      """
     And Studio's window shows the project
 
   Scenario: A component of the project is placed like any type
@@ -44,3 +53,9 @@ Feature: The palette offers the project's own components
     Given the person has opened "Main.qml" in the documents list
     When the person searches the palette for "zzz"
     Then the palette says "Nothing called \"zzz\""
+
+  Scenario: Placed with text selected, an object goes beside it
+    Given the person has opened "Page.qml" in the documents list
+    And the person has selected "Text heading" in the layers panel
+    When the person places "Rectangle" from the palette
+    Then the file "Page.qml" says "text: \"Hi\" }\n"

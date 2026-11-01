@@ -470,7 +470,7 @@ MouseArea {
         workspace.dispatch("node_insert", {
             doc: workspace.doc,
             parent: {node: into.node},
-            text: kind + " { " + parts.join("; ") + " }"
+            text: kind + " {\n    " + parts.join("\n    ") + "\n}"
         })
     }
 
