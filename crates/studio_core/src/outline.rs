@@ -34,6 +34,9 @@ pub struct Node {
     /// signal, `nameChanged`.
     #[serde(skip)]
     pub properties: Vec<String>,
+    /// Those of them only the type can write: QML refuses a value from outside.
+    #[serde(skip)]
+    pub read_only: Vec<String>,
     /// Those of them of type `color`, which says so with no value too.
     #[serde(skip)]
     pub colours: Vec<String>,
@@ -193,6 +196,20 @@ fn walk(
             .iter()
             .filter_map(|m| match m {
                 QmlMember::Property(p) => Some(p.name.name.to_string()),
+                _ => None,
+            })
+            .collect(),
+        read_only: object
+            .members
+            .iter()
+            .filter_map(|m| match m {
+                QmlMember::Property(p)
+                    if source[p.span.start as usize..p.name.span.start as usize]
+                        .split_whitespace()
+                        .any(|word| word == "readonly") =>
+                {
+                    Some(p.name.name.to_string())
+                }
                 _ => None,
             })
             .collect(),

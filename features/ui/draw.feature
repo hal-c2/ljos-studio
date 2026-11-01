@@ -7,7 +7,8 @@ Feature: Drawing on the canvas and writing text where it is
   A person picks a tool and draws where the object should go, rather than
   choosing from a list and moving it afterwards. Each drawing is one call of
   `node_insert`, one undo step, and a line of QML in the file. Text is written
-  on the canvas, over the object it belongs to.
+  on the canvas, over the object it belongs to, and what is typed there is a
+  step of its own: one Undo gives back the placeholder, the next the drawing.
 
   Background:
     Given the file "Main.qml":
@@ -127,3 +128,64 @@ Feature: Drawing on the canvas and writing text where it is
     Given the person has clicked the button "Hand"
     When the person holds "Alt" and drags in the frame "Desktop" from 60, 40 to 100, 70
     Then the frame "Desktop" has moved
+
+  Scenario: After the hand a letter still picks the tool
+    Given the person has clicked the frame "Desktop" at 300, 20
+    When the person presses "H"
+    And the person presses "R"
+    And the person drags in the frame "Desktop" from 30, 100 to 130, 160
+    Then the file "Main.qml" says "x: 30\n        y: 100\n        width: 100\n        height: 60\n"
+
+  Scenario: After the Hand button a letter still picks the tool
+    Given the person has clicked the button "Hand"
+    When the person presses "R"
+    And the person drags in the frame "Desktop" from 30, 100 to 130, 160
+    Then the file "Main.qml" says "x: 30\n        y: 100\n        width: 100\n        height: 60\n"
+
+  Scenario: Text in any of QML's quotes is written on
+    Given an agent has called the tool "binding_set" with:
+      """json
+      {"doc": "Main.qml", "node": {"id": "title"}, "name": "text", "value": "'say \"hi\"\\x21'"}
+      """
+    When the person double-clicks the frame "Desktop" at 25, 25
+    Then the canvas's text holds "say \"hi\"!"
+    When the person writes "Changed" on the canvas and presses "Return"
+    Then the file "Main.qml" says "text: \"Changed\""
+
+  Scenario: A template is told to go to the inspector
+    Given an agent has called the tool "binding_set" with:
+      """json
+      {"doc": "Main.qml", "node": {"id": "title"}, "name": "text", "value": "`at ${width}`"}
+      """
+    When the person double-clicks the frame "Desktop" at 25, 25
+    Then the canvas has no text being written
+    And the window says "This text is an expression: change it in the inspector"
+
+  Scenario: Text being written is kept when the selection moves
+    Given the person has double-clicked the frame "Desktop" at 25, 25
+    And the person has typed "Moved" on the canvas
+    When the person selects "Rectangle card" in the layers panel
+    Then the canvas has no text being written
+    And the file "Main.qml" says "id: title; x: 20; y: 20; text: \"Moved\""
+
+  Scenario: Text being written goes to its own document when the document changes
+    Given the file "Other.qml":
+      """qml
+      import QtQuick
+
+      Text { id: title; text: "Other" }
+      """
+    And the person has double-clicked the frame "Desktop" at 25, 25
+    And the person has typed "Moved" on the canvas
+    When the person opens "Other.qml" in the documents list
+    Then the file "Main.qml" says "text: \"Moved\""
+    And the file "Other.qml" says "text: \"Other\""
+
+  Scenario: A drawn text that was refused leaves nothing to write on the next object
+    Given the project's folder takes no writes
+    And the person has clicked the button "Draw text"
+    When the person drags in the frame "Desktop" from 30, 100 to 130, 130
+    Then the window shows a refusal that says "Permission denied"
+    When the project's folder takes writes again
+    And the person places "Rectangle" from the palette
+    Then the canvas has no text being written

@@ -275,9 +275,12 @@ impl Types<'_> {
             found
                 .properties
                 .extend(ty.properties.iter().map(|p| p.name.clone()));
-            found
-                .taken
-                .extend(ty.properties.iter().map(|p| p.name.clone()));
+            found.taken.extend(
+                ty.properties
+                    .iter()
+                    .filter(|p| !p.readonly)
+                    .map(|p| p.name.clone()),
+            );
             if let Some(base) = self.dumps.base_of(ty) {
                 ty = base;
                 continue;
@@ -336,7 +339,12 @@ impl Types<'_> {
             return Described::InPart;
         };
         found.declared(root);
-        found.taken.extend(root.properties.iter().cloned());
+        found.taken.extend(
+            root.properties
+                .iter()
+                .filter(|p| !root.read_only.contains(p))
+                .cloned(),
+        );
         let scope = Scope {
             dir: dir_of(file).to_owned(),
             imports,

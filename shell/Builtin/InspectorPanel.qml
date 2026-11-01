@@ -121,12 +121,13 @@ Panel {
         if (picked === "" && row.name !== "id" && row.expression === true && !workspace.literal(text.trim()))
             bind(row.name, text)
         else {
-            heldText = String(row.value).startsWith('"')
+            heldText = row.value === "" || String(row.value).startsWith('"')
             set(row.name, text)
             heldText = false
         }
     }
-    // The row being entered held a string, so a word typed in it may be meant as one.
+    // The row being entered held a string or nothing yet, so a word typed in it
+    // may be meant as one.
     property bool heldText: false
 
     // A refused value the refusal offers to bind, while that refusal stands.

@@ -438,6 +438,7 @@ Panel {
                 panel.hand = true
                 panel.drawing = ""
                 checked = Qt.binding(() => panel.hand)
+                canvasFocus.forceActiveFocus()
             }
         }
         Hairline {}
@@ -535,7 +536,7 @@ Panel {
                 return
             panel.handHeld = false
             panel.hand = panel.handWas
-            if (panel.keysWere !== null)
+            if (!panel.hand && panel.keysWere !== null)
                 panel.keysWere.forceActiveFocus()
             event.accepted = true
         }
@@ -562,6 +563,14 @@ Panel {
         hand = event.key === Qt.Key_H
         drawing = tool
         playing = false
+        // The overlay is disabled under the hand, and the next letter has to
+        // reach someone; it takes the keys back when the hand goes.
+        if (hand) {
+            keysWere = from
+            canvasFocus.forceActiveFocus()
+        } else if (canvasFocus.activeFocus && keysWere !== null) {
+            keysWere.forceActiveFocus()
+        }
         return true
     }
 
