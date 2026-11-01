@@ -18,6 +18,8 @@ MouseArea {
     // What a drag draws: a type, or "" to select and move.
     required property string drawing
     signal drawn()
+    // Which tool is in use is the panel's. Says whether the key was one.
+    required property var toolKey
     // Why the last drop wrote nothing; said until the next press.
     property string told: ""
 
@@ -634,6 +636,10 @@ MouseArea {
         }
         if (event.key === Qt.Key_Escape && drawing !== "") {
             drawn()
+            event.accepted = true
+            return
+        }
+        if (toolKey(event)) {
             event.accepted = true
             return
         }

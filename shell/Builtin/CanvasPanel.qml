@@ -40,6 +40,11 @@ Panel {
     property bool hand: false
     // In play a press is the app's, whichever tool waits for after.
     readonly property bool panning: hand && !playing
+    // Space held is the hand for as long as it is held, then back to what
+    // was in use and where the keys were.
+    property bool handHeld: false
+    property bool handWas: false
+    property var keysWere: null
     // What a drag on the frame draws; "" selects and moves.
     property string drawing: ""
     readonly property real zoom: fitted ? Math.max(0.125, fit) : chosenZoom
@@ -302,6 +307,7 @@ Panel {
                         CanvasOverlay {
                             onHasBoxesChanged: panel.framesWithoutBoxes += hasBoxes ? -1 : 1
                             Component.onDestruction: if (!hasBoxes) panel.framesWithoutBoxes -= 1
+                            id: overlayHere
                             objectName: "overlay"
                             enabled: !panel.panning
                             anchors.fill: parent
@@ -311,6 +317,7 @@ Panel {
                             recording: panel.recording
                             drawing: panel.drawing
                             onDrawn: panel.drawing = ""
+                            toolKey: (event) => panel.toolKey(event, overlayHere)
                             onDraggingChanged: panel.dragging = dragging
                             onSaysChanged: panel.says = says
                             Component.onCompleted: refetch()
@@ -520,6 +527,42 @@ Panel {
     Item {
         id: canvasFocus
         Keys.onEscapePressed: panel.drawing = ""
+        Keys.onPressed: (event) => {
+            event.accepted = panel.toolKey(event, panel.keysWere)
+        }
+        Keys.onReleased: (event) => {
+            if (event.key !== Qt.Key_Space || event.isAutoRepeat || !panel.handHeld)
+                return
+            panel.handHeld = false
+            panel.hand = panel.handWas
+            if (panel.keysWere !== null)
+                panel.keysWere.forceActiveFocus()
+            event.accepted = true
+        }
+    }
+
+    function toolKey(event, from) {
+        if ((event.modifiers & (Qt.ControlModifier | Qt.AltModifier | Qt.MetaModifier)) !== 0)
+            return false
+        const tool = {[Qt.Key_V]: "", [Qt.Key_H]: "", [Qt.Key_R]: "Rectangle", [Qt.Key_T]: "Text"}[event.key]
+        if (event.key === Qt.Key_Space) {
+            if (handHeld || event.isAutoRepeat)
+                return true
+            handHeld = true
+            handWas = hand
+            keysWere = from
+            hand = true
+            // The overlay is disabled under the hand, and the key's release
+            // has to reach someone.
+            canvasFocus.forceActiveFocus()
+            return true
+        }
+        if (tool === undefined)
+            return false
+        hand = event.key === Qt.Key_H
+        drawing = tool
+        playing = false
+        return true
     }
 
     // Zoom is the panel's own: it changes no file and no agent needs it, since
