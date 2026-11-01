@@ -24,8 +24,9 @@ export function servePreview({ element, mount, reload: remade, inspect, tell, co
   // The address the running compile's files are at, and the data files
   // already told there.
   let base = null;
+  // The aliases of the compile that is running: a reload that throws leaves it.
+  let compiledWith = [];
   const told = new Set();
-  let types = [];
   let size = null;
   // An item root is laid out at the preview's size, as `ljos run --size`
   // lays it out; a Window fills the element itself.
@@ -35,8 +36,16 @@ export function servePreview({ element, mount, reload: remade, inspect, tell, co
     root.width = size.width;
     root.height = size.height;
   };
-  // A file is named by its path in the project, not the compile's.
-  const inProject = (file) => file?.replace(/^projects\/\d+\//, "") ?? null;
+  // A file is named by its path in the project, not the compile's: an aliased
+  // module's files are compiled at the module's path, so `served` read backwards.
+  const inProject = (file) => {
+    const path = file?.replace(/^projects\/\d+\//, "") ?? null;
+    if (path === null) return null;
+    // Only a module's own files move: one nested in it is compiled where it is.
+    const dir = path.slice(0, path.lastIndexOf("/"));
+    const alias = compiledWith.find((a) => a.module.replaceAll(".", "/") === dir);
+    return alias ? `${alias.dir}/${path.slice(alias.module.length + 1)}` : path;
+  };
   let generation = 0;
   const logs = [];
   let dropped = 0;
@@ -61,21 +70,33 @@ export function servePreview({ element, mount, reload: remade, inspect, tell, co
   const said = (diagnostics) =>
     diagnostics.map((d) => (d.file ? `${d.file}${d.line ? `:${d.line}:${d.column ?? 1}` : ""}: ${d.message}` : d.message)).join("\n");
 
+  const sameAliases = (one, other) =>
+    one.length === other.length && one.every((a) => other.some((b) => b.module === a.module && b.dir === a.dir));
+
   // A reload keeps the app's state where it can, as `ljos run --watch` does;
   // only a page with no `reload` (a test's) starts over.
   const start = async ({ again = false } = {}) => {
     const compiled = await compile({ files, entry, aliases });
     if (compiled.diagnostics) throw new Error(said(compiled.diagnostics));
     const Component = compiled.component;
-    base = compiled.base ?? null;
-    told.clear();
-    if (again && remade && running) {
+    // Compared with what is running, not with this call: a switch that did not
+    // compile has changed `aliases`, and the save that mends it is still the
+    // first of the new program.
+    if (again && remade && running && sameAliases(aliases, compiledWith)) {
       remade(running, Component);
     } else {
       running?.dispose?.();
       element.replaceChildren();
+      // Before the mount, which can throw: a disposed root is no root to
+      // reload or to answer for, and the next save has to mount.
+      running = inspector = base = null;
       running = mount(Component, element, {}, { reloadable: Boolean(remade) });
     }
+    // Only now: a reload that throws leaves the old root running, and its
+    // readers still watch the old compile's address.
+    base = compiled.base ?? null;
+    compiledWith = aliases;
+    told.clear();
     layOut();
     inspector = inspect && running?.object ? inspect(running.object) : null;
   };
@@ -93,7 +114,7 @@ export function servePreview({ element, mount, reload: remade, inspect, tell, co
   // not read again from nowhere: those reload.
   const onlyData = (changed) =>
     Boolean(tell && base && running) &&
-    Object.entries(changed).every(([path, text]) => text !== null && DATA.test(path) && !COMPILED_FROM.test(path) && !types.includes(path));
+    Object.entries(changed).every(([path, text]) => text !== null && DATA.test(path) && !COMPILED_FROM.test(path));
 
   // Where a data file is served: an aliased module's files are at the
   // module's path, and what they replaced is not served at all.
@@ -101,9 +122,9 @@ export function servePreview({ element, mount, reload: remade, inspect, tell, co
     const parts = path.split("/");
     const file = parts.pop();
     const dir = parts.join("/");
-    const alias = aliases.find((a) => a.dir === dir);
+    const alias = compiledWith.find((a) => a.dir === dir);
     if (alias) return `${alias.module.replaceAll(".", "/")}/${file}`;
-    return aliases.some((a) => a.module.replaceAll(".", "/") === dir) ? null : path;
+    return compiledWith.some((a) => a.module.replaceAll(".", "/") === dir) ? null : path;
   };
 
   const tellData = (changed) => {
@@ -137,7 +158,6 @@ export function servePreview({ element, mount, reload: remade, inspect, tell, co
       files = { ...r.files };
       entry = r.entry;
       aliases = r.aliases;
-      types = r.types ?? [];
       generation = 0;
       answers.resize(r);
       if (!compile) {
@@ -184,7 +204,10 @@ export function servePreview({ element, mount, reload: remade, inspect, tell, co
     },
     write(r) {
       if (!inspector) return waiting("write", "ljos-web keeps a component's ids private to its context", 4);
-      return inspector.write(r.id, r.name, r.value) ? { answer: "done" } : { answer: "no_object", id: r.id };
+      if (inspector.write(r.id, r.name, r.value)) return { answer: "done" };
+      // Both come back false, and only one of them means the object is not there.
+      if (!inspector.find(r.id)) return { answer: "no_object", id: r.id };
+      return { answer: "refused", code: "no_property", message: `\`${r.id}\` has no property \`${r.name}\`` };
     },
     click(r) {
       if (!inspector) return waiting("click", "ljos-web keeps a component's ids private to its context", 4);

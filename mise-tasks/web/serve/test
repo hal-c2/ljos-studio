@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-#MISE description="What qmlc is shown of a project: forQmlc's edge cases, no browser or build needed"
+#MISE description="What qmlc is shown of a project, and a preview page whose mount throws: no browser or build needed"
 set -euo pipefail
 . "$(dirname "$0")/../../_lib/env.sh"
-node --test "$studio_root/web/serve.test.mjs"
+node --test "$studio_root/web/serve.test.mjs" "$studio_root/web/page.test.mjs"
