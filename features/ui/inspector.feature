@@ -264,6 +264,21 @@ Feature: The inspector shows colours and every declared property
     Then the file "Main.qml" says "width: parent.width"
     And the window shows no refusal
 
+  Scenario: A colour is written the way a person writes one
+    When the person sets "color" to "#123456" in the inspector
+    Then the file "Main.qml" says "color: \"#123456\""
+    And the window shows no refusal
+
+  Scenario: A word typed over a string can be written as one
+    When the person sets "color" to "red" in the inspector
+    And the person clicks the button "Write red as text"
+    Then the file "Main.qml" says "color: \"red\""
+    And the window shows no refusal
+
+  Scenario: A number row does not offer to write a word as text
+    When the person sets "width" to "parent.width" in the inspector
+    Then the inspector has no button "Write parent.width as text"
+
   Scenario: A refused value is forgotten when something else is selected
     Given the person has set "width" to "parent.width" in the inspector
     When the person selects "Item other" in the layers panel

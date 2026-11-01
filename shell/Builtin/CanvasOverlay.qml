@@ -249,8 +249,13 @@ MouseArea {
         startSnaps()
         const sx = free ? {by: 0, at: -1} : snap([atX], snapXs)
         const sy = free ? {by: 0, at: -1} : snap([atY], snapYs)
-        const fromX = pressedAt.x / zoom
-        const fromY = pressedAt.y / zoom
+        // Where it starts snaps to the frame only, which shows without a guide:
+        // a box drawn from a corner would miss it by what a screen pixel is
+        // worth when zoomed out.
+        const startX = pressedAt.x / zoom
+        const startY = pressedAt.y / zoom
+        const fromX = startX + (free ? 0 : snap([startX], [0, width / zoom]).by)
+        const fromY = startY + (free ? 0 : snap([startY], [0, height / zoom]).by)
         const toX = atX + sx.by
         const toY = atY + sy.by
         guideX = sx.at
