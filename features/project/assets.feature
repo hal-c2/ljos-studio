@@ -272,3 +272,18 @@ Feature: A project's assets
       | target |
       | native |
       | web    |
+
+  Scenario: Only an asset is taken out of the folder
+    Given the file "assets/Thing.qml":
+      """qml
+      import QtQuick
+
+      Item {}
+      """
+    When the agent calls the tool "project_open" with:
+      """json
+      {"asset": "remove", "name": "Thing.qml"}
+      """
+    Then the agent is refused with "not_actionable"
+    And the refusal's "/details/kind" is "asset_kind"
+    And the file "assets/Thing.qml" exists

@@ -242,7 +242,7 @@ impl Studio {
                 AssetTile {
                     file: dir
                         .as_ref()
-                        .map(|d| format!("file://{}", d.join(&url).display()))
+                        .map(|d| file_url(&d.join(&url)))
                         .unwrap_or_default(),
                     url,
                     name,
@@ -653,4 +653,38 @@ fn utf16(text: &str, byte: usize) -> usize {
         end -= 1;
     }
     text[..end].encode_utf16().count()
+}
+
+/// A path as a `file:` URL: what a path may hold and a URL may not is escaped,
+/// and a drive's path starts with one more slash.
+fn file_url(path: &std::path::Path) -> String {
+    let path = path.to_string_lossy().replace('\\', "/");
+    let mut url = String::from("file://");
+    if !path.starts_with('/') {
+        url.push('/');
+    }
+    for byte in path.bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' | b'/' | b':' => {
+                url.push(byte as char);
+            }
+            _ => url.push_str(&format!("%{byte:02X}")),
+        }
+    }
+    url
+}
+
+#[cfg(test)]
+mod tests {
+    use super::file_url;
+    use std::path::Path;
+
+    #[test]
+    fn a_path_is_written_as_a_url() {
+        assert_eq!(
+            file_url(Path::new("/a b/c#d?e.png")),
+            "file:///a%20b/c%23d%3Fe.png"
+        );
+        assert_eq!(file_url(Path::new("C:\\p\\a.png")), "file:///C:/p/a.png");
+    }
 }

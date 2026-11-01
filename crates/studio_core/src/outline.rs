@@ -354,6 +354,26 @@ fn is_named(source: &str, object: &QmlObject<'_>) -> bool {
     })
 }
 
+/// The lists of objects the object starting at `start` is given, such as its
+/// `states`. No `Node` lists them, and they are more than where it sits.
+pub fn lists_given(source: &str, start: usize) -> Vec<String> {
+    let allocator = Allocator::default();
+    let parsed = qml_syntax::parse(&allocator, source);
+    let Some(object) = object_at(&parsed.document.root, start) else {
+        return Vec::new();
+    };
+    object
+        .members
+        .iter()
+        .filter_map(|m| match m {
+            QmlMember::Binding(b) if matches!(b.value, QmlBindingValue::Objects(_)) => {
+                Some(b.name.to_string())
+            }
+            _ => None,
+        })
+        .collect()
+}
+
 /// Where the x, y and anchors of the object starting at `start` are written,
 /// whichever way, each member whole, in order. They say where it sits in its
 /// parent, not what it is.

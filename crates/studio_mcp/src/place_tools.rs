@@ -507,6 +507,12 @@ fn place_ops(
         let now = placed.get(&handle).map(|p| p.local);
         let placing = if place::is_spatial(&node.ty) {
             place::bindings_3d(&node, wanted)
+        } else if wanted.z.is_some() {
+            return Err(SurfaceError::invalid_argument(format!(
+                "`z` is for an object of a 3D scene, and `{}` is a {}",
+                node.id.as_deref().unwrap_or(&node.ty),
+                node.ty
+            )));
         } else {
             place::bindings_for(&node, &types, now, wanted)
         };
@@ -839,6 +845,7 @@ fn arrange(studio: &mut Studio, a: ArrangeArgs) -> Result<ArrangeOut, SurfaceErr
             | Action::Wrap
             | Action::Unwrap
             | Action::Anchor
+            | Action::Relayout
             | Action::ComponentExtract
     ) {
         check_unlocked(studio, &a)?;

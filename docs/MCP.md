@@ -624,18 +624,20 @@ puts siblings in a new object at their joint box, in reading order. A layout's
 children lose their written x/y; an Item's are counted from its corner and keep
 document order, which is what is drawn over what. `spacing` defaults to the
 gap they had, `columns` to the widest row. Refused: `not_siblings`, `root`,
-`anchored`, `reads_parent`, `locked`.
+`anchored`, `anchored_to` (a sibling that stays anchors to one of them),
+`reads_parent`, `locked`.
 
 `unwrap` {nodes: [one]} takes a Row, Column, Grid, Flow, Item or layout away
 from around its children: they get their place on the preview, or for an Item
 its numbers added to theirs, or none. Refused: `not_a_layout`, `holds_more`
-(its own property, function or handler), `referenced` (something reads its id),
-`reads_parent`, `root`.
+(anything of its own but a place: a property, function, handler, `visible`,
+`states`), `referenced` (something reads its id), `reads_parent` (a child's value
+or anchor reads `parent`), `root`, `locked`.
 
 `relayout` {nodes: [one], name} turns a Row, Column, Grid or Flow into another
 of them, or a `*Layout` into another `*Layout`, writing only the type's name.
 Refused: `not_a_layout`, `other_family`, `says_other` (it says something the new
-kind has no member for, such as a Grid's `columns`).
+kind has no member for, such as a Grid's `columns`), `locked`.
 
 `anchor` {nodes, fill?, centerIn?, sides?: {left, right, top, bottom}, target?}
 writes `anchors.*` and takes away the x, y, width and height that now disagree.

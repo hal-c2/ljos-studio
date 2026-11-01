@@ -76,9 +76,7 @@ pub(crate) fn fresh_id(stem: &str, taken: &[String]) -> String {
 fn reads_parent(node: &Node) -> Option<&str> {
     node.bindings
         .iter()
-        .find(|b| {
-            !b.declared && !b.name.starts_with("anchors.") && place::reads(&b.value, "parent")
-        })
+        .find(|b| place::reads(&b.value, "parent"))
         .map(|b| b.name.as_str())
 }
 
@@ -139,6 +137,32 @@ pub(crate) fn wrap(studio: &mut Studio, a: &WrapArgs) -> Result<ManyOut, Surface
             ));
         }
         check_may_leave_parent(node)?;
+    }
+    // A sibling that stays can't anchor to what is now inside another object.
+    let moved_ids: Vec<&str> = found.iter().filter_map(|(_, n)| n.id.as_deref()).collect();
+    for (handle, stays) in &tree {
+        if parent_path(&stays.path).as_ref() != Some(&parent.1.path)
+            || found.iter().any(|(h, _)| h == handle)
+        {
+            continue;
+        }
+        for b in stays
+            .bindings
+            .iter()
+            .filter(|b| b.name.starts_with("anchors."))
+        {
+            if let Some(id) = moved_ids.iter().find(|id| place::reads(&b.value, id)) {
+                return Err(refused(
+                    "anchored_to",
+                    format!(
+                        "`{}`'s {} reads `{id}`, which would no longer be its sibling: take that \
+                         anchor off first",
+                        label(stays),
+                        b.name
+                    ),
+                ));
+            }
+        }
     }
     let index = match found[0].1.path.0.last() {
         Some(Step::Child(index)) => *index,
@@ -274,6 +298,13 @@ pub(crate) fn unwrap(
             ),
         ));
     };
+    let (tree, _) = studio.session.tree(doc).map_err(error)?;
+    let lists = studio
+        .session
+        .text(doc)
+        .map(|(text, _)| studio_core::outline::lists_given(text, wrapper.start))
+        .map_err(error)?;
+    // Only what places may go with it.
     let own: Vec<&str> = wrapper
         .properties
         .iter()
@@ -285,8 +316,13 @@ pub(crate) fn unwrap(
                 .bindings
                 .iter()
                 .map(|b| b.name.as_str())
-                .filter(|n| is_handler(n)),
+                .filter(|n| !only_places(n)),
         )
+        .chain(lists.iter().map(String::as_str))
+        .chain(tree.iter().filter_map(|(_, n)| {
+            let below = n.path.0.strip_prefix(wrapper.path.0.as_slice())?;
+            (!matches!(below.first(), None | Some(Step::Child(_)))).then_some(n.ty.as_str())
+        }))
         .collect();
     if let Some(name) = own.first() {
         return Err(refused(
@@ -373,10 +409,28 @@ pub(crate) fn unwrap(
     })
 }
 
-fn is_handler(name: &str) -> bool {
-    name.strip_prefix("on")
-        .and_then(|rest| rest.chars().next())
-        .is_some_and(char::is_uppercase)
+/// A binding that says where things are and nothing else, so that a wrapper
+/// going loses nothing the numbers put on its children don't make up for.
+fn only_places(name: &str) -> bool {
+    name.starts_with("anchors.")
+        || name.starts_with("Layout.")
+        || matches!(
+            name,
+            "id" | "x"
+                | "y"
+                | "width"
+                | "height"
+                | "spacing"
+                | "rowSpacing"
+                | "columnSpacing"
+                | "columns"
+                | "rows"
+                | "padding"
+                | "leftPadding"
+                | "rightPadding"
+                | "topPadding"
+                | "bottomPadding"
+        )
 }
 
 /// The line of the first thing in `doc` that reads the object `id`, other than
