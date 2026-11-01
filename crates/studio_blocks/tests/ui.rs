@@ -144,7 +144,6 @@ impl PreviewHost for SlowPictures {
         self.0.calls_per_second()
     }
 
-
     fn click(&mut self, at: &Click) -> Result<(), PreviewError> {
         self.0.click(at)
     }
@@ -2216,7 +2215,10 @@ fn outline_of(
             .ok_or_else(|| format!("the frame has no {name}"))
     };
     let outline = part("selectionOutline")?;
-    let zoom = window.engine().read_by_name(part("overlay")?, "zoom").to_number();
+    let zoom = window
+        .engine()
+        .read_by_name(part("overlay")?, "zoom")
+        .to_number();
     let read = |name: &str| window.engine().read_by_name(outline, name).to_number() / zoom;
     let got = (read("x"), read("y"), read("width"), read("height"));
     let close = |a: f64, b: f64| (a - b).abs() < 0.5;

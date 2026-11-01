@@ -31,6 +31,18 @@
               "notify": "documentsChanged"
             },
             {
+              "name": "assets",
+              "type": "var",
+              "kind": "value",
+              "list": false,
+              "readonly": true,
+              "final": true,
+              "required": false,
+              "constant": false,
+              "group": false,
+              "notify": "assetsChanged"
+            },
+            {
               "name": "settling",
               "type": "bool",
               "kind": "value",
@@ -41,6 +53,18 @@
               "constant": false,
               "group": false,
               "notify": "settlingChanged"
+            },
+            {
+              "name": "playing",
+              "type": "bool",
+              "kind": "value",
+              "list": false,
+              "readonly": false,
+              "final": true,
+              "required": false,
+              "constant": false,
+              "group": false,
+              "notify": "playingChanged"
             },
             {
               "name": "looks",
@@ -197,6 +221,18 @@
               "constant": false,
               "group": false,
               "notify": "signalsChanged"
+            },
+            {
+              "name": "offers",
+              "type": "var",
+              "kind": "value",
+              "list": false,
+              "readonly": true,
+              "final": true,
+              "required": false,
+              "constant": false,
+              "group": false,
+              "notify": "offersChanged"
             },
             {
               "name": "flow",
