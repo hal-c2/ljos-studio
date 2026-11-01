@@ -47,6 +47,18 @@ Feature: A person pins an object from the inspector's Layout section
     And the person clicks the button "Wrap in Column"
     Then the file "Main.qml" says "Column {"
 
+  Scenario: A layout is turned into another kind from the section
+    Given an agent has called the tool "binding_set" with:
+      """json
+      {"doc": "Main.qml", "node": {"id": "table"}, "name": "columns", "value": null}
+      """
+    And the person has selected "Grid table" in the layers panel
+    When the person clicks the button "Turn into Flow"
+    Then the file "Main.qml" says "Flow {"
+    And the file "Main.qml" does not say "Grid {"
+    When the person clicks the button "Turn into Column"
+    Then the file "Main.qml" says "Column {"
+
   Scenario: A layout says its spacing here
     When the person selects "Grid table" in the layers panel
     Then the inspector's "Layout spacing" holds "3"

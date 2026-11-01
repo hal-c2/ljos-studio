@@ -43,6 +43,7 @@ enum Action {
     Duplicate,
     Remove,
     Rename,
+    Relayout,
     Hide,
     Show,
     Lock,
@@ -98,7 +99,7 @@ struct ArrangeArgs {
     align: Option<Align>,
     /// For `paste`, into any document. Ids it has are renamed.
     parent: Option<Address>,
-    /// For `rename`: the object's new `id`. For `component_extract`: the new type.
+    /// For `rename`: the object's new `id`. For `component_extract`: the new type. For `relayout`: its new kind.
     name: Option<String>,
     /// For `wrap`.
     #[serde(rename = "in")]
@@ -936,6 +937,10 @@ fn arrange(studio: &mut Studio, a: ArrangeArgs) -> Result<ArrangeOut, SurfaceErr
             let name = needed(a.name, "name", "rename")?;
             rename(studio, &doc, generation, &nodes, &name, a.dry_run)
         }
+        Action::Relayout => {
+            let kind = needed(a.name, "name", "relayout")?;
+            relayout(studio, &doc, generation, &nodes, &kind, a.dry_run)
+        }
         Action::Hide | Action::Show => {
             let objects = objects_with_ids(studio, &doc, &nodes)?;
             if a.dry_run {
@@ -1089,6 +1094,117 @@ fn objects_with_ids(
     Ok(objects)
 }
 
+/// The kinds a layout can turn into: what places a child by its own numbers
+/// never turns into what places it by `Layout.*`, which would move it.
+const LAYOUT_FAMILIES: [&[&str]; 2] = [
+    &["Row", "Column", "Grid", "Flow"],
+    &["RowLayout", "ColumnLayout", "GridLayout"],
+];
+
+/// A member only some kinds have, and those kinds: the file would not load
+/// with it on another.
+const LAYOUT_MEMBERS: [(&str, &[&str]); 8] = [
+    ("columns", &["Grid", "GridLayout"]),
+    ("rows", &["Grid", "GridLayout"]),
+    ("columnSpacing", &["Grid", "GridLayout"]),
+    ("rowSpacing", &["Grid", "GridLayout"]),
+    ("flow", &["Grid", "Flow", "GridLayout"]),
+    ("horizontalItemAlignment", &["Grid"]),
+    ("verticalItemAlignment", &["Grid"]),
+    (
+        "layoutDirection",
+        &[
+            "Row",
+            "Grid",
+            "Flow",
+            "RowLayout",
+            "ColumnLayout",
+            "GridLayout",
+        ],
+    ),
+];
+
+fn relayout(
+    studio: &mut Studio,
+    doc: &str,
+    generation: Option<u64>,
+    nodes: &[Address],
+    kind: &str,
+    dry_run: bool,
+) -> Result<ArrangeOut, SurfaceError> {
+    let [address] = nodes else {
+        return Err(refused("one_object", "`relayout` turns one object"));
+    };
+    let (handle, node) = studio.session.resolve(doc, address).map_err(error)?;
+    let family = |ty: &str| LAYOUT_FAMILIES.iter().find(|f| f.contains(&ty));
+    let (Some(from), Some(to)) = (family(&node.ty), family(kind)) else {
+        return Err(refused(
+            "not_a_layout",
+            format!(
+                "`relayout` turns a Row, Column, Grid, Flow or `*Layout` into another: not `{}` into `{kind}`",
+                node.ty
+            ),
+        ));
+    };
+    if from != to {
+        return Err(refused(
+            "other_family",
+            format!(
+                "a `{}` places its children by their numbers or `Layout.*`, a `{kind}` by the other: wrap them anew instead",
+                node.ty
+            ),
+        ));
+    }
+    let others: Vec<&str> = node
+        .bindings
+        .iter()
+        .filter(|b| {
+            LAYOUT_MEMBERS
+                .iter()
+                .any(|(name, on)| *name == b.name && !on.contains(&kind))
+        })
+        .map(|b| b.name.as_str())
+        .collect();
+    if !others.is_empty() {
+        return Err(refused(
+            "says_other",
+            format!(
+                "a `{kind}` has no `{}`: take it away first",
+                others.join("`, `")
+            ),
+        ));
+    }
+    let text = studio.session.text(doc).map_err(error)?.0.to_owned();
+    let text = format!(
+        "{}{kind}{}",
+        &text[..node.start],
+        &text[node.start + node.ty.len()..]
+    );
+    let selected = studio
+        .session
+        .selection()
+        .contains(&(doc.to_owned(), handle.clone()));
+    let outcome = studio
+        .session
+        .replace_text(doc, generation, None, &text, dry_run)
+        .map_err(error)?;
+    if dry_run {
+        return Ok(ArrangeOut {
+            edit: Some(outcome.into()),
+            nodes: vec![handle],
+            ..ArrangeOut::default()
+        });
+    }
+    // Its place in the file is all that hasn't changed.
+    let at = Address::Path(node.path.to_string());
+    let now = rehandled(studio, doc, &handle, selected, at)?;
+    Ok(ArrangeOut {
+        edit: Some(outcome.into()),
+        nodes: vec![now],
+        ..ArrangeOut::default()
+    })
+}
+
 fn rename(
     studio: &mut Studio,
     doc: &str,
@@ -1148,37 +1264,46 @@ fn rename(
             ..ArrangeOut::default()
         });
     }
-    // Written as a new text, the object comes back with a new handle: what
-    // Studio holds of the old one goes with it.
-    let renamed = Address::Id(name.to_owned());
-    let (now, _) = studio.session.resolve(doc, &renamed).map_err(error)?;
-    if studio.locked.contains(&handle) {
-        studio.locked.insert(now.clone());
-    }
-    studio.rehandled.push((handle.clone(), now.clone()));
-    if selected {
-        let others: Vec<Address> = studio
-            .session
-            .selection()
-            .into_iter()
-            .filter(|(_, h)| *h != handle)
-            .map(|(_, h)| Address::Node(h))
-            .chain([renamed])
-            .collect();
-        studio.session.select(doc, &others).map_err(error)?;
-    }
-    // The call's end writes it under its new id (`hidden_now`).
-    {
-        let mut previews = crate::preview::lock(&studio.previews);
-        if previews.is_hidden(doc, &handle) {
-            previews.hidden.insert((doc.to_owned(), now.clone()));
-        }
-    }
+    let now = rehandled(studio, doc, &handle, selected, Address::Id(name.to_owned()))?;
     Ok(ArrangeOut {
         edit: Some(outcome.into()),
         nodes: vec![now],
         ..ArrangeOut::default()
     })
+}
+
+/// Written as a new text, an object comes back with a new handle: what Studio
+/// holds of the old one goes with it. Gives the new one.
+fn rehandled(
+    studio: &mut Studio,
+    doc: &str,
+    handle: &str,
+    selected: bool,
+    address: Address,
+) -> Result<String, SurfaceError> {
+    let (now, _) = studio.session.resolve(doc, &address).map_err(error)?;
+    if studio.locked.contains(handle) {
+        studio.locked.insert(now.clone());
+    }
+    studio.rehandled.push((handle.to_owned(), now.clone()));
+    if selected {
+        let others: Vec<Address> = studio
+            .session
+            .selection()
+            .into_iter()
+            .filter(|(_, h)| h != handle)
+            .map(|(_, h)| Address::Node(h))
+            .chain([address])
+            .collect();
+        studio.session.select(doc, &others).map_err(error)?;
+    }
+    // The call's end writes it under its new id (`hidden_now`).
+    let mut previews = crate::preview::lock(&studio.previews);
+    if previews.is_hidden(doc, handle) {
+        previews.hidden.insert((doc.to_owned(), now.clone()));
+    }
+    drop(previews);
+    Ok(now)
 }
 
 pub(crate) fn add(registry: ToolRegistry, studio: &Arc<Mutex<Studio>>) -> ToolRegistry {

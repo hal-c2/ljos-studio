@@ -31,6 +31,7 @@ expression: value
           "duplicate",
           "remove",
           "rename",
+          "relayout",
           "hide",
           "show",
           "lock",
@@ -89,7 +90,7 @@ expression: value
         "type": "string"
       },
       "name": {
-        "description": "For `rename`: the object's new `id`. For `component_extract`: the new type.",
+        "description": "For `rename`: the object's new `id`. For `component_extract`: the new type. For `relayout`: its new kind.",
         "type": "string"
       },
       "nodes": {
