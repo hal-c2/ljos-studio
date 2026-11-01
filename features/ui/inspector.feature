@@ -130,22 +130,24 @@ Feature: The inspector shows colours and every declared property
     Then the inspector's "<row>" has <picker>, painted "<swatch>", with the note "<note>"
 
     Examples:
-      | kind                        | declaration                               | row         | picker    | swatch      | note                                                   |
-      | declared colour             | property color shade: "#336699"           | shade       | a picker  | #336699     |                                                        |
-      | declared colour, named      | property color shade: "red"               | shade       | a picker  | red         |                                                        |
-      | declared colour, empty      | property color shade                      | shade       | a picker  |             |                                                        |
-      | colour by name              | property var borderColor: "red"           | borderColor | a picker  | red         |                                                        |
-      | colour by name, transparent | property var borderColor: "transparent"   | borderColor | a picker  | transparent |                                                        |
-      | colour by name, empty       | property var borderColor                  | borderColor | a picker  |             |                                                        |
-      | colour by name, not one     | property string borderColor: "nope"       | borderColor | a picker  |             |                                                        |
-      | hex text                    | property string code: "#123456"           | code        | a picker  | #123456     |                                                        |
-      | not quite hex text          | property string code: "#12345"            | code        | no picker |             |                                                        |
-      | colour-name text            | property string label: "red"              | label       | no picker |             |                                                        |
-      | not a colour                | property string label: "nope"             | label       | no picker |             |                                                        |
-      | number                      | property int size: 3                      | size        | no picker |             |                                                        |
-      | expression                  | property int size: 1 + 1                  | size        | no picker |             |                                                        |
-      | colour by expression        | property color shade: Qt.rgba(0, 1, 0, 1) | shade       | a picker  |             | Worked out by Qt.rgba(0, 1, 0, 1): picking replaces it |
-      | colour-named expression     | property var borderColor: Colors.text     | borderColor | a picker  |             | Worked out by Colors.text: picking replaces it         |
+      | kind                                | declaration                                    | row                  | picker    | swatch      | note                                                   |
+      | declared colour                     | property color shade: "#336699"                | shade                | a picker  | #336699     |                                                        |
+      | declared colour, named              | property color shade: "red"                    | shade                | a picker  | red         |                                                        |
+      | declared colour, empty              | property color shade                           | shade                | a picker  |             |                                                        |
+      | colour by name                      | property var borderColor: "red"                | borderColor          | a picker  | red         |                                                        |
+      | colour by a longer name             | property var selectedTextColor: "red"          | selectedTextColor    | a picker  | red         |                                                        |
+      | colour by a longer name, expression | property var placeholderTextColor: Colors.text | placeholderTextColor | a picker  |             | Worked out by Colors.text: picking replaces it         |
+      | colour by name, transparent         | property var borderColor: "transparent"        | borderColor          | a picker  | transparent |                                                        |
+      | colour by name, empty               | property var borderColor                       | borderColor          | a picker  |             |                                                        |
+      | colour by name, not one             | property string borderColor: "nope"            | borderColor          | a picker  |             |                                                        |
+      | hex text                            | property string code: "#123456"                | code                 | a picker  | #123456     |                                                        |
+      | not quite hex text                  | property string code: "#12345"                 | code                 | no picker |             |                                                        |
+      | colour-name text                    | property string label: "red"                   | label                | no picker |             |                                                        |
+      | not a colour                        | property string label: "nope"                  | label                | no picker |             |                                                        |
+      | number                              | property int size: 3                           | size                 | no picker |             |                                                        |
+      | expression                          | property int size: 1 + 1                       | size                 | no picker |             |                                                        |
+      | colour by expression                | property color shade: Qt.rgba(0, 1, 0, 1)      | shade                | a picker  |             | Worked out by Qt.rgba(0, 1, 0, 1): picking replaces it |
+      | colour-named expression             | property var borderColor: Colors.text          | borderColor          | a picker  |             | Worked out by Colors.text: picking replaces it         |
 
   @preview
   Scenario: A new picker does not keep what the last one refused
