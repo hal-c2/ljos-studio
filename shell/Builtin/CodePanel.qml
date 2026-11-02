@@ -77,9 +77,15 @@ Panel {
             objectName: "code"
             Accessible.name: panel.title
             font.family: "monospace"
-            font.pixelSize: Typography.bodySize
+            font.pixelSize: Typography.captionSize
             enabled: panel.workspace.doc !== ""
             selectByMouse: true
+            color: Colors.text
+            leftPadding: Spacing.sm
+            topPadding: Spacing.xs
+            background: Rectangle {
+                color: Colors.surface
+            }
 
             Rectangle {
                 id: band

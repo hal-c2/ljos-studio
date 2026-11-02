@@ -234,7 +234,7 @@ Popup {
                 text: "Into"
                 color: Colors.text
             }
-            TextField {
+            Field {
                 id: out
                 placeholderText: "build/" + panel.target
                 Accessible.name: "Output directory"
@@ -339,20 +339,20 @@ Popup {
 
         RowLayout {
             spacing: Spacing.xs
-            Button {
+            TextButton {
                 text: "Check"
                 Accessible.name: text
                 enabled: panel.entry !== "" && !panel.busy
                 onClicked: panel.check()
             }
-            Button {
+            TextButton {
                 text: "Write bundle"
                 Accessible.name: text
                 enabled: panel.entry !== "" && !panel.busy
                 highlighted: true
                 onClicked: panel.run(false)
             }
-            Button {
+            TextButton {
                 text: "Copy path"
                 Accessible.name: text
                 enabled: panel.wrote
@@ -365,7 +365,7 @@ Popup {
             Item {
                 Layout.fillWidth: true
             }
-            Button {
+            TextButton {
                 text: "Close"
                 Accessible.name: text
                 onClicked: panel.close()

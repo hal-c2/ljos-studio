@@ -642,7 +642,7 @@ MouseArea {
             width: visible ? modelData.window.width * overlay.zoom : 0
             height: visible ? modelData.window.height * overlay.zoom : 0
             color: "transparent"
-            border.color: Colors.primary
+            border.color: Colors.accent
             border.width: 1
             opacity: overlay.ghost !== null ? 0.4 : 1
         }
@@ -659,7 +659,7 @@ MouseArea {
             x: (box.x + box.width * overlay.handleX[index]) * overlay.zoom - width / 2
             y: (box.y + box.height * overlay.handleY[index]) * overlay.zoom - height / 2
             color: Colors.surface
-            border.color: Colors.primary
+            border.color: Colors.accent
             border.width: 1
         }
     }
@@ -672,7 +672,7 @@ MouseArea {
         width: visible ? overlay.ghost.width * overlay.zoom : 0
         height: visible ? overlay.ghost.height * overlay.zoom : 0
         color: "transparent"
-        border.color: Colors.primary
+        border.color: Colors.accent
         border.width: 2
 
         Label {
@@ -680,7 +680,7 @@ MouseArea {
             visible: overlay.mode === "resizing"
             y: parent.height + Spacing.xxs
             text: overlay.ghost !== null ? Math.round(overlay.ghost.width) + " × " + Math.round(overlay.ghost.height) : ""
-            color: Colors.primary
+            color: Colors.accent
             font.pixelSize: Typography.captionSize
         }
     }

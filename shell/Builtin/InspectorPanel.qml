@@ -45,6 +45,13 @@ Panel {
             panel.reseed()
             // The selection is shared, and what is open was opened on another.
             picker.close()
+            // An object removed under an open picker empties the selection,
+            // and what the picker says of that is still to be read. Any other
+            // refusal was about what is gone.
+            if (panel.workspace.selected !== "" || refusal.text !== panel.pickerGone)
+                panel.forgetRefused()
+            else
+                panel.offered = null
         }
         function onRefused(tool, error) {
             if (["property_set", "binding_set", "state_edit"].includes(tool))
@@ -104,6 +111,10 @@ Panel {
             set(row.name, text)
     }
 
+    // A refused value the refusal offers to bind, while that refusal stands.
+    property var offered: null
+    property string offeredSays: ""
+
     // On the selected object unless a picker says which it was opened on.
     function set(name, text, node) {
         if (picked !== "") {
@@ -114,7 +125,12 @@ Panel {
         // `0x20` stays `0x20`. An expression is for "Bind".
         const typed = text.trim()
         if (!workspace.literal(typed)) {
-            refusal.text = text + " is not a literal: bind it as an expression"
+            // The field goes back to what the file says; what was typed is
+            // kept for the button under the refusal, which is what it asks for.
+            offered = {name: name, value: typed}
+            refusal.text = typed + " is not a literal: bind it as an expression"
+            offeredSays = refusal.text
+            reseed()
             return
         }
         refusal.text = ""
@@ -149,6 +165,14 @@ Panel {
     onPickedDocChanged: {
         picked = ""
         pickedOn = ""
+        forgetRefused()
+    }
+    readonly property string pickerGone: "The object this picker was opened on has gone"
+    // A refused value was typed on one object, in one document, into one state;
+    // its offer would write it to whatever is there now.
+    function forgetRefused() {
+        refusal.text = ""
+        offered = null
     }
 
     function layer(node) {
@@ -166,6 +190,8 @@ Panel {
     // With `follows` this comes after an edit, whose refusal it leaves alone;
     // without it, it is the person's own gesture.
     function pick(name, on, follows) {
+        if (!follows)
+            forgetRefused()
         const was = pickedOn
         const had = picked !== ""
         picked = name
@@ -241,24 +267,23 @@ Panel {
     property bool adding: false
     Connections {
         target: panel.workspace
-        function onAnswered(tool, answer) {
+        function onAnswered(tool, answer, asked) {
             if (tool === "review" && panel.adding) {
                 panel.adding = false
                 newComment.text = ""
             }
-            // An answer names its object: one on its way when the person opened
-            // this picker on another is not about what the sliders hold.
-            if (tool === "preview_state" && picker.waiting && answer.state !== undefined
-                    && answer.id === picker.objectId && answer.state[picker.name] !== undefined) {
-                const read = String(answer.state[picker.name])
+            if (tool === "preview_state" && picker.asks(asked)) {
+                const value = answer.state[picker.name]
+                const read = value !== undefined ? String(value) : null
                 // The running app has no value for it yet, so any is a start.
-                if (answer.state[picker.name] === null) {
+                if (value === null) {
                     picker.start("#000000")
-                } else if (panel.writesColour(read)) {
+                } else if (read !== null && panel.writesColour(read)) {
                     picker.start(read)
                 } else {
-                    picker.waiting = false
-                    refusal.text = read + " is not a colour"
+                    picker.unread()
+                    if (read !== null)
+                        refusal.text = read + " is not a colour"
                 }
             }
             if (panel.rowEditing && ["property_set", "binding_set", "state_edit"].includes(tool)) {
@@ -267,12 +292,13 @@ Panel {
                 newValue.text = ""
             }
         }
-        function onRefused(tool, error) {
+        function onRefused(tool, error, asked) {
             if (tool === "review")
                 panel.adding = false
-            // The reason is on the window's error line; the sliders stay still.
-            if (tool === "preview_state")
-                picker.waiting = false
+            // The reason is on the window's error line; the sliders go on from
+            // grey, since picking replaces what could not be read.
+            if (tool === "preview_state" && picker.asks(asked))
+                picker.unread()
             panel.rowEditing = false
         }
     }
@@ -299,8 +325,8 @@ Panel {
     // Hue, saturation and value, or the hex a person has from elsewhere.
     // Set when the hand lets go or Enter is pressed: a drag is one undo step.
     // A colour an expression works out to is asked of the preview, so the
-    // sliders start from what is on the canvas; until it answers, or when
-    // it cannot, they stay still rather than start from black.
+    // sliders start from what is on the canvas; when it cannot say, they go
+    // on from a mid grey and an empty hex rather than stay off or start black.
     Popup {
         id: picker
         objectName: "colourPicker"
@@ -308,10 +334,11 @@ Panel {
         property string name: ""
         // The object it was opened on: the selection can move while it is open.
         property string node: ""
-        // Read when asked: the object can be named again while this is open.
-        readonly property string objectId: {
-            const object = panel.layer(node)
-            return object !== null ? object.id : ""
+        // Showing a state or clicking in play reads the same object: only this
+        // picker's own read ends its wait.
+        function asks(call) {
+            return waiting && call.read !== undefined && call.read.includes(name)
+                && call.node.node === node
         }
         property string written: ""
         property bool waiting: false
@@ -329,6 +356,12 @@ Panel {
             hex.text = colour
             waiting = false
             known = true
+        }
+        // Nothing says what colour it is now. A mid grey moves every way, and
+        // the empty hex says it is no reading of the file.
+        function unread() {
+            start("#808080")
+            hex.text = ""
         }
         function show(row, written, at) {
             refusal.text = ""
@@ -357,7 +390,7 @@ Panel {
         function take(text) {
             written = JSON.stringify(text)
             if (panel.layer(node) === null) {
-                refusal.text = "The object this picker was opened on has gone"
+                refusal.text = panel.pickerGone
                 return
             }
             panel.set(name, written, node)
@@ -379,7 +412,7 @@ Panel {
                 Layout.fillWidth: true
                 Layout.preferredHeight: 32
                 color: picker.chosen
-                border.color: Colors.outline
+                border.color: Colors.border
             }
             Label {
                 text: "Hue"
@@ -400,6 +433,7 @@ Panel {
             }
             Slider {
                 id: saturation
+                objectName: "pickerSaturation"
                 enabled: picker.known
                 Accessible.name: "Saturation"
                 onPressedChanged: if (!pressed) picker.take(picker.chosen.toString())
@@ -412,12 +446,13 @@ Panel {
             }
             Slider {
                 id: brightness
+                objectName: "pickerBrightness"
                 enabled: picker.known
                 Accessible.name: "Brightness"
                 onPressedChanged: if (!pressed) picker.take(picker.chosen.toString())
                 onMoved: hex.text = picker.chosen.toString()
             }
-            TextField {
+            Field {
                 id: hex
                 Layout.fillWidth: true
                 placeholderText: "#rrggbb"
@@ -433,471 +468,470 @@ Panel {
         }
     }
 
-    ColumnLayout {
+    Flickable {
+        id: scroll
         anchors.fill: parent
-        anchors.margins: Spacing.xs
-        spacing: Spacing.xxs
-        enabled: panel.workspace.selected !== ""
-
-        Repeater {
-            model: panel.workspace.inspector
-            delegate: RowLayout {
-                id: row
-                required property var modelData
-                Layout.fillWidth: true
-                spacing: Spacing.xxs
-
-                Label {
-                    text: row.modelData.name
-                    color: Colors.text
-                    Layout.preferredWidth: 72
-                    elide: Text.ElideRight
-                }
-                Button {
-                    id: swatch
-                    readonly property var kind: panel.colourRow(row.modelData, value.text)
-                    visible: kind.picker
-                    Layout.preferredWidth: 24
-                    Layout.preferredHeight: 24
-                    padding: 0
-                    Accessible.name: "Pick " + row.modelData.name
-                    Accessible.description: kind.paint
-                    onClicked: picker.show(row.modelData, value.text, this)
-                    contentItem: Rectangle {
-                        color: swatch.kind.paint || "transparent"
-                        border.color: Colors.outline
-                    }
-                }
-                TextField {
-                    id: value
-                    text: panel.inState(row.modelData.name, row.modelData.value)
-                    placeholderText: "no value"
-                    Accessible.name: row.modelData.name
-                    Layout.fillWidth: true
-                    Layout.minimumWidth: 96
-                    onAccepted: panel.enter(row.modelData, text)
-                    // The rows are not made anew for a list that reads the
-                    // same, and what is typed in one is not the next object's,
-                    // nor stays when the file refused it.
-                    Connections {
-                        target: panel
-                        function onReseed() {
-                            value.text = Qt.binding(() => panel.inState(row.modelData.name, row.modelData.value))
-                        }
-                    }
-                }
-                Button {
-                    text: "Bind"
-                    Accessible.name: "Bind " + row.modelData.name
-                    onClicked: panel.bind(row.modelData.name, value.text)
-                }
-            }
+        clip: true
+        contentHeight: rows.implicitHeight
+        boundsBehavior: Flickable.StopAtBounds
+        ScrollBar.vertical: ScrollBar {
+            Accessible.name: "Scroll the inspector"
         }
 
-        // Two lines: on one, the panel's width left the value a few pixels.
-        RowLayout {
-            Layout.fillWidth: true
-            spacing: Spacing.xxs
-
-            TextField {
-                id: newName
-                placeholderText: "property"
-                Accessible.name: "New property"
-                Layout.preferredWidth: 96
-            }
-            TextField {
-                id: newValue
-                placeholderText: "value"
-                Accessible.name: "New value"
-                Layout.fillWidth: true
-                onAccepted: add.clicked()
-            }
-        }
-        RowLayout {
-            Layout.fillWidth: true
-            spacing: Spacing.xxs
-
-            Item {
-                Layout.fillWidth: true
-            }
-            Button {
-                id: add
-                text: "Set"
-                Accessible.name: "Set new property"
-                enabled: newName.text !== ""
-                onClicked: panel.fromRow(() => panel.set(newName.text, newValue.text))
-            }
-            Button {
-                text: "Bind"
-                Accessible.name: "Bind new property"
-                enabled: newName.text !== ""
-                onClicked: panel.fromRow(() => panel.bind(newName.text, newValue.text))
-            }
-        }
+    ColumnLayout {
+        id: rows
+        width: scroll.width
+        spacing: 0
 
         Label {
-            text: "States"
-            color: Colors.text
-            font.weight: Typography.bodyStrongWeight
-            Accessible.role: Accessible.Heading
-            Accessible.name: text
-        }
-
-        Repeater {
-            model: panel.workspace.states
-            delegate: RowLayout {
-                id: stateRow
-                required property var modelData
-                Layout.fillWidth: true
-                spacing: Spacing.xxs
-
-                Button {
-                    text: stateRow.modelData.name
-                    checkable: true
-                    checked: panel.picked === stateRow.modelData.name
-                    Accessible.name: "State " + stateRow.modelData.name
-                    onClicked: panel.pick(checked ? stateRow.modelData.name : "", checked ? panel.workspace.selected : "")
-                }
-                TextField {
-                    id: stateName
-                    text: stateRow.modelData.name
-                    Accessible.name: "Name of " + stateRow.modelData.name
-                    Layout.fillWidth: true
-                    onAccepted: {
-                        const was = stateRow.modelData.name
-                        if (text === was || text === "")
-                            return
-                        panel.editState({action: "rename", state: was, new_name: text})
-                        if (panel.picked === was) {
-                            panel.renamedPicked = was
-                            panel.pick(text, panel.pickedOn, true)
-                        }
-                    }
-                    Connections {
-                        target: panel
-                        function onReseed() {
-                            stateName.text = Qt.binding(() => stateRow.modelData.name)
-                        }
-                    }
-                }
-                Button {
-                    text: "Remove"
-                    Accessible.name: "Remove state " + stateRow.modelData.name
-                    onClicked: {
-                        const name = stateRow.modelData.name
-                        panel.editState({action: "remove", state: name})
-                        if (panel.picked === name)
-                            panel.pick("", "", true)
-                    }
-                }
-            }
-        }
-
-        RowLayout {
-            Layout.fillWidth: true
-            spacing: Spacing.xxs
-
-            TextField {
-                id: newState
-                placeholderText: "state"
-                Accessible.name: "New state"
-                Layout.fillWidth: true
-                onAccepted: addState.clicked()
-            }
-            Button {
-                id: addState
-                text: "Add"
-                Accessible.name: "Add state"
-                enabled: newState.text !== ""
-                onClicked: {
-                    panel.editState({action: "add", state: newState.text})
-                    newState.text = ""
-                }
-            }
-        }
-
-        RowLayout {
-            visible: panel.picked !== ""
-            Layout.fillWidth: true
-            spacing: Spacing.xxs
-
-            Label {
-                text: "Editing state " + panel.picked
-                color: Colors.text
-                font.weight: Typography.bodyStrongWeight
-                Accessible.role: Accessible.StaticText
-                Accessible.name: text
-                Layout.fillWidth: true
-            }
-            Button {
-                text: "Done"
-                Accessible.name: "Done editing state"
-                onClicked: panel.pick("", "")
-            }
-        }
-
-        ColumnLayout {
-            visible: panel.current !== null
-            Layout.fillWidth: true
-            spacing: Spacing.xxs
-
-            RowLayout {
-                Layout.fillWidth: true
-                spacing: Spacing.xxs
-
-                Label {
-                    text: "when"
-                    color: Colors.text
-                    Layout.preferredWidth: 96
-                }
-                TextField {
-                    id: stateWhen
-                    text: panel.current !== null && panel.current.when !== undefined ? panel.current.when : ""
-                    placeholderText: "always off"
-                    Accessible.name: "When"
-                    Layout.fillWidth: true
-                    onAccepted: {
-                        const args = {action: "when", state: panel.picked}
-                        if (text !== "")
-                            args.when = text
-                        panel.editState(args)
-                        panel.show(panel.pickedOn, "", true)
-                    }
-                    Connections {
-                        target: panel
-                        function onReseed() {
-                            stateWhen.text = Qt.binding(() => panel.current !== null && panel.current.when !== undefined ? panel.current.when : "")
-                        }
-                    }
-                }
-            }
-
-            RowLayout {
-                Layout.fillWidth: true
-                spacing: Spacing.xxs
-
-                Repeater {
-                    model: ["phone", "tablet", "desktop"]
-                    delegate: Button {
-                        required property string modelData
-                        text: modelData
-                        Accessible.name: "Breakpoint " + modelData
-                        onClicked: {
-                            panel.editState({action: "when", state: panel.picked, breakpoint: modelData})
-                            panel.show(panel.pickedOn, "", true)
-                        }
-                    }
-                }
-            }
-
-            Repeater {
-                model: panel.current !== null ? panel.current.changes : []
-                delegate: RowLayout {
-                    id: changeRow
-                    required property var modelData
-                    readonly property string name: modelData.target + "." + modelData.name
-                    Layout.fillWidth: true
-                    spacing: Spacing.xxs
-
-                    Label {
-                        text: changeRow.name
-                        color: Colors.text
-                        Layout.preferredWidth: 96
-                        elide: Text.ElideRight
-                    }
-                    TextField {
-                        id: changeNow
-                        text: changeRow.modelData.value
-                        Accessible.name: changeRow.name
-                        Layout.fillWidth: true
-                        onAccepted: panel.change(changeRow.modelData.target, changeRow.modelData.name, text)
-                        Connections {
-                            target: panel
-                            function onReseed() {
-                                changeNow.text = Qt.binding(() => changeRow.modelData.value)
-                            }
-                        }
-                    }
-                }
-            }
-
-            RowLayout {
-                Layout.fillWidth: true
-                spacing: Spacing.xxs
-
-                TextField {
-                    id: changeTarget
-                    placeholderText: "id"
-                    Accessible.name: "Change target"
-                    Layout.preferredWidth: 64
-                }
-                TextField {
-                    id: changeName
-                    placeholderText: "property"
-                    Accessible.name: "Change property"
-                    Layout.preferredWidth: 64
-                }
-                TextField {
-                    id: changeValue
-                    placeholderText: "value"
-                    Accessible.name: "Change value"
-                    Layout.fillWidth: true
-                    onAccepted: setChange.clicked()
-                }
-                Button {
-                    id: setChange
-                    text: "Set"
-                    Accessible.name: "Set change"
-                    enabled: changeTarget.text !== "" && changeName.text !== ""
-                    onClicked: panel.change(changeTarget.text, changeName.text, changeValue.text)
-                }
-            }
-        }
-
-        Label {
-            visible: signalList.count > 0
-            text: "Signals"
-            color: Colors.text
-            font.weight: Typography.bodyStrongWeight
-            Accessible.role: Accessible.Heading
-            Accessible.name: text
-        }
-
-        // What a flow may handle on it, with the arguments a handler is
-        // given; a property's change signal, which every property has, is
-        // left out.
-        Repeater {
-            id: signalList
-            model: panel.workspace.signals.filter(s => !s.change)
-            delegate: Label {
-                required property var modelData
-                text: modelData.name + "(" + modelData.arguments
-                    .map(a => a.type === "" ? a.name : a.name + ": " + a.type).join(", ") + ")"
-                color: Colors.text
-                elide: Text.ElideRight
-                Layout.fillWidth: true
-                Accessible.role: Accessible.StaticText
-                Accessible.name: "Signal " + modelData.name
-            }
-        }
-
-        Label {
-            visible: panel.workspace.roles.length > 0
-            text: "Roles"
-            color: Colors.text
-            font.weight: Typography.bodyStrongWeight
-            Accessible.role: Accessible.Heading
-            Accessible.name: text
-        }
-
-        Repeater {
-            model: panel.workspace.roles
-            delegate: RowLayout {
-                id: roleRow
-                required property string modelData
-                Layout.fillWidth: true
-                spacing: Spacing.xxs
-
-                Label {
-                    text: roleRow.modelData
-                    color: Colors.text
-                    Layout.preferredWidth: 96
-                    elide: Text.ElideRight
-                    Accessible.role: Accessible.StaticText
-                    Accessible.name: "Role " + roleRow.modelData
-                }
-                TextField {
-                    placeholderText: "property"
-                    Accessible.name: "Bind role " + roleRow.modelData + " to"
-                    Layout.fillWidth: true
-                    onAccepted: {
-                        if (text === "")
-                            return
-                        panel.bind(text, "model." + roleRow.modelData)
-                        text = ""
-                    }
-                }
-            }
-        }
-
-        Label {
-            text: "Comments"
-            color: Colors.text
-            font.weight: Typography.bodyStrongWeight
-            Accessible.role: Accessible.Heading
-            Accessible.name: text
-        }
-
-        Repeater {
-            model: panel.comments
-            delegate: RowLayout {
-                id: commentRow
-                required property var modelData
-                readonly property string kind: modelData.orphaned ? "Orphaned"
-                                               : modelData.resolved ? "Resolved" : "Open"
-                Layout.fillWidth: true
-                spacing: Spacing.xxs
-
-                Label {
-                    text: commentRow.modelData.orphaned
-                          ? commentRow.modelData.text + " (" + commentRow.modelData.label + ", removed)"
-                          : commentRow.modelData.text
-                    color: commentRow.modelData.resolved ? Colors.textMuted : Colors.text
-                    wrapMode: Text.Wrap
-                    Layout.fillWidth: true
-                    Accessible.role: Accessible.StaticText
-                    Accessible.name: commentRow.kind + " comment: " + commentRow.modelData.text
-                }
-                Button {
-                    text: commentRow.modelData.resolved ? "Reopen" : "Resolve"
-                    Accessible.name: text + " " + commentRow.modelData.text
-                    onClicked: panel.review({
-                        action: commentRow.modelData.resolved ? "reopen" : "resolve",
-                        comment: commentRow.modelData.id
-                    })
-                }
-            }
-        }
-
-        RowLayout {
-            Layout.fillWidth: true
-            spacing: Spacing.xxs
-
-            TextField {
-                id: newComment
-                placeholderText: "comment"
-                Accessible.name: "New comment"
-                Layout.fillWidth: true
-                onAccepted: if (addComment.enabled) addComment.clicked()
-            }
-            Button {
-                id: addComment
-                text: "Comment"
-                Accessible.name: "Add comment"
-                enabled: newComment.text.trim() !== "" && panel.workspace.selected !== ""
-                onClicked: {
-                    panel.adding = true
-                    panel.review({
-                        action: "add",
-                        doc: panel.workspace.doc,
-                        node: {node: panel.workspace.selected},
-                        text: newComment.text
-                    })
-                }
-            }
+            visible: panel.workspace.selected === ""
+            text: "Select something to edit it"
+            color: Colors.textMuted
+            font.pixelSize: Typography.captionSize
+            padding: Spacing.md
+            Layout.alignment: Qt.AlignHCenter
         }
 
         Label {
             id: refusal
             objectName: "inspectorRefusal"
-            color: Colors.text
+            color: Colors.danger
             visible: text !== ""
             wrapMode: Text.Wrap
+            font.pixelSize: Typography.captionSize
+            padding: Spacing.xs
             Layout.fillWidth: true
         }
-
-        Item {
-            Layout.fillHeight: true
+        TextButton {
+            visible: panel.offered !== null && refusal.text === panel.offeredSays
+            Layout.leftMargin: Spacing.xs
+            text: visible ? "Bind " + panel.offered.name + " to " + panel.offered.value : ""
+            onClicked: panel.bind(panel.offered.name, panel.offered.value)
         }
+
+        Section {
+            title: "Properties"
+            visible: panel.workspace.selected !== ""
+            Layout.fillWidth: true
+
+            Repeater {
+                model: panel.workspace.inspector
+                delegate: RowLayout {
+                    id: row
+                    required property var modelData
+                    Layout.fillWidth: true
+                    spacing: Spacing.xxs
+
+                    Label {
+                        text: row.modelData.name
+                        color: Colors.textMuted
+                        font.pixelSize: Typography.captionSize
+                        Layout.preferredWidth: 72
+                        elide: Text.ElideRight
+                    }
+                    TextButton {
+                        id: swatch
+                        readonly property var kind: panel.colourRow(row.modelData, value.text)
+                        visible: kind.picker
+                        Layout.preferredWidth: 24
+                        Layout.preferredHeight: 24
+                        padding: 0
+                        Accessible.name: "Pick " + row.modelData.name
+                        Accessible.description: kind.paint
+                        onClicked: picker.show(row.modelData, value.text, this)
+                        contentItem: Rectangle {
+                            color: swatch.kind.paint || "transparent"
+                            border.color: Colors.border
+                        }
+                    }
+                    Field {
+                        id: value
+                        text: panel.inState(row.modelData.name, row.modelData.value)
+                        placeholderText: "no value"
+                        Accessible.name: row.modelData.name
+                        Layout.fillWidth: true
+                        Layout.minimumWidth: 96
+                        onAccepted: panel.enter(row.modelData, text)
+                        // The rows are not made anew for a list that reads the
+                        // same, and what is typed in one is not the next object's,
+                        // nor stays when the file refused it.
+                        Connections {
+                            target: panel
+                            function onReseed() {
+                                value.text = Qt.binding(() => panel.inState(row.modelData.name, row.modelData.value))
+                            }
+                        }
+                    }
+                    IconButton {
+                        icon_: "link"
+                        text: "Bind " + row.modelData.name
+                        onClicked: panel.bind(row.modelData.name, value.text)
+                    }
+                }
+            }
+
+            // Two lines: on one, the panel's width left the value a few pixels.
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: Spacing.xxs
+
+                Field {
+                    id: newName
+                    placeholderText: "property"
+                    Accessible.name: "New property"
+                    Layout.preferredWidth: 96
+                }
+                Field {
+                    id: newValue
+                    placeholderText: "value"
+                    Accessible.name: "New value"
+                    Layout.fillWidth: true
+                    onAccepted: add.clicked()
+                }
+            }
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: Spacing.xxs
+
+                Item {
+                    Layout.fillWidth: true
+                }
+                TextButton {
+                    id: add
+                    text: "Set"
+                    Accessible.name: "Set new property"
+                    enabled: newName.text !== ""
+                    onClicked: panel.fromRow(() => panel.set(newName.text, newValue.text))
+                }
+                TextButton {
+                    text: "Bind"
+                    Accessible.name: "Bind new property"
+                    enabled: newName.text !== ""
+                    onClicked: panel.fromRow(() => panel.bind(newName.text, newValue.text))
+                }
+            }
+        }
+
+        Section {
+            title: "States"
+            visible: panel.workspace.selected !== ""
+            Layout.fillWidth: true
+
+            Repeater {
+                model: panel.workspace.states
+                delegate: RowLayout {
+                    id: stateRow
+                    required property var modelData
+                    Layout.fillWidth: true
+                    spacing: Spacing.xxs
+
+                    TextButton {
+                        text: stateRow.modelData.name
+                        checkable: true
+                        checked: panel.picked === stateRow.modelData.name
+                        Accessible.name: "State " + stateRow.modelData.name
+                        onClicked: panel.pick(checked ? stateRow.modelData.name : "", checked ? panel.workspace.selected : "")
+                    }
+                    Field {
+                        id: stateName
+                        text: stateRow.modelData.name
+                        Accessible.name: "Name of " + stateRow.modelData.name
+                        Layout.fillWidth: true
+                        onAccepted: {
+                            const was = stateRow.modelData.name
+                            if (text === was || text === "")
+                                return
+                            panel.editState({action: "rename", state: was, new_name: text})
+                            if (panel.picked === was) {
+                                panel.renamedPicked = was
+                                panel.pick(text, panel.pickedOn, true)
+                            }
+                        }
+                        Connections {
+                            target: panel
+                            function onReseed() {
+                                stateName.text = Qt.binding(() => stateRow.modelData.name)
+                            }
+                        }
+                    }
+                    IconButton {
+                        icon_: "trash"
+                        text: "Remove state " + stateRow.modelData.name
+                        onClicked: {
+                            const name = stateRow.modelData.name
+                            panel.editState({action: "remove", state: name})
+                            if (panel.picked === name)
+                                panel.pick("", "", true)
+                        }
+                    }
+                }
+            }
+
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: Spacing.xxs
+
+                Field {
+                    id: newState
+                    placeholderText: "state"
+                    Accessible.name: "New state"
+                    Layout.fillWidth: true
+                    onAccepted: addState.clicked()
+                }
+                TextButton {
+                    id: addState
+                    text: "Add"
+                    Accessible.name: "Add state"
+                    enabled: newState.text !== ""
+                    onClicked: {
+                        panel.editState({action: "add", state: newState.text})
+                        newState.text = ""
+                    }
+                }
+            }
+
+            ColumnLayout {
+                visible: panel.current !== null
+                Layout.fillWidth: true
+                spacing: Spacing.xxs
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: Spacing.xxs
+
+                    Label {
+                        text: "when"
+                        color: Colors.text
+                        Layout.preferredWidth: 96
+                    }
+                    Field {
+                        id: stateWhen
+                        text: panel.current !== null && panel.current.when !== undefined ? panel.current.when : ""
+                        placeholderText: "always off"
+                        Accessible.name: "When"
+                        Layout.fillWidth: true
+                        onAccepted: {
+                            const args = {action: "when", state: panel.picked}
+                            if (text !== "")
+                                args.when = text
+                            panel.editState(args)
+                            panel.show(panel.pickedOn, "", true)
+                        }
+                        Connections {
+                            target: panel
+                            function onReseed() {
+                                stateWhen.text = Qt.binding(() => panel.current !== null && panel.current.when !== undefined ? panel.current.when : "")
+                            }
+                        }
+                    }
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: Spacing.xxs
+
+                    Repeater {
+                        model: ["phone", "tablet", "desktop"]
+                        delegate: TextButton {
+                            required property string modelData
+                            text: modelData
+                            Accessible.name: "Breakpoint " + modelData
+                            onClicked: {
+                                panel.editState({action: "when", state: panel.picked, breakpoint: modelData})
+                                panel.show(panel.pickedOn, "", true)
+                            }
+                        }
+                    }
+                }
+
+                Repeater {
+                    model: panel.current !== null ? panel.current.changes : []
+                    delegate: RowLayout {
+                        id: changeRow
+                        required property var modelData
+                        readonly property string name: modelData.target + "." + modelData.name
+                        Layout.fillWidth: true
+                        spacing: Spacing.xxs
+
+                        Label {
+                            text: changeRow.name
+                            color: Colors.text
+                            Layout.preferredWidth: 96
+                            elide: Text.ElideRight
+                        }
+                        Field {
+                            id: changeNow
+                            text: changeRow.modelData.value
+                            Accessible.name: changeRow.name
+                            Layout.fillWidth: true
+                            onAccepted: panel.change(changeRow.modelData.target, changeRow.modelData.name, text)
+                            Connections {
+                                target: panel
+                                function onReseed() {
+                                    changeNow.text = Qt.binding(() => changeRow.modelData.value)
+                                }
+                            }
+                        }
+                    }
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: Spacing.xxs
+
+                    Field {
+                        id: changeTarget
+                        placeholderText: "id"
+                        Accessible.name: "Change target"
+                        Layout.preferredWidth: 64
+                    }
+                    Field {
+                        id: changeName
+                        placeholderText: "property"
+                        Accessible.name: "Change property"
+                        Layout.preferredWidth: 64
+                    }
+                    Field {
+                        id: changeValue
+                        placeholderText: "value"
+                        Accessible.name: "Change value"
+                        Layout.fillWidth: true
+                        onAccepted: setChange.clicked()
+                    }
+                    TextButton {
+                        id: setChange
+                        text: "Set"
+                        Accessible.name: "Set change"
+                        enabled: changeTarget.text !== "" && changeName.text !== ""
+                        onClicked: panel.change(changeTarget.text, changeName.text, changeValue.text)
+                    }
+                }
+            }
+        }
+
+        Section {
+            title: "Signals"
+            Layout.fillWidth: true
+            visible: panel.workspace.selected !== "" && signalList.count > 0
+
+            // What a flow may handle on it, with the arguments a handler is
+            // given; a property's change signal, which every property has, is
+            // left out.
+            Repeater {
+                id: signalList
+                model: panel.workspace.signals.filter(s => !s.change)
+                delegate: Label {
+                    required property var modelData
+                    text: modelData.name + "(" + modelData.arguments
+                        .map(a => a.type === "" ? a.name : a.name + ": " + a.type).join(", ") + ")"
+                    color: Colors.text
+                    elide: Text.ElideRight
+                    Layout.fillWidth: true
+                    Accessible.role: Accessible.StaticText
+                    Accessible.name: "Signal " + modelData.name
+                }
+            }
+        }
+
+        Section {
+            title: "Roles"
+            Layout.fillWidth: true
+            visible: panel.workspace.roles.length > 0
+
+            Repeater {
+                model: panel.workspace.roles
+                delegate: RowLayout {
+                    id: roleRow
+                    required property string modelData
+                    Layout.fillWidth: true
+                    spacing: Spacing.xxs
+
+                    Label {
+                        text: roleRow.modelData
+                        color: Colors.text
+                        Layout.preferredWidth: 96
+                        elide: Text.ElideRight
+                        Accessible.role: Accessible.StaticText
+                        Accessible.name: "Role " + roleRow.modelData
+                    }
+                    Field {
+                        placeholderText: "property"
+                        Accessible.name: "Bind role " + roleRow.modelData + " to"
+                        Layout.fillWidth: true
+                        onAccepted: {
+                            if (text === "")
+                                return
+                            panel.bind(text, "model." + roleRow.modelData)
+                            text = ""
+                        }
+                    }
+                }
+            }
+        }
+
+        Section {
+            title: "Comments"
+            Layout.fillWidth: true
+
+            Repeater {
+                model: panel.comments
+                delegate: RowLayout {
+                    id: commentRow
+                    required property var modelData
+                    readonly property string kind: modelData.orphaned ? "Orphaned"
+                                                   : modelData.resolved ? "Resolved" : "Open"
+                    Layout.fillWidth: true
+                    spacing: Spacing.xxs
+
+                    Label {
+                        text: commentRow.modelData.orphaned
+                              ? commentRow.modelData.text + " (" + commentRow.modelData.label + ", removed)"
+                              : commentRow.modelData.text
+                        color: commentRow.modelData.resolved ? Colors.textMuted : Colors.text
+                        wrapMode: Text.Wrap
+                        Layout.fillWidth: true
+                        Accessible.role: Accessible.StaticText
+                        Accessible.name: commentRow.kind + " comment: " + commentRow.modelData.text
+                    }
+                    TextButton {
+                        text: commentRow.modelData.resolved ? "Reopen" : "Resolve"
+                        Accessible.name: text + " " + commentRow.modelData.text
+                        onClicked: panel.review({
+                            action: commentRow.modelData.resolved ? "reopen" : "resolve",
+                            comment: commentRow.modelData.id
+                        })
+                    }
+                }
+            }
+
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: Spacing.xxs
+
+                Field {
+                    id: newComment
+                    placeholderText: "comment"
+                    Accessible.name: "New comment"
+                    Layout.fillWidth: true
+                    onAccepted: if (addComment.enabled) addComment.clicked()
+                }
+                TextButton {
+                    id: addComment
+                    text: "Comment"
+                    Accessible.name: "Add comment"
+                    enabled: newComment.text.trim() !== "" && panel.workspace.selected !== ""
+                    onClicked: {
+                        panel.adding = true
+                        panel.review({
+                            action: "add",
+                            doc: panel.workspace.doc,
+                            node: {node: panel.workspace.selected},
+                            text: newComment.text
+                        })
+                    }
+                }
+            }
+        }
+    }
     }
 }

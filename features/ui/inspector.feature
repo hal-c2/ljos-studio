@@ -20,7 +20,14 @@ Feature: The inspector shows colours and every declared property
           property color accentColor: Qt.rgba(0, 1, 0, 1)
           color: "#ff0000"
           width: 100
+          Item { id: other }
       }
+      """
+    And the file "Other.qml":
+      """qml
+      import QtQuick
+
+      Item { }
       """
     And Studio's window shows the project
     And the person has opened "Main.qml" in the documents list
@@ -161,6 +168,7 @@ Feature: The inspector shows colours and every declared property
     Then the window says "nope is not a colour"
     And the window does not say "Worked out by "nope": picking replaces it"
     And the colour picker waits on nothing
+    And the colour picker goes on from grey, with no reading in its hex
 
   Scenario: Text that is no colour has no picker, however it looks
     When the person replaces "property var stack" with "property string code: \"#12345\"\n    property string label: \"red\"\n    property string objectTag: \"orange\"" in the code view
@@ -242,9 +250,46 @@ Feature: The inspector shows colours and every declared property
     And the person clicks the button "Pick accentColor"
     Then the window shows a refusal that says "top"
     And the colour picker waits on nothing
+    And the colour picker goes on from grey, with no reading in its hex
 
   Scenario: The picker of a colour an expression works out starts from what the preview shows
     When the person clicks the button "Pick accentColor"
     Then the colour picker holds "#00ff00"
     And the window says "Worked out by Qt.rgba(0, 1, 0, 1): picking replaces it"
     And the file "Main.qml" says "Qt.rgba(0, 1, 0, 1)"
+
+  Scenario: A refused value can be bound as the refusal says
+    When the person sets "width" to "parent.width" in the inspector
+    And the person clicks the button "Bind width to parent.width"
+    Then the file "Main.qml" says "width: parent.width"
+    And the window shows no refusal
+
+  Scenario: A refused value is forgotten when something else is selected
+    Given the person has set "width" to "parent.width" in the inspector
+    When the person selects "Item other" in the layers panel
+    Then the inspector has no button "Bind width to parent.width"
+    And the window shows no refusal
+
+
+  Scenario: A refusal goes with the object it was about
+    Given the person has selected "Item other" in the layers panel
+    And the person has set "stack" to "cube" in the inspector
+    When an agent calls the tool "node_remove" with:
+      """json
+      {"doc": "Main.qml", "node": {"id": "other"}}
+      """
+    Then the window does not say "cube is not a literal: bind it as an expression"
+
+  Scenario: A refused value is forgotten when another document opens
+    Given the person has set "width" to "parent.width" in the inspector
+    When the person opens "Other.qml" in the documents list
+    Then the inspector has no button "Bind width to parent.width"
+    And the window shows no refusal
+
+  Scenario: A refused value is forgotten when a state is picked
+    Given the person has set "width" to "parent.width" in the inspector
+    And the person has added the state "compact" in the inspector
+    And the person has set "width" to "parent.width" in the inspector
+    When the person picks the state "compact" in the inspector
+    Then the inspector has no button "Bind width to parent.width"
+    And the window shows no refusal

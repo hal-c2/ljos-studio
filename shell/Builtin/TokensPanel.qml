@@ -61,7 +61,7 @@ Panel {
         anchors.margins: Spacing.xs
         spacing: Spacing.xxs
 
-        TextField {
+        Field {
             id: filter
             placeholderText: "Filter tokens"
             Accessible.name: "Filter tokens"
@@ -103,6 +103,8 @@ Panel {
                     text: row.modelData.set ? row.modelData.token + " (theme)" : row.modelData.token
                     color: Colors.text
                     font.pixelSize: Typography.captionSize
+                    font.weight: Typography.bodyStrongWeight
+                    topPadding: Spacing.xs
                     elide: Text.ElideRight
                     Layout.fillWidth: true
                 }
@@ -110,7 +112,25 @@ Panel {
                 RowLayout {
                     visible: !row.colour
                     Layout.fillWidth: true
-                    TextField {
+                    // What the value does, beside the number that does it.
+                    Text {
+                        visible: /size|weight/i.test(row.modelData.token)
+                        text: "Aa"
+                        color: Colors.text
+                        font.pixelSize: /size/i.test(row.modelData.token)
+                            ? Math.max(10, Math.min(28, Number(row.modelData.value))) : Typography.bodySize
+                        font.weight: /weight/i.test(row.modelData.token)
+                            ? Number(row.modelData.value) : Typography.bodyWeight
+                        Accessible.ignored: true
+                    }
+                    Rectangle {
+                        visible: /^Spacing\./.test(row.modelData.token)
+                        implicitWidth: Math.min(64, Number(row.modelData.value))
+                        implicitHeight: 8
+                        color: Colors.accent
+                        Accessible.ignored: true
+                    }
+                    Field {
                         text: row.modelData.value
                         Accessible.name: row.modelData.token
                         Layout.fillWidth: true
@@ -135,21 +155,23 @@ Panel {
                         spacing: Spacing.xxs
 
                         Rectangle {
-                            implicitWidth: Spacing.md
-                            implicitHeight: Spacing.md
+                            implicitWidth: 20
+                            implicitHeight: 20
+                            radius: 4
                             color: variantRow.shown
                             // A swatch the colour of the panel still shows.
                             border.width: 1
-                            border.color: Colors.text
+                            border.color: Colors.border
                             Accessible.role: Accessible.Graphic
                             Accessible.name: row.modelData.token + " " + variantRow.modelData + " swatch"
                         }
                         Label {
                             text: variantRow.modelData
-                            color: Colors.text
-                            Layout.preferredWidth: 36
+                            color: Colors.textMuted
+                            font.pixelSize: Typography.captionSize
+                            Layout.preferredWidth: 28
                         }
-                        TextField {
+                        Field {
                             text: variantRow.shown
                             Accessible.name: row.modelData.token + " " + variantRow.modelData
                             Layout.fillWidth: true

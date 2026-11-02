@@ -16,36 +16,36 @@ publish = false
 # ljos-ui" in README.md. Every ljos-ui crate names the same `rev`: move them
 # together.
 [workspace.dependencies]
-qml_syntax = { git = "https://github.com/hal-c2/ljos-ui", rev = "e318dad71bd87be23133b83f53de6ac91314f0ac" }
-qml_edit = { git = "https://github.com/hal-c2/ljos-ui", rev = "e318dad71bd87be23133b83f53de6ac91314f0ac" }
+qml_syntax = { git = "https://github.com/hal-c2/ljos-ui", rev = "f5266a91b0b7f6b3d2f0991b264781f11b25c8b1" }
+qml_edit = { git = "https://github.com/hal-c2/ljos-ui", rev = "f5266a91b0b7f6b3d2f0991b264781f11b25c8b1" }
 # Which `onName` handlers an object takes: the type table cut down to
 # modules, properties and signals, small enough for the web build.
-qt_signals = { git = "https://github.com/hal-c2/ljos-ui", rev = "e318dad71bd87be23133b83f53de6ac91314f0ac" }
+qt_signals = { git = "https://github.com/hal-c2/ljos-ui", rev = "f5266a91b0b7f6b3d2f0991b264781f11b25c8b1" }
 # Only in build scripts: the full table stays out of what ships.
-qt_types = { git = "https://github.com/hal-c2/ljos-ui", rev = "e318dad71bd87be23133b83f53de6ac91314f0ac" }
-ljos_ir = { git = "https://github.com/hal-c2/ljos-ui", rev = "e318dad71bd87be23133b83f53de6ac91314f0ac" }
+qt_types = { git = "https://github.com/hal-c2/ljos-ui", rev = "f5266a91b0b7f6b3d2f0991b264781f11b25c8b1" }
+ljos_ir = { git = "https://github.com/hal-c2/ljos-ui", rev = "f5266a91b0b7f6b3d2f0991b264781f11b25c8b1" }
 # What a theme may say and when Ljós refuses one, judged by Ljós itself.
-ljos_design = { git = "https://github.com/hal-c2/ljos-ui", rev = "e318dad71bd87be23133b83f53de6ac91314f0ac" }
+ljos_design = { git = "https://github.com/hal-c2/ljos-ui", rev = "f5266a91b0b7f6b3d2f0991b264781f11b25c8b1" }
 # Puts Studio's own theme on its window when no watched session does.
-ljos_design_qml = { git = "https://github.com/hal-c2/ljos-ui", rev = "e318dad71bd87be23133b83f53de6ac91314f0ac" }
+ljos_design_qml = { git = "https://github.com/hal-c2/ljos-ui", rev = "f5266a91b0b7f6b3d2f0991b264781f11b25c8b1" }
 # The protocol alone; each crate that serves or calls MCP turns on
 # `server` (rmcp, tokio), `http` or `remote`, so the web build links neither.
-ljos_mcp_core = { git = "https://github.com/hal-c2/ljos-ui", rev = "e318dad71bd87be23133b83f53de6ac91314f0ac", default-features = false }
-ljos_blocks = { git = "https://github.com/hal-c2/ljos-ui", rev = "e318dad71bd87be23133b83f53de6ac91314f0ac", features = ["source"] }
-ljos_child = { git = "https://github.com/hal-c2/ljos-ui", rev = "e318dad71bd87be23133b83f53de6ac91314f0ac" }
+ljos_mcp_core = { git = "https://github.com/hal-c2/ljos-ui", rev = "f5266a91b0b7f6b3d2f0991b264781f11b25c8b1", default-features = false }
+ljos_blocks = { git = "https://github.com/hal-c2/ljos-ui", rev = "f5266a91b0b7f6b3d2f0991b264781f11b25c8b1", features = ["source"] }
+ljos_child = { git = "https://github.com/hal-c2/ljos-ui", rev = "f5266a91b0b7f6b3d2f0991b264781f11b25c8b1" }
 # The facade a Ljós app is written against; each crate turns on what it
 # needs (the window, the compiler, the test window).
-ljos = { git = "https://github.com/hal-c2/ljos-ui", rev = "e318dad71bd87be23133b83f53de6ac91314f0ac", default-features = false }
+ljos = { git = "https://github.com/hal-c2/ljos-ui", rev = "f5266a91b0b7f6b3d2f0991b264781f11b25c8b1", default-features = false }
 # What settles a scene and counts its frames, for the UI scenarios.
-ljos_drive = { git = "https://github.com/hal-c2/ljos-ui", rev = "e318dad71bd87be23133b83f53de6ac91314f0ac" }
+ljos_drive = { git = "https://github.com/hal-c2/ljos-ui", rev = "f5266a91b0b7f6b3d2f0991b264781f11b25c8b1" }
 # The watched session the self-reskin scenarios drive in-process, the
 # clock it is pumped with, and the scene a reload shows its root in.
-ljos_dev = { git = "https://github.com/hal-c2/ljos-ui", rev = "e318dad71bd87be23133b83f53de6ac91314f0ac" }
-ljos_runtime = { git = "https://github.com/hal-c2/ljos-ui", rev = "e318dad71bd87be23133b83f53de6ac91314f0ac" }
-ljos_quick = { git = "https://github.com/hal-c2/ljos-ui", rev = "e318dad71bd87be23133b83f53de6ac91314f0ac" }
+ljos_dev = { git = "https://github.com/hal-c2/ljos-ui", rev = "f5266a91b0b7f6b3d2f0991b264781f11b25c8b1" }
+ljos_runtime = { git = "https://github.com/hal-c2/ljos-ui", rev = "f5266a91b0b7f6b3d2f0991b264781f11b25c8b1" }
+ljos_quick = { git = "https://github.com/hal-c2/ljos-ui", rev = "f5266a91b0b7f6b3d2f0991b264781f11b25c8b1" }
 # The role words the driver names nodes by, for tests that find a node by
 # role among several.
-ljos_a11y = { git = "https://github.com/hal-c2/ljos-ui", rev = "e318dad71bd87be23133b83f53de6ac91314f0ac" }
+ljos_a11y = { git = "https://github.com/hal-c2/ljos-ui", rev = "f5266a91b0b7f6b3d2f0991b264781f11b25c8b1" }
 
 # Pins match ljos-ui's, so the two lock files agree.
 anyhow = "1.0"
@@ -73,6 +73,13 @@ unsafe_code = "forbid"
 
 [workspace.lints.clippy]
 all = { level = "warn", priority = -1 }
+
+# QuickJS allows a fixed 512 KiB of stack, measured from where the engine was
+# made. Unoptimised frames of the engine and its toolkit use that up on the way
+# to a binding deep in the shell, which then throws RangeError and keeps its old
+# value: every debug gate would judge a window no release build ever shows.
+[profile.dev.package."*"]
+opt-level = 1
 
 # What a page downloads: as small as the compiler makes it (`mise run
 # web:build`).

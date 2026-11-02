@@ -55,7 +55,7 @@ Feature: An agent sets properties and bindings
       """
     When the agent calls the tool "property_set" with:
       """json
-      {"doc": "Main.qml", "node": {"id": "label"}, "name": "font", "value": null}
+      {"doc": "Main.qml", "node": {"id": "label"}, "name": "anchors", "value": null}
       """
     Then the agent is refused with "not_found"
     And the file "Main.qml" is:
@@ -144,6 +144,25 @@ Feature: An agent sets properties and bindings
           Text {
               id: label
               font.pixelSize: 12
+          }
+      }
+      """
+
+  Scenario: Clearing a group clears the parts written of it
+    When the agent calls the tool "property_set" with:
+      """json
+      {"doc": "Main.qml", "node": {"id": "label"}, "name": "font", "value": null}
+      """
+    Then the file "Main.qml" is:
+      """qml
+      import QtQuick
+
+      Item {
+          id: root
+          font { bold: true }
+
+          Text {
+              id: label
           }
       }
       """

@@ -9,7 +9,7 @@ use std::sync::{Arc, mpsc};
 use std::time::Duration;
 
 use cucumber::{World, gherkin::Step, given, then, when};
-use ljos::item::{DrawOp, MouseButtons, kurbo::Point};
+use ljos::item::{DrawOp, MouseButtons, WheelEvent, kurbo::Point};
 use ljos::prelude::*;
 use ljos::testing::AccessibleNode;
 use ljos_dev::{DevSession, Host, Report};
@@ -32,6 +32,10 @@ const HEIGHT: f64 = 900.0;
 #[derive(World)]
 #[world(init = Self::new)]
 struct UiWorld {
+    /// Where a frame was before the wheel turned.
+    frame_before: Option<ljos::item::kurbo::Rect>,
+    /// Where the pointer was for a zoom.
+    pointer_was: Option<Point>,
     /// A workspace a scenario expects to go.
     remembered: Option<ObjectId>,
     /// Where the outline was shown, bare of a ghost, in the frames of a flick.
@@ -220,6 +224,8 @@ fn drive_error(e: DriveError) -> String {
 impl UiWorld {
     fn new() -> Self {
         Self {
+            frame_before: None,
+            pointer_was: None,
             remembered: None,
             outlines: Vec::new(),
             dir: tempfile::tempdir().expect("a temporary directory"),
@@ -563,13 +569,14 @@ impl Window {
 
     /// The answer to a gesture's call, as the worker's arrives: for one that
     /// was on its way when the person did something else.
-    fn answer(&mut self, tool: &str, answer: Json) -> StepResult {
+    fn answer(&mut self, tool: &str, answer: Json, asked: Json) -> StepResult {
         let workspace = self.workspace;
         let engine = &mut self.stage.engine;
         studio_blocks::Workspace::emit_answered(
             &Cx::new(engine, workspace),
             tool.to_owned(),
             answer,
+            asked,
         )
         .map_err(|e| format!("{e:?}"))
     }
@@ -639,8 +646,35 @@ impl Window {
         self.rest()
     }
 
+    /// Brings a panel behind a tab to the front, as a person has to before
+    /// using it: a panel not shown is not in the tree.
+    fn open_panel(&mut self, panel: &str) -> StepResult {
+        let tab = match panel {
+            "Palette" => "Insert tab",
+            "Layers" | "Documents" => "Layers tab",
+            "Inspector" => "Design tab",
+            "Tokens" => "Tokens tab",
+            "Flow" => "Flow tab",
+            _ => return Ok(()),
+        };
+        let tree = self.tree();
+        if find(&tree, &|n| n.name == panel && n.role != "label").is_some() {
+            return Ok(());
+        }
+        let Some(node) = find(&tree, &|n| n.name == tab && n.key.is_some()).cloned() else {
+            return Ok(());
+        };
+        self.click_node(&node)
+    }
+
     /// The node named `name` inside the one named `within`.
-    fn node(&self, within: &str, role: Option<&str>, name: &str) -> Result<AccessibleNode, String> {
+    fn node(
+        &mut self,
+        within: &str,
+        role: Option<&str>,
+        name: &str,
+    ) -> Result<AccessibleNode, String> {
+        self.open_panel(within)?;
         let tree = self.tree();
         let container = find(&tree, &|n| n.name == within && n.role != "label")
             .ok_or_else(|| format!("no {within:?} in the window"))?;
@@ -720,7 +754,8 @@ impl Window {
     }
 
     /// The rows the layers panel shows, in order.
-    fn shown_layers(&self) -> Result<Vec<AccessibleNode>, String> {
+    fn shown_layers(&mut self) -> Result<Vec<AccessibleNode>, String> {
+        self.open_panel("Layers")?;
         let tree = self.tree();
         let list = find(&tree, &|n| n.name == "Layers" && n.role == "list")
             .ok_or("no layers list in the window")?;
@@ -1106,7 +1141,8 @@ fn lists_states(w: &mut UiWorld, names: String) -> StepResult {
 }
 
 /// The states the inspector shows a button for, in order.
-fn shown_states(window: &Window) -> Result<Vec<String>, String> {
+fn shown_states(window: &mut Window) -> Result<Vec<String>, String> {
+    window.open_panel("Inspector")?;
     let tree = window.tree();
     let inspector = find(&tree, &|n| n.name == "Inspector" && n.role != "label")
         .ok_or("no inspector in the window")?;
@@ -1124,7 +1160,8 @@ fn shown_states(window: &Window) -> Result<Vec<String>, String> {
 
 /// The names in the panel `within` that start with `prefix`, without it,
 /// in order.
-fn shown_with(window: &Window, within: &str, prefix: &str) -> Result<Vec<String>, String> {
+fn shown_with(window: &mut Window, within: &str, prefix: &str) -> Result<Vec<String>, String> {
+    window.open_panel(within)?;
     let tree = window.tree();
     let panel = find(&tree, &|n| n.name == within && n.role != "label")
         .ok_or_else(|| format!("no {within:?} in the window"))?;
@@ -1295,6 +1332,7 @@ fn opens_wire_box(w: &mut UiWorld) -> StepResult {
 /// scrolling the list to it as a person does.
 #[when(regex = r#"^the person picks the signal "([^"]+)" to wire in the flow panel$"#)]
 fn picks_signal(w: &mut UiWorld, signal: String) -> StepResult {
+    w.window()?.open_panel("Flow")?;
     if wire_row(w.window()?, &signal).is_none() {
         opens_wire_box(w)?;
     }
@@ -1985,6 +2023,24 @@ fn canvas_says(w: &mut UiWorld, want: String) -> StepResult {
         .ok_or_else(|| format!("the canvas says {got:?}"))
 }
 
+#[then("the canvas's words are clear of its recording bar")]
+fn hint_clear_of_bar(w: &mut UiWorld) -> StepResult {
+    let window = w.window()?;
+    let engine = window.engine();
+    let part =
+        |name: &str| ljos_drive::find_below(engine, window.root, name).ok_or(format!("no {name}"));
+    let (hint, bar) = (part("canvasHint")?, part("recordingBar")?);
+    if !engine.read_by_name(bar, "visible").to_boolean() {
+        return Err("the recording bar is not showing".to_owned());
+    }
+    let hint_bottom = engine.read_by_name(hint, "y").to_number()
+        + engine.read_by_name(hint, "height").to_number();
+    let bar_top = engine.read_by_name(bar, "y").to_number();
+    (hint_bottom <= bar_top)
+        .then_some(())
+        .ok_or_else(|| format!("the words end at {hint_bottom}, the bar starts at {bar_top}"))
+}
+
 #[when(regex = r#"^nobody touches the window for (\d+) seconds?$"#)]
 fn nobody_touches(w: &mut UiWorld, seconds: u64) -> StepResult {
     let window = w.window()?;
@@ -2048,6 +2104,7 @@ fn tokens_show(w: &mut UiWorld, name: String, value: String) -> StepResult {
 fn tokens_say(w: &mut UiWorld, pattern: String) -> StepResult {
     let pattern = regex::Regex::new(&pattern).map_err(|e| e.to_string())?;
     let window = w.window()?;
+    window.open_panel("Tokens")?;
     let tree = window.tree();
     let panel = find(&tree, &|n| n.name == "Tokens" && n.role != "label")
         .ok_or("no tokens panel in the window")?;
@@ -2285,8 +2342,72 @@ fn late_answer(w: &mut UiWorld, button: String, about: String, says: String) -> 
         .write_by_name(picker, "waiting", Value::Bool(true))
         .map_err(|e| format!("{e:?}"))?;
     let answer = serde_json::json!({"id": about, "state": {name: says}, "mocked": false});
-    window.answer("preview_state", answer)?;
+    let asked = serde_json::json!({"node": {"node": about}, "read": [name]});
+    window.answer("preview_state", answer, asked)?;
     window.rest()
+}
+
+/// The picker on `button` opened and waiting, as `late_answer`'s is; what it
+/// asked about, for an answer to name.
+fn picker_waiting(window: &mut Window, button: &str) -> Result<(String, String), String> {
+    let tree = window.tree();
+    let node = find(&tree, &|n| n.name == button && n.role == "button")
+        .cloned()
+        .ok_or_else(|| format!("no button {button:?}; the window holds {}", names(&tree)))?;
+    let key = node.key.ok_or("the button has no key")?;
+    let name = button
+        .strip_prefix("Pick ")
+        .ok_or("not a picker's button")?;
+    let mut driver = window.stage.drive();
+    let at = driver.aim_at_node(key).map_err(|why| format!("{why:?}"))?;
+    driver
+        .click(at, MouseButtons::LEFT, 1)
+        .map_err(drive_error)?;
+    let picker = ljos_drive::find_below(window.engine(), window.root, "colourPicker")
+        .ok_or("the window has no colour picker")?;
+    window
+        .engine()
+        .write_by_name(picker, "waiting", Value::Bool(true))
+        .map_err(|e| format!("{e:?}"))?;
+    let Value::String(on) = window.engine().read_by_name(picker, "node") else {
+        return Err("the picker is on no object".into());
+    };
+    Ok((name.to_owned(), on.to_string()))
+}
+
+#[when(
+    regex = r#"^the person clicks the button "([^"]+)" and the answer to showing a state on the same object comes first$"#
+)]
+fn other_call_answer(w: &mut UiWorld, button: String) -> StepResult {
+    let window = w.window()?;
+    let (_, on) = picker_waiting(window, &button)?;
+    let answer = serde_json::json!({"id": "a", "state": {}, "mocked": false});
+    let asked = serde_json::json!({"node": {"node": on}, "show": "open"});
+    // No rest: the read this picker really sent is on its way, and a preview
+    // slow enough answers it inside one, which rightly ends the wait.
+    window.answer("preview_state", answer, asked)
+}
+
+#[when(
+    regex = r#"^the person clicks the button "([^"]+)" and the preview's answer has no value for it$"#
+)]
+fn empty_answer(w: &mut UiWorld, button: String) -> StepResult {
+    let window = w.window()?;
+    let (name, on) = picker_waiting(window, &button)?;
+    let answer = serde_json::json!({"id": "a", "state": {}, "mocked": false});
+    let asked = serde_json::json!({"node": {"node": on}, "read": [name]});
+    window.answer("preview_state", answer, asked)?;
+    window.rest()
+}
+
+#[then("the colour picker still waits for the preview")]
+fn picker_still_waits(w: &mut UiWorld) -> StepResult {
+    let window = w.window()?;
+    let picker = ljos_drive::find_below(window.engine(), window.root, "colourPicker")
+        .ok_or("the window has no colour picker")?;
+    (window.engine().read_by_name(picker, "waiting") == Value::Bool(true))
+        .then_some(())
+        .ok_or_else(|| "another call's answer ended the picker's wait".to_owned())
 }
 
 #[then(regex = r#"^the window has no colour picker open$"#)]
@@ -3208,4 +3329,269 @@ fn main() {
                 tags.clone().any(|t| t == "ui") && !tags.any(|t| t == "web")
             }),
     );
+}
+
+#[given(regex = r#"^the person has opened the "([^"]+) tab"$"#)]
+#[when(regex = r#"^the person opens the "([^"]+) tab"$"#)]
+fn opens_tab(w: &mut UiWorld, tab: String) -> StepResult {
+    let window = w.window()?;
+    let tree = window.tree();
+    let name = format!("{tab} tab");
+    let node = find(&tree, &|n| n.name == name && n.key.is_some())
+        .cloned()
+        .ok_or_else(|| format!("no {name:?}; the window holds {}", names(&tree)))?;
+    window.click_node(&node)
+}
+
+#[then(regex = r#"^the window has no pane "([^"]+)"$"#)]
+fn has_no_pane(w: &mut UiWorld, name: String) -> StepResult {
+    let tree = w.window()?.tree();
+    match find(&tree, &|n| n.name == name && n.role == "pane") {
+        None => Ok(()),
+        Some(_) => Err(format!("the window still has a pane {name:?}")),
+    }
+}
+
+#[then(regex = r#"^the window has a button "([^"]+)"$"#)]
+fn has_button(w: &mut UiWorld, name: String) -> StepResult {
+    let tree = w.window()?.tree();
+    find(&tree, &|n| n.name == name && n.role == "button")
+        .map(drop)
+        .ok_or_else(|| format!("no button {name:?}; the window holds {}", names(&tree)))
+}
+
+/// Where the frame for `target` is drawn; its button and label share the name.
+fn frame_bounds(window: &Window, target: &str) -> Result<ljos::item::kurbo::Rect, String> {
+    window
+        .bounds(&|role, name| name == target && role != "button" && role != "label")
+        .ok_or_else(|| format!("no frame {target:?} drawn in the window"))
+}
+
+#[when("the person turns the wheel over the canvas")]
+fn wheel_over_canvas(w: &mut UiWorld) -> StepResult {
+    let window = w.window()?;
+    let before = frame_bounds(window, "Desktop")?;
+    window
+        .stage
+        .drive()
+        .wheel(before.center(), Wheel::Notches(0.0, -1.0))
+        .map_err(drive_error)?;
+    window.stage.drive().advance(1000).map_err(drive_error)?;
+    window.rest()?;
+    w.frame_before = Some(before);
+    Ok(())
+}
+
+#[when(
+    regex = r#"^the person drags with the hand in the frame "([^"]+)" from (\d+), (\d+) by (\d+), (\d+)$"#
+)]
+fn hand_drag(w: &mut UiWorld, target: String, x: f64, y: f64, dx: f64, dy: f64) -> StepResult {
+    let window = w.window()?;
+    let before = frame_bounds(window, &target)?;
+    let from = frame_point(window, &target, x, y)?;
+    window
+        .stage
+        .drive()
+        .drag(from, Point::new(from.x + dx, from.y + dy))
+        .map_err(drive_error)?;
+    window.rest()?;
+    w.frame_before = Some(before);
+    Ok(())
+}
+
+#[then(regex = r#"^the frame "([^"]+)" has moved by (\d+), (\d+)$"#)]
+fn frame_moved_by(w: &mut UiWorld, target: String, dx: f64, dy: f64) -> StepResult {
+    let before = w.frame_before.ok_or("no place noted")?;
+    let now = frame_bounds(w.window()?, &target)?;
+    if (now.x0 - before.x0 - dx).abs() > 1.0 || (now.y0 - before.y0 - dy).abs() > 1.0 {
+        return Err(format!("the frame went from {before:?} to {now:?}"));
+    }
+    Ok(())
+}
+
+#[when(
+    regex = r#"^the person zooms in with Ctrl and the wheel over the frame "([^"]+)" at (\d+), (\d+)$"#
+)]
+fn ctrl_wheel(w: &mut UiWorld, target: String, x: f64, y: f64) -> StepResult {
+    let window = w.window()?;
+    let before = frame_bounds(window, &target)?;
+    let at = frame_point(window, &target, x, y)?;
+    let mut driver = window.stage.drive();
+    let mut turned = WheelEvent::notches(at.x, at.y, 0.0, 1.0, driver.now());
+    turned.modifiers = ljos_drive::parse_modifiers("Ctrl")?;
+    driver.send_wheel(&turned);
+    driver.settle().map_err(drive_error)?;
+    window.stage.drive().advance(1000).map_err(drive_error)?;
+    window.rest()?;
+    w.frame_before = Some(before);
+    w.pointer_was = Some(at);
+    Ok(())
+}
+
+#[then(regex = r#"^the frame "([^"]+)" grew, with its point under the pointer still there$"#)]
+fn zoomed_about_pointer(w: &mut UiWorld, target: String) -> StepResult {
+    let before = w.frame_before.ok_or("no place noted")?;
+    let at = w.pointer_was.ok_or("no pointer noted")?;
+    let now = frame_bounds(w.window()?, &target)?;
+    if now.width() <= before.width() {
+        return Err(format!("the frame went from {before:?} to {now:?}"));
+    }
+    let along =
+        |r: &ljos::item::kurbo::Rect| ((at.x - r.x0) / r.width(), (at.y - r.y0) / r.height());
+    let (was, is) = (along(&before), along(&now));
+    if (was.0 - is.0).abs() > 0.01 || (was.1 - is.1).abs() > 0.01 {
+        return Err(format!(
+            "the point under the pointer went from {was:?} to {is:?} of the frame"
+        ));
+    }
+    Ok(())
+}
+
+#[then(regex = r#"^the frame "([^"]+)" has moved$"#)]
+fn frame_moved(w: &mut UiWorld, target: String) -> StepResult {
+    let before = w.frame_before.ok_or("no place noted")?;
+    let now = frame_bounds(w.window()?, &target)?;
+    if (now.y0 - before.y0).abs() < 1.0 && (now.x0 - before.x0).abs() < 1.0 {
+        return Err(format!("the frame stayed at {now:?}"));
+    }
+    Ok(())
+}
+
+#[then(regex = r#"^the frame "([^"]+)" has kept its size$"#)]
+fn frame_kept_size(w: &mut UiWorld, target: String) -> StepResult {
+    let before = w.frame_before.ok_or("no place noted")?;
+    let now = frame_bounds(w.window()?, &target)?;
+    if (now.width() - before.width()).abs() > 0.5 || (now.height() - before.height()).abs() > 0.5 {
+        return Err(format!("the frame went from {before:?} to {now:?}"));
+    }
+    Ok(())
+}
+
+#[when("the person zooms in with the button")]
+fn zooms_in(w: &mut UiWorld) -> StepResult {
+    w.frame_before = Some(frame_bounds(w.window()?, "Desktop")?);
+    clicks_button(w, "Zoom in".to_owned())
+}
+
+#[then(regex = r#"^the middle of the view shows the same place of the frame "([^"]+)"$"#)]
+fn zoom_kept_middle(w: &mut UiWorld, target: String) -> StepResult {
+    let before = w.frame_before.ok_or("no place noted")?;
+    let window = w.window()?;
+    let now = frame_bounds(window, &target)?;
+    if now.width() <= before.width() {
+        return Err(format!("the frame did not grow: {before:?} to {now:?}"));
+    }
+    let view = window
+        .bounds(&|role, name| role == "pane" && name == "Canvas")
+        .ok_or("no canvas pane")?
+        .center();
+    let place =
+        |r: ljos::item::kurbo::Rect| ((view.x - r.x0) / r.width(), (view.y - r.y0) / r.height());
+    let (was, is) = (place(before), place(now));
+    if (was.0 - is.0).abs() > 0.01 || (was.1 - is.1).abs() > 0.01 {
+        return Err(format!(
+            "the view's middle was at {was:?} of the frame, now {is:?}"
+        ));
+    }
+    Ok(())
+}
+
+#[when(regex = r"^the person zooms in with the button (\d+) times$")]
+fn zooms_in_times(w: &mut UiWorld, times: u32) -> StepResult {
+    w.frame_before = Some(frame_bounds(w.window()?, "Desktop")?);
+    for _ in 0..times {
+        clicks_button(w, "Zoom in".to_owned())?;
+    }
+    Ok(())
+}
+
+#[when("the person pans the canvas with the middle button")]
+fn pans_with_middle(w: &mut UiWorld) -> StepResult {
+    let window = w.window()?;
+    let before = frame_bounds(window, "Desktop")?;
+    let from = before.center();
+    let to = Point::new(from.x + 40.0, from.y + 30.0);
+    window
+        .stage
+        .drive()
+        .press(from, MouseButtons::MIDDLE)
+        .map_err(drive_error)?;
+    window.rest()?;
+    window.stage.drive().move_to(to).map_err(drive_error)?;
+    window
+        .stage
+        .drive()
+        .release(to, MouseButtons::MIDDLE)
+        .map_err(drive_error)?;
+    window.rest()?;
+    w.frame_before = Some(before);
+    Ok(())
+}
+
+#[then(regex = r#"^the frame "([^"]+)" is back where it was$"#)]
+fn frame_back(w: &mut UiWorld, target: String) -> StepResult {
+    let before = w.frame_before.ok_or("no place noted")?;
+    let now = frame_bounds(w.window()?, &target)?;
+    if (now.y0 - before.y0).abs() > 1.0 || (now.x0 - before.x0).abs() > 1.0 {
+        return Err(format!("the frame went from {before:?} to {now:?}"));
+    }
+    Ok(())
+}
+
+#[then(regex = r#"^the button "([^"]+)" is (on|off)$"#)]
+fn button_state(w: &mut UiWorld, name: String, state: String) -> StepResult {
+    let tree = w.window()?.tree();
+    let button = find(&tree, &|n| n.name == name && n.role == "button")
+        .ok_or_else(|| format!("no button {name:?}; the window holds {}", names(&tree)))?;
+    let on = button.states.iter().any(|s| s == "checked");
+    (on == (state == "on"))
+        .then_some(())
+        .ok_or_else(|| format!("{name:?} reads {:?}", button.states))
+}
+
+#[then("the colour picker goes on from grey, with no reading in its hex")]
+fn picker_from_grey(w: &mut UiWorld) -> StepResult {
+    let window = w.window()?;
+    let tree = window.tree();
+    let hex = find(&tree, &|n| n.name == "Colour" && n.key.is_some())
+        .ok_or_else(|| format!("no colour field; the window holds {}", names(&tree)))?;
+    if !hex.value.is_empty() {
+        return Err(format!("the hex holds {:?}", hex.value));
+    }
+    let slider = find(&tree, &|n| n.role == "slider" && n.name == "Hue")
+        .ok_or_else(|| format!("no sliders; the window holds {}", names(&tree)))?;
+    if slider.states.iter().any(|s| s == "disabled") {
+        return Err("the sliders are off".into());
+    }
+    // A slider's value is not in the accessibility tree.
+    let value_of = |name: &str| -> Result<f64, String> {
+        let slider = ljos_drive::find_below(window.engine(), window.root, name)
+            .ok_or_else(|| format!("no slider {name:?}"))?;
+        let read = window.engine().read_by_name(slider, "value");
+        <f64 as QmlValue>::from_value(&read).map_err(|_| format!("{name:?} reads {read:?}"))
+    };
+    let brightness = value_of("pickerBrightness")?;
+    if (brightness - 0.5).abs() > 0.01 {
+        return Err(format!("brightness is {brightness}, not grey's"));
+    }
+    let saturation = value_of("pickerSaturation")?;
+    if saturation.abs() > 0.01 {
+        return Err(format!("saturation is {saturation}, not grey's"));
+    }
+    Ok(())
+}
+
+#[then("the inspector asks for something to be selected")]
+fn inspector_asks(w: &mut UiWorld) -> StepResult {
+    let window = w.window()?;
+    window.open_panel("Inspector")?;
+    let tree = window.tree();
+    find(&tree, &|n| n.name == "Select something to edit it")
+        .map(drop)
+        .ok_or_else(|| {
+            format!(
+                "the inspector does not ask; the window holds {}",
+                names(&tree)
+            )
+        })
 }

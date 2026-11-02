@@ -35,8 +35,8 @@ QtObject {
     readonly property var toolkit
     readonly property var rootStates
 
-    signal answered(string tool, var answer)
-    signal refused(string tool, var error)
+    signal answered(string tool, var answer, var asked)
+    signal refused(string tool, var error, var asked)
 
     function dispatch(tool: string, args: var) {
     }

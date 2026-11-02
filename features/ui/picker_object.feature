@@ -111,6 +111,20 @@ Feature: The colour picker belongs to the object it was opened on
     Then the colour picker holds "#0000ff"
 
   @preview
+  Scenario: The answer to another call about the object does not end the picker's wait
+    Given the person has selected "Rectangle b" in the layers panel
+    When the person clicks the button "Pick shade" and the answer to showing a state on the same object comes first
+    Then the colour picker still waits for the preview
+
+  @preview
+  Scenario: A read with no value for the name goes on from grey
+    Given the person has selected "Rectangle b" in the layers panel
+    When the person clicks the button "Pick shade" and the preview's answer has no value for it
+    Then the colour picker waits on nothing
+    And the colour picker goes on from grey, with no reading in its hex
+    And the window shows no refusal
+
+  @preview
   Scenario: A value the running app has not got yet starts the picker from a default
     When the person replaces "id: a" with "id: a\n    property var borderColor" in the code view
     And the person selects "Rectangle a" in the layers panel

@@ -3,6 +3,7 @@
 // with nothing to edit has nothing to offer.
 import QtQuick
 import QtQuick.Controls
+import QtQuick.Layouts
 import Ljos.Design
 import Studio
 
@@ -71,14 +72,14 @@ Panel {
 
         Row {
             spacing: Spacing.xxs
-            TextField {
+            Field {
                 id: nameField
                 width: maker.width - newButton.width - Spacing.xxs
                 placeholderText: "Name"
                 Accessible.name: "New document's name"
                 onAccepted: newButton.clicked()
             }
-            Button {
+            TextButton {
                 id: newButton
                 text: "New"
                 Accessible.name: "New document"
@@ -106,6 +107,8 @@ Panel {
         anchors.topMargin: maker.height + Spacing.xxs
         clip: true
         model: panel.workspace.documents
+        // The list is short on purpose: the open document stays in it.
+        currentIndex: panel.workspace.documents.indexOf(panel.workspace.doc)
         Accessible.role: Accessible.List
         Accessible.name: "Documents"
         ScrollBar.vertical: ScrollBar {
@@ -117,12 +120,36 @@ Panel {
         }
 
         delegate: ItemDelegate {
+            id: entry
             required property string modelData
             width: ListView.view.width
+            implicitHeight: 28
+            padding: 0
+            leftPadding: Spacing.xs
             text: modelData
             Accessible.name: modelData
             highlighted: modelData === panel.workspace.doc
             onClicked: panel.show(modelData)
+            contentItem: RowLayout {
+                spacing: Spacing.xxs
+                Icon {
+                    name: "document"
+                    color: entry.highlighted ? Colors.accent : Colors.textMuted
+                }
+                Text {
+                    text: entry.text
+                    color: Colors.text
+                    font.pixelSize: Typography.captionSize
+                    font.weight: entry.highlighted ? Typography.bodyStrongWeight : Typography.bodyWeight
+                    elide: Text.ElideRight
+                    Layout.fillWidth: true
+                }
+            }
+            background: Rectangle {
+                radius: 6
+                color: entry.highlighted ? Colors.surfaceSelected
+                    : entry.hovered ? Colors.surfaceHover : "transparent"
+            }
         }
     }
 }

@@ -378,6 +378,10 @@
                 {
                   "name": "answer",
                   "type": "var"
+                },
+                {
+                  "name": "asked",
+                  "type": "var"
                 }
               ]
             },
@@ -390,6 +394,10 @@
                 },
                 {
                   "name": "error",
+                  "type": "var"
+                },
+                {
+                  "name": "asked",
                   "type": "var"
                 }
               ]

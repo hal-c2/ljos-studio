@@ -137,7 +137,7 @@ class Queue {
     const job = this.jobs.shift();
     const self = this.#self;
     if (!served) {
-      if (job.tool) self.refused(job.tool, { code: "unavailable", message: "no Studio session is served" });
+      if (job.tool) self.refused(job.tool, { code: "unavailable", message: "no Studio session is served" }, job.args);
       return this.#pump();
     }
     this.busy = true;
@@ -159,10 +159,10 @@ class Queue {
       if (job.tool) {
         if (answer.error) {
           if (!job.follows || !untrack(() => self.error)) this.#give("error", answer.error.message ?? "");
-          self.refused(job.tool, answer.error);
+          self.refused(job.tool, answer.error, job.args);
         } else {
           if (!job.follows) this.#give("error", "");
-          self.answered(job.tool, answer.ok);
+          self.answered(job.tool, answer.ok, job.args);
         }
       }
     } finally {
