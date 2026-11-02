@@ -604,6 +604,190 @@ Feature: A tool does not write what would not load or would not show
       """
     Then the file "Plain.qml" contains "import \"./sub\""
 
+  # qml6 6.11: a bare import beside `as C` is valid, and `Button` needs it.
+  Scenario Outline: A paste into a file that imports under another name still loads
+    Given the file "Bare.qml":
+      """qml
+      import QtQuick
+      import QtQuick.Layouts
+      import QtQuick.Controls
+
+      Item {
+          id: bare
+          RowLayout { id: withbutton; Button {} }
+          Item { id: withrow; RowLayout {} }
+      }
+      """
+    And the file "Aliased.qml":
+      """qml
+      import QtQuick
+      <import>
+
+      Item {
+          id: aliased
+      }
+      """
+    And the agent has called the tool "node_arrange" with:
+      """json
+      {"action": "copy", "doc": "Bare.qml", "nodes": [{"id": "<node>"}]}
+      """
+    When the agent calls the tool "node_arrange" with:
+      """json
+      {"action": "paste", "doc": "Aliased.qml", "parent": {"id": "aliased"}}
+      """
+    Then the file "Aliased.qml" contains:
+      """
+      <bare>
+
+      Item {
+      """
+    And the file "Aliased.qml" contains "<text>"
+
+    Examples:
+      | node       | import                      | bare                   | text          |
+      | withbutton | import QtQuick.Controls as C | import QtQuick.Controls | Button {}     |
+      | withrow    | import QtQuick.Layouts as L  | import QtQuick.Layouts  | RowLayout {}  |
+
+  # qml6 6.11: `Button` beside the file is the file under `import QtQuick`, and
+  # the toolkit's once QtQuick.Controls is imported.
+  Scenario: An import that would change what the file has stays out
+    Given the file "Button.qml":
+      """qml
+      import QtQuick
+
+      Item { objectName: "local" }
+      """
+    And the file "Holds.qml":
+      """qml
+      import QtQuick
+
+      Item {
+          id: holds
+          Button { id: mine }
+      }
+      """
+    And the file "Has.qml":
+      """qml
+      import QtQuick
+      import QtQuick.Controls
+
+      Item {
+          id: has
+          Sprocket { id: s }
+      }
+      """
+    And the agent has called the tool "node_arrange" with:
+      """json
+      {"action": "copy", "doc": "Has.qml", "nodes": [{"id": "s"}]}
+      """
+    When the agent calls the tool "node_arrange" with:
+      """json
+      {"action": "paste", "doc": "Holds.qml", "parent": {"id": "holds"}}
+      """
+    Then the file "Holds.qml" does not contain "import QtQuick.Controls"
+    And the file "Holds.qml" contains "Sprocket"
+
+  Scenario: An import a paste needs that would change what the file has is refused
+    Given the file "Button.qml":
+      """qml
+      import QtQuick
+
+      Item { objectName: "local" }
+      """
+    And the file "Holds.qml":
+      """qml
+      import QtQuick
+
+      Item {
+          id: holds
+          Button { id: mine }
+      }
+      """
+    And the file "Has.qml":
+      """qml
+      import QtQuick
+      import QtQuick.Controls
+
+      Item {
+          id: has
+          Slider { id: s }
+      }
+      """
+    And the agent has called the tool "node_arrange" with:
+      """json
+      {"action": "copy", "doc": "Has.qml", "nodes": [{"id": "s"}]}
+      """
+    When the agent calls the tool "node_arrange" with:
+      """json
+      {"action": "paste", "doc": "Holds.qml", "parent": {"id": "holds"}}
+      """
+    Then the agent is refused with "not_actionable"
+    And the refusal's "/details/kind" is "import_changes_type"
+    And the file "Holds.qml" does not contain "Slider"
+
+  Scenario: A paste says what it imported
+    Given the agent has called the tool "node_arrange" with:
+      """json
+      {"action": "copy", "doc": "Main.qml", "nodes": [{"id": "row"}]}
+      """
+    When the agent calls the tool "node_arrange" with:
+      """json
+      {"action": "paste", "doc": "Plain.qml", "parent": {"id": "plain"}}
+      """
+    Then the answer's "/imported" lists "QtQuick.Layouts"
+
+  Scenario: A paste keeps the file a qualified type is in, beside the one it came from
+    Given the file "sub/Other.qml":
+      """qml
+      import QtQuick
+
+      Item { component Inner: Rectangle {} }
+      """
+    And the file "sub/Came.qml":
+      """qml
+      import QtQuick
+
+      Item {
+          id: came
+          Other.Inner { id: near }
+      }
+      """
+    And the agent has called the tool "node_arrange" with:
+      """json
+      {"action": "copy", "doc": "sub/Came.qml", "nodes": [{"id": "near"}]}
+      """
+    When the agent calls the tool "node_arrange" with:
+      """json
+      {"action": "paste", "doc": "Plain.qml", "parent": {"id": "plain"}}
+      """
+    Then the file "Plain.qml" contains "import \"./sub\""
+
+  Scenario Outline: A paste copies a folder that is not relative as it is
+    Given the file "sub/Came.qml":
+      """qml
+      import QtQuick
+      import "<path>"
+
+      Item {
+          id: came
+          Sprocket { id: near }
+      }
+      """
+    And the agent has called the tool "node_arrange" with:
+      """json
+      {"action": "copy", "doc": "sub/Came.qml", "nodes": [{"id": "near"}]}
+      """
+    When the agent calls the tool "node_arrange" with:
+      """json
+      {"action": "paste", "doc": "Plain.qml", "parent": {"id": "plain"}}
+      """
+    Then the file "Plain.qml" contains "import \"<path>\""
+
+    Examples:
+      | path                   |
+      | /opt/lib               |
+      | https://example.org/q/ |
+
   Scenario: A paste of a qualified type is not let through by a module nothing is known of
     Given the file "Native.qml":
       """qml

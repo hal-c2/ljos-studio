@@ -104,7 +104,9 @@ pub(crate) fn check_text(
 
 /// What a paste of `text` from `from`, whose imports are `had`, has to import
 /// into `doc`. A type not `Known` takes the first of them that makes it so; one
-/// that stays `Unsure` might come from any, so all of them come.
+/// that stays `Unsure` might come from any, so all of them come. An import wins
+/// over a file beside the document, so one that would turn an object `doc` has
+/// into something else stays out, and is refused if the paste needs it.
 pub(crate) fn imports_for(
     store: &dyn Store,
     doc: &str,
@@ -127,12 +129,25 @@ pub(crate) fn imports_for(
         .filter_map(|import| match import {
             Import::Module { uri, alias: None } => Some(uri.clone()),
             Import::Path { path, alias: None } if !path.ends_with(".js") => {
-                folder_from(there, path, here)
+                if path.starts_with('/') || path.contains(':') {
+                    Some(path.clone())
+                } else {
+                    folder_from(there, path, here)
+                }
             }
             _ => None,
         })
         .filter(|offer| !imported_by(&target, here, offer))
         .collect();
+    let shadows =
+        |offer: &str| Names::of(store, doc, source, &[]).and_then(|names| names.shadowed_by(offer));
+    let needed = |offer: &str| match shadows(offer) {
+        Some(ty) => Err(refused(
+            "import_changes_type",
+            format!("importing `{offer}` would make the `{ty}` in `{doc}` another type"),
+        )),
+        None => Ok(offer.to_owned()),
+    };
     let mut wanted: Vec<String> = Vec::new();
     for node in &nodes {
         // What the text's qualifier meant stays behind with the alias.
@@ -150,24 +165,30 @@ pub(crate) fn imports_for(
         if is(&node.ty, &wanted) == Some(TypeIs::Known) {
             continue;
         }
-        // The folder of the file it came from is imported without a word.
+        // The folder of the file it came from is imported without a word. A
+        // qualified type is in the file its first part names.
+        let file = node.ty.split('.').next().unwrap_or(&node.ty);
         let beside = store
-            .exists(&in_dir(there, &format!("{}.qml", node.ty)))
+            .exists(&in_dir(there, &format!("{file}.qml")))
             .then(|| folder_from(there, ".", here))
             .flatten();
-        if let Some(folder) = beside.filter(|folder| !wanted.contains(folder)) {
-            wanted.push(folder);
+        if let Some(folder) = beside {
+            if !wanted.contains(&folder) {
+                wanted.push(needed(&folder)?);
+            }
             continue;
         }
         let with = |uri: &String| [wanted.as_slice(), std::slice::from_ref(uri)].concat();
-        if let Some(uri) = offered
+        let making: Vec<&String> = offered
             .iter()
-            .find(|uri| is(&node.ty, &with(uri)) == Some(TypeIs::Known))
-        {
-            wanted.push(uri.clone());
+            .filter(|uri| is(&node.ty, &with(uri)) == Some(TypeIs::Known))
+            .collect();
+        if let Some(uri) = making.first() {
+            let free = making.iter().find(|uri| shadows(uri).is_none());
+            wanted.push(needed(free.unwrap_or(uri))?);
         } else if is(&node.ty, &offered) == Some(TypeIs::Unsure) {
             for uri in &offered {
-                if !wanted.contains(uri) {
+                if !wanted.contains(uri) && shadows(uri).is_none() {
                     wanted.push(uri.clone());
                 }
             }

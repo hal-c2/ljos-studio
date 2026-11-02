@@ -276,7 +276,7 @@ pub enum Op {
         add_id: bool,
         import: Option<String>,
     },
-    /// `module`, or a folder if it has a `/`, imported unless it is already.
+    /// `module`, or a folder if it has a `/`, imported bare unless it is already.
     Import {
         module: String,
     },
@@ -1545,8 +1545,8 @@ impl Session {
             }
             Op::Import { module } => {
                 let out = match imported(before, module) {
-                    Imported::No => with_import(before, module)?,
-                    _ => before.to_owned(),
+                    Imported::Bare => before.to_owned(),
+                    _ => with_import(before, module)?,
                 };
                 Ok((out, PathChange::Same, None))
             }
