@@ -162,7 +162,28 @@ pub(crate) fn imports_for(
         if alias_left {
             return Err(unknown_type(doc, &node.ty));
         }
-        if is(&node.ty, &wanted) == Some(TypeIs::Known) {
+        let names = Names::of(store, doc, source, &wanted);
+        // Known here by the file beside `doc` is another object than the one
+        // its source's imports found.
+        let becomes_other = names.as_ref().is_some_and(|names| {
+            names.only_beside(&node.ty) && offered.iter().any(|uri| names.import_has(uri, &node.ty))
+        });
+        if is(&node.ty, &wanted) == Some(TypeIs::Known) && !becomes_other {
+            continue;
+        }
+        if becomes_other {
+            let names = names.as_ref();
+            let has: Vec<&String> = offered
+                .iter()
+                .filter(|uri| names.is_some_and(|names| names.import_has(uri, &node.ty)))
+                .collect();
+            let free = has
+                .iter()
+                .find(|uri| shadows(uri).is_none())
+                .or(has.first());
+            if let Some(uri) = free.filter(|uri| !wanted.contains(uri)) {
+                wanted.push(needed(uri)?);
+            }
             continue;
         }
         // The folder of the file it came from is imported without a word. A

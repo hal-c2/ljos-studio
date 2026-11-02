@@ -725,6 +725,86 @@ Feature: A tool does not write what would not load or would not show
     And the refusal's "/details/kind" is "import_changes_type"
     And the file "Holds.qml" does not contain "Slider"
 
+  # qml6 6.11: a folder imported beats a module, in either order.
+  Scenario: A folder that would change what a module gave the file stays out
+    Given the file "lib/Button.qml":
+      """qml
+      import QtQuick
+
+      Item {}
+      """
+    And the file "Holds.qml":
+      """qml
+      import QtQuick.Controls
+
+      Item {
+          id: holds
+          Button { id: mine; text: "x" }
+      }
+      """
+    And the file "Has.qml":
+      """qml
+      import QtQuick
+      import "./lib"
+
+      Item {
+          id: has
+          Gadget { id: g }
+      }
+      """
+    And the agent has called the tool "node_arrange" with:
+      """json
+      {"action": "copy", "doc": "Has.qml", "nodes": [{"id": "g"}]}
+      """
+    When the agent calls the tool "node_arrange" with:
+      """json
+      {"action": "paste", "doc": "Holds.qml", "parent": {"id": "holds"}}
+      """
+    Then the file "Holds.qml" does not contain "lib"
+    And the file "Holds.qml" contains "Gadget"
+
+  # qml6 6.11: an import is found before the file beside the document.
+  Scenario Outline: A pasted object stays what it was where a file beside has its name
+    Given the file "Button.qml":
+      """qml
+      import QtQuick
+
+      Item { objectName: "local" }
+      """
+    And the file "Holds.qml":
+      """qml
+      import QtQuick
+
+      Item {
+          id: holds
+          <has>
+      }
+      """
+    And the file "other/Has.qml":
+      """qml
+      import QtQuick
+      import QtQuick.Controls
+
+      Item {
+          id: has
+          Button { id: s }
+      }
+      """
+    And the agent has called the tool "node_arrange" with:
+      """json
+      {"action": "copy", "doc": "other/Has.qml", "nodes": [{"id": "s"}]}
+      """
+    When the agent calls the tool "node_arrange" with:
+      """json
+      {"action": "paste", "doc": "Holds.qml", "parent": {"id": "holds"}}
+      """
+    Then <then>
+
+    Examples:
+      | has                 | then                                                        |
+      | Item { id: inner }  | the file "Holds.qml" contains "import QtQuick.Controls"     |
+      | Button { id: mine } | the agent is refused with "not_actionable"                  |
+
   Scenario: A paste says what it imported
     Given the agent has called the tool "node_arrange" with:
       """json
@@ -785,8 +865,31 @@ Feature: A tool does not write what would not load or would not show
 
     Examples:
       | path                   |
-      | /opt/lib               |
+      | file:/opt/lib          |
       | https://example.org/q/ |
+
+  # qml6 6.11 loads `Button` from `import "file:<dir>"`, which Studio can't read.
+  Scenario: A toolkit's name may come from a folder Studio cannot read
+    Given the file "sub/Came.qml":
+      """qml
+      import QtQuick
+      import "file:/opt/lib"
+
+      Item {
+          id: came
+          Slider { id: near }
+      }
+      """
+    And the agent has called the tool "node_arrange" with:
+      """json
+      {"action": "copy", "doc": "sub/Came.qml", "nodes": [{"id": "near"}]}
+      """
+    When the agent calls the tool "node_arrange" with:
+      """json
+      {"action": "paste", "doc": "Plain.qml", "parent": {"id": "plain"}}
+      """
+    Then the file "Plain.qml" contains "import \"file:/opt/lib\""
+    And the file "Plain.qml" contains "Slider"
 
   Scenario: A paste of a qualified type is not let through by a module nothing is known of
     Given the file "Native.qml":
