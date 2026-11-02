@@ -75,6 +75,19 @@ Feature: An agent contributes to a block's slot
     When the agent calls the tool "blocks_list"
     Then the answer's "/types" has 0 entries
 
+  Scenario Outline: A contribution that would not load is refused
+    When the agent calls the tool "slot_contribute" with:
+      """json
+      {"doc": "Shell.qml", "slot": "controls", "text": "<text>"}
+      """
+    Then the agent is refused with "not_actionable"
+    And the refusal's "/details/kind" is "<why>"
+
+    Examples:
+      | text               | why            |
+      | Nowhere {}         | unknown_type   |
+      | Text { nothere: 1 } | no_such_member |
+
   Scenario: A contribution written in QML
     When the agent calls the tool "slot_contribute" with:
       """json
