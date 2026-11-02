@@ -57,6 +57,16 @@ Feature: A shell under edit runs in a preview
 
   Rule: A preview runs the shell
 
+    # Vite's page client connects as it loads, whatever the server says; no
+    # socket serves a preview, whose updates come by message, and a failed
+    # connect reached the app's own events as errors the app did not make.
+    Scenario: A preview opens no socket
+      When the agent calls the tool "preview_open" with:
+        """json
+        {"doc": "Shell.qml", "state": "mocked"}
+        """
+      Then the preview has opened no socket
+
     Scenario: A preview on a phone-sized target
       When the agent calls the tool "preview_open" with:
         """json

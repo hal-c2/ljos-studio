@@ -1010,6 +1010,13 @@ fn is_reload(event: &Value) -> bool {
     matches!(event["kind"].as_str(), Some("reloaded" | "reload_failed"))
 }
 
+/// The native preview is a process, with no page to open a socket; the step
+/// says something only in the browser runner.
+#[then(regex = r#"^the preview has opened no socket$"#)]
+fn preview_opened_no_socket(_w: &mut StudioWorld) -> StepResult {
+    Ok(())
+}
+
 #[then(regex = r#"^the preview shows "([^"]*)"$"#)]
 fn preview_shows(w: &mut StudioWorld, text: String) -> StepResult {
     // Read first: what a burst of writes left out is reloaded before the
