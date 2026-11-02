@@ -60,8 +60,6 @@ Feature: Another program in a browser's preview starts as a program does
       """
     And the studio tools are connected with the capabilities "inspect, mutate, run"
 
-  # The mock names a file it does not have: a browser compiles the whole
-  # project, so a mock that does not parse stops the live preview as well.
   # Both hosts: a mock that does not compile is told, and the program that
   # was running goes on, state and all.
   Scenario: A broken mock is told and the last good preview stays
@@ -89,6 +87,8 @@ Feature: Another program in a browser's preview starts as a program does
       """
     Then the answer's "/events/0/kind" is "reload_failed"
 
+  # The mock names a file it does not have: a browser compiles the whole
+  # project, so a mock that does not parse stops the live preview as well.
   @web
   Scenario: A switch that did not compile starts over when a save mends it
     Given the file "mocks/App/Block/qmldir":

@@ -9,7 +9,7 @@ expression: value
     "open_world": false,
     "read_only": false
   },
-  "description": "Run a document (a shell) in a preview for a target (desktop, tablet, phone) with live blocks or the mock modules. On the open preview it changes size or state in place, keeping the app's state.",
+  "description": "Run a document (a shell) in a preview for a target (desktop, tablet, phone) with live blocks or the mock modules. On the open preview it changes size or state in place; `state_kept` says whether the app's state survived.",
   "inputSchema": {
     "properties": {
       "doc": {

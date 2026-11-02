@@ -737,7 +737,7 @@ pub(crate) fn add(registry: ToolRegistry, studio: &Arc<Mutex<Studio>>) -> ToolRe
         .with(
             ToolDef::new::<OpenArgs>(
                 "preview_open",
-                "Run a document (a shell) in a preview for a target (desktop, tablet, phone) with live blocks or the mock modules. On the open preview it changes size or state in place, keeping the app's state.",
+                "Run a document (a shell) in a preview for a target (desktop, tablet, phone) with live blocks or the mock modules. On the open preview it changes size or state in place; `state_kept` says whether the app's state survived.",
             )
             .answers::<OpenOut>()
             .requires(Cap::Run)
