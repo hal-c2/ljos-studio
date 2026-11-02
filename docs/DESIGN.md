@@ -279,7 +279,9 @@ headless). Its shell is QML under `shell/`, and it binds one block,
   and its arguments. A gesture *is* a tool call: the shell has no path to
   the session that an agent lacks, which is how the UI scenarios
   (`features/ui/`) prove the same flows as the MCP ones with the same
-  oracle, the file text.
+  oracle, the file text. `follow(tool, args)` is the same call made as a
+  consequence of a gesture, not as one: it leaves the refusal on the
+  window's line, and says its own only when that line is empty.
 - **Its events**: `answered(tool, answer)` and `refused(tool, error)`.
 
 DECISION: one block with a `dispatch` action, not one native type per
@@ -717,25 +719,14 @@ What the page answers:
 frame that `serve.mjs` compiles, the same steps as `web/features.mjs`
 plus the native runner's two preview steps (`the preview shows`, the PNG
 step), which features.mjs lists as run there; a step of this runner the
-native one lacks is a failure. 21 of 39 pass. The other 18 are in
-`WAITING` with the request they wait on and the failure that says so
-(a `not_supported` refusal naming it; for request 20 the drawn text; for
-21 and 22 ljos-web's compile error for the type, or a frame that draws
-nothing when that error comes after the open);
+native one lacks is a failure. 42 of 43 pass. The other is in `WAITING`
+with the request it waits on and the failure that says so (a
+`not_supported` refusal naming it);
 one that passes, or fails another way, fails the run:
 
-- request 4: the six flow scenarios that read or click (`preview_state`),
-  one of them a click at a point, a mocked block's state set from
-  outside, a live block's state read;
-- request 2: a picture of the preview;
-- request 20: a token set shows in the preview, and its undo shows the
-  module's value again. The undo's last step reads what a preview that
-  never drew the token shows too, so its entry has a probe: once the
-  token is set the preview must show it, and its absence is the wait.
-- request 21: the three scenarios of a JSON list in the preview
-  (`Ljos.Models`);
-- request 22: four of the five scenarios of a project's type dumps
-  (stand-ins from `ljostypes.json`; the mocked state's passes).
+- request 25: waiting on the preview (`preview_events` with `wait_ms`): the
+  page cannot say when the app rests. A browser preview draws itself, so the
+  window has no picture to keep current; only an agent's wait waits on it.
 
 CI's `browser` job runs it after `web:serve:check`.
 
@@ -991,11 +982,10 @@ takes `args` and `standins`; a page imports `ljos-web/runtime.css` and calls
 is plain QML and compiles from `ljos_design_qml/qml` as a stand-in. Built
 from the fixture (`web/site/project`), the site is three files, Vite inlines
 a small SVG into the script, the text takes Ljos.Design's colour, and the
-mock never reaches the page. What it cannot do: build a site from a
-directory on its own (request 30), apply `theme.json` (Studio's native
-preview applies it through `ljos_design_qml::theme::apply`, which is Rust:
-request 20), and run `Ljos.Blocks`, `Ljos.Models` or `Ljos.Observer`, which
-are Rust types (requests 32, 33).
+mock never reaches the page. `Ljos.Blocks` and `Ljos.Models` run there since
+ljos-web d28e9440; `Ljos.Observer` does not (a Rust type). Studio's builder
+stays until `ljos-web build-site` builds a themed bundle from any directory:
+at d28e9440 it fails to resolve `ljos-web/theme` from its stage.
 
 **The site contract.** `ljos-site.json`, at the bundle's root:
 
@@ -1038,8 +1028,8 @@ among them:
 5. The native `mocked_only`.
 6. `unsupported` with `no_web_face`, its `modules` and the `docs` that
    import them: a module that is neither the project's own nor one ljos-web
-   provides. That covers `Ljos.Blocks` shells, `Ljos.Models`, a module
-   only an installed plugin gives, and a typo.
+   provides. That covers `Ljos.Observer`, a module only an installed plugin
+   gives, and a typo.
 
 DECISION: the web export reuses the native one's walk and checks, and adds
 to its manifest rather than forking it; `run` is native's alone, and

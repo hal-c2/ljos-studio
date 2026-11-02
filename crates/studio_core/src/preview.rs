@@ -251,6 +251,31 @@ pub enum PreviewError {
 /// more (Ljós ARCHITECTURE.md 19.7).
 pub const DEFAULT_CALLS_PER_SECOND: u32 = 20;
 
+/// What a preview said when its UI thread last went to sleep.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Rest {
+    /// How many times it has gone to sleep saying something new.
+    pub rests: u64,
+    /// When it wakes by itself next; `None` for not until something happens.
+    pub wake_in_ms: Option<u64>,
+}
+
+/// Waits on a running preview from outside the session's lock, so a long
+/// wait holds up nobody.
+pub trait RestWatch: Send {
+    /// Answers at once without `since`, else when `rests` differs from `since`
+    /// or after `wait_ms`.
+    fn wait(&self, since: Option<u64>, wait_ms: u64) -> Result<Rest, PreviewError>;
+
+    /// The same wait for a server's thread, past `since`. Dropped, it is over:
+    /// it holds neither the thread nor the preview.
+    fn parked(
+        &self,
+        since: u64,
+        wait_ms: u64,
+    ) -> std::pin::Pin<Box<dyn Future<Output = Result<Rest, PreviewError>> + Send>>;
+}
+
 pub trait PreviewHost: Send {
     /// The calls a second the preview answers before it asks a caller to
     /// wait: what bounds how often Studio may ask it to reload.
@@ -325,6 +350,11 @@ pub trait PreviewHost: Send {
 
     /// Ends the preview.
     fn close(&mut self);
+
+    /// A way to wait on this preview; `None` when it cannot tell.
+    fn rest_watch(&self) -> Option<Box<dyn RestWatch>> {
+        None
+    }
 }
 
 /// Something that happened to a preview, in the order it happened.

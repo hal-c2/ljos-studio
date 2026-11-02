@@ -129,4 +129,3 @@ Feature: Studio's selection is set by address or by a point in the preview
       """
     Then the agent is refused with "busy"
     And the refusal's "/details/kind" is "leased"
-

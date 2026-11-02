@@ -9,11 +9,25 @@ expression: value
     "open_world": false,
     "read_only": true
   },
-  "description": "What happened to the preview since a cursor: opened, reloaded (with ms), reload_failed (the last good one stays), log lines, ended.",
+  "description": "What happened to the preview since a cursor: opened, reloaded (with ms), reload_failed (the last good one stays), log lines, ended. `wait_ms` instead waits for it to rest past `rests`, and says `wake_in_ms`.",
   "inputSchema": {
     "properties": {
+      "rests": {
+        "description": "The `rests` of an earlier answer; left out, the answer comes at once.",
+        "type": [
+          "integer",
+          "null"
+        ]
+      },
       "since": {
         "description": "The `next` of an earlier answer; 0 or left out: from the start.",
+        "type": [
+          "integer",
+          "null"
+        ]
+      },
+      "wait_ms": {
+        "description": "Instead of events, wait until the preview's app rests saying something\nnew: at most this long (up to 3 600 000), past `rests`.",
         "type": [
           "integer",
           "null"
@@ -34,6 +48,18 @@ expression: value
       },
       "open": {
         "type": "boolean"
+      },
+      "rests": {
+        "type": [
+          "integer",
+          "null"
+        ]
+      },
+      "wake_in_ms": {
+        "type": [
+          "integer",
+          "null"
+        ]
       }
     },
     "required": [

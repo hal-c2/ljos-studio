@@ -7,8 +7,7 @@
 # `web/site/project` for the web, `mise run export:web:build` builds the
 # site with ljos-web's `qmlc` and Vite plugin, and headless Chromium loads
 # it from a plain static server. It needs an ljos-web checkout, so neither
-# ledger runs it. The project's `theme.json` is carried into the site but
-# not applied: ljos-web reads no theme file yet (DESIGN.md, request 20).
+# ledger runs it.
 
 @web @disk
 Feature: A web export becomes a site any static server serves

@@ -97,7 +97,7 @@ check("what does not compile is said beside the preview", failed && problem.leng
 check("the last picture that worked stays", (await widthOf()) === 150, await widthOf());
 await page.evaluate(async () => {
   const { text, generation } = window.studio.text("Main.qml");
-  await window.studio.replaceText("Main.qml", generation, 0, text.length, "import QtQuick\n\nRectangle {\n    width: 77\n    height: 50\n    color: \"steelblue\"\n}\n");
+  await window.studio.replaceText("Main.qml", generation, 0, text.length, "import QtQuick\n\nItem {\n    Rectangle {\n        width: 77\n        height: 50\n        color: \"steelblue\"\n    }\n}\n");
 });
 await page.waitForFunction(() => document.getElementById("state").textContent.startsWith("Up to date"), null, { timeout: 30000 }).catch(() => {});
 check("a mended document previews again", (await page.locator("#problem").innerText()) === "" && (await widthOf()) === 77, { width: await widthOf(), problem: await page.locator("#problem").innerText() });
@@ -112,7 +112,7 @@ const folder = mkdtempSync(join(tmpdir(), "studio-serve-"));
 try {
   const project = join(folder, "imported");
   mkdirSync(join(project, "pages"), { recursive: true });
-  writeFileSync(join(project, "Main.qml"), 'import QtQuick\n\nRectangle {\n    width: 60\n    height: 60\n    color: "steelblue"\n}\n');
+  writeFileSync(join(project, "Main.qml"), 'import QtQuick\n\nItem {\n    Rectangle {\n        width: 60\n        height: 60\n        color: "steelblue"\n    }\n}\n');
   writeFileSync(join(project, "pages", "Other.qml"), "import QtQuick\n\nItem {}\n");
   writeFileSync(join(project, "picture.png"), "not text");
   await Promise.all([page.waitForURL(/project=imported/, { timeout: 30000 }), page.locator("#import").setInputFiles(project)]);
@@ -150,13 +150,19 @@ check("the page logged no errors", said.length === 0, said);
   });
   check("thirty style changes that move nothing ask for no resize", (await asked()).length === before, (await asked()).slice(before));
   await page.setViewportSize({ width: 1200, height: 800 });
-  // Once the shell has laid out again and the frame has been told.
-  await page.waitForTimeout(500);
-  const want = await page.evaluate(() => {
-    const box = document.getElementById("frame").getBoundingClientRect();
-    return { width: Math.round(box.width), height: Math.round(box.height) };
-  });
-  const after = (await asked()).slice(before);
+  // Once the shell has laid out again and the frame has been told, however
+  // long a loaded machine takes; what it was asked by then says why if not.
+  let want;
+  let after;
+  const deadline = Date.now() + 10000;
+  do {
+    await page.waitForTimeout(100);
+    want = await page.evaluate(() => {
+      const box = document.getElementById("frame").getBoundingClientRect();
+      return { width: Math.round(box.width), height: Math.round(box.height) };
+    });
+    after = (await asked()).slice(before);
+  } while (JSON.stringify(after.at(-1)) !== JSON.stringify(want) && Date.now() < deadline);
   check("a new size is asked for, and the last is the frame's", JSON.stringify(after.at(-1)) === JSON.stringify(want), { after, want });
 }
 // A first preview is laid out at the frame's size even when the shell moved
@@ -203,7 +209,7 @@ try {
   });
   check("through a link, a project is its own root", first.url !== undefined, first);
   const second = await compile({ "Main.qml": main });
-  check("through a link, the next project does not see that module", second.error?.includes("Panel") === true, second);
+  check("through a link, the next project does not see that module", second.error?.includes("Parts") === true, second);
   check("through a link, an error names the project's own path", second.error?.includes(realpathSync(app)) === false, second);
   await linked.stop();
 } finally {

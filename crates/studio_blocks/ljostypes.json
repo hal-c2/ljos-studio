@@ -43,6 +43,18 @@
               "notify": "settlingChanged"
             },
             {
+              "name": "looks",
+              "type": "int",
+              "kind": "value",
+              "list": false,
+              "readonly": true,
+              "final": true,
+              "required": false,
+              "constant": false,
+              "group": false,
+              "notify": "looksChanged"
+            },
+            {
               "name": "blank",
               "type": "bool",
               "kind": "value",
@@ -399,8 +411,32 @@
               "returnType": "void"
             },
             {
+              "name": "follow",
+              "parameters": [
+                {
+                  "name": "tool",
+                  "type": "string"
+                },
+                {
+                  "name": "args",
+                  "type": "var"
+                }
+              ],
+              "returnType": "void"
+            },
+            {
               "name": "lookAgain",
               "parameters": [],
+              "returnType": "void"
+            },
+            {
+              "name": "followPicture",
+              "parameters": [
+                {
+                  "name": "on",
+                  "type": "bool"
+                }
+              ],
               "returnType": "void"
             }
           ],

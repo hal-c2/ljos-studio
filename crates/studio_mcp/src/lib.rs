@@ -90,6 +90,22 @@ impl std::fmt::Debug for Studio {
     }
 }
 
+fn told_of_write(previews: &preview::Shared, watchers: &Watchers, timer: &Arc<dyn Timer>) {
+    let catch_up = preview::lock(previews).wrote();
+    watchers.tell();
+    if let Some(delay) = catch_up {
+        let (previews, watchers) = (previews.clone(), watchers.clone());
+        // One wake-up per burst, which ends: a timer, not a poll.
+        timer.after(
+            delay,
+            Box::new(move || {
+                preview::lock(&previews).catch_up();
+                watchers.tell();
+            }),
+        );
+    }
+}
+
 impl Studio {
     /// Opens `workspace` itself as the project.
     #[cfg(feature = "native")]
@@ -156,24 +172,24 @@ impl Studio {
     /// when the budget allows, so a window shows the last state of a burst
     /// without anybody having to look first.
     fn follow(&mut self) {
-        let previews = self.previews.clone();
-        let watchers = self.watchers.clone();
-        let timer = self.timer.clone();
-        self.session.on_write(move |_| {
-            let catch_up = preview::lock(&previews).wrote();
-            watchers.tell();
-            if let Some(delay) = catch_up {
-                let (previews, watchers) = (previews.clone(), watchers.clone());
-                // One wake-up per burst, which ends: a timer, not a poll.
-                timer.after(
-                    delay,
-                    Box::new(move || {
-                        preview::lock(&previews).catch_up();
-                        watchers.tell();
-                    }),
-                );
-            }
-        });
+        let (previews, watchers, timer) = self.written();
+        self.session
+            .on_write(move |_| told_of_write(&previews, &watchers, &timer));
+    }
+
+    fn written(&self) -> (preview::Shared, Watchers, Arc<dyn Timer>) {
+        (
+            self.previews.clone(),
+            self.watchers.clone(),
+            self.timer.clone(),
+        )
+    }
+
+    /// A file changed that no write of the session made (storage got it from
+    /// elsewhere): the open preview and the watchers hear of it as of a write.
+    pub fn file_changed(&self) {
+        let (previews, watchers, timer) = self.written();
+        told_of_write(&previews, &watchers, &timer);
     }
 
     /// Calls `watcher` after every change a window shows: each write of the
@@ -307,9 +323,10 @@ const SHOWN_WITHOUT_WRITING: &[&str] = &[
 ];
 
 /// What `studio --mcp` serves.
+#[derive(Clone)]
 pub struct StudioServer {
     studio: Arc<Mutex<Studio>>,
-    tools: ToolRegistry,
+    tools: Arc<ToolRegistry>,
 }
 
 impl std::fmt::Debug for StudioServer {
@@ -324,7 +341,10 @@ impl StudioServer {
     pub fn new(studio: Studio) -> Self {
         let studio = Arc::new(Mutex::new(studio));
         let tools = tools::registry(&studio);
-        Self { studio, tools }
+        Self {
+            studio,
+            tools: Arc::new(tools),
+        }
     }
 
     /// The session, shared with whatever else shows it (Studio's canvas).
@@ -466,7 +486,53 @@ impl McpSurface for StudioServer {
         ctx: &'a CallCtx,
         args: serde_json::Value,
     ) -> ToolFuture<'a> {
+        #[cfg(feature = "native")]
+        if name == "preview_events" && args.get("wait_ms").is_some_and(|w| !w.is_null()) {
+            return Box::pin(self.wait_for_rest(ctx, args));
+        }
         Box::pin(std::future::ready(self.call(name, ctx, args)))
+    }
+}
+
+impl StudioServer {
+    /// A wait lasts as long as it was asked to, and the server's one thread
+    /// answers every other call: it waits as a future, which a client leaving
+    /// or the server ending drops. The look with no wait says all a refusal
+    /// would, and whether there is anything to wait for.
+    #[cfg(feature = "native")]
+    async fn wait_for_rest(
+        &self,
+        ctx: &CallCtx,
+        args: serde_json::Value,
+    ) -> Result<ToolReply, SurfaceError> {
+        // Not a wait: the typed arguments say so, and the look below would
+        // write over it.
+        if args.get("wait_ms").is_some_and(|w| !w.is_u64()) {
+            return self.call("preview_events", ctx, args);
+        }
+        let (wait_ms, rests) = (args["wait_ms"].as_u64(), args["rests"].as_u64());
+        let mut look = args;
+        look["wait_ms"] = json!(0);
+        let mut reply = self.call("preview_events", ctx, look)?;
+        let (Some(wait_ms), Some(rests)) = (wait_ms, rests) else {
+            return Ok(reply);
+        };
+        if reply.structured["rests"].as_u64() != Some(rests) {
+            return Ok(reply);
+        }
+        let parked = preview_tools::parked(&self.studio, rests, wait_ms)?;
+        let rest = parked.await.map_err(preview_tools::preview_error)?;
+        reply.structured["rests"] = json!(rest.rests);
+        match (rest.wake_in_ms, reply.structured.as_object_mut()) {
+            (Some(wake), Some(out)) => {
+                out.insert("wake_in_ms".to_owned(), json!(wake));
+            }
+            (None, Some(out)) => {
+                out.remove("wake_in_ms");
+            }
+            (_, None) => {}
+        }
+        Ok(reply)
     }
 }
 

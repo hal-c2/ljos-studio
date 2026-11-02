@@ -51,10 +51,10 @@ documents: export), `run` (start previews). They are granted at launch with
 | 19 | `preview_open` | Start a preview of a shell on a target (desktop, tablet, phone) or size with live or mocked state; on the open one, change size or state in place | run |
 | 20 | `preview_state` | Read an object's state and a block's published state in the preview; set it when the block is mocked; hold an object in a state of its own (`show`); click first | run |
 | 21 | `preview_screenshot` | A PNG of the preview (≤ 1280 px), or its outline as text | inspect |
-| 22 | `preview_events` | Since a cursor: opened, reloaded (with ms), reload failed, logs, ended | inspect |
+| 22 | `preview_events` | Since a cursor: opened, reloaded (with ms), reload failed, logs, ended; or wait until its app rests saying something new (`wait_ms`, past `rests`), answering when it wakes next (`wake_in_ms`) and asking the app nothing meanwhile | inspect |
 | 23 | `export` | Write a bundle that `ljos run` starts (`native`) or that ljos-web builds a site from (`web`): the project's QML, theme, assets and own modules with a manifest, never mocks or `.studio/` | fs |
 | 24 | `review` | Add, reply to, resolve, reopen or list design review comments on objects, kept in `.studio/` | inspect (writing: mutate) |
-| 25 | `node_arrange` | What a canvas gesture does: `geometry` (boxes, what a drag does, siblings), `place`, `align`, `copy`, `paste`, `duplicate`, `remove`; each edit is one undo step, all or none | inspect; mutate to edit |
+| 25 | `node_arrange` | What a canvas gesture does: `geometry` (boxes, what a drag does, siblings), `place` (`record` writes into a state), `align`, `copy`, `paste`, `duplicate`, `remove`; each edit is one undo step, all or none | inspect; mutate to edit |
 
 A document is a `.qml` file or a `theme.json` of the project outside the
 directories a walk leaves out, judged where its links lead; anything else is
@@ -168,12 +168,17 @@ shows it; the watcher's quiet time is not on that path.
   A dump is read when the preview starts: an edit of it shows when the
   preview is opened again. Export still refuses a project whose types
   are written in Rust.
-- DECISION: a preview in a browser (ljos-web, DESIGN.md S5) answers what
-  ljos-web can: open, reload, aliases, resize, logs (without file and
-  line). The rest (`preview_screenshot`, `preview_state` reads, writes and
-  clicks, `node_select {at}`) is refused `not_actionable` with
-  `details.kind: "not_supported"` and `details.ljos_web_request`, the
-  numbered ljos-web request it waits on, never with a made-up answer.
+- DECISION: a preview in a browser (ljos-web, DESIGN.md S5) answers every
+  preview tool through `ljos-web/inspect`. A page built without it refuses
+  `not_actionable` with `details.kind: "not_supported"`, never with a
+  made-up answer.
+  One whose app failed to start refuses `not_actionable` with
+  `details.kind: "refused"` and `details.code: "not_running"`: no ljos-web
+  request will change that, and a save that mends it starts it again.
+- DECISION: a preview in a browser keeps the app's state over a reload, as
+  `--watch` does; a file read as data is told to what reads it, nothing
+  compiled; switching a block between live and mocked starts the app again,
+  since another module's code is another program.
 - DECISION: starting a preview needs `run` (it runs the project's code);
   looking at one that runs (`preview_screenshot`, `preview_events`) needs
   only `inspect`.
@@ -465,9 +470,8 @@ than a bundle of either kind (a site built from one, say).
   manifest has no hashes or signature yet.
 - DECISION: a web export is a directory and its manifest, not a site:
   compiling and bundling are ljos-web's, choosing the files and refusing
-  what has no face on the web are Studio's. Until ljos-web builds a site
-  from one (its request 30), `export:web:build` does it with ljos-web's
-  compiler and Vite plugin.
+  what has no face on the web are Studio's. `export:web:build` uses ljos-web's
+  compiler and Vite plugin until `ljos-web build-site` handles a themed bundle.
 - DECISION: `export` writes no history entry; it changes no document.
 
 `review {action, doc?, node?, comment?, text?, author?}` keeps design

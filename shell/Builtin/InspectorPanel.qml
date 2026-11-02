@@ -49,6 +49,27 @@ Panel {
             rowEditing = false
     }
 
+    signal reseed()
+    Connections {
+        target: panel.workspace
+        function onSelectedChanged() { panel.reseed() }
+        function onRefused(tool, error) {
+            if (["property_set", "binding_set", "state_edit"].includes(tool))
+                panel.reseed()
+            if (tool === "state_edit" && panel.renamedPicked !== "") {
+                panel.pick(panel.renamedPicked, panel.pickedOn, true)
+                panel.renamedPicked = ""
+            }
+        }
+        function onAnswered(tool, answer) {
+            if (tool === "state_edit")
+                panel.renamedPicked = ""
+        }
+    }
+    // The picked state's old name while its rename is unanswered: the pick
+    // goes back to it if the rename is refused.
+    property string renamedPicked: ""
+
     function set(name, text) {
         if (picked !== "") {
             record(name, text)
@@ -72,6 +93,8 @@ Panel {
     // selected when it was picked, and stays picked as the selection moves.
     property string picked: ""
     property string pickedOn: ""
+    // For what else sets values: the canvas records into the same state.
+    readonly property var recording: picked === "" ? null : {state: picked, on: {node: pickedOn}}
     readonly property var current: {
         const all = workspace.selected === pickedOn ? workspace.states : workspace.rootStates
         for (let i = 0; i < all.length; i++) {
@@ -103,20 +126,26 @@ Panel {
     // The frame shows what is being edited, by the object's id, which is how
     // a running preview is read. A state with a `when` is the app's to turn
     // on: forcing it would have a frame claim what its width does not do.
-    function pick(name, on) {
+    // With `follows` this comes after an edit, whose refusal it leaves alone;
+    // without it, it is the person's own gesture.
+    function pick(name, on, follows) {
         const was = pickedOn
         const had = picked !== ""
         picked = name
         pickedOn = on
         const conditioned = workspace.states.some(s => s.name === name && s.when !== undefined)
         if (name !== "" && !conditioned)
-            show(on, name)
+            show(on, name, follows)
         else if (had)
-            show(was, "")
+            show(was, "", follows)
     }
-    function show(on, state) {
+    function show(on, state, follows) {
         const object = layer(on)
-        if (workspace.previews && object !== null && object.id !== "")
+        if (!workspace.previews || object === null || object.id === "")
+            return
+        if (follows)
+            workspace.follow("preview_state", {node: {node: on}, show: state})
+        else
             workspace.dispatch("preview_state", {node: {node: on}, show: state})
     }
 
@@ -237,6 +266,15 @@ Panel {
                     Accessible.name: row.modelData.name
                     Layout.fillWidth: true
                     onAccepted: panel.set(row.modelData.name, text)
+                    // The rows are not made anew for a list that reads the
+                    // same, and what is typed in one is not the next object's,
+                    // nor stays when the file refused it.
+                    Connections {
+                        target: panel
+                        function onReseed() {
+                            value.text = Qt.binding(() => panel.inState(row.modelData.name, row.modelData.value))
+                        }
+                    }
                 }
                 Button {
                     text: "Bind"
@@ -311,6 +349,7 @@ Panel {
                     onClicked: panel.pick(checked ? stateRow.modelData.name : "", checked ? panel.workspace.selected : "")
                 }
                 TextField {
+                    id: stateName
                     text: stateRow.modelData.name
                     Accessible.name: "Name of " + stateRow.modelData.name
                     Layout.fillWidth: true
@@ -319,8 +358,16 @@ Panel {
                         if (text === was || text === "")
                             return
                         panel.editState({action: "rename", state: was, new_name: text})
-                        if (panel.picked === was)
-                            panel.pick(text, panel.pickedOn)
+                        if (panel.picked === was) {
+                            panel.renamedPicked = was
+                            panel.pick(text, panel.pickedOn, true)
+                        }
+                    }
+                    Connections {
+                        target: panel
+                        function onReseed() {
+                            stateName.text = Qt.binding(() => stateRow.modelData.name)
+                        }
                     }
                 }
                 Button {
@@ -330,7 +377,7 @@ Panel {
                         const name = stateRow.modelData.name
                         panel.editState({action: "remove", state: name})
                         if (panel.picked === name)
-                            panel.pick("", "")
+                            panel.pick("", "", true)
                     }
                 }
             }
@@ -394,6 +441,7 @@ Panel {
                     Layout.preferredWidth: 96
                 }
                 TextField {
+                    id: stateWhen
                     text: panel.current !== null && panel.current.when !== undefined ? panel.current.when : ""
                     placeholderText: "always off"
                     Accessible.name: "When"
@@ -403,7 +451,13 @@ Panel {
                         if (text !== "")
                             args.when = text
                         panel.editState(args)
-                        panel.show(panel.pickedOn, "")
+                        panel.show(panel.pickedOn, "", true)
+                    }
+                    Connections {
+                        target: panel
+                        function onReseed() {
+                            stateWhen.text = Qt.binding(() => panel.current !== null && panel.current.when !== undefined ? panel.current.when : "")
+                        }
                     }
                 }
             }
@@ -420,7 +474,7 @@ Panel {
                         Accessible.name: "Breakpoint " + modelData
                         onClicked: {
                             panel.editState({action: "when", state: panel.picked, breakpoint: modelData})
-                            panel.show(panel.pickedOn, "")
+                            panel.show(panel.pickedOn, "", true)
                         }
                     }
                 }
@@ -442,10 +496,17 @@ Panel {
                         elide: Text.ElideRight
                     }
                     TextField {
+                        id: changeNow
                         text: changeRow.modelData.value
                         Accessible.name: changeRow.name
                         Layout.fillWidth: true
                         onAccepted: panel.change(changeRow.modelData.target, changeRow.modelData.name, text)
+                        Connections {
+                            target: panel
+                            function onReseed() {
+                                changeNow.text = Qt.binding(() => changeRow.modelData.value)
+                            }
+                        }
                     }
                 }
             }

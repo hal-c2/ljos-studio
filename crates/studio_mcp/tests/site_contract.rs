@@ -359,7 +359,8 @@ fn studio_knows_the_modules_ljos_web_exports() {
         .unwrap()
         .keys()
         .filter_map(|k| k.strip_prefix("./"))
-        .filter(|k| !matches!(*k, "runtime" | "runtime.css" | "object" | "vite"))
+        // A module is named as QML names it; the rest are the runtime's own.
+        .filter(|k| k.starts_with(char::is_uppercase))
         .map(|k| k.replace('/', "."))
         .collect();
     // Compiled from Qt's own QML and from Ljós's, not shipped as modules.

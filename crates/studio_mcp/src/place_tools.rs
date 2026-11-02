@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use studio_core::place::{self, Align, Drag, Moving, Rect, Wanted};
 use studio_core::preview::Placed;
-use studio_core::{Address, Node, NodePath, Op, Step};
+use studio_core::{Address, Node, NodePath, Op, StateEdit, Step};
 
 use crate::tools::{EditOut, MUTATE};
 use crate::{Studio, error, lock};
@@ -54,8 +54,14 @@ struct ArrangeArgs {
     nodes: Vec<Address>,
     /// Needed when a node is named by path.
     generation: Option<u64>,
+    /// For `geometry`: leave the siblings out, each one being a read of the
+    /// running app. Who only shows the selection does not snap to them.
+    #[serde(default)]
+    without_siblings: bool,
     /// For `place`.
     places: Option<Vec<PlaceOne>>,
+    /// For `place` and `align`: write into this state, not the object.
+    record: Option<RecordInto>,
     /// For `align`: left, hcenter, right, top, vcenter, bottom, distribute_h,
     /// distribute_v. One object lines up with its parent.
     align: Option<Align>,
@@ -63,6 +69,14 @@ struct ArrangeArgs {
     parent: Option<Address>,
     #[serde(default)]
     dry_run: bool,
+}
+
+/// The state a gesture is recorded into, and the object that holds it.
+#[derive(Clone, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct RecordInto {
+    state: String,
+    on: Address,
 }
 
 #[derive(Default, Serialize, JsonSchema)]
@@ -90,6 +104,7 @@ struct GeometryArgs {
     doc: String,
     nodes: Vec<Address>,
     generation: Option<u64>,
+    siblings: bool,
 }
 
 struct GeometryOut {
@@ -137,6 +152,7 @@ struct AlignArgs {
     nodes: Vec<Address>,
     align: Align,
     generation: Option<u64>,
+    record: Option<RecordInto>,
     dry_run: bool,
 }
 
@@ -271,7 +287,7 @@ fn geometry(studio: &mut Studio, a: &GeometryArgs) -> Result<GeometryOut, Surfac
             })
         })
         .filter(|(handle, _)| !asked.iter().any(|(h, _)| h == handle))
-        .take(MOST_SIBLINGS)
+        .take(if a.siblings { MOST_SIBLINGS } else { 0 })
         .cloned()
         .collect();
     let parents: Vec<(String, Node)> = asked
@@ -334,6 +350,7 @@ fn place_ops(
     studio: &mut Studio,
     doc: &str,
     places: &[(Address, Wanted)],
+    record: Option<&RecordInto>,
 ) -> Result<(Vec<Op>, Vec<String>), SurfaceError> {
     let (tree, _) = studio.session.tree(doc).map_err(error)?;
     let mut targets = Vec::new();
@@ -365,10 +382,27 @@ fn place_ops(
             refused(kind, r.message)
         })?;
         for (name, value) in bindings {
-            ops.push(Op::SetBinding {
-                node: Address::Node(handle.clone()),
-                name,
-                value,
+            ops.push(match record {
+                // What a state changes is written with the object's id.
+                Some(record) => Op::State {
+                    node: record.on.clone(),
+                    edit: StateEdit::Change {
+                        name: record.state.clone(),
+                        target: node.id.clone().ok_or_else(|| {
+                            error(studio_core::Error::NoId(format!(
+                                "{handle} (`{}`)",
+                                node.ty
+                            )))
+                        })?,
+                        property: name,
+                        value: Some(value),
+                    },
+                },
+                None => Op::SetBinding {
+                    node: Address::Node(handle.clone()),
+                    name,
+                    value,
+                },
             });
         }
         handles.push(handle);
@@ -382,9 +416,10 @@ fn place_many(
     generation: Option<u64>,
     places: &[(Address, Wanted)],
     label: &str,
+    record: Option<&RecordInto>,
     dry_run: bool,
 ) -> Result<ManyOut, SurfaceError> {
-    let (ops, nodes) = place_ops(studio, doc, places)?;
+    let (ops, nodes) = place_ops(studio, doc, places, record)?;
     let (outcome, _) = studio
         .session
         .edit_many(doc, generation, &ops, label, dry_run)
@@ -407,6 +442,7 @@ fn align(studio: &mut Studio, a: &AlignArgs) -> Result<ManyOut, SurfaceError> {
             doc: a.doc.clone(),
             nodes: a.nodes.clone(),
             generation: a.generation,
+            siblings: false,
         },
     )?;
     let mut boxes = Vec::new();
@@ -438,7 +474,15 @@ fn align(studio: &mut Studio, a: &AlignArgs) -> Result<ManyOut, SurfaceError> {
             )
         })
         .collect();
-    place_many(studio, &a.doc, a.generation, &places, "align", a.dry_run)
+    place_many(
+        studio,
+        &a.doc,
+        a.generation,
+        &places,
+        "align",
+        a.record.as_ref(),
+        a.dry_run,
+    )
 }
 
 /// Each of `nodes` as written, with the ids in it.
@@ -657,6 +701,7 @@ fn arrange(studio: &mut Studio, a: ArrangeArgs) -> Result<ArrangeOut, SurfaceErr
                     doc,
                     nodes,
                     generation,
+                    siblings: !a.without_siblings,
                 },
             )?;
             Ok(ArrangeOut {
@@ -681,7 +726,16 @@ fn arrange(studio: &mut Studio, a: ArrangeArgs) -> Result<ArrangeOut, SurfaceErr
                     )
                 })
                 .collect();
-            place_many(studio, &doc, generation, &places, "place", a.dry_run).map(many)
+            place_many(
+                studio,
+                &doc,
+                generation,
+                &places,
+                "place",
+                a.record.as_ref(),
+                a.dry_run,
+            )
+            .map(many)
         }
         Action::Align => {
             let how = needed(a.align, "align", "align")?;
@@ -692,6 +746,7 @@ fn arrange(studio: &mut Studio, a: ArrangeArgs) -> Result<ArrangeOut, SurfaceErr
                     nodes,
                     align: how,
                     generation,
+                    record: a.record,
                     dry_run: a.dry_run,
                 },
             )

@@ -2,10 +2,13 @@
 
 use std::{
     path::Path,
+    sync::Arc,
     time::{Duration, Instant},
 };
 
-use ljos_mcp_core::remote::{BlockingClient, Client, ToolError, Trust, wait_for_token_blocking};
+use ljos_mcp_core::remote::{
+    BlockingClient, Client, ToolError, ToolResult, Trust, wait_for_token_blocking,
+};
 use serde_json::Value;
 
 /// How long one look for the token file lasts before the child is asked
@@ -13,6 +16,7 @@ use serde_json::Value;
 /// once, and its error should not wait out the whole start limit.
 const LOOK: Duration = Duration::from_millis(250);
 
+#[derive(Clone)]
 pub(crate) struct Inspector(BlockingClient);
 
 pub(crate) struct Answer {
@@ -65,27 +69,42 @@ impl Inspector {
     }
 
     pub fn call(&self, tool: &str, args: Value) -> Result<Answer, Fault> {
-        match self.0.call_tool(tool, args) {
-            Ok(result) => Ok(Answer {
-                structured: result.structured,
-                text: result.text,
-                images: result
-                    .images
-                    .into_iter()
-                    .map(|image| (image.mime, image.data))
-                    .collect(),
-            }),
-            Err(ToolError::Tool { code, message, .. }) => Err(Fault::Refused {
-                code: code.unwrap_or_else(|| "error".to_owned()),
-                message,
-            }),
-            Err(e @ ToolError::Protocol { .. }) => Err(Fault::Refused {
-                code: e
-                    .code()
-                    .map_or_else(|| "invalid_argument".to_owned(), |c| c.as_str().to_owned()),
-                message: e.to_string(),
-            }),
-            Err(e) => Err(Fault::Transport(e.to_string())),
-        }
+        answer_of(self.0.call_tool(tool, args))
+    }
+
+    /// [`Inspector::call`] on the caller's own runtime: dropping the future
+    /// drops the connection, and with it the call.
+    pub fn asking(
+        &self,
+        tool: &'static str,
+        args: Value,
+    ) -> impl Future<Output = Result<Answer, Fault>> + Send + 'static {
+        let client = Arc::clone(self.0.client());
+        async move { answer_of(client.call_tool(tool, args).await) }
+    }
+}
+
+fn answer_of(answer: Result<ToolResult, ToolError>) -> Result<Answer, Fault> {
+    match answer {
+        Ok(result) => Ok(Answer {
+            structured: result.structured,
+            text: result.text,
+            images: result
+                .images
+                .into_iter()
+                .map(|image| (image.mime, image.data))
+                .collect(),
+        }),
+        Err(ToolError::Tool { code, message, .. }) => Err(Fault::Refused {
+            code: code.unwrap_or_else(|| "error".to_owned()),
+            message,
+        }),
+        Err(e @ ToolError::Protocol { .. }) => Err(Fault::Refused {
+            code: e
+                .code()
+                .map_or_else(|| "invalid_argument".to_owned(), |c| c.as_str().to_owned()),
+            message: e.to_string(),
+        }),
+        Err(e) => Err(Fault::Transport(e.to_string())),
     }
 }

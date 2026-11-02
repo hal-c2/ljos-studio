@@ -20,11 +20,11 @@
 pub mod shell;
 
 use std::cell::RefCell;
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::hash::Hasher;
 use std::rc::Rc;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
+use std::sync::{Arc, mpsc};
 use std::time::{Duration, Instant};
 
 use ljos::item::{self, DisplayListBuilder, ImageHandle, ItemPaint, TextEngine, kurbo};
@@ -82,6 +82,8 @@ struct Context {
     wake_at: std::cell::Cell<Option<Instant>>,
     /// What the last reload said, for a status made after it.
     reload_error: RefCell<String>,
+    /// The threads following a preview's picture that have not ended.
+    followers: Arc<AtomicUsize>,
 }
 
 /// The session a shell binds: its state as plain JS values, and one
@@ -102,6 +104,9 @@ pub struct Workspace {
     /// calls `lookAgain` every so often until this is false.
     #[qml(readonly, notify)]
     pub settling: bool,
+    /// How many pictures of the preview have been asked for.
+    #[qml(readonly, notify)]
+    pub looks: i32,
     /// The project's directory has nothing in it yet.
     #[qml(readonly, notify)]
     pub blank: bool,
@@ -218,6 +223,7 @@ impl Default for Workspace {
         Self {
             documents: none(),
             settling: false,
+            looks: 0,
             blank: false,
             doc: String::new(),
             generation: 0.0,
@@ -265,7 +271,32 @@ impl Workspace {
     /// `refused` tells how each went.
     #[qml(invokable)]
     fn dispatch(cx: &Cx, tool: String, args: Json) -> Result<(), EngineError> {
-        enqueue(cx.engine, cx.this, Job::Call { tool, args });
+        enqueue(
+            cx.engine,
+            cx.this,
+            Job::Call {
+                tool,
+                args,
+                follows: false,
+            },
+        );
+        Ok(())
+    }
+
+    /// `dispatch` for a call that follows from what the person just did and
+    /// is no gesture of its own: it leaves the refusal on the window's line,
+    /// and says its own refusal only when that line is empty.
+    #[qml(invokable)]
+    fn follow(cx: &Cx, tool: String, args: Json) -> Result<(), EngineError> {
+        enqueue(
+            cx.engine,
+            cx.this,
+            Job::Call {
+                tool,
+                args,
+                follows: true,
+            },
+        );
         Ok(())
     }
 
@@ -281,7 +312,30 @@ impl Workspace {
             (q.settling.is_some() && !waiting).then_some(q.fetched)
         };
         if let Some(generation) = generation {
-            enqueue(cx.engine, cx.this, Job::Picture { generation });
+            enqueue(
+                cx.engine,
+                cx.this,
+                Job::Picture {
+                    generation,
+                    looks: Vec::new(),
+                },
+            );
+        }
+        Ok(())
+    }
+
+    /// While on, the picture follows what the preview draws: an app that
+    /// animates for ever stays current, and one at rest is asked nothing.
+    #[qml(invokable, name = "followPicture")]
+    fn follow_picture(cx: &Cx, on: bool) -> Result<(), EngineError> {
+        let Some(queue) = queue_of(cx.engine, cx.this) else {
+            return Ok(());
+        };
+        queue.borrow_mut().follow_wanted = on;
+        if on {
+            follow(cx.engine, cx.this);
+        } else if let Some(stop) = queue.borrow_mut().following.take() {
+            stop.store(true, Ordering::SeqCst);
         }
         Ok(())
     }
@@ -327,12 +381,30 @@ struct Queue {
     /// The preview's clicks already looked at.
     clicks: u64,
     settling: Option<Settling>,
+    /// Pictures asked for.
+    looks: i32,
+    /// Play mode wants the picture to follow the preview.
+    follow_wanted: bool,
+    /// What stops the thread waiting on the preview, while there is one.
+    following: Option<Arc<AtomicBool>>,
+    /// The lists last set, by the property's name.
+    given: HashMap<&'static str, Json>,
+}
+
+impl Drop for Queue {
+    /// `followPicture(false)` is not called on a Workspace going away, and the
+    /// thread would go on waiting on the preview for it.
+    fn drop(&mut self) {
+        if let Some(stop) = self.following.take() {
+            stop.store(true, Ordering::SeqCst);
+        }
+    }
 }
 
 /// Looking again after a click. Nothing tells Studio when the app has come to
-/// rest (Ljós request 3), so the picture is fetched until it stops changing,
-/// a bounded number of times: a click on an app that animates for ever must
-/// not cost a screenshot for ever.
+/// rest outside play mode, where nothing follows it, so the picture is fetched
+/// until it stops changing, a bounded number of times: a click on an app that
+/// animates for ever must not cost a screenshot for ever.
 struct Settling {
     looks_left: u32,
     same: u32,
@@ -350,12 +422,17 @@ enum Job {
     Call {
         tool: String,
         args: Json,
+        follows: bool,
     },
     /// Read the session again.
     Refresh,
     /// Fetch the preview's picture.
     Picture {
         generation: u64,
+        /// The follower's looks this picture answers. Theirs alone: one
+        /// already being painted when they asked shows the app from before.
+        /// A job dropped unrun drops them, and the follower stops waiting.
+        looks: Vec<mpsc::Sender<()>>,
     },
 }
 
@@ -364,9 +441,11 @@ enum Done {
     Call {
         tool: String,
         args: Json,
+        follows: bool,
         answer: Result<Json, Json>,
-        view: View,
-        seen: u64,
+        /// With the session's write count it was read at; none for a call
+        /// that changes nothing shown.
+        view: Option<(View, u64)>,
     },
     Refresh {
         view: View,
@@ -374,6 +453,7 @@ enum Done {
     },
     Picture {
         generation: u64,
+        looks: Vec<mpsc::Sender<()>>,
         /// Width, height, pixels, and what the pixels hash to.
         picture: Result<(u32, u32, Vec<u8>, u64), String>,
     },
@@ -443,6 +523,7 @@ fn pump(engine: &Engine, ws: ObjectId) {
         Job::Call { tool, .. } => Some(tool.clone()),
         _ => None,
     };
+    let refreshing = matches!(job, Job::Refresh);
     let spawned = task::spawn_in(
         engine,
         Lane::Visible,
@@ -454,6 +535,8 @@ fn pump(engine: &Engine, ws: ObjectId) {
             if let Some(queue) = queue_of(engine, ws) {
                 queue.borrow_mut().busy = false;
             }
+            // A read that panics never catches up, and would ask again for ever.
+            let again = done.is_ok() || !refreshing;
             match done {
                 Ok(done) => finish(engine, ws, done),
                 Err(panic) => {
@@ -465,6 +548,9 @@ fn pump(engine: &Engine, ws: ObjectId) {
                         let _ = Workspace::emit_refused(&Cx::new(engine, ws), tool, error);
                     }
                 }
+            }
+            if again {
+                refresh_if_behind(engine, ws);
             }
             pump(engine, ws);
         },
@@ -488,25 +574,30 @@ fn run(server: &StudioServer, writes: &AtomicU64, doc: &str, job: Job) -> Done {
         (studio.view(doc), seen)
     };
     match job {
-        Job::Call { tool, args } => {
+        Job::Call {
+            tool,
+            args,
+            follows,
+        } => {
             let answer = server
                 .call(&tool, &person(), args.clone())
                 .map(|reply| reply.structured)
                 .map_err(|e| refusal(e.to_value()));
-            let (view, seen) = read();
+            // Reading where things are changes nothing a panel shows.
+            let view = (!is_geometry(&tool, &args)).then(read);
             Done::Call {
                 tool,
                 args,
+                follows,
                 answer,
                 view,
-                seen,
             }
         }
         Job::Refresh => {
             let (view, seen) = read();
             Done::Refresh { view, seen }
         }
-        Job::Picture { generation } => {
+        Job::Picture { generation, looks } => {
             let args = json!({"format": "png", "max_size": 1280});
             let picture = server
                 .shown_picture(&person(), args)
@@ -525,6 +616,7 @@ fn run(server: &StudioServer, writes: &AtomicU64, doc: &str, job: Job) -> Done {
                 });
             Done::Picture {
                 generation,
+                looks,
                 picture,
             }
         }
@@ -573,6 +665,10 @@ fn decode(data: &[u8]) -> Result<(u32, u32, Vec<u8>), String> {
     Ok((info.width, info.height, rgba))
 }
 
+fn is_geometry(tool: &str, args: &Json) -> bool {
+    tool == "node_arrange" && args["action"] == "geometry"
+}
+
 /// Publishes what a job did, on the UI thread.
 fn finish(engine: &Engine, ws: ObjectId, done: Done) {
     let cx = Cx::new(engine, ws);
@@ -580,19 +676,23 @@ fn finish(engine: &Engine, ws: ObjectId, done: Done) {
         Done::Call {
             tool,
             args,
+            follows,
             answer,
             view,
-            seen,
         } => {
             if let Ok(answer) = &answer {
                 rebase(engine, ws, &tool, &args, answer);
             }
-            publish(engine, ws, view, seen);
+            if let Some((view, seen)) = view {
+                publish(engine, ws, view, seen);
+            }
             // What the canvas reads for itself is no gesture of the person's:
             // it neither clears the refusal of the drop before it nor raises one.
-            // The export panel shows its own answers and refusals.
-            let gesture =
-                !(tool == "node_arrange" && args["action"] == "geometry" || tool == "export");
+            // The export panel shows its own answers and refusals. A call made
+            // with `follow` must not clear or replace the refusal of the gesture
+            // it follows; with none on the line its own is the only word the
+            // person gets.
+            let gesture = !(is_geometry(&tool, &args) || tool == "export" || follows);
             match answer {
                 Ok(answer) => {
                     if gesture {
@@ -601,7 +701,13 @@ fn finish(engine: &Engine, ws: ObjectId, done: Done) {
                     let _ = Workspace::emit_answered(&cx, tool, answer);
                 }
                 Err(error) => {
-                    if gesture {
+                    let free = || {
+                        engine
+                            .get(ws, Workspace::ERROR)
+                            .unwrap_or_default()
+                            .is_empty()
+                    };
+                    if gesture || (follows && free()) {
                         let message = error["message"].as_str().unwrap_or_default().to_owned();
                         let _ = cx.set(Workspace::ERROR, message);
                     }
@@ -612,11 +718,15 @@ fn finish(engine: &Engine, ws: ObjectId, done: Done) {
         Done::Refresh { view, seen } => publish(engine, ws, view, seen),
         Done::Picture {
             generation,
+            looks,
             picture,
         } => {
             let Some(queue) = queue_of(engine, ws) else {
                 return;
             };
+            for looked in looks {
+                let _ = looked.send(());
+            }
             let picture = picture.and_then(|(w, h, rgba, pixels)| {
                 let image = ImageHandle::from_straight(w, h, rgba).map_err(|e| e.to_string())?;
                 Ok((image, pixels))
@@ -648,6 +758,12 @@ fn finish(engine: &Engine, ws: ObjectId, done: Done) {
                     let _ = cx.set(Workspace::ERROR, format!("no picture of the preview: {e}"));
                 }
             }
+            let looks = {
+                let mut q = queue.borrow_mut();
+                q.looks += 1;
+                q.looks
+            };
+            let _ = cx.set(Workspace::LOOKS, looks);
             let mut q = queue.borrow_mut();
             if let Some(settling) = &mut q.settling {
                 settling.same = if changed { 0 } else { settling.same + 1 };
@@ -660,6 +776,167 @@ fn finish(engine: &Engine, ws: ObjectId, done: Done) {
             }
         }
     }
+}
+
+/// How long one wait on the preview lasts. The thread sees that it should stop
+/// only when a wait ends, and a person who left play mode leaves it behind for
+/// no longer than this; it costs the app nothing meanwhile.
+const FOLLOW_WAIT_MS: u64 = 30_000;
+const LOOK_AT_MOST_EVERY_MS: u64 = 100;
+
+/// Counts a following thread out, however it ends.
+struct Follower(Arc<AtomicUsize>);
+
+impl Drop for Follower {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
+/// How many threads are following a preview's picture for this Engine's
+/// workspaces.
+pub fn followers(engine: &Engine) -> usize {
+    engine
+        .extension::<Context>()
+        .followers
+        .load(Ordering::SeqCst)
+}
+
+/// Starts waiting on the preview, if wanted and not already waiting. Nothing
+/// polls: the wait answers when the app has drawn.
+fn follow(engine: &Engine, ws: ObjectId) {
+    let Some(queue) = queue_of(engine, ws) else {
+        return;
+    };
+    let context = engine.extension::<Context>();
+    // It may not keep the session, and so the preview, past the window: it
+    // holds the server only while it asks.
+    let Some(weak) = context.server.borrow().as_ref().map(Arc::downgrade) else {
+        return;
+    };
+    let stop = Arc::new(AtomicBool::new(false));
+    {
+        let mut q = queue.borrow_mut();
+        if !q.follow_wanted || q.following.is_some() {
+            return;
+        }
+        q.following = Some(Arc::clone(&stop));
+    }
+    let post = Platform::of(engine).poster();
+    let mine = Arc::clone(&stop);
+    let followers = Arc::clone(&context.followers);
+    followers.fetch_add(1, Ordering::SeqCst);
+    let counted = Arc::clone(&followers);
+    let spawned = std::thread::Builder::new()
+        .name("studio-picture-watch".to_owned())
+        .spawn(move || {
+            let _ended = Follower(counted);
+            let mut since = None;
+            while !stop.load(Ordering::SeqCst) {
+                let mut args = json!({"wait_ms": FOLLOW_WAIT_MS});
+                if let Some(since) = since {
+                    args["rests"] = json!(since);
+                }
+                let Some(server) = weak.upgrade() else {
+                    break;
+                };
+                let Ok(reply) = server.call("preview_events", &person(), args) else {
+                    break;
+                };
+                drop(server);
+                let held = since;
+                since = reply.structured["rests"].as_u64();
+                // A rest told of past one already held is a change, and the
+                // last of them, an animation's end, has no wake after it.
+                let moved = held.is_some() && since != held;
+                // One that will wake is looked at when it has, and the look
+                // makes it rest again with its next wake: this asks only as
+                // often as the app itself moves, and no more than a person
+                // can see. The wait is on the app: a new rest ends it early.
+                if let Some(wake) = reply.structured["wake_in_ms"].as_u64() {
+                    std::thread::sleep(Duration::from_millis(LOOK_AT_MOST_EVERY_MS));
+                    let rest = wake
+                        .min(FOLLOW_WAIT_MS)
+                        .saturating_sub(LOOK_AT_MOST_EVERY_MS);
+                    if rest > 0 && !stop.load(Ordering::SeqCst) {
+                        let mut args = json!({"wait_ms": rest});
+                        if let Some(since) = since {
+                            args["rests"] = json!(since);
+                        }
+                        let Some(server) = weak.upgrade() else {
+                            break;
+                        };
+                        let Ok(reply) = server.call("preview_events", &person(), args) else {
+                            break;
+                        };
+                        drop(server);
+                        since = reply.structured["rests"].as_u64();
+                    }
+                } else if !moved {
+                    // An app that will not wake by itself shows what it shows.
+                    continue;
+                }
+                if !stop.load(Ordering::SeqCst) {
+                    // The next look's wait starts when this picture has
+                    // landed: a picture slower than the app moves would
+                    // otherwise have the next asked before it is done, and
+                    // the lane would never be free between them. Without
+                    // a Workspace nothing holds the sender, and this ends.
+                    let (landed, wait) = mpsc::channel();
+                    post.send(move |engine| look(engine, ws, landed));
+                    let _ = wait.recv_timeout(Duration::from_millis(FOLLOW_WAIT_MS));
+                }
+            }
+            // No preview to wait on: the next one's refresh starts this again.
+            post.send(move |engine| {
+                if let Some(queue) = queue_of(engine, ws) {
+                    let mut q = queue.borrow_mut();
+                    if q.following.as_ref().is_some_and(|s| Arc::ptr_eq(s, &stop)) {
+                        q.following = None;
+                    }
+                }
+            });
+        });
+    if spawned.is_err() {
+        // No thread to wait on: the next refresh tries again.
+        followers.fetch_sub(1, Ordering::SeqCst);
+        let mut q = queue.borrow_mut();
+        if q.following.as_ref().is_some_and(|s| Arc::ptr_eq(s, &mine)) {
+            q.following = None;
+        }
+    }
+}
+
+/// Asks for the picture again, unless an ask is already waiting.
+fn look(engine: &Engine, ws: ObjectId, landed: mpsc::Sender<()>) {
+    if !engine.is_alive(ws) {
+        return;
+    }
+    let Some(queue) = queue_of(engine, ws) else {
+        return;
+    };
+    let generation = {
+        let mut q = queue.borrow_mut();
+        let waiting = q.jobs.iter_mut().find_map(|j| match j {
+            Job::Picture { looks, .. } => Some(looks),
+            _ => None,
+        });
+        match waiting {
+            Some(looks) => {
+                looks.push(landed);
+                return;
+            }
+            None => q.fetched,
+        }
+    };
+    enqueue(
+        engine,
+        ws,
+        Job::Picture {
+            generation,
+            looks: vec![landed],
+        },
+    );
 }
 
 fn hash_of(bytes: &[u8]) -> u64 {
@@ -687,7 +964,9 @@ fn rebase(engine: &Engine, ws: ObjectId, tool: &str, args: &Json, answer: &Json)
         return;
     };
     for job in &mut queue.borrow_mut().jobs {
-        if let Job::Call { tool, args: next } = job
+        if let Job::Call {
+            tool, args: next, ..
+        } = job
             && tool == "document_edit"
             && next["doc"] == args["doc"]
             && next["generation"].as_u64() == Some(from)
@@ -737,33 +1016,117 @@ fn publish(engine: &Engine, ws: ObjectId, view: View, seen: u64) {
         .map(|p| p.generation)
         .filter(|&g| resized || (g != picture && g != fetched));
     let _ = cx.set(Workspace::BLANK, view.blank);
-    let _ = cx.set(Workspace::DOCUMENTS, to_json(&view.documents));
+    give(
+        &cx,
+        Workspace::DOCUMENTS,
+        "DOCUMENTS",
+        to_json(&view.documents),
+        &queue,
+    );
     let _ = cx.set(Workspace::GENERATION, view.generation as f64);
     let _ = cx.set(Workspace::TEXT, view.text);
-    let _ = cx.set(Workspace::LAYERS, to_json(&view.layers));
+    give(
+        &cx,
+        Workspace::LAYERS,
+        "LAYERS",
+        to_json(&view.layers),
+        &queue,
+    );
     let _ = cx.set(Workspace::SELECTED, view.selected);
-    let _ = cx.set(Workspace::CHOSEN, to_json(&view.chosen));
-    let _ = cx.set(Workspace::SELECTION, to_json(&view.selection));
-    let _ = cx.set(Workspace::INSPECTOR, to_json(&view.inspector));
-    let _ = cx.set(Workspace::STATES, to_json(&view.states));
-    let _ = cx.set(Workspace::ROLES, to_json(&view.roles));
-    let _ = cx.set(Workspace::SIGNALS, to_json(&view.signals));
-    let _ = cx.set(Workspace::FLOW, to_json(&view.flow));
-    let _ = cx.set(Workspace::PALETTE, to_json(&view.palette));
-    let _ = cx.set(Workspace::TOOLKIT, to_json(&view.toolkit));
-    let _ = cx.set(Workspace::ROOT_STATES, to_json(&view.root_states));
-    let _ = cx.set(Workspace::DONE, to_json(&view.done));
-    let _ = cx.set(Workspace::UNDONE, to_json(&view.undone));
-    let _ = cx.set(Workspace::LEASES, to_json(&view.leases));
+    give(
+        &cx,
+        Workspace::CHOSEN,
+        "CHOSEN",
+        to_json(&view.chosen),
+        &queue,
+    );
+    give(
+        &cx,
+        Workspace::SELECTION,
+        "SELECTION",
+        to_json(&view.selection),
+        &queue,
+    );
+    give(
+        &cx,
+        Workspace::INSPECTOR,
+        "INSPECTOR",
+        to_json(&view.inspector),
+        &queue,
+    );
+    give(
+        &cx,
+        Workspace::STATES,
+        "STATES",
+        to_json(&view.states),
+        &queue,
+    );
+    give(&cx, Workspace::ROLES, "ROLES", to_json(&view.roles), &queue);
+    give(
+        &cx,
+        Workspace::SIGNALS,
+        "SIGNALS",
+        to_json(&view.signals),
+        &queue,
+    );
+    give(&cx, Workspace::FLOW, "FLOW", to_json(&view.flow), &queue);
+    give(
+        &cx,
+        Workspace::PALETTE,
+        "PALETTE",
+        to_json(&view.palette),
+        &queue,
+    );
+    give(
+        &cx,
+        Workspace::TOOLKIT,
+        "TOOLKIT",
+        to_json(&view.toolkit),
+        &queue,
+    );
+    give(
+        &cx,
+        Workspace::ROOT_STATES,
+        "ROOT_STATES",
+        to_json(&view.root_states),
+        &queue,
+    );
+    give(&cx, Workspace::DONE, "DONE", to_json(&view.done), &queue);
+    give(
+        &cx,
+        Workspace::UNDONE,
+        "UNDONE",
+        to_json(&view.undone),
+        &queue,
+    );
+    give(
+        &cx,
+        Workspace::LEASES,
+        "LEASES",
+        to_json(&view.leases),
+        &queue,
+    );
     if let Some(ms) = view.leases.iter().map(|l| l.ends_in_ms).min() {
         wake_after(engine, Duration::from_millis(ms));
     }
-    let _ = cx.set(Workspace::COMMENTS, to_json(&view.comments));
+    give(
+        &cx,
+        Workspace::COMMENTS,
+        "COMMENTS",
+        to_json(&view.comments),
+        &queue,
+    );
     let _ = cx.set(Workspace::PREVIEW, preview);
     let _ = cx.set(Workspace::PROBLEM, view.problem);
     let _ = cx.set(Workspace::PREVIEWS, view.previews);
     let _ = cx.set(Workspace::THEME, view.theme);
-    let _ = cx.set(Workspace::TOKENS, to_json(&view.tokens));
+    give(
+        &cx,
+        Workspace::TOKENS,
+        "TOKENS",
+        to_json(&view.tokens),
+        &queue,
+    );
     // A click changes what the app shows and no generation says so. A new
     // preview counts from nothing again, which is no click.
     let clicks = view
@@ -786,16 +1149,24 @@ fn publish(engine: &Engine, ws: ObjectId, view: View, seen: u64) {
     if clicked {
         let _ = cx.set(Workspace::SETTLING, true);
     }
+    follow(engine, ws);
     // A picture is fetched once for each generation the preview applies.
     if let Some(generation) = wanted {
         let queued = queue
             .borrow()
             .jobs
             .iter()
-            .any(|j| matches!(j, Job::Picture { generation: g } if *g == generation));
+            .any(|j| matches!(j, Job::Picture { generation: g, .. } if *g == generation));
         if !queued {
             queue.borrow_mut().fetched = generation;
-            enqueue(engine, ws, Job::Picture { generation });
+            enqueue(
+                engine,
+                ws,
+                Job::Picture {
+                    generation,
+                    looks: Vec::new(),
+                },
+            );
         }
     }
 }
@@ -850,10 +1221,30 @@ fn refresh_all(engine: &Engine) {
         all.clone()
     };
     for ws in live {
-        let behind = queue_of(engine, ws).is_some_and(|q| q.borrow().published < writes);
-        if behind {
-            enqueue(engine, ws, Job::Refresh);
+        // A job running or waiting may be what wrote, and reads after it: it
+        // says when it is done whether that was enough.
+        let (busy, empty) = queue_of(engine, ws).map_or((true, false), |q| {
+            let q = q.borrow();
+            (q.busy, q.jobs.is_empty())
+        });
+        if !busy && empty {
+            refresh_if_behind_of(engine, ws, writes);
+        } else if !busy {
+            // Jobs that could not start: this is the next write to ask again.
+            pump(engine, ws);
         }
+    }
+}
+
+fn refresh_if_behind(engine: &Engine, ws: ObjectId) {
+    let writes = engine.extension::<Context>().writes.load(Ordering::SeqCst);
+    refresh_if_behind_of(engine, ws, writes);
+}
+
+fn refresh_if_behind_of(engine: &Engine, ws: ObjectId, writes: u64) {
+    let behind = queue_of(engine, ws).is_some_and(|q| q.borrow().published < writes);
+    if behind {
+        enqueue(engine, ws, Job::Refresh);
     }
 }
 
@@ -863,6 +1254,17 @@ fn lock(
     studio
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+/// Sets a list a panel shows, if it is not what the panel has: a panel over a
+/// list made anew makes its rows anew, and most publishes change one list.
+fn give(cx: &Cx, prop: Prop<Json>, name: &'static str, value: Json, queue: &Rc<RefCell<Queue>>) {
+    let mut q = queue.borrow_mut();
+    if q.given.get(name) != Some(&value) {
+        q.given.insert(name, value.clone());
+        drop(q);
+        let _ = cx.set(prop, value);
+    }
 }
 
 /// A view's part as the JSON a script reads.

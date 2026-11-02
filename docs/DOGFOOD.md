@@ -100,7 +100,7 @@ view itself loses work.
   only after an edit. Owner: Studio, the preview client in `studio_core`;
   Ljós may need to say when it is at rest after input, not only after a
   reload (request 3).
-- **Fixed** (d553611): Cause: nothing asked for a new picture after a click, since a click makes no new generation. A click now looks again every 100 ms, up to 30 looks, stopping after 3 unchanged. Remains: a continuous animation goes stale after the bound, until Ljós request 3 says when the preview is at rest.
+- **Fixed** (d553611): Cause: nothing asked for a new picture after a click, since a click makes no new generation. A click now looks again every 100 ms, up to 30 looks, stopping after 3 unchanged. A continuous animation then went stale after the bound; in Play the picture now follows what the app says when it sleeps (`app_watch` `rests`, `wake_in_ms`): looked at when it has woken, at most ten times a second, and an app that will not wake by itself is asked nothing. Not `paints`, which a preview without a window never counts, nor `frames`, which a screenshot moves. `features/ui/play_follow.feature`.
 
 ### Major
 
@@ -144,7 +144,7 @@ view itself loses work.
 - **Fix:** a state row that, when entered, records inspector edits as
   `PropertyChanges`, and a "when" field with the breakpoint presets the MCP
   tool already has. Owner: Studio, States block over `state_edit`.
-- **Fixed** (5569e87): `when` and presets already existed; the gap was recording and seeing a state. Pick a state and edits go into it, and `preview_state.show` shows it. Remains: a canvas drag while recording writes the base value, and the state's override then hides it.
+- **Fixed** (5569e87): `when` and presets already existed; the gap was recording and seeing a state. Pick a state and edits go into it, and `preview_state.show` shows it. A canvas drag, an arrow press and an align while recording wrote the base value, and the state's override then hid it; they now go into the picked state (`node_arrange` `record`), and a move that would reorder a layout says a state cannot.
 
 #### D8. `tools/list` answers 62 KB
 
@@ -382,10 +382,10 @@ Studio, `budgets` and the preview's `ljos` are all release builds, taken
 | Path | Budget | Stock project | `samples/site` | `samples/notes` | Verdict |
 |---|---|---|---|---|---|
 | Drag in the real window, frame interval p50 / p95 / max | 16.7 ms (60 fps) | 17 / 18 / 24 ms | | | about 59 fps, see below |
-| Edit to canvas picture, one per 250 ms, p50 / p95 / max | 50 ms p95 | 27.3 / 30.2 / 30.4 ms (was 158.1 / 234.5) | 35.7 / 40.8 / 45.0 ms (was 258.7 / 264.9) | 32.4 / 52.8 / 72.8 ms (was 230.8 / 236.6) | notes slightly over |
+| Edit to canvas picture, one per 250 ms, p50 / p95 / max | 50 ms p95 | 27.3 / 30.2 / 30.4 ms (was 158.1 / 234.5) | 35.7 / 40.8 / 45.0 ms (was 258.7 / 264.9) | 23.3 to 24.9 / 25.4 to 29.4 ms over three runs; max 31.6, 53.5 and 341.1, the two high ones a rename on the data drive (was 32.4 / 52.8 / 72.8) | within |
 | Edit to picture, back to back, p50 / p95 | | 25.1 / 1028.8 ms | | | the preview's call rate limit, see below |
 | Cold start, p50 / p95 | 1 s | 52.3 / 65.2 ms (200 files) | 59.4 / 60.2 ms | 53.6 / 57.9 ms | within |
-| Selection to inspector, p50 / p95 / max | 16 ms | 18.7 / 22.9 / 24.8 ms (was 14.1 / 19.0 / 21.2) | | | **over** |
+| Selection to inspector, p50 / p95 / max | 16 ms | 8.4 to 10.6 / 10.2 to 12.6 / 14.3 to 17.2 ms over four runs (was 18.7 / 22.9 / 24.8) | | | within |
 | Idle for 5 s | 0 % CPU | 0 ms CPU, 0 wakes, 0 frames | | | within |
 | Drag, engine work per pointer move, p50 / p95 / max | | 34 / 45 / 418 us | | | no paint in it |
 
@@ -398,10 +398,13 @@ cadence, not paint time: a frame's own paint shows only by pushing the next
 interval out. No real GPU was measured, and keeping a `FrameAnimation` running
 is itself continuous frames, which an ordinary drag does not have.
 
-**Selection to inspector is over budget**, and worse than before D1: the
-measure runs until everything is at rest, which now includes the overlay's
-geometry read from the preview. No split of how long the inspector alone takes
-was measured.
+**Selection to inspector was over budget** for three reasons, none of them the
+inspector. A selection's answer was followed by a second, redundant read of the
+session (the write's notice reached the UI thread ahead of the answer of the
+job that wrote); the overlay's geometry read published the whole view again;
+and every publish set all seventeen lists, so panels made their rows anew. With
+no preview it was already 11.2 / 13.8 ms. Now one read, no publish for geometry,
+and only lists that changed are set; the overlay reads siblings only on a press.
 
 **Back to back edits:** the p95 is about a second of waiting for a picture,
 because the preview limits how often it is called. One edit per 250 ms does not

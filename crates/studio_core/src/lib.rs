@@ -2955,14 +2955,20 @@ impl Session {
     }
 
     /// The selection as (document, handle), dropping objects that are gone.
+    /// While a document's text does not parse its handles wait, and what they
+    /// select waits with them, out of the answer until the text parses again.
     pub fn selection(&mut self) -> Vec<(String, String)> {
         let selection = std::mem::take(&mut self.selection);
-        let kept: Vec<_> = selection
-            .into_iter()
-            .filter(|(doc, handle)| self.resolve(doc, &Address::Node(handle.clone())).is_ok())
-            .collect();
-        self.selection = kept.clone();
-        kept
+        let mut now = Vec::new();
+        for (doc, handle) in selection {
+            if self.resolve(&doc, &Address::Node(handle.clone())).is_ok() {
+                now.push((doc.clone(), handle.clone()));
+            } else if !self.docs.get(&doc).is_some_and(|d| d.nodes.is_none()) {
+                continue;
+            }
+            self.selection.push((doc, handle));
+        }
+        now
     }
 }
 

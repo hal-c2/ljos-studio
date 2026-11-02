@@ -14,6 +14,9 @@ MouseArea {
     required property Workspace workspace
     required property real zoom
     required property bool playing
+    required property var recording
+    // Why the last drop wrote nothing; said until the next press.
+    property string told: ""
 
     // `node_arrange` `geometry`'s answer for the selection.
     property var nodes: []
@@ -29,6 +32,9 @@ MouseArea {
     // The box a drag shows; kept after a drop until the new geometry answers,
     // so the outline does not jump back for the length of a reload.
     property var ghost: null
+    // A drop's write is on its way: a read asked before it, the press's, says
+    // the old box and is no reason to let go of the ghost.
+    property bool dropping: false
     property real guideX: -1
     property real guideY: -1
     property var snapXs: []
@@ -44,12 +50,16 @@ MouseArea {
     readonly property var selectedOne: nodes.length === 1 && nodes[0].window !== undefined ? nodes[0] : null
     readonly property bool resizable: selectedOne !== null && selectedOne.drag.resize !== "none"
     readonly property int handlesShown: resizable && !playing && ghost === null ? 8 : 0
+    onRecordingChanged: told = ""
+
     // What a drag does, said before and during it.
     readonly property string says: {
         if (workspace.chosen.length === 0 || playing)
             return ""
         if (nodes.length > 0 && nodes.every(n => n.window === undefined))
             return "The preview does not show this object"
+        if (told !== "")
+            return told
         return nodes.length === 1 ? nodes[0].drag.says : ""
     }
 
@@ -73,12 +83,20 @@ MouseArea {
             nodes = []
             parentBox = null
             siblings = []
+            // No read is coming to let go of a ghost.
+            if (!dragging)
+                ghost = null
             return
         }
+        ++reads
         workspace.dispatch("node_arrange", {
             action: "geometry",
             doc: workspace.doc,
-            nodes: chosen.map(h => ({node: h}))
+            nodes: chosen.map(h => ({node: h})),
+            // Only a press can start the drag that snaps to them, and each
+            // sibling is a read of the running app: a selection made anywhere
+            // but on the canvas does not wait for them.
+            without_siblings: mode === ""
         })
     }
 
@@ -228,14 +246,33 @@ MouseArea {
             places.push(place)
         }
         if (places.length > 0) {
-            workspace.dispatch("node_arrange", {action: "place", doc: workspace.doc, places: places})
+            overlay.place(places)
             return true
         }
         return selectedOne !== null && selectedOne.drag.move === "reorder" && dropReorder()
     }
 
+    // Every gesture that sets a value, so all of them follow `recording`.
+    function place(places) {
+        told = ""
+        const args = {action: "place", doc: workspace.doc, places: places}
+        if (recording !== null)
+            args.record = recording
+        workspace.dispatch("node_arrange", args)
+    }
+
     // A layout places the object: the drop picks its place among the others.
     function dropReorder() {
+        if (recording !== null) {
+            told = "A state cannot change the order of a layout"
+            return false
+        }
+        // The hand let go before the press's read answered: the drop is decided
+        // when it does.
+        if (siblings.length === 0 && reads > 0) {
+            dropWaits = true
+            return true
+        }
         const layers = workspace.layers
         const layerOf = (node) => layers.find(l => l.node === node)
         const self = layerOf(selectedOne.node)
@@ -289,7 +326,7 @@ MouseArea {
             place.height = height
         if (Object.keys(place).length === 1)
             return false
-        workspace.dispatch("node_arrange", {action: "place", doc: workspace.doc, places: [place]})
+        overlay.place([place])
         return true
     }
 
@@ -297,8 +334,30 @@ MouseArea {
         mode = ""
         guideX = -1
         guideY = -1
-        if (!wrote)
+        if (wrote)
+            dropping = true
+        else
+            endDrop(false)
+    }
+
+    // Every way a drop ends comes here. A write that went in keeps the ghost
+    // for the read that says the new box, so the outline does not jump back;
+    // otherwise there is nothing to wait for. The ghost of a drag still in
+    // hand is that drag's.
+    function endDrop(wentIn) {
+        dropWaits = false
+        dropping = false
+        if (!wentIn && !dragging)
             ghost = null
+    }
+
+    // What was held was for an object no longer selected: letting go must
+    // not write it to whatever is selected now.
+    function letGo() {
+        mode = ""
+        guideX = -1
+        guideY = -1
+        endDrop(false)
     }
 
     // Each press is its own undo step. The boxes move at once, so a key held
@@ -327,7 +386,7 @@ MouseArea {
         nodes = moved
         writing = true
         settled.restart()
-        workspace.dispatch("node_arrange", {action: "place", doc: workspace.doc, places: places})
+        overlay.place(places)
     }
 
     function selectedHandles() {
@@ -344,17 +403,21 @@ MouseArea {
 
     onPressed: (mouse) => {
         forceActiveFocus()
+        endDrop(true)
         if (playing)
             return
+        told = ""
         pressedAt = Qt.point(mouse.x, mouse.y)
         const shift = (mouse.modifiers & Qt.ShiftModifier) !== 0
         handle = shift ? -1 : handleAt(mouse.x, mouse.y)
         if (handle >= 0) {
             startBox = selectedOne.window
             mode = "pressed"
+            refetch()
         } else if (!shift && inside(mouse.x, mouse.y)) {
             startBox = around()
             mode = "pressed"
+            refetch()
         } else {
             mode = "selecting"
             selectAt(mouse.x, mouse.y, shift)
@@ -448,14 +511,17 @@ MouseArea {
 
     Connections {
         target: overlay.workspace
-        // Every publish sets the list anew, and reading geometry publishes:
-        // only a selection that differs may read again, or the two would feed
-        // each other and an idle window would never rest.
+        // A list set again need not be another selection: only one that differs
+        // reads again, or an idle window could feed itself and never rest.
         function onChosenChanged() {
             const key = JSON.stringify(overlay.workspace.chosen)
             if (key !== overlay.seenChosen) {
                 overlay.seenChosen = key
+                overlay.told = ""
                 overlay.writing = false
+                // Choosing is how a press on another object starts its drag.
+                if (overlay.mode !== "selecting")
+                    overlay.letGo()
                 overlay.refetch()
             }
         }
@@ -474,39 +540,62 @@ MouseArea {
             if (tool === "node_select" && overlay.mode === "selecting") {
                 overlay.refetch()
             } else if (tool === "node_move") {
+                overlay.endDrop(true)
                 overlay.refetch()
             } else if (tool === "node_arrange") {
                 overlay.reread = false
                 if (answer.edit === undefined && answer.generation === undefined) {
+                    if (answer.copied === undefined)
+                        overlay.reads = Math.max(0, overlay.reads - 1)
+                    if (overlay.dropWaits && answer.copied === undefined) {
+                        overlay.siblings = answer.siblings !== undefined ? answer.siblings : []
+                        if (overlay.siblings.length > 0 || overlay.reads === 0) {
+                            overlay.dropWaits = false
+                            // An agent may have emptied the selection's boxes meanwhile.
+                            if (overlay.selectedOne === null || !overlay.dropReorder()) {
+                                overlay.endDrop(false)
+                                overlay.refetch()
+                            }
+                        }
+                        return
+                    }
                     if (answer.copied !== undefined || overlay.writing)
                         return
                     overlay.nodes = answer.boxes !== undefined ? answer.boxes : []
                     overlay.parentBox = answer.parent !== undefined ? answer.parent : null
                     overlay.siblings = answer.siblings !== undefined ? answer.siblings : []
-                    overlay.ghost = overlay.dragging ? overlay.ghost : null
+                    overlay.ghost = overlay.dragging || overlay.dropping ? overlay.ghost : null
+                    // The hand may be ahead of the siblings it snaps to.
+                    if (overlay.mode === "moving" || overlay.mode === "resizing")
+                        overlay.startSnaps()
                     if (overlay.mode === "selecting") {
                         overlay.startBox = overlay.around()
                         if (overlay.startBox !== null)
                             overlay.mode = "pressed"
                     }
-                } else if (overlay.writing) {
-                    settled.restart()
                 } else {
-                    overlay.refetch()
+                    // The read asked now is the first that can say the new box.
+                    overlay.endDrop(true)
+                    if (overlay.writing)
+                        settled.restart()
+                    else
+                        overlay.refetch()
                 }
             }
         }
         function onRefused(tool, error) {
             if (tool === "node_move") {
+                overlay.endDrop(false)
                 overlay.refetch()
             } else if (tool === "node_arrange") {
                 // A refused read leaves nothing to draw; a refused drop goes
                 // back to what the preview says.
                 overlay.writing = false
-                overlay.ghost = null
+                overlay.endDrop(false)
                 // Read again once only: when the read is what is refused
                 // (a preview gone, or one that cannot say), asking on would
                 // keep an idle window busy for ever.
+                overlay.reads = Math.max(0, overlay.reads - 1)
                 const refusedTwice = overlay.reread
                 overlay.reread = !refusedTwice
                 if (refusedTwice || (error.details !== undefined && error.details.kind === "no_preview")) {
@@ -533,6 +622,9 @@ MouseArea {
             overlay.refetch()
         }
     }
+    // Geometry reads asked and not answered; they answer in order.
+    property int reads: 0
+    property bool dropWaits: false
     property int seenGeneration: -1
     property string seenChosen: "[]"
 

@@ -539,6 +539,17 @@ fn calls_with(w: &mut StudioWorld, tool: String, step: &Step) -> StepResult {
     Ok(())
 }
 
+// `call_tool` is what MCP reaches, and a wait takes its own way through it.
+#[when(regex = r#"^the agent asks the server to wait with:$"#)]
+async fn asks_to_wait(w: &mut StudioWorld, step: &Step) -> StepResult {
+    let args = w.arguments(&docstring(step)?)?;
+    let caps = w.caps;
+    let ctx = CallCtx::new(caps);
+    let out = w.server()?.call_tool("preview_events", &ctx, args).await;
+    w.answer = Some(out.map(|reply| reply.structured));
+    Ok(())
+}
+
 #[given(regex = r#"^a second agent named "([^"]+)" has called the tool "([^"]+)" with:$"#)]
 #[when(regex = r#"^a second agent named "([^"]+)" calls the tool "([^"]+)" with:$"#)]
 fn second_calls_with(w: &mut StudioWorld, name: String, tool: String, step: &Step) -> StepResult {
@@ -600,6 +611,58 @@ fn person_types(w: &mut StudioWorld, doc: String, old: String, new: String) -> S
         .replace_text(&doc, Some(generation), Some(range), &unquote(&new), false)
         .map_err(|e| e.to_string())?;
     Ok(())
+}
+
+// Over the served surface, on one thread, as `studio --mcp` calls it: a wait
+// that blocked here would answer first, and only after its whole length.
+#[then(
+    regex = r#"^the tool "([^"]+)" answers while a wait past the answer's rests is parked, and the wait ends with the server$"#
+)]
+fn answers_past_a_wait(w: &mut StudioWorld, tool: String) -> StepResult {
+    let rests = at(w.answer()?, "/rests")?.clone();
+    let caps = w.caps;
+    let server = w.server()?.clone();
+    let ctx = CallCtx::new(caps);
+    let (done, ended) = std::sync::mpsc::channel();
+    // Its own thread, for a wait that keeps the runtime from dropping would
+    // hang the scenario for the hour.
+    std::thread::spawn(move || {
+        let answer = (|| {
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .map_err(|e| e.to_string())?;
+            runtime.block_on(async {
+                // The app may move on: an answer is a new rest to wait past.
+                let mut rests = rests;
+                for wait_ms in [100, 3_600_000, 3_600_000, 3_600_000, 3_600_000] {
+                    let mut wait = server.call_tool(
+                        "preview_events",
+                        &ctx,
+                        json!({"wait_ms": wait_ms, "rests": rests}),
+                    );
+                    if wait_ms == 100 {
+                        rests =
+                            (&mut wait).await.map_err(|e| e.message)?.structured["rests"].clone();
+                        continue;
+                    }
+                    let other = server.call_tool(&tool, &ctx, json!({}));
+                    tokio::select! {
+                        biased;
+                        answer = &mut wait => {
+                            rests = answer.map_err(|e| e.message)?.structured["rests"].clone();
+                        }
+                        other = other => return other.map(drop).map_err(|e| e.message),
+                    }
+                }
+                Err("the wait was never parked".to_owned())
+            })
+        })();
+        let _ = done.send(answer);
+    });
+    ended
+        .recv_timeout(std::time::Duration::from_secs(30))
+        .map_err(|_| "the server did not end with a wait parked".to_owned())?
 }
 
 #[given(regex = r#"^the agent keeps the answer's "(/[^"]*)" as "([^"]+)"$"#)]

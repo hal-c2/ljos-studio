@@ -45,7 +45,8 @@ pub enum Request {
         changed: BTreeMap<String, Option<String>>,
     },
     /// Import `module` from `dir` (`null`: from where it would be found)
-    /// and reload with `changed`, keeping state.
+    /// and start over with `changed`: another module's code is another
+    /// program, so the old one's state says nothing of it.
     Alias {
         module: String,
         dir: Option<String>,
@@ -72,6 +73,13 @@ pub enum Request {
     Logs {
         since: u64,
     },
+    /// A click on the object `id`, or at `at` (logical pixels).
+    Click {
+        #[serde(skip_serializing_if = "Option::is_none")]
+        id: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        at: Option<[f64; 2]>,
+    },
     /// Where the object at `x`, `y` (logical pixels) is declared.
     Pick {
         x: f64,
@@ -93,6 +101,7 @@ impl Request {
             Request::Read { .. } => "read",
             Request::Write { .. } => "write",
             Request::Logs { .. } => "logs",
+            Request::Click { .. } => "click",
             Request::Pick { .. } => "pick",
             Request::Close => "close",
         }
