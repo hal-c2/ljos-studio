@@ -1888,5 +1888,75 @@ Feature: A tool does not write what would not load or would not show
       {"action": "paste", "doc": "Own.qml", "parent": {"id": "own"}}
       """
     Then the agent is refused with "not_actionable"
-    And the refusal's "/details/kind" is "unknown_type"
+    And the refusal's "/details/kind" is "component_takes_name"
     And the file "Own.qml" does not contain "./lib"
+
+  Scenario: A paste from beside a file whose inline component takes the head is refused, though a file has the name
+    Given the file "Other.qml":
+      """qml
+      import QtQuick
+
+      Item {
+          component Inner: Rectangle {}
+      }
+      """
+    And the file "Has.qml":
+      """qml
+      import QtQuick
+
+      Item {
+          id: has
+          Other.Inner { id: t }
+      }
+      """
+    And the file "Own.qml":
+      """qml
+      import QtQuick
+
+      Item {
+          id: own
+          component Other: Rectangle {}
+      }
+      """
+    And the agent has called the tool "node_arrange" with:
+      """json
+      {"action": "copy", "doc": "Has.qml", "nodes": [{"id": "t"}]}
+      """
+    When the agent calls the tool "node_arrange" with:
+      """json
+      {"action": "paste", "doc": "Own.qml", "parent": {"id": "own"}}
+      """
+    Then the agent is refused with "not_actionable"
+    And the refusal's "/details/kind" is "component_takes_name"
+
+  Scenario Outline: An insert whose inline component and a qualified name would meet is refused, unless the head is an alias
+    Given the file "Other.qml":
+      """qml
+      import QtQuick
+
+      Item {
+          component Inner: Rectangle {}
+      }
+      """
+    And the file "Own.qml":
+      """qml
+      import QtQuick
+      import QtQuick.Controls as C
+
+      Item {
+          id: own
+          <has>
+      }
+      """
+    When the agent calls the tool "node_insert" with:
+      """json
+      {"doc": "Own.qml", "parent": {"id": "own"}, "text": "<text>"}
+      """
+    Then <outcome>
+
+    Examples:
+      | has                           | text                            | outcome                                                  |
+      | Other.Inner { id: t }         | Item { component Other: Item {} } | the agent is refused with "not_actionable"             |
+      | component Other: Item {}      | Other.Inner { id: t }           | the agent is refused with "not_actionable"               |
+      | C.Button { id: t }            | Item { component C: Item {} }   | the file "Own.qml" contains "component C: Item {}"       |
+      | component C: Item {}          | C.Button { id: t }              | the file "Own.qml" contains "C.Button { id: t }"         |
