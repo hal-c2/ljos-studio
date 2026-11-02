@@ -13,7 +13,7 @@ use serde_json::json;
 use studio_core::place::{self, Align, Drag, Moving, Rect, Resizing, Wanted, Wrap};
 use studio_core::preview::{Declared, Placed};
 use studio_core::scene3d::Handles;
-use studio_core::{Address, Node, NodePath, Op, StateEdit, Step};
+use studio_core::{Address, Import, Node, NodePath, Op, StateEdit, Step};
 
 use crate::tools::{EditOut, MUTATE};
 use crate::{Studio, component, error, layout_tools, lock};
@@ -30,6 +30,9 @@ const DUPLICATE_OFFSET: f64 = 16.0;
 pub(crate) struct Copied {
     text: String,
     ids: Vec<String>,
+    /// The modules its document imports with no name, of which a paste into
+    /// another document brings what it needs.
+    modules: Vec<String>,
 }
 
 #[derive(Clone, Copy, Deserialize, JsonSchema)]
@@ -637,6 +640,14 @@ fn copied(
 ) -> Result<Vec<(String, Node, Copied)>, SurfaceError> {
     let (tree, _) = studio.session.tree(doc).map_err(error)?;
     let text = studio.session.text(doc).map_err(error)?.0.to_owned();
+    let modules: Vec<String> = studio_core::outline::imports(&text)
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|import| match import {
+            Import::Module { uri, alias: None } => Some(uri),
+            _ => None,
+        })
+        .collect();
     let mut out = Vec::new();
     for address in nodes {
         let (handle, node) = studio.session.resolve(doc, address).map_err(error)?;
@@ -648,6 +659,7 @@ fn copied(
         let copy = Copied {
             text: text[node.start..node.end].to_owned(),
             ids,
+            modules: modules.clone(),
         };
         out.push((handle, node, copy));
     }
@@ -732,15 +744,30 @@ fn paste(studio: &mut Studio, a: &PasteArgs) -> Result<ManyOut, SurfaceError> {
         ));
     }
     let mut taken = taken_ids(studio, &a.doc)?;
+    let source = studio.session.text(&a.doc).map_err(error)?.0.to_owned();
+    let imports: Vec<Option<String>> = studio
+        .clipboard
+        .iter()
+        .map(|copy| {
+            crate::loads::import_for(
+                studio.session.store(),
+                &a.doc,
+                &source,
+                &copy.text,
+                &copy.modules,
+            )
+        })
+        .collect::<Result<_, _>>()?;
     let ops: Vec<Op> = studio
         .clipboard
         .iter()
-        .map(|copy| Op::Insert {
+        .zip(imports)
+        .map(|(copy, import)| Op::Insert {
             parent: a.parent.clone(),
             index: None,
             text: place::with_fresh_ids(&copy.text, &copy.ids, &mut taken),
             add_id: false,
-            import: None,
+            import,
         })
         .collect();
     let (outcome, nodes) = studio
@@ -1108,29 +1135,6 @@ const LAYOUT_FAMILIES: [&[&str]; 2] = [
     &["RowLayout", "ColumnLayout", "GridLayout"],
 ];
 
-/// A member only some kinds have, and those kinds: the file would not load
-/// with it on another.
-const LAYOUT_MEMBERS: [(&str, &[&str]); 8] = [
-    ("columns", &["Grid", "GridLayout"]),
-    ("rows", &["Grid", "GridLayout"]),
-    ("columnSpacing", &["Grid", "GridLayout"]),
-    ("rowSpacing", &["Grid", "GridLayout"]),
-    ("flow", &["Grid", "Flow", "GridLayout"]),
-    ("horizontalItemAlignment", &["Grid"]),
-    ("verticalItemAlignment", &["Grid"]),
-    (
-        "layoutDirection",
-        &[
-            "Row",
-            "Grid",
-            "Flow",
-            "RowLayout",
-            "ColumnLayout",
-            "GridLayout",
-        ],
-    ),
-];
-
 fn relayout(
     studio: &mut Studio,
     doc: &str,
@@ -1162,16 +1166,16 @@ fn relayout(
             ),
         ));
     }
-    let others: Vec<&str> = node
-        .bindings
-        .iter()
-        .filter(|b| {
-            LAYOUT_MEMBERS
+    let source = studio.session.text(doc).map_err(error)?.0.to_owned();
+    let others: Vec<&str> = crate::signals::Names::of(studio.session.store(), doc, &source, None)
+        .map(|names| {
+            node.bindings
                 .iter()
-                .any(|(name, on)| *name == b.name && !on.contains(&kind))
+                .filter(|b| names.lacks(kind, Some(&node), &b.name))
+                .map(|b| b.name.as_str())
+                .collect()
         })
-        .map(|b| b.name.as_str())
-        .collect();
+        .unwrap_or_default();
     if !others.is_empty() {
         return Err(refused(
             "says_other",
@@ -1212,6 +1216,44 @@ fn relayout(
     })
 }
 
+/// The words qml6 refuses as an id, as measured: `parent` or `property`, which
+/// read as odd ones, load.
+const NOT_AN_ID: [&str; 33] = [
+    "break",
+    "case",
+    "catch",
+    "class",
+    "const",
+    "continue",
+    "debugger",
+    "default",
+    "delete",
+    "do",
+    "else",
+    "enum",
+    "export",
+    "extends",
+    "finally",
+    "for",
+    "function",
+    "if",
+    "import",
+    "in",
+    "instanceof",
+    "let",
+    "new",
+    "return",
+    "super",
+    "switch",
+    "throw",
+    "try",
+    "typeof",
+    "var",
+    "void",
+    "while",
+    "with",
+];
+
 fn rename(
     studio: &mut Studio,
     doc: &str,
@@ -1231,6 +1273,12 @@ fn rename(
         return Err(refused(
             "not_an_id",
             format!("`{name}` is not an id: an id is one word and starts lowercase"),
+        ));
+    }
+    if NOT_AN_ID.contains(&name) {
+        return Err(refused(
+            "not_an_id",
+            format!("`{name}` is not an id: QML keeps the word for itself"),
         ));
     }
     if taken_ids(studio, doc)?.iter().any(|id| id == name) {

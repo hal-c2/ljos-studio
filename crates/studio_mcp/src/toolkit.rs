@@ -29,7 +29,7 @@ pub struct Group {
     pub types: Vec<String>,
 }
 
-fn names(uri: &str) -> Option<Vec<String>> {
+pub(crate) fn names(uri: &str) -> Option<Vec<String>> {
     TEXT.lines().find_map(|line| {
         let mut words = line.split(' ');
         (words.next() == Some(uri)).then(|| words.map(str::to_owned).collect())

@@ -731,3 +731,15 @@ own because the list stays at 25 tools.
 - **ship:** `export` with `dry_run` → mend what it refuses → `export` →
   start the bundle with its manifest's `run`; for the web, `export` with
   `target: "web"` and build the site from `build/web`.
+
+## What a write refuses because the file would not load
+
+`property_set`, `binding_set`, `node_insert`, `node_arrange`'s `paste`,
+`relayout`, `rename` and `component_extract`, `state_edit`'s `change` and the
+delegate of `contribute` refuse, with `not_actionable`, what `qml6` would not
+load: `details.kind` is `no_such_member`, `unknown_type`, `not_an_id` or
+`name_taken`. Only what is certain is refused. A module Studio has no
+description of may have anything, and what a file says already is not held
+against a write beside it. `crates/studio_mcp/src/measured_members.txt` is what
+qml6 says the toolkit's types have beyond the table Studio is built with:
+`mise run measure-members` writes it.

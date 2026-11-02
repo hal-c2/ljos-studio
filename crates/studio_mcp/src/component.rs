@@ -443,6 +443,17 @@ pub(crate) fn extract(
     if studio.session.store().exists(&component) {
         return Err(refused("exists", format!("`{component}` is there already")));
     }
+    // An import is found before the file beside the document: the instance
+    // would be the other type, and the object gone from what shows.
+    let store = studio.session.store();
+    if crate::signals::Names::of(store, doc, &text, None)
+        .is_some_and(|names| names.type_is(name, "") == crate::signals::TypeIs::Known)
+    {
+        return Err(refused(
+            "name_taken",
+            format!("`{doc}` already has a type `{name}`, which would be used in its place"),
+        ));
+    }
     let tree: Vec<Node> = studio
         .session
         .tree(doc)

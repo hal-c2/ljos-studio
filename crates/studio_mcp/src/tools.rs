@@ -1216,6 +1216,12 @@ fn state_op(studio: &Mutex<Studio>, a: StateEditArgs) -> Result<Op, SurfaceError
         },
         StateAction::Change => {
             let target = a.target.ok_or_else(|| needs("target", "change"))?;
+            if let Some(name) = &a.name {
+                let mut held = lock(studio);
+                if let Ok((_, object)) = held.session.resolve(&a.doc, &target) {
+                    crate::loads::check_member(&mut held, &a.doc, &object, name)?;
+                }
+            }
             let value = match (a.value, a.binding) {
                 (Some(_), Some(_)) => {
                     return Err(SurfaceError::invalid_argument(
@@ -1301,6 +1307,10 @@ fn contribute_op(studio: &Mutex<Studio>, a: &ContributeArgs) -> Result<Op, Surfa
             format!("{} {{}}", block.name)
         }
     };
+    if a.block.is_none() {
+        let source = studio.session.text(&a.doc).map_err(error)?.0.to_owned();
+        crate::loads::check_text(studio.session.store(), &a.doc, &source, &delegate, None)?;
+    }
     let (text, _) = studio.session.text(&a.doc).map_err(error)?;
     let unit = studio_core::states::unit(text);
     let text = studio_core::slots::contribution(&slot, a.mode, a.order, &delegate, &unit)
@@ -1331,9 +1341,6 @@ fn edit(
         .map_err(error)
 }
 
-/// Sets a binding. A property the object declares with a value has its value
-/// there: a binding beside it would set it twice, which the app refuses. An
-/// alias has its target there, which stays.
 /// What names an object elsewhere has to follow its id, and a string written
 /// as an id names nothing.
 fn not_an_id(name: &str) -> Result<(), SurfaceError> {
@@ -1345,6 +1352,9 @@ fn not_an_id(name: &str) -> Result<(), SurfaceError> {
     Ok(())
 }
 
+/// Sets a binding. A property the object declares with a value has its value
+/// there: a binding beside it would set it twice, which the app refuses. An
+/// alias has its target there, which stays.
 fn set(
     studio: &Mutex<Studio>,
     doc: &str,
@@ -1364,6 +1374,9 @@ fn set(
         .resolve(doc, node)
         .ok()
         .map(|(_, object)| object);
+    if let (Some(_), Some(object)) = (&value, &object) {
+        crate::loads::check_member(&mut studio, doc, object, name)?;
+    }
     let declared = object
         .iter()
         .flat_map(|object| &object.bindings)
@@ -1842,6 +1855,7 @@ fn edits(studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
                 let studio = s();
                 move |_, a: InsertArgs| {
                     let (text, import) = insert_text(&studio, &a)?;
+                    crate::loads::check_insert(&studio, &a.doc, &text, import.as_deref())?;
                     let op = Op::Insert {
                         parent: a.parent,
                         index: a.index,
