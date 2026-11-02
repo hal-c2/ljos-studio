@@ -1805,3 +1805,88 @@ Feature: A tool does not write what would not load or would not show
     Then the file "Nat.qml" contains "import App.Other"
     And the answer's "/unvouched/1/type" is "Thing"
     And the answer's "/unvouched/1/held" is true
+
+  Scenario Outline: A pasted inline component that takes the head of a qualified name is refused, unless the head is an alias
+    Given the file "Other.qml":
+      """qml
+      import QtQuick
+
+      Item {
+          component Inner: Rectangle {}
+      }
+      """
+    And the file "Has.qml":
+      """qml
+      import QtQuick
+
+      Item {
+          id: has
+          Item {
+              id: box
+              component <head>: Item {}
+          }
+      }
+      """
+    And the file "Own.qml":
+      """qml
+      import QtQuick
+      <import>
+
+      Item {
+          id: own
+          <object> { id: mine }
+      }
+      """
+    And the agent has called the tool "node_arrange" with:
+      """json
+      {"action": "copy", "doc": "Has.qml", "nodes": [{"id": "box"}]}
+      """
+    When the agent calls the tool "node_arrange" with:
+      """json
+      {"action": "paste", "doc": "Own.qml", "parent": {"id": "own"}}
+      """
+    Then <outcome>
+
+    Examples:
+      | head  | import                       | object      | outcome                                                |
+      | Other | // nothing                   | Other.Inner | the agent is refused with "not_actionable"             |
+      | C     | import QtQuick.Controls as C | C.Button    | the file "Own.qml" contains "component C: Item {}"     |
+
+  Scenario: A pasted qualified name whose head the target's inline component takes is refused, since qml6 won't load it
+    Given the file "lib/Other.qml":
+      """qml
+      import QtQuick
+
+      Item {
+          component Inner: Rectangle {}
+      }
+      """
+    And the file "lib/Has.qml":
+      """qml
+      import QtQuick
+
+      Item {
+          id: has
+          Other.Inner { id: t }
+      }
+      """
+    And the file "Own.qml":
+      """qml
+      import QtQuick
+
+      Item {
+          id: own
+          component Other: Rectangle {}
+      }
+      """
+    And the agent has called the tool "node_arrange" with:
+      """json
+      {"action": "copy", "doc": "lib/Has.qml", "nodes": [{"id": "t"}]}
+      """
+    When the agent calls the tool "node_arrange" with:
+      """json
+      {"action": "paste", "doc": "Own.qml", "parent": {"id": "own"}}
+      """
+    Then the agent is refused with "not_actionable"
+    And the refusal's "/details/kind" is "unknown_type"
+    And the file "Own.qml" does not contain "./lib"
