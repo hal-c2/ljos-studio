@@ -7,7 +7,7 @@ import re
 import subprocess
 import sys
 
-work, written = sys.argv[1:]
+work, written, types_written, ids_written = sys.argv[1:]
 rows = [line.rstrip("\n").split("\t") for line in open(f"{work}/table.tsv")]
 env = dict(os.environ, QT_QPA_PLATFORM="offscreen", QT_FORCE_STDERR_LOGGING="1")
 OPENS = 'var H="import QtQuick; import QtQuick.Layouts; import QtQuick.Controls; ";\n'
@@ -60,6 +60,58 @@ for name, member in functions:
     )
 for name, member in re.findall(r"SIGNAL (\S+) (\S+)", run(body)):
     missing[name].add(member)
+
+body = ""
+for name in listed:
+    body += (
+        f'try{{Qt.createQmlObject(H+"{name} {{ nothereZz: 1 }}",this);'
+        f'console.log("ANY {name} *")}}catch(e){{}};\n'
+        f'try{{Qt.createQmlObject(H+"{name} {{ onNothereZz: {{}} }}",this);'
+        f'console.log("ANY {name} on*")}}catch(e){{}};\n'
+    )
+for name, mark in re.findall(r"ANY (\S+) (\S+)", run(body)):
+    missing[name].add(mark)
+
+# Only `is not a type` says a module lacks a type: others are refused for how
+# they are used, as what is only attached is.
+modules = sorted({uri for uri, _, _, _ in rows})
+body = ""
+for _, name, _, _ in rows:
+    for uri in modules:
+        body += (
+            f'try{{Qt.createQmlObject("import {uri}; {name} {{}}",this);'
+            f'console.log("HAS {name} {uri}")}}catch(e){{'
+            'if(e.qmlErrors[0].message.indexOf("is not a type")<0)'
+            f'console.log("HAS {name} {uri}")}};\n'
+        )
+has = {name: set() for _, name, _, _ in rows}
+for name, uri in re.findall(r"HAS (\S+) (\S+)", run(body)):
+    has[name].add(uri)
+with open(types_written, "w") as out:
+    for name in sorted(has):
+        out.write(f"{name} {','.join(sorted(has[name]))}\n")
+
+# What might be refused as an id: the language's words and every global.
+WORDS = """break case catch class const continue debugger default delete do else
+enum export extends false finally for function if implements import in instanceof
+interface let new null package pragma private protected public return static super
+switch this throw true try typeof var void while with yield""".split()
+globals_listed = re.search(
+    r"GLOBALS (\S+)",
+    run('console.log("GLOBALS "+Object.getOwnPropertyNames((function(){return this})()).join(","));\n'),
+)[1].split(",")
+words = sorted(
+    {w for w in WORDS + globals_listed if re.fullmatch(r"[a-z_]\w*", w)}
+)
+body = ""
+for word in words:
+    body += (
+        f'try{{Qt.createQmlObject(H+"Item {{ id: {word} }}",this)}}'
+        f'catch(e){{console.log("NOT_ID {word}")}};\n'
+    )
+with open(ids_written, "w") as out:
+    for word in sorted(set(re.findall(r"NOT_ID (\S+)", run(body)))):
+        out.write(word + "\n")
 
 with open(written, "w") as out:
     for name in sorted(missing):

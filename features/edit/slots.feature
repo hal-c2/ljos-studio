@@ -85,7 +85,7 @@ Feature: An agent contributes to a block's slot
 
     Examples:
       | text               | why            |
-      | Nowhere {}         | unknown_type   |
+      | RowLayout {}        | unknown_type   |
       | Text { nothere: 1 } | no_such_member |
 
   Scenario: A contribution written in QML

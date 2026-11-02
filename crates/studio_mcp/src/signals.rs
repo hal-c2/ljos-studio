@@ -219,21 +219,6 @@ pub(crate) enum TypeIs {
     Unsure,
 }
 
-/// What qml6 6.11 loads with `import QtQuick` and the table has nowhere.
-const NOT_IN_TABLE: [&str; 8] = [
-    "AnimatedSprite",
-    "LoggingCategory",
-    "MultiPointTouchArea",
-    "Package",
-    "PathAnimation",
-    "PathInterpolator",
-    "TouchPoint",
-    "WorkerScript",
-];
-
-/// Types that take members no type lists, which they hand to something else.
-const ANY_MEMBER: [&str; 2] = ["ListElement", "PropertyChanges"];
-
 /// What a document can name, read once for all a write asks of it.
 pub(crate) struct Names<'s> {
     types: Types<'s>,
@@ -267,7 +252,9 @@ impl<'s> Names<'s> {
         })
     }
 
-    /// `ty` as this document, plus the object text `beside` it, names it.
+    /// `ty` as this document, plus the object text `beside` it, names it. It
+    /// is `Missing` only when qml6 was seen to refuse it: every import is one
+    /// whose types are all known, and the type was tried in the toolkit's.
     pub(crate) fn type_is(&self, ty: &str, beside: &str) -> TypeIs {
         let found = &mut Found::default();
         if self.types.lookup(&self.scope, ty, found, 0) != Described::Not {
@@ -280,28 +267,40 @@ impl<'s> Names<'s> {
             .is_some_and(|nodes| nodes.iter().any(|node| node.ty == ty))
             || self.source.contains(&inline)
             || beside.contains(&inline)
-            || self.comes_with_qt(ty)
         {
             return TypeIs::Known;
         }
-        let described = |import: &Import| match import {
-            Import::Module { uri, .. } => {
-                self.types.dumps.module_types(uri).is_some()
-                    || self.types.qmldirs.contains_key(uri)
-                    || qt_signals::module(uri).is_some()
-            }
-            Import::Path { .. } => true,
-        };
-        if self.scope.imports.iter().all(described) {
-            TypeIs::Missing
-        } else {
-            TypeIs::Unsure
+        if let Some((qualifier, _)) = ty.rsplit_once('.') {
+            let aliased = |import: &Import| match import {
+                Import::Module { alias, .. } | Import::Path { alias, .. } => {
+                    alias.as_deref() == Some(qualifier)
+                }
+            };
+            return if self.scope.imports.iter().any(aliased) {
+                TypeIs::Unsure
+            } else {
+                TypeIs::Missing
+            };
         }
-    }
-
-    fn comes_with_qt(&self, ty: &str) -> bool {
-        let of_qt = |import: &Import| matches!(import, Import::Module { uri, .. } if uri == "QtQml" || uri.starts_with("QtQuick"));
-        NOT_IN_TABLE.contains(&ty) && self.scope.imports.iter().any(of_qt)
+        let Some(modules) = measured_types().get(ty) else {
+            return TypeIs::Unsure;
+        };
+        let mut missing = TypeIs::Missing;
+        for import in &self.scope.imports {
+            let Import::Module { uri, alias } = import else {
+                continue;
+            };
+            if alias.is_none() && modules.contains(uri.as_str()) {
+                return TypeIs::Known;
+            }
+            let known = MEASURED_MODULES.contains(&uri.as_str())
+                || self.types.dumps.module_types(uri).is_some()
+                || self.types.qmldirs.contains_key(uri);
+            if !known {
+                missing = TypeIs::Unsure;
+            }
+        }
+        missing
     }
 
     /// Whether an object of type `ty`, declaring what `node` does, certainly
@@ -314,10 +313,7 @@ impl<'s> Names<'s> {
             let first = rest.chars().next().filter(char::is_ascii_uppercase)?;
             Some(format!("{}{}", first.to_ascii_lowercase(), &rest[1..]))
         });
-        if base == "id"
-            || base.starts_with(|c: char| c.is_ascii_uppercase())
-            || ANY_MEMBER.contains(&ty.rsplit('.').next().unwrap_or(ty))
-        {
+        if base == "id" || base.starts_with(|c: char| c.is_ascii_uppercase()) {
             return false;
         }
         let mut found = Found::default();
@@ -336,6 +332,9 @@ impl<'s> Names<'s> {
             return false;
         };
         let also = |name: &str| also.iter().any(|members| members.contains(name));
+        if also(if handled.is_some() { "on*" } else { "*" }) {
+            return false;
+        }
         let property = |name: &str| found.properties.iter().any(|p| p == name) || also(name);
         match handled {
             Some(said) => {
@@ -348,9 +347,31 @@ impl<'s> Names<'s> {
     }
 }
 
+/// The modules whose types were tried: only of these is a type's absence seen.
+const MEASURED_MODULES: [&str; 4] = ["QtQml", "QtQuick", "QtQuick.Layouts", "QtQuick.Controls"];
+
+/// The words qml6 was seen to refuse as an id: `mise run measure-members`.
+pub(crate) fn not_an_id(word: &str) -> bool {
+    include_str!("measured_ids.txt")
+        .lines()
+        .any(|line| line == word)
+}
+
+/// Each type tried, and which of `MEASURED_MODULES` have it.
+fn measured_types() -> &'static HashMap<&'static str, HashSet<&'static str>> {
+    static MEASURED: OnceLock<HashMap<&str, HashSet<&str>>> = OnceLock::new();
+    MEASURED.get_or_init(|| {
+        include_str!("measured_types.txt")
+            .lines()
+            .filter_map(|line| line.split_once(' '))
+            .map(|(ty, modules)| (ty, modules.split(',').collect()))
+            .collect()
+    })
+}
+
 /// What qml6 says each toolkit type has beyond the table: `mise run
-/// measure-members`. A type with no entry was not measured, and is taken to
-/// have anything.
+/// measure-members`. `*` and `on*` mean it took a made-up property or handler.
+/// A type with no entry was not measured, and is taken to have anything.
 fn measured() -> &'static HashMap<&'static str, HashSet<&'static str>> {
     static MEASURED: OnceLock<HashMap<&str, HashSet<&str>>> = OnceLock::new();
     MEASURED.get_or_init(|| {

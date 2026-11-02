@@ -175,9 +175,137 @@ Feature: A tool does not write what would not load or would not show
     Examples:
       | text                     | why            |
       | RowLayout {}             | unknown_type   |
-      | Nowhere {}               | unknown_type   |
       | Item { RowLayout {} }    | unknown_type   |
       | Rectangle { nothere: 1 } | no_such_member |
+
+  # qml6 6.11 loads all but the last two of these with these imports; Studio's
+  # table has none of them, and what it cannot be sure of it lets through.
+  Scenario Outline: A type Studio has no word on goes through
+    Given the file "Wide.qml":
+      """qml
+      import QtQuick
+      import QtQuick.Controls
+      import QtQuick.Layouts
+
+      Item {
+          id: root
+      }
+      """
+    When the agent calls the tool "node_insert" with:
+      """json
+      {"doc": "Wide.qml", "parent": {"id": "root"}, "text": "<type> {}"}
+      """
+    Then the file "Wide.qml" contains "<type> {"
+
+    Examples:
+      | type               |
+      | SearchField        |
+      | FlexboxLayout      |
+      | PathText           |
+      | FunctionFilter     |
+      | FunctionSorter     |
+      | BorderImageMesh    |
+      | HeaderViewDelegate |
+      | Nowhere            |
+
+  # qml6 6.11: `Cannot assign to non-existent property "radius"` on the Item.
+  Scenario Outline: What only something else in the object says is not its own
+    Given the file "Boxed.qml":
+      """qml
+      import QtQuick
+
+      Item {
+          id: box
+          // radius: 3
+          property string note: "radius: 3"
+          Rectangle { radius: 3 }
+      }
+      """
+    When the agent calls the tool "<tool>" with:
+      """json
+      {"doc": "Boxed.qml", "node": {"id": "box"}, "name": "radius", "value": <value>}
+      """
+    Then the agent is refused with "not_actionable"
+    And the refusal's "/details/kind" is "no_such_member"
+
+    Examples:
+      | tool         | value |
+      | property_set | 3     |
+      | binding_set  | "3"   |
+
+  # qml6 6.11: Connections loads a made-up handler, with a warning, and refuses
+  # a made-up property.
+  Scenario: A Connections takes any handler and no made-up property
+    Given the file "Wired.qml":
+      """qml
+      import QtQuick
+
+      Item {
+          id: root
+          Connections { id: wire; target: root }
+      }
+      """
+    When the agent calls the tool "binding_set" with:
+      """json
+      {"doc": "Wired.qml", "node": {"id": "wire"}, "name": "onClicked", "value": "root.x = 1"}
+      """
+    Then the file "Wired.qml" contains "onClicked: root.x = 1"
+    When the agent calls the tool "binding_set" with:
+      """json
+      {"doc": "Wired.qml", "node": {"id": "wire"}, "name": "nothere", "value": "1"}
+      """
+    Then the agent is refused with "not_actionable"
+    And the refusal's "/details/kind" is "no_such_member"
+
+  # qml6 6.11 loads a made-up role and a made-up change.
+  Scenario Outline: What takes members of any name takes them
+    Given the file "Roles.qml":
+      """qml
+      import QtQuick
+
+      Item {
+          id: root
+          ListModel { ListElement { id: row } }
+          states: State { PropertyChanges { id: change } }
+      }
+      """
+    When the agent calls the tool "binding_set" with:
+      """json
+      {"doc": "Roles.qml", "node": {"id": "<node>"}, "name": "madeUp", "value": "1"}
+      """
+    Then the file "Roles.qml" contains "madeUp: 1"
+
+    Examples:
+      | node   |
+      | row    |
+      | change |
+
+  # qml6 6.11 loads `id: parent` and `id: property`.
+  Scenario Outline: An id QML keeps for itself is refused wherever it is written
+    When the agent calls the tool "node_insert" with:
+      """json
+      {"doc": "Plain.qml", "parent": {"id": "plain"}, "text": "Text { id: <word> }"}
+      """
+    Then the agent is refused with "not_actionable"
+    And the refusal's "/details/kind" is "not_an_id"
+
+    Examples:
+      | word     |
+      | console  |
+      | print    |
+      | pragma   |
+
+  Scenario Outline: A word that only reads like a kept one is an id
+    When the agent calls the tool "node_arrange" with:
+      """json
+      {"action": "rename", "doc": "Plain.qml", "nodes": [{"id": "plain"}], "name": "<word>"}
+      """
+    Then the file "Plain.qml" contains "id: <word>"
+
+    Examples:
+      | word     |
+      | parent   |
+      | property |
 
   Scenario Outline: A type the document has, or will, is inserted
     When the agent calls the tool "node_insert" with:
@@ -351,6 +479,28 @@ Feature: A tool does not write what would not load or would not show
       """
     Then the file "Plain.qml" contains "import QtQuick.Layouts"
     And the file "Plain.qml" contains "RowLayout"
+
+  # qml6 6.11: `RowLayout is not a type` beside a module without it, and loads
+  # once QtQuick.Layouts is imported too.
+  Scenario: A paste brings its import though another module may have the type
+    Given the file "Native.qml":
+      """qml
+      import QtQuick
+      import App.Native
+
+      Item {
+          id: native
+      }
+      """
+    And the agent has called the tool "node_arrange" with:
+      """json
+      {"action": "copy", "doc": "Main.qml", "nodes": [{"id": "row"}]}
+      """
+    When the agent calls the tool "node_arrange" with:
+      """json
+      {"action": "paste", "doc": "Native.qml", "parent": {"id": "native"}}
+      """
+    Then the file "Native.qml" contains "import QtQuick.Layouts"
 
   Scenario: A paste that needs what no plain import brings is refused
     Given the agent has called the tool "node_arrange" with:

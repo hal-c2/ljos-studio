@@ -1216,44 +1216,6 @@ fn relayout(
     })
 }
 
-/// The words qml6 refuses as an id, as measured: `parent` or `property`, which
-/// read as odd ones, load.
-const NOT_AN_ID: [&str; 33] = [
-    "break",
-    "case",
-    "catch",
-    "class",
-    "const",
-    "continue",
-    "debugger",
-    "default",
-    "delete",
-    "do",
-    "else",
-    "enum",
-    "export",
-    "extends",
-    "finally",
-    "for",
-    "function",
-    "if",
-    "import",
-    "in",
-    "instanceof",
-    "let",
-    "new",
-    "return",
-    "super",
-    "switch",
-    "throw",
-    "try",
-    "typeof",
-    "var",
-    "void",
-    "while",
-    "with",
-];
-
 fn rename(
     studio: &mut Studio,
     doc: &str,
@@ -1275,7 +1237,7 @@ fn rename(
             format!("`{name}` is not an id: an id is one word and starts lowercase"),
         ));
     }
-    if NOT_AN_ID.contains(&name) {
+    if crate::signals::not_an_id(name) {
         return Err(refused(
             "not_an_id",
             format!("`{name}` is not an id: QML keeps the word for itself"),

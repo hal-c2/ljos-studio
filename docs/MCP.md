@@ -738,8 +738,9 @@ own because the list stays at 25 tools.
 `relayout`, `rename` and `component_extract`, `state_edit`'s `change` and the
 delegate of `contribute` refuse, with `not_actionable`, what `qml6` would not
 load: `details.kind` is `no_such_member`, `unknown_type`, `not_an_id` or
-`name_taken`. Only what is certain is refused. A module Studio has no
-description of may have anything, and what a file says already is not held
-against a write beside it. `crates/studio_mcp/src/measured_members.txt` is what
-qml6 says the toolkit's types have beyond the table Studio is built with:
-`mise run measure-members` writes it.
+`name_taken`. Only what qml6 was seen to refuse is refused, since blocking a
+valid write is worse than missing a bad one, whose load error the preview still
+says. A misspelt type goes through, as does anything in a module Studio has not
+measured, and what a file says already is not held against a write beside it.
+`crates/studio_mcp/src/measured_*.txt` is what qml6 6.11 said: `mise run
+measure-members` writes them.
