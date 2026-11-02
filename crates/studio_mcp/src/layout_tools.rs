@@ -241,6 +241,7 @@ pub(crate) fn wrap(studio: &mut Studio, a: &WrapArgs) -> Result<ManyOut, Surface
         edit: outcome.into(),
         nodes,
         imported: Vec::new(),
+        unvouched: Vec::new(),
     })
 }
 
@@ -425,6 +426,7 @@ pub(crate) fn unwrap(
         edit: outcome.into(),
         nodes: moved,
         imported: Vec::new(),
+        unvouched: Vec::new(),
     })
 }
 
@@ -571,5 +573,6 @@ pub(crate) fn anchor(
         edit: outcome.into(),
         nodes: found.into_iter().map(|(handle, ..)| handle).collect(),
         imported: Vec::new(),
+        unvouched: Vec::new(),
     })
 }

@@ -18,7 +18,7 @@ use studio_core::outline::Import;
 use studio_core::{Node, Step, Store, outline};
 
 use crate::place_tools::refused;
-use crate::signals::{Finds, Names, TypeIs, not_an_id};
+use crate::signals::{Keeps, Lands, Names, TypeIs, Unvouched, compare, not_an_id};
 use crate::{Studio, error, lock};
 
 /// `name` on `object` of `doc`, if `object`'s type is known not to have it.
@@ -102,13 +102,17 @@ pub(crate) fn check_text(
     Ok(())
 }
 
-/// What a paste of `texts`, together, from `from`, whose imports are `had`, has
-/// to import into `doc`. A type not `Known` takes the first of them that makes it so; one
-/// that stays `Unsure` might come from any, so all of them come. A type whose
-/// place in `from` can be said stays there, by an import of it, or the paste is
-/// refused. An import wins over a file beside the document, so one that would
-/// turn an object `doc` has into something else stays out, and is refused if the
-/// paste needs it.
+/// What a paste brings and what it couldn't vouch for.
+pub(crate) struct Pasted {
+    pub(crate) imports: Vec<String>,
+    pub(crate) unvouched: Vec<Unvouched>,
+}
+
+/// What a paste of `texts`, together, from `from`, whose imports are `had`, adds
+/// to `doc`: the least of the source's imports, in its order, that a name not
+/// landing where it did needs, leaving out any that moves what `doc` has. Whatever
+/// `lands` can't then show as the same is said in the answer, not refused: the
+/// resolver is sure of less than qml6, and only qml6's refusals refuse.
 pub(crate) fn imports_for(
     store: &dyn Store,
     doc: &str,
@@ -116,22 +120,61 @@ pub(crate) fn imports_for(
     texts: &[&str],
     from: &str,
     had: &[Import],
-) -> Result<Vec<String>, SurfaceError> {
-    let nodes: Vec<_> = texts
-        .iter()
-        .filter_map(|text| outline::outline(text))
-        .flatten()
-        .collect();
+) -> Result<Pasted, SurfaceError> {
     let beside = texts.join("\n");
-    let is = |ty: &str, imports: &[String]| {
-        Names::of(store, doc, source, imports).map(|names| names.type_is(ty, &beside))
+    let mut names: Vec<String> = Vec::new();
+    for node in texts.iter().filter_map(|t| outline::outline(t)).flatten() {
+        if !names.contains(&node.ty) && !beside.contains(&format!("component {}", node.ty)) {
+            names.push(node.ty);
+        }
+    }
+    let target = outline::imports(source).unwrap_or_default();
+    // What a qualifier meant stays behind with the alias: qml6 won't load it.
+    let says = |qualifier: &str, import: &Import| match import {
+        Import::Module { alias, .. } | Import::Path { alias, .. } => {
+            alias.as_deref() == Some(qualifier)
+        }
     };
+    if let Some(left) = names.iter().find(|name| {
+        name.rsplit_once('.').is_some_and(|(qualifier, _)| {
+            had.iter().any(|i| says(qualifier, i)) && !target.iter().any(|i| says(qualifier, i))
+        })
+    }) {
+        return Err(unknown_type(doc, left));
+    }
+    let (Some(before), false) = (
+        Names::of(store, doc, source, &[]),
+        from == doc && had == target,
+    ) else {
+        check_all(store, doc, source, texts, &[])?;
+        return Ok(Pasted {
+            imports: Vec::new(),
+            unvouched: Vec::new(),
+        });
+    };
+    let was_at = Names::at(store, from, had);
     let here = dir_of(doc);
     let there = dir_of(from);
-    let target = outline::imports(source).unwrap_or_default();
-    let offered: Vec<String> = had
+    let holds: Vec<String> = outline::outline(source)
+        .into_iter()
+        .flatten()
+        .map(|node| node.ty)
+        .collect();
+    let moves = |offer: &str| {
+        Names::of(store, doc, source, &[offer.to_owned()]).is_some_and(|with| {
+            holds
+                .iter()
+                .any(|ty| compare(&before.lands(ty), &with.lands(ty)) == Keeps::Different)
+        })
+    };
+    // The folder of the file it came from first: it is imported without a word,
+    // and every folder the source names beat it there.
+    let implicit = folder_from(there, ".", here);
+    let mut offers: Vec<String> = Vec::new();
+    for offer in implicit
         .iter()
-        .filter_map(|import| match import {
+        .cloned()
+        .chain(had.iter().filter_map(|import| match import {
             Import::Module { uri, alias: None } => Some(uri.clone()),
             Import::Path { path, alias: None } if !path.ends_with(".js") => {
                 if path.starts_with('/') || path.contains(':') {
@@ -141,147 +184,70 @@ pub(crate) fn imports_for(
                 }
             }
             _ => None,
-        })
-        .filter(|offer| !imported_by(&target, here, offer))
+        }))
+    {
+        if !offers.contains(&offer) && !imported_by(&target, here, &offer) && !moves(&offer) {
+            offers.push(offer);
+        }
+    }
+    let mut wanted: Vec<&String> = Vec::new();
+    for name in &names {
+        let was = was_at.lands(name);
+        if compare(&was, &before.lands(name)) == Keeps::Same {
+            continue;
+        }
+        match &was {
+            Lands::Folder(dir) => {
+                let folder = folder_from("", dir, here);
+                wanted.extend(offers.iter().filter(|o| Some(*o) == folder.as_ref()));
+            }
+            Lands::Modules(modules) => {
+                wanted.extend(offers.iter().find(|o| modules.contains(o)));
+            }
+            Lands::CantTell => {
+                let file = name.split('.').next().unwrap_or(name);
+                let beside_it = store.exists(&in_dir(there, &format!("{file}.qml")));
+                wanted.extend(
+                    offers
+                        .iter()
+                        .filter(|o| beside_it || Some(*o) != implicit.as_ref()),
+                );
+            }
+            Lands::Nowhere => {}
+        }
+    }
+    let imports: Vec<String> = offers
+        .iter()
+        .filter(|offer| wanted.contains(offer))
+        .cloned()
         .collect();
-    let shadows =
-        |offer: &str| Names::of(store, doc, source, &[]).and_then(|names| names.shadowed_by(offer));
-    let needed = |offer: &str| match shadows(offer) {
-        Some(ty) => Err(refused(
-            "import_changes_type",
-            format!("importing `{offer}` would make the `{ty}` in `{doc}` another type"),
-        )),
-        None => Ok(offer.to_owned()),
-    };
-    // The last folder imported wins, so what comes keeps the source's order; a
-    // folder that came for the file beside the source had nothing to beat.
-    let rank = |import: &String| {
-        offered
-            .iter()
-            .position(|o| o == import)
-            .map_or(0, |i| i + 1)
-    };
-    let with_offer = |wanted: &[String], offer: Option<&str>| {
-        let mut with = wanted.to_vec();
-        // An import the target has stays where it is: adding it moves nothing.
-        with.extend(
-            offer
-                .filter(|o| !imported_by(&target, here, o))
-                .map(str::to_owned)
-                .filter(|o| !wanted.contains(o)),
-        );
-        with.sort_by_key(rank);
-        with
-    };
-    let was_at = Names::at(store, from, had);
-    // Where either file imports what can't be read, an answer here may be
-    // wrong, so it can bring imports along but never refuses.
-    let unread = was_at.bare_unread()
-        || Names::of(store, doc, source, &[]).is_some_and(|names| names.bare_unread());
-    let changes = |ty: &str| {
-        refused(
-            "import_changes_type",
-            format!("`{ty}` in `{doc}` would be another type, and no import can keep it"),
-        )
-    };
-    let bring_all = |wanted: &mut Vec<String>| {
-        for uri in &offered {
-            if shadows(uri).is_none() {
-                *wanted = with_offer(wanted, Some(uri));
-            }
-        }
-    };
-    let mut wanted: Vec<String> = Vec::new();
-    for node in &nodes {
-        // What the text's qualifier meant stays behind with the alias.
-        let alias_left = node.ty.rsplit_once('.').is_some_and(|(qualifier, _)| {
-            let says = |import: &Import| match import {
-                Import::Module { alias, .. } | Import::Path { alias, .. } => {
-                    alias.as_deref() == Some(qualifier)
-                }
-            };
-            had.iter().any(says) && !target.iter().any(says)
-        });
-        if alias_left {
-            return Err(unknown_type(doc, &node.ty));
-        }
-        let Some(names) = Names::of(store, doc, source, &wanted) else {
-            continue;
-        };
-        // Only an import of where it was can keep it that, whatever the target
-        // would do with the name: another type, or none yet.
-        if let Some(was) = was_at.finds(&node.ty) {
-            let would = names.finds(&node.ty);
-            if would.is_some_and(|would| was.same(&would)) {
-                continue;
-            }
-            let offer = match &was {
-                Finds::File(file) => folder_from("", dir_of(file), here),
-                Finds::Modules(modules) => modules.first().cloned(),
-            };
-            let with = with_offer(&wanted, offer.as_deref());
-            let kept = Names::of(store, doc, source, &with)
-                .and_then(|names| names.finds(&node.ty))
-                .is_some_and(|now| now.same(&was));
-            match offer {
-                Some(offer) if kept => {
-                    needed(&offer)?;
-                    wanted = with;
-                }
-                _ if unread => bring_all(&mut wanted),
-                _ => return Err(changes(&node.ty)),
-            }
-            continue;
-        }
-        // Something the source imports that nothing here can read has it, so
-        // a name the target has as well may be another type.
-        if unread && !node.ty.contains('.') && names.finds(&node.ty).is_some() {
-            bring_all(&mut wanted);
-            continue;
-        }
-        if is(&node.ty, &wanted) == Some(TypeIs::Known) {
-            continue;
-        }
-        // The folder of the file it came from is imported without a word. A
-        // qualified type is in the file its first part names.
-        let file = node.ty.split('.').next().unwrap_or(&node.ty);
-        let beside = store
-            .exists(&in_dir(there, &format!("{file}.qml")))
-            .then(|| folder_from(there, ".", here))
-            .flatten();
-        if let Some(folder) = beside {
-            needed(&folder)?;
-            wanted = with_offer(&wanted, Some(&folder));
-            continue;
-        }
-        let with = |uri: &String| [wanted.as_slice(), std::slice::from_ref(uri)].concat();
-        let making: Vec<&String> = offered
-            .iter()
-            .filter(|uri| is(&node.ty, &with(uri)) == Some(TypeIs::Known))
-            .collect();
-        if let Some(uri) = making.first() {
-            let free = making.iter().find(|uri| shadows(uri).is_none());
-            let uri = free.unwrap_or(uri);
-            needed(uri)?;
-            wanted = with_offer(&wanted, Some(uri));
-        } else if is(&node.ty, &offered) == Some(TypeIs::Unsure) {
-            bring_all(&mut wanted);
-        }
-    }
-    // A folder that came for one part may have taken another part's name.
-    if !unread && let Some(names) = Names::of(store, doc, source, &wanted) {
-        for node in &nodes {
-            if let Some(was) = was_at.finds(&node.ty)
-                && !names.finds(&node.ty).is_some_and(|now| now.same(&was))
-            {
-                return Err(changes(&node.ty));
+    check_all(store, doc, source, texts, &imports)?;
+    let mut unvouched = Vec::new();
+    if let Some(after) = Names::of(store, doc, source, &imports) {
+        for name in &names {
+            let (was, now) = (was_at.lands(name), after.lands(name));
+            if compare(&was, &now) != Keeps::Same {
+                unvouched.push(Unvouched {
+                    ty: name.clone(),
+                    was: was.say(),
+                    now: now.say(),
+                });
             }
         }
     }
-    for text in texts {
-        check_text(store, doc, source, text, &wanted)?;
-    }
-    Ok(wanted)
+    Ok(Pasted { imports, unvouched })
+}
+
+fn check_all(
+    store: &dyn Store,
+    doc: &str,
+    source: &str,
+    texts: &[&str],
+    imports: &[String],
+) -> Result<(), SurfaceError> {
+    texts
+        .iter()
+        .try_for_each(|text| check_text(store, doc, source, text, imports))
 }
 
 fn dir_of(file: &str) -> &str {

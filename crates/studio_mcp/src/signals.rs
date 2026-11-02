@@ -219,26 +219,12 @@ pub(crate) enum TypeIs {
     Unsure,
 }
 
+mod lookup;
+pub(crate) use lookup::{Keeps, Lands, Unvouched, compare};
+
 /// Whether a folder import is one in the project, whose files can be read.
 fn readable_folder(dir: &str, path: &str) -> bool {
     !path.starts_with('/') && !path.contains(':') && crate::blocks::join(dir, path).is_some()
-}
-
-/// Where a name is found: one file, or a type the same modules have.
-pub(crate) enum Finds {
-    File(String),
-    Modules(Vec<String>),
-}
-
-impl Finds {
-    /// The same type: a module the other has too has it as that one does.
-    pub(crate) fn same(&self, other: &Finds) -> bool {
-        match (self, other) {
-            (Finds::File(a), Finds::File(b)) => a == b,
-            (Finds::Modules(a), Finds::Modules(b)) => a.iter().any(|m| b.contains(m)),
-            _ => false,
-        }
-    }
 }
 
 /// What a document can name, read once for all a write asks of it.
@@ -342,95 +328,9 @@ impl<'s> Names<'s> {
         }
     }
 
-    /// Whether `import` has a type `ty`, so far as Studio can read.
-    pub(crate) fn import_has(&self, import: &str, ty: &str) -> bool {
-        let found = &mut Found::default();
-        if import.contains('/') {
-            let dir = crate::blocks::join(&self.scope.dir, import);
-            return dir.is_some_and(|dir| self.types.in_dir(&dir, ty, found, 0) != Described::Not);
-        }
-        measured_types()
-            .get(ty)
-            .is_some_and(|modules| modules.contains(import))
-            || self.types.in_module(import, ty, found, 0) != Described::Not
-    }
-
-    /// Where qml6 would find `ty` here: the folder imported last, before any
-    /// module, before the file beside the document. `None` when nothing has it, or it is qualified. What can't be read counts
-    /// as not having it: `bare_unread` says when that may be wrong.
-    pub(crate) fn finds(&self, ty: &str) -> Option<Finds> {
-        if ty.contains('.') {
-            return None;
-        }
-        let file = format!("{ty}.qml");
-        for import in self.scope.imports.iter().rev() {
-            if let Import::Path { path, alias: None } = import
-                && !path.ends_with(".js")
-                && readable_folder(&self.scope.dir, path)
-                && let Some(found) = crate::blocks::join(&self.scope.dir, path)
-                    .and_then(|dir| crate::blocks::join(&dir, &file))
-                && self.types.store.exists(&found)
-            {
-                return Some(Finds::File(found));
-            }
-        }
-        let modules: Vec<String> = self
-            .scope
-            .imports
-            .iter()
-            .filter_map(|import| match import {
-                Import::Module { uri, alias: None } if self.import_has(uri, ty) => {
-                    Some(uri.clone())
-                }
-                _ => None,
-            })
-            .collect();
-        if !modules.is_empty() {
-            return Some(Finds::Modules(modules));
-        }
-        crate::blocks::join(&self.scope.dir, &file)
-            .filter(|found| self.types.store.exists(found))
-            .map(Finds::File)
-    }
-
-    /// Whether `ty` here is the file beside the document, no import having it.
-    pub(crate) fn only_beside(&self, ty: &str) -> bool {
-        let imported = self.scope.imports.iter().any(|import| match import {
-            Import::Module { uri, alias: None } => self.import_has(uri, ty),
-            Import::Path { path, alias: None } => self.import_has(&format!("./{path}"), ty),
-            _ => false,
-        });
-        !imported
-            && self
-                .types
-                .in_dir(&self.scope.dir, ty, &mut Found::default(), 0)
-                != Described::Not
-    }
-
-    /// A type the document has that `offer`, once imported, would be found
-    /// first for. A folder beats any module, and a module the file beside.
-    pub(crate) fn shadowed_by(&self, offer: &str) -> Option<String> {
-        let nodes = studio_core::outline::outline(&self.source)?;
-        nodes.into_iter().map(|node| node.ty).find(|ty| {
-            !ty.contains('.')
-                && self.import_has(offer, ty)
-                && (offer.contains('/') || self.only_beside(ty))
-        })
-    }
-
     /// Whether the document imports a module whose types nothing here knows.
     fn undescribed(&self) -> bool {
         self.scope.imports.iter().any(|import| self.unread(import))
-    }
-
-    /// Whether such an import could have a bare name: one under an alias can't.
-    pub(crate) fn bare_unread(&self) -> bool {
-        self.scope.imports.iter().any(|import| {
-            let aliased = match import {
-                Import::Module { alias, .. } | Import::Path { alias, .. } => alias.is_some(),
-            };
-            !aliased && self.unread(import)
-        })
     }
 
     fn unread(&self, import: &Import) -> bool {

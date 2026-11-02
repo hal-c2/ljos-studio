@@ -738,17 +738,37 @@ own because the list stays at 25 tools.
 `relayout`, `rename` and `component_extract`, `state_edit`'s `change` and the
 delegate of `contribute` refuse, with `not_actionable`, what `qml6` would not
 load: `details.kind` is `no_such_member`, `unknown_type`, `not_an_id`,
-`name_taken` or `import_changes_type`. Only what qml6 was seen to refuse is refused, since blocking a
+`name_taken`. Only what qml6 was seen to refuse is refused, since blocking a
 valid write is worse than missing a bad one, whose load error the preview still
 says. A misspelt type goes through, as does anything in a module Studio has not
 measured, and what a file says already is not held against a write beside it.
-Not being sure is not read as free either: `paste` brings every import of its
-source that might name what Studio can't vouch for, and `component_extract` to
-such a name answers `name_unsure: true`, since an import having it would win.
-A `paste` answers `imported` with what it added. An import that would turn an
-object the file has from the file beside it into something else stays out, and
-if the paste needs it the refusal's kind is `import_changes_type`. A type whose place in the source can be said stays there: the paste imports that place, in the source's
-order, or is refused the same way. Where either file imports, without an alias, what Studio can't read, it brings the source's imports and
-is never refused for this.
+`component_extract` to a name Studio can't vouch for answers `name_unsure: true`,
+since an import having it would win.
+
+A `paste` asks one resolver where each name landed in its source and where it
+lands in the target: the same, different, or can't tell. It adds the least of the
+source's imports that keeps each name, answers `imported` with them, and leaves
+out any that would move what the file has. Whatever it still can't show as the
+same it writes anyway and lists in `unvouched`, each with `type`, `was` and `now`.
+Only what qml6 would refuse is refused, which includes an object whose only import
+had to stay out (`unknown_type`). What can't be read comes along with
+`was: "can't tell"`.
+
+The resolver covers modules, folders, aliases, the file beside and `File.Inner`.
+Known limits, each of which lands in `unvouched` or goes unnoticed as noted:
+
+- Two modules both having a name are taken as the same type if they share one, and
+  their order isn't measured. A module that can be read and has the name is the
+  answer even beside one that can't be read, which might have it too, since
+  otherwise every `Rectangle` in an app with its own module would be flagged.
+  Goes unnoticed.
+- A folder's `qmldir` naming a type other than its file isn't read: the name
+  counts as not in that folder. Lands in `unvouched`, or goes unnoticed if a
+  module also has it.
+- A project file with a name the measured table never tried is taken not to
+  be in the measured modules. Goes unnoticed.
+- Import versions and singletons aren't considered, and an alias isn't carried:
+  a qualified name needs the alias in the target, or qml6's refusal applies.
+
 `crates/studio_mcp/src/measured_*.txt` is what qml6 6.11 said: `mise run
-measure-members` writes them.
+measure-members` and `mise run measure-lookup` write them.
