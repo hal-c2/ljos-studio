@@ -751,7 +751,14 @@ source's imports that keeps each name, answers `imported` with them, and leaves
 out any that would certainly move what the file has. Whatever it still can't show
 as the same it writes anyway and lists in `unvouched`, each with `type`, `was` and
 `now`. That includes objects the file already had, with `held: true`, when an import
-went in that may have moved them because the file imports what can't be read.
+went in that may have moved them because the file imports what can't be read. An
+inline component takes its name across the whole file, so a name one takes is listed
+too, with `now: "an inline component in this file"`: objects the file had when the
+paste declares it (`held: true`), pasted objects when the file declares it. Such a
+paste is written even if an object taken this way sets a member the component lacks,
+which qml6 then won't load (known limit; the preview shows the load error). An inline
+component the file already declares is refused, `duplicate_component`, on every
+insert, `paste` and `duplicate`, since qml6 won't load a file with two of one name.
 Only what qml6 would refuse is refused, which includes an object whose only import
 had to stay out (`unknown_type`). What can't be read comes along with
 `was: "can't tell"`.

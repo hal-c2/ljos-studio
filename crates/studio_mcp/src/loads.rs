@@ -81,6 +81,14 @@ pub(crate) fn check_text(
     ) else {
         return Ok(());
     };
+    // A file has one of each, however deep they are written.
+    let here = outline::outline(source).unwrap_or_default();
+    if let Some(twice) = outline::components(&nodes)
+        .into_iter()
+        .find(|name| outline::declares_component(&here, name))
+    {
+        return Err(duplicate_component(doc, twice));
+    }
     for node in &nodes {
         if names.type_is(&node.ty, text) == TypeIs::Missing {
             return Err(unknown_type(doc, &node.ty));
@@ -113,7 +121,9 @@ pub(crate) struct Pasted {
 /// landing where it did needs, leaving out any that certainly moves what `doc`
 /// has. Whatever `lands` can't then show as the same, pasted or already there, is
 /// said in the answer, not refused: the
-/// resolver is sure of less than qml6, and only qml6's refusals refuse.
+/// resolver is sure of less than qml6, and only qml6's refusals refuse. An inline
+/// component wins over every import in the whole file, so a name one takes,
+/// declared by the paste or by `doc`, is said too.
 pub(crate) fn imports_for(
     store: &dyn Store,
     doc: &str,
@@ -123,6 +133,13 @@ pub(crate) fn imports_for(
     had: &[Import],
 ) -> Result<Pasted, SurfaceError> {
     let pasted: Vec<Vec<Node>> = texts.iter().filter_map(|t| outline::outline(t)).collect();
+    let mut brought: Vec<&str> = Vec::new();
+    for name in pasted.iter().flat_map(|nodes| outline::components(nodes)) {
+        if brought.contains(&name) {
+            return Err(duplicate_component(doc, name));
+        }
+        brought.push(name);
+    }
     let mut names: Vec<String> = Vec::new();
     for node in pasted.iter().flatten() {
         let inline = pasted
@@ -199,7 +216,9 @@ pub(crate) fn imports_for(
     let mut wanted: Vec<&String> = Vec::new();
     for name in &names {
         let was = was_at.lands(name);
-        if compare(&was, &before.lands(name)) == Keeps::Same {
+        if compare(&was, &before.lands(name)) == Keeps::Same
+            || outline::declares_component(&held, name)
+        {
             continue;
         }
         match &was {
@@ -232,26 +251,39 @@ pub(crate) fn imports_for(
     if let Some(after) = Names::of(store, doc, source, &imports) {
         for name in &names {
             let (was, now) = (was_at.lands(name), after.lands(name));
-            if compare(&was, &now) != Keeps::Same {
+            let taken = outline::declares_component(&held, name);
+            if taken || compare(&was, &now) != Keeps::Same {
                 unvouched.push(Unvouched {
                     ty: name.clone(),
                     was: was.say(),
-                    now: now.say(),
+                    now: if taken {
+                        IN_THIS_FILE.to_owned()
+                    } else {
+                        now.say()
+                    },
                     held: false,
                 });
             }
         }
         // An import that only may move what the file has goes in, since what
-        // needs it may not load otherwise, and the answer says so.
-        for ty in holds.iter().filter(|_| !imports.is_empty()) {
+        // needs it may not load otherwise, and the answer says so. The same
+        // answer twice says nothing the import caused, unless it can't be read.
+        let unread_added = after.unread_imports() > before.unread_imports();
+        for ty in &holds {
             let (was, now) = (before.lands(ty), after.lands(ty));
-            if compare(&was, &now) != Keeps::Same
-                && !(was == Lands::Nowhere && now == Lands::Nowhere)
-            {
+            let taken = brought.contains(&ty.as_str());
+            let moved = !imports.is_empty()
+                && compare(&was, &now) != Keeps::Same
+                && (was != now || (was == Lands::CantTell && unread_added));
+            if taken || moved {
                 unvouched.push(Unvouched {
                     ty: ty.clone(),
                     was: was.say(),
-                    now: now.say(),
+                    now: if taken {
+                        IN_THIS_FILE.to_owned()
+                    } else {
+                        now.say()
+                    },
                     held: true,
                 });
             }
@@ -311,6 +343,16 @@ fn imported_by(imports: &[Import], here: &str, offer: &str) -> bool {
         }
         _ => false,
     })
+}
+
+/// Where a name an inline component takes lands, in an answer.
+const IN_THIS_FILE: &str = "an inline component in this file";
+
+pub(crate) fn duplicate_component(doc: &str, name: &str) -> SurfaceError {
+    refused(
+        "duplicate_component",
+        format!("`{doc}` already declares a `component {name}`: qml6 won't load it twice"),
+    )
 }
 
 fn unknown_type(doc: &str, ty: &str) -> SurfaceError {

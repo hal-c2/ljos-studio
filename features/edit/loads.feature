@@ -1591,3 +1591,217 @@ Feature: A tool does not write what would not load or would not show
       | beside                                |
       | component SliderHandle: Rectangle {}  |
       | // component Slider is for later      |
+
+  Scenario Outline: An inline component the file already declares is refused, since qml6 won't load the file
+    Given the file "Dup.qml":
+      """qml
+      import QtQuick
+
+      Item {
+          id: dup
+          Item {
+              id: first
+              component Twice: Rectangle {}
+          }
+      }
+      """
+    When the agent calls the tool "<tool>" with:
+      """json
+      <args>
+      """
+    Then the agent is refused with "not_actionable"
+    And the refusal's "/details/kind" is "duplicate_component"
+    And the file "Dup.qml" does not contain "id: second"
+
+    Examples:
+      | tool         | args                                                                                                    |
+      | node_insert  | {"doc": "Dup.qml", "parent": {"id": "dup"}, "text": "Item { id: second; component Twice: Item {} }"}    |
+      | node_arrange | {"action": "duplicate", "doc": "Dup.qml", "nodes": [{"id": "first"}]}                                   |
+
+  Scenario: A paste of an inline component the target declares is refused
+    Given the file "Has.qml":
+      """qml
+      import QtQuick
+
+      Item {
+          id: has
+          Item {
+              id: second
+              component Twice: Item {}
+          }
+      }
+      """
+    And the file "Dup.qml":
+      """qml
+      import QtQuick
+
+      Item {
+          id: dup
+          component Twice: Rectangle {}
+      }
+      """
+    And the agent has called the tool "node_arrange" with:
+      """json
+      {"action": "copy", "doc": "Has.qml", "nodes": [{"id": "second"}]}
+      """
+    When the agent calls the tool "node_arrange" with:
+      """json
+      {"action": "paste", "doc": "Dup.qml", "parent": {"id": "dup"}}
+      """
+    Then the agent is refused with "not_actionable"
+    And the refusal's "/details/kind" is "duplicate_component"
+    And the file "Dup.qml" does not contain "id: second"
+
+  Scenario: A pasted inline component taking a name the target uses is said, and the file is written
+    Given the file "Has.qml":
+      """qml
+      import QtQuick
+
+      Item {
+          id: has
+          Item {
+              id: box
+              component Button: Rectangle {}
+              Button { id: h }
+          }
+      }
+      """
+    And the file "Own.qml":
+      """qml
+      import QtQuick
+      import QtQuick.Controls
+
+      Item {
+          id: own
+          Button { id: mine; width: 3 }
+      }
+      """
+    And the agent has called the tool "node_arrange" with:
+      """json
+      {"action": "copy", "doc": "Has.qml", "nodes": [{"id": "box"}]}
+      """
+    When the agent calls the tool "node_arrange" with:
+      """json
+      {"action": "paste", "doc": "Own.qml", "parent": {"id": "own"}}
+      """
+    Then the file "Own.qml" contains "component Button: Rectangle {}"
+    And the answer's "/unvouched/0/type" is "Button"
+    And the answer's "/unvouched/0/held" is true
+    And the answer's "/unvouched/0/was" is "QtQuick.Controls"
+    And the answer's "/unvouched/0/now" is "an inline component in this file"
+
+  Scenario: A pasted name the target's own inline component takes is said, and brings no import
+    Given the file "lib/Thing.qml":
+      """qml
+      import QtQuick
+
+      Item {}
+      """
+    And the file "Has.qml":
+      """qml
+      import QtQuick
+      import "./lib"
+
+      Item {
+          id: has
+          Thing { id: t }
+      }
+      """
+    And the file "Own.qml":
+      """qml
+      import QtQuick
+
+      Item {
+          id: own
+          component Thing: Rectangle {}
+      }
+      """
+    And the agent has called the tool "node_arrange" with:
+      """json
+      {"action": "copy", "doc": "Has.qml", "nodes": [{"id": "t"}]}
+      """
+    When the agent calls the tool "node_arrange" with:
+      """json
+      {"action": "paste", "doc": "Own.qml", "parent": {"id": "own"}}
+      """
+    Then the file "Own.qml" does not contain "./lib"
+    And the answer's "/unvouched/0/type" is "Thing"
+    And the answer's "/unvouched/0/was" is "the folder lib"
+    And the answer's "/unvouched/0/now" is "an inline component in this file"
+
+  Scenario: An import that can't have touched what the target has doesn't list it
+    Given the file "Thing.qml":
+      """qml
+      import QtQuick
+
+      Item {}
+      """
+    And the file "Nat.qml":
+      """qml
+      import QtQuick
+      import App.Native
+
+      Item {
+          id: nat
+          Thing { id: mine }
+      }
+      """
+    And the file "Has.qml":
+      """qml
+      import QtQuick
+      import QtQuick.Layouts
+
+      Item {
+          id: has
+          RowLayout { id: r }
+      }
+      """
+    And the agent has called the tool "node_arrange" with:
+      """json
+      {"action": "copy", "doc": "Has.qml", "nodes": [{"id": "r"}]}
+      """
+    When the agent calls the tool "node_arrange" with:
+      """json
+      {"action": "paste", "doc": "Nat.qml", "parent": {"id": "nat"}}
+      """
+    Then the file "Nat.qml" contains "import QtQuick.Layouts"
+    And the answer's "/unvouched" is absent
+
+  Scenario: An added import that can't be read keeps what the target has listed
+    Given the file "Thing.qml":
+      """qml
+      import QtQuick
+
+      Item {}
+      """
+    And the file "Nat.qml":
+      """qml
+      import QtQuick
+      import App.Native
+
+      Item {
+          id: nat
+          Thing { id: mine }
+      }
+      """
+    And the file "Has.qml":
+      """qml
+      import QtQuick
+      import App.Other
+
+      Item {
+          id: has
+          Zed { id: z }
+      }
+      """
+    And the agent has called the tool "node_arrange" with:
+      """json
+      {"action": "copy", "doc": "Has.qml", "nodes": [{"id": "z"}]}
+      """
+    When the agent calls the tool "node_arrange" with:
+      """json
+      {"action": "paste", "doc": "Nat.qml", "parent": {"id": "nat"}}
+      """
+    Then the file "Nat.qml" contains "import App.Other"
+    And the answer's "/unvouched/1/type" is "Thing"
+    And the answer's "/unvouched/1/held" is true
