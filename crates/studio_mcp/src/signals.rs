@@ -219,6 +219,11 @@ pub(crate) enum TypeIs {
     Unsure,
 }
 
+/// Whether a folder import is one in the project, whose files can be read.
+fn readable_folder(dir: &str, path: &str) -> bool {
+    !path.starts_with('/') && !path.contains(':') && crate::blocks::join(dir, path).is_some()
+}
+
 /// What a document can name, read once for all a write asks of it.
 pub(crate) struct Names<'s> {
     types: Types<'s>,
@@ -308,32 +313,41 @@ impl<'s> Names<'s> {
         }
     }
 
-    /// A type the document uses from the file beside it, which `offer`, once
-    /// imported, would be found first for.
+    /// Whether `import` has a type `ty`, so far as Studio can read.
+    pub(crate) fn import_has(&self, import: &str, ty: &str) -> bool {
+        let found = &mut Found::default();
+        if import.contains('/') {
+            let dir = crate::blocks::join(&self.scope.dir, import);
+            return dir.is_some_and(|dir| self.types.in_dir(&dir, ty, found, 0) != Described::Not);
+        }
+        measured_types()
+            .get(ty)
+            .is_some_and(|modules| modules.contains(import))
+            || self.types.in_module(import, ty, found, 0) != Described::Not
+    }
+
+    /// Whether `ty` here is the file beside the document, no import having it.
+    pub(crate) fn only_beside(&self, ty: &str) -> bool {
+        let imported = self.scope.imports.iter().any(|import| match import {
+            Import::Module { uri, alias: None } => self.import_has(uri, ty),
+            Import::Path { path, alias: None } => self.import_has(&format!("./{path}"), ty),
+            _ => false,
+        });
+        !imported
+            && self
+                .types
+                .in_dir(&self.scope.dir, ty, &mut Found::default(), 0)
+                != Described::Not
+    }
+
+    /// A type the document has that `offer`, once imported, would be found
+    /// first for. A folder beats any module, and a module the file beside.
     pub(crate) fn shadowed_by(&self, offer: &str) -> Option<String> {
-        let has = |import: &str, ty: &str| {
-            let found = &mut Found::default();
-            if import.contains('/') {
-                let dir = crate::blocks::join(&self.scope.dir, import);
-                return dir
-                    .is_some_and(|dir| self.types.in_dir(&dir, ty, found, 0) != Described::Not);
-            }
-            measured_types()
-                .get(ty)
-                .is_some_and(|modules| modules.contains(import))
-                || self.types.in_module(import, ty, found, 0) != Described::Not
-        };
         let nodes = studio_core::outline::outline(&self.source)?;
         nodes.into_iter().map(|node| node.ty).find(|ty| {
-            let local = self
-                .types
-                .in_dir(&self.scope.dir, ty, &mut Found::default(), 0);
-            let found_first = self.scope.imports.iter().any(|import| match import {
-                Import::Module { uri, alias: None } => has(uri, ty),
-                Import::Path { path, alias: None } => has(&format!("./{path}"), ty),
-                _ => false,
-            });
-            !ty.contains('.') && local != Described::Not && !found_first && has(offer, ty)
+            !ty.contains('.')
+                && self.import_has(offer, ty)
+                && (offer.contains('/') || self.only_beside(ty))
         })
     }
 
@@ -345,7 +359,7 @@ impl<'s> Names<'s> {
                     && self.types.dumps.module_types(uri).is_none()
                     && !self.types.qmldirs.contains_key(uri)
             }
-            Import::Path { .. } => false,
+            Import::Path { path, .. } => !readable_folder(&self.scope.dir, path),
         })
     }
 
