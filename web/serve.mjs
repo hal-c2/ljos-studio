@@ -88,9 +88,24 @@ export async function start({ app, port = 0, record = false }) {
     base: "/preview/",
     appType: "mpa",
     logLevel: "warn",
+    // Vite's page client connects as it loads, whatever `hmr` says, and a
+    // connect that fails is an error in the app's own events however late it
+    // comes. A preview updates by message, so nothing listens and nothing asks.
+    plugins: [
+      {
+        name: "studio-preview-no-socket",
+        transform(code, id) {
+          if (!id.split("?")[0].endsWith("/vite/dist/client/client.mjs")) return null;
+          const connect = "transport.connect(createHMRHandler(handleMessage));";
+          if (!code.includes(connect)) this.error(`Vite's client no longer has \`${connect}\``);
+          return code.replace(connect, "");
+        },
+      },
+    ],
     server: {
       middlewareMode: true,
       hmr: false,
+      ws: false,
       // Each compile is a new directory: there is nothing to watch for.
       watch: null,
       fs: { allow: [app, process.env.LJOS_WEB, process.env.LJOS_DESIGN, process.env.QT_INSTALL_QML].filter(Boolean) },

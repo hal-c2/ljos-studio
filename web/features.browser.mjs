@@ -114,6 +114,14 @@ async function reloads(w) {
 const PREVIEW_STEPS = [
   {
     kinds: ["then"],
+    pattern: /^the preview has opened no socket$/,
+    async action(w) {
+      const opened = await w.page.evaluate(() => top.socketsOpened ?? []);
+      if (opened.length > 0) throw new Error(`the page opened: ${opened.join(", ")}`);
+    },
+  },
+  {
+    kinds: ["then"],
     pattern: /^the preview shows "([^"]*)"$/,
     // DECISION: what the frame draws, as text: an element whose own text
     // is the text, as the native outline names a Text by its text. It is
@@ -305,6 +313,17 @@ export async function launch(app) {
   const served = await start({ app, record: true });
   const browser = await chromium.launch({ headless: true });
   const context = await browser.newContext({ ignoreHTTPSErrors: true });
+  // Counted in the page: Playwright's `websocket` event doesn't report a socket
+  // still waiting on its host's name, which is when this one matters.
+  await context.addInitScript(() => {
+    const Socket = WebSocket;
+    window.WebSocket = class extends Socket {
+      constructor(url, ...rest) {
+        super(url, ...rest);
+        (top.socketsOpened ??= []).push(String(url));
+      }
+    };
+  });
   await context.route(`${ORIGIN}/**`, async (route) => {
     const request = route.request();
     const url = new URL(request.url());
