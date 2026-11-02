@@ -51,6 +51,11 @@ struct Scope {
 struct Found {
     signals: Vec<Signal>,
     properties: Vec<String>,
+    /// What a project file or a type dump declares, which a person has no
+    /// other way to learn: the toolkit's own are in its documentation, and
+    /// there are too many to list on every object.
+    taken: Vec<String>,
+    not_text: Vec<String>,
 }
 
 impl Found {
@@ -115,10 +120,46 @@ struct Types<'s> {
     qmldirs: HashMap<String, Vec<(String, String)>>,
 }
 
-/// Every signal `node` of the document `doc` (whose text is `source`) has,
-/// a derived type's before its base's; `None` when its type is one Studio
-/// finds described nowhere, so that what it has is not known.
+/// What Studio can say of `node`'s type, all from the one lookup, which reads
+/// every type dump and `qmldir` of the project.
+#[derive(Default)]
+pub struct TypeSays {
+    /// Every signal it has, a derived type's before its base's; `None` when
+    /// its type is one Studio finds described nowhere, so that what it has is
+    /// not known.
+    pub signals: Option<Vec<Signal>>,
+    /// What its project says it takes: the properties its files and type dumps
+    /// declare that may be written from outside, the nearest first. Known even
+    /// when what the type inherits is not.
+    pub takes: Vec<String>,
+    /// Those of them no string can be written to.
+    pub not_text: Vec<String>,
+}
+
+/// All that of `node` of the document `doc`, whose text is `source`.
+pub fn described(store: &dyn Store, doc: &str, source: &str, node: &Node) -> TypeSays {
+    let Some((mut found, whole)) = look_up(store, doc, source, node) else {
+        return TypeSays::default();
+    };
+    let mut takes: Vec<String> = Vec::new();
+    for name in &found.taken {
+        if !takes.contains(name) {
+            takes.push(name.clone());
+        }
+    }
+    TypeSays {
+        not_text: std::mem::take(&mut found.not_text),
+        signals: (whole == Described::Whole).then(|| found.done()),
+        takes,
+    }
+}
+
+/// `described`'s signals alone.
 pub fn of(store: &dyn Store, doc: &str, source: &str, node: &Node) -> Option<Vec<Signal>> {
+    described(store, doc, source, node).signals
+}
+
+fn look_up(store: &dyn Store, doc: &str, source: &str, node: &Node) -> Option<(Found, Described)> {
     let mut dumps = DumpedTypes::default();
     for file in crate::blocks::dumps(store) {
         // A dump that does not read is `blocks_list`'s to report; its types
@@ -157,7 +198,8 @@ pub fn of(store: &dyn Store, doc: &str, source: &str, node: &Node) -> Option<Vec
     };
     let mut found = Found::default();
     found.declared(node);
-    (types.lookup(&scope, &node.ty, &mut found, 0) == Described::Whole).then(|| found.done())
+    let described = types.lookup(&scope, &node.ty, &mut found, 0);
+    Some((found, described))
 }
 
 fn dir_of(file: &str) -> &str {
@@ -249,6 +291,18 @@ impl Types<'_> {
             found
                 .properties
                 .extend(ty.properties.iter().map(|p| p.name.clone()));
+            found.not_text.extend(
+                ty.properties
+                    .iter()
+                    .filter(|p| p.list || !studio_core::outline::takes_string(&p.ty))
+                    .map(|p| p.name.clone()),
+            );
+            found.taken.extend(
+                ty.properties
+                    .iter()
+                    .filter(|p| !p.readonly)
+                    .map(|p| p.name.clone()),
+            );
             if let Some(base) = self.dumps.base_of(ty) {
                 ty = base;
                 continue;
@@ -307,6 +361,13 @@ impl Types<'_> {
             return Described::InPart;
         };
         found.declared(root);
+        found.not_text.extend(root.not_text.iter().cloned());
+        found.taken.extend(
+            root.properties
+                .iter()
+                .filter(|p| !root.read_only.contains(p))
+                .cloned(),
+        );
         let scope = Scope {
             dir: dir_of(file).to_owned(),
             imports,

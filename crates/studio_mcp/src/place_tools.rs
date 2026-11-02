@@ -63,6 +63,10 @@ struct ArrangeArgs {
     /// running app. Who only shows the selection does not snap to them.
     #[serde(default)]
     without_siblings: bool,
+    /// For `geometry`: the siblings are the first node's children instead,
+    /// which is what something drawn inside it snaps to.
+    #[serde(default)]
+    within: bool,
     /// For `place`.
     places: Option<Vec<PlaceOne>>,
     /// For `place` and `align`: write into this state, not the object.
@@ -112,6 +116,7 @@ struct GeometryArgs {
     nodes: Vec<Address>,
     generation: Option<u64>,
     siblings: bool,
+    within: bool,
 }
 
 struct GeometryOut {
@@ -285,7 +290,12 @@ fn geometry(studio: &mut Studio, a: &GeometryArgs) -> Result<GeometryOut, Surfac
         .first()
         .and_then(|(_, n)| parent_path(&n.path))
         .and_then(|p| at_path(&tree, &p));
-    let siblings: Vec<(String, Node)> = first_parent
+    let around = if a.within {
+        asked.first().cloned()
+    } else {
+        first_parent.clone()
+    };
+    let siblings: Vec<(String, Node)> = around
         .iter()
         .flat_map(|(_, parent)| {
             tree.iter().filter(move |(_, n)| {
@@ -450,6 +460,7 @@ fn align(studio: &mut Studio, a: &AlignArgs) -> Result<ManyOut, SurfaceError> {
             nodes: a.nodes.clone(),
             generation: a.generation,
             siblings: false,
+            within: false,
         },
     )?;
     let mut boxes = Vec::new();
@@ -720,6 +731,7 @@ fn arrange(studio: &mut Studio, a: ArrangeArgs) -> Result<ArrangeOut, SurfaceErr
                     nodes,
                     generation,
                     siblings: !a.without_siblings,
+                    within: a.within,
                 },
             )?;
             Ok(ArrangeOut {

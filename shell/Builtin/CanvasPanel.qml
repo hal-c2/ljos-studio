@@ -40,6 +40,13 @@ Panel {
     property bool hand: false
     // In play a press is the app's, whichever tool waits for after.
     readonly property bool panning: hand && !playing
+    // Space held is the hand for as long as it is held, then back to what
+    // was in use and where the keys were.
+    property bool handHeld: false
+    property bool handWas: false
+    property var keysWere: null
+    // What a drag on the frame draws; "" selects and moves.
+    property string drawing: ""
     readonly property real zoom: fitted ? Math.max(0.125, fit) : chosenZoom
     property bool playing: false
     onPlayingChanged: workspace.followPicture(playing)
@@ -300,6 +307,7 @@ Panel {
                         CanvasOverlay {
                             onHasBoxesChanged: panel.framesWithoutBoxes += hasBoxes ? -1 : 1
                             Component.onDestruction: if (!hasBoxes) panel.framesWithoutBoxes -= 1
+                            id: overlayHere
                             objectName: "overlay"
                             enabled: !panel.panning
                             anchors.fill: parent
@@ -307,6 +315,9 @@ Panel {
                             zoom: panel.zoom
                             playing: panel.playing
                             recording: panel.recording
+                            drawing: panel.drawing
+                            onDrawn: panel.drawing = ""
+                            toolKey: (event) => panel.toolKey(event, overlayHere)
                             onDraggingChanged: panel.dragging = dragging
                             onSaysChanged: panel.says = says
                             Component.onCompleted: refetch()
@@ -409,12 +420,13 @@ Panel {
             icon_: "select"
             text: "Select"
             checkable: true
-            checked: !panel.hand
+            checked: !panel.hand && panel.drawing === ""
             // A click toggles a checkable button and ends its binding, and
             // clicking the tool in use is not putting it down.
             onClicked: {
                 panel.hand = false
-                checked = Qt.binding(() => !panel.hand)
+                panel.drawing = ""
+                checked = Qt.binding(() => !panel.hand && panel.drawing === "")
             }
         }
         IconButton {
@@ -424,15 +436,43 @@ Panel {
             checked: panel.hand
             onClicked: {
                 panel.hand = true
+                panel.drawing = ""
                 checked = Qt.binding(() => panel.hand)
+                canvasFocus.forceActiveFocus()
             }
         }
+        Hairline {}
+        Repeater {
+            model: [
+                {label: "Draw rectangle", icon: "frame", kind: "Rectangle"},
+                {label: "Draw text", icon: "text", kind: "Text"}
+            ]
+            delegate: IconButton {
+                required property var modelData
+                icon_: modelData.icon
+                text: modelData.label
+                checkable: true
+                checked: panel.drawing === modelData.kind
+                onClicked: {
+                    panel.hand = false
+                    panel.playing = false
+                    panel.drawing = panel.drawing === modelData.kind ? "" : modelData.kind
+                    checked = Qt.binding(() => panel.drawing === modelData.kind)
+                    canvasFocus.forceActiveFocus()
+                }
+            }
+        }
+        Hairline {}
         IconButton {
             icon_: "play"
             text: "Play"
             checkable: true
             checked: panel.playing
-            onClicked: panel.playing = checked
+            onClicked: {
+                panel.playing = !panel.playing
+                panel.drawing = ""
+                checked = Qt.binding(() => panel.playing)
+            }
         }
     }
 
@@ -482,6 +522,59 @@ Panel {
         font.pixelSize: Typography.captionSize
         Accessible.role: Accessible.StaticText
         Accessible.name: text
+    }
+
+    // The tool is picked with the pointer on a button: Escape still puts it down.
+    Item {
+        id: canvasFocus
+        Keys.onEscapePressed: panel.drawing = ""
+        Keys.onPressed: (event) => {
+            event.accepted = panel.toolKey(event, panel.keysWere)
+        }
+        Keys.onReleased: (event) => {
+            if (event.key !== Qt.Key_Space || event.isAutoRepeat || !panel.handHeld)
+                return
+            panel.handHeld = false
+            panel.hand = panel.handWas
+            if (!panel.hand && panel.keysWere !== null)
+                panel.keysWere.forceActiveFocus()
+            event.accepted = true
+        }
+    }
+
+    function toolKey(event, from) {
+        if ((event.modifiers & (Qt.ControlModifier | Qt.AltModifier | Qt.MetaModifier)) !== 0)
+            return false
+        const tool = {[Qt.Key_V]: "", [Qt.Key_H]: "", [Qt.Key_R]: "Rectangle", [Qt.Key_T]: "Text"}[event.key]
+        if (event.key === Qt.Key_Space) {
+            if (handHeld || event.isAutoRepeat)
+                return true
+            handHeld = true
+            handWas = hand
+            keysWere = from
+            hand = true
+            // The overlay is disabled under the hand, and the key's release
+            // has to reach someone.
+            canvasFocus.forceActiveFocus()
+            return true
+        }
+        if (tool === undefined)
+            return false
+        hand = event.key === Qt.Key_H
+        // The tool is the person's choice now, and Space's release, which goes
+        // where the keys are, has nothing to give back.
+        handHeld = false
+        drawing = tool
+        playing = false
+        // The overlay is disabled under the hand, and the next letter has to
+        // reach someone; it takes the keys back when the hand goes.
+        if (hand) {
+            keysWere = from
+            canvasFocus.forceActiveFocus()
+        } else if (canvasFocus.activeFocus && keysWere !== null) {
+            keysWere.forceActiveFocus()
+        }
+        return true
     }
 
     // Zoom is the panel's own: it changes no file and no agent needs it, since

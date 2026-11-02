@@ -70,6 +70,9 @@ pub struct Shown {
     /// A row holding an expression; a row with nothing written holds none.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub expression: bool,
+    /// A row with nothing written whose declared type takes no string.
+    #[serde(rename = "notText", skip_serializing_if = "std::ops::Not::not")]
+    pub not_text: bool,
 }
 
 /// The selected object's place in [`View::text`], in UTF-16 units, as a
@@ -416,6 +419,7 @@ impl Studio {
                     value: b.value.clone(),
                     colour: b.colour,
                     expression: !b.literal,
+                    not_text: false,
                 })
                 .collect();
             // Declared without a value (`property var stack`): nothing is
@@ -427,6 +431,20 @@ impl Studio {
                         value: String::new(),
                         colour: node.colours.contains(name),
                         expression: false,
+                        not_text: node.not_text.contains(name),
+                    });
+                }
+            }
+            // What its type takes, which the person placing it has not read.
+            let says = crate::signals::described(self.session.store(), doc, &view.text, &node);
+            for name in says.takes {
+                if !view.inspector.iter().any(|row| row.name == name) {
+                    view.inspector.push(Shown {
+                        not_text: says.not_text.contains(&name),
+                        name,
+                        value: String::new(),
+                        colour: false,
+                        expression: false,
                     });
                 }
             }
@@ -436,8 +454,7 @@ impl Studio {
             if let Ok(Some(model)) = self.session.model(doc, &Address::Node(handle.clone())) {
                 view.roles = model.roles;
             }
-            view.signals = crate::signals::of(self.session.store(), doc, &view.text, &node)
-                .unwrap_or_default();
+            view.signals = says.signals.unwrap_or_default();
             view.selected = handle;
         }
         view

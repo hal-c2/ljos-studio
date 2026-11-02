@@ -513,6 +513,10 @@ What changed, for an agent: no tool was added (24 of the 25 budgeted).
   "list"` writes the `ListModel` copy it wrote before.
 - `node_inspect` answers `signals`, and a model's `source` for a
   `JsonListModel`, whose `roles` are the JSON's keys.
+- `node_inspect` answers `takes`, the properties the object's type declares
+  in the project's files and type dumps, written on it or not. The toolkit's
+  own are left out: there are too many to list on every object, and
+  `type_lookup` says them.
 - `state_edit`'s `interaction` with `signal` is refused (`no_signal`) when
   the trigger lacks the signal, naming those it has.
 - `preview_state`'s `click_at` clicks at the point itself (`app_click`

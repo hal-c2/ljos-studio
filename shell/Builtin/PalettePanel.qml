@@ -24,9 +24,18 @@ Panel {
     }
     readonly property var selectedLayer: layer(workspace.selected)
     // The selection, or the root: a new document has nothing selected and a
-    // first object must still go somewhere.
-    readonly property string target: workspace.selected !== "" ? workspace.selected
-        : (workspace.layers.length > 0 ? workspace.layers[0].node : "")
+    // first object must still go somewhere. A type that draws its own content
+    // shows nothing put inside it, so what is placed goes beside it.
+    readonly property string target: {
+        const picked = selectedLayer
+        if (picked === null)
+            return workspace.layers.length > 0 ? workspace.layers[0].node : ""
+        const bare = picked.type.split(".").pop()
+        return picked.parent !== "" && panel.drawsItsOwn.includes(bare) ? picked.parent : picked.node
+    }
+    readonly property var drawsItsOwn: ["Text", "TextInput", "TextEdit", "Image", "AnimatedImage",
+        "BorderImage", "Canvas", "Button", "CheckBox", "RadioButton", "Switch", "Slider",
+        "ProgressBar", "SpinBox", "TextField", "TextArea", "ComboBox", "Label", "ToolButton"]
     readonly property string needle: search.text.toLowerCase()
     // A string, which changes only when the list does: `toolkit` is a new
     // value at each publish, and rebuilding the buttons would drop a press.
@@ -35,8 +44,18 @@ Panel {
     // a type comes from goes along, for the import.
     readonly property var groups: {
         const needle = panel.needle
-        const order = ["Basics", "Layout", "Controls", "Input", "Motion", "3D", "More"]
+        const order = ["This project", "Basics", "Layout", "Controls", "Input", "Motion", "3D", "More"]
         const out = order.map(name => ({name: name, types: []}))
+        // A file beside the document is a type it can use with no import, and
+        // the one open cannot hold itself. A file in another directory needs
+        // an import of that directory, which `node_insert` does not write.
+        const beside = panel.workspace.doc.substring(0, panel.workspace.doc.lastIndexOf("/") + 1)
+        for (const doc of panel.workspace.documents) {
+            const name = doc.substring(beside.length, doc.length - 4)
+            if (doc !== panel.workspace.doc && doc.startsWith(beside) && doc.endsWith(".qml")
+                    && /^[A-Z][A-Za-z0-9_]*$/.test(name) && name.toLowerCase().includes(needle))
+                out[0].types.push({name: name, module: ""})
+        }
         for (const g of JSON.parse(toolkit)) {
             for (const t of g.types) {
                 if (t.toLowerCase().includes(needle))
@@ -242,6 +261,19 @@ Panel {
             width: ListView.view.width
             spacing: Spacing.xs
 
+            Label {
+                visible: panel.groups.length === 0 && panel.needle !== ""
+                width: parent.width
+                topPadding: Spacing.sm
+                horizontalAlignment: Text.AlignHCenter
+                wrapMode: Text.Wrap
+                color: Colors.textMuted
+                font.pixelSize: Typography.captionSize
+                text: "Nothing called \"" + search.text + "\""
+                Accessible.role: Accessible.StaticText
+                Accessible.name: text
+            }
+
             Repeater {
                 model: panel.groups
                 delegate: Column {
@@ -276,7 +308,7 @@ Panel {
                                 width: (group.width - 2 * Spacing.xxs) / 3
                                 height: 68
                                 ToolTip.visible: hovered
-                                ToolTip.text: "Place " + modelData.name + " (" + modelData.module + ")"
+                                ToolTip.text: "Place " + modelData.name + " (" + (modelData.module || "this project") + ")"
                                 ToolTip.delay: 500
                                 background: Rectangle {
                                     radius: 6
@@ -305,12 +337,16 @@ Panel {
                                         elide: Text.ElideRight
                                     }
                                 }
-                                onClicked: panel.workspace.dispatch("node_insert", {
-                                    doc: panel.workspace.doc,
-                                    parent: {node: panel.target},
-                                    text: panel.starter(modelData.name),
-                                    import: modelData.module
-                                })
+                                onClicked: {
+                                    const place = {
+                                        doc: panel.workspace.doc,
+                                        parent: {node: panel.target},
+                                        text: panel.starter(modelData.name)
+                                    }
+                                    if (modelData.module !== "")
+                                        place.import = modelData.module
+                                    panel.workspace.dispatch("node_insert", place)
+                                }
                             }
                         }
                     }

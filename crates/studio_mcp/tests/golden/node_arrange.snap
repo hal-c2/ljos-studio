@@ -189,6 +189,11 @@ expression: value
         ],
         "description": "For `place` and `align`: write into this state, not the object."
       },
+      "within": {
+        "default": false,
+        "description": "For `geometry`: the siblings are the first node's children instead,\nwhich is what something drawn inside it snaps to.",
+        "type": "boolean"
+      },
       "without_siblings": {
         "default": false,
         "description": "For `geometry`: leave the siblings out, each one being a read of the\nrunning app. Who only shows the selection does not snap to them.",

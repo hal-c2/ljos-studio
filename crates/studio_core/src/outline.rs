@@ -34,6 +34,12 @@ pub struct Node {
     /// signal, `nameChanged`.
     #[serde(skip)]
     pub properties: Vec<String>,
+    /// Those of them only the type can write: QML refuses a value from outside.
+    #[serde(skip)]
+    pub read_only: Vec<String>,
+    /// Those of them whose declared type no string can be written to.
+    #[serde(skip)]
+    pub not_text: Vec<String>,
     /// Those of them of type `color`, which says so with no value too.
     #[serde(skip)]
     pub colours: Vec<String>,
@@ -196,6 +202,25 @@ fn walk(
                 _ => None,
             })
             .collect(),
+        read_only: object
+            .members
+            .iter()
+            .filter_map(|m| match m {
+                QmlMember::Property(p) if p.is_readonly => Some(p.name.name.to_string()),
+                _ => None,
+            })
+            .collect(),
+        not_text: object
+            .members
+            .iter()
+            .filter_map(|m| match m {
+                QmlMember::Property(p) => {
+                    let ty = qml_syntax::text(source, p.type_name.as_ref()?.span);
+                    (!takes_string(ty)).then(|| p.name.name.to_string())
+                }
+                _ => None,
+            })
+            .collect(),
         colours: object
             .members
             .iter()
@@ -287,6 +312,31 @@ fn declared_signals(source: &str, object: &QmlObject<'_>) -> Vec<DeclaredSignal>
             _ => None,
         })
         .collect()
+}
+
+/// Whether a string can be written to a property declared with this type, by
+/// QML's name or a type dump's. Every value type qml6 loads a string for takes
+/// one (`"red"`, `"1,2"`, `"1x2"`, a date, a font), as an enum takes a value's
+/// name, so only those that refuse one are listed. An object type refuses one
+/// too, but its name reads like an enum's, so it is still offered.
+pub fn takes_string(ty: &str) -> bool {
+    let refuses = matches!(
+        ty,
+        "int"
+            | "uint"
+            | "qint32"
+            | "quint32"
+            | "qlonglong"
+            | "qulonglong"
+            | "real"
+            | "qreal"
+            | "double"
+            | "float"
+            | "bool"
+            | "matrix4x4"
+            | "QMatrix4x4"
+    );
+    !(refuses || ty.starts_with("list<") || ty.starts_with("QQmlListProperty") || ty.ends_with('*'))
 }
 
 /// Whether an object has an `id` or a literal `objectName`, so that its key

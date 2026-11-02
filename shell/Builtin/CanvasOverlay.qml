@@ -15,6 +15,11 @@ MouseArea {
     required property real zoom
     required property bool playing
     required property var recording
+    // What a drag draws: a type, or "" to select and move.
+    required property string drawing
+    signal drawn()
+    // Which tool is in use is the panel's. Says whether the key was one.
+    required property var toolKey
     // Why the last drop wrote nothing; said until the next press.
     property string told: ""
 
@@ -24,7 +29,8 @@ MouseArea {
     property var siblings: []
 
     // "": at rest. "selecting": pressed, the selection under the pointer is
-    // on its way. "pressed": could still be a click. "moving", "resizing".
+    // on its way. "pressed": could still be a click. "moving", "resizing",
+    // "drawing".
     property string mode: ""
     property int handle: -1
     property point pressedAt: Qt.point(0, 0)
@@ -51,7 +57,7 @@ MouseArea {
     readonly property bool hasBoxes: nodes.length === 0 || nodes.some(n => n.window !== undefined)
     readonly property var selectedOne: nodes.length === 1 && nodes[0].window !== undefined ? nodes[0] : null
     readonly property bool resizable: selectedOne !== null && selectedOne.drag.resize !== "none"
-    readonly property int handlesShown: resizable && !playing && ghost === null ? 8 : 0
+    readonly property int handlesShown: resizable && !playing && ghost === null && drawing === "" && editing === null ? 8 : 0
     onRecordingChanged: told = ""
 
     // What a drag does, said before and during it.
@@ -98,7 +104,8 @@ MouseArea {
             // Only a press can start the drag that snaps to them, and each
             // sibling is a read of the running app: a selection made anywhere
             // but on the canvas does not wait for them.
-            without_siblings: mode === ""
+            without_siblings: mode === "",
+            within: mode === "drawing"
         })
     }
 
@@ -152,6 +159,13 @@ MouseArea {
             add(parentBox)
         for (const s of siblings)
             add(s.window)
+        // While drawing, the object under the start is a target too.
+        if (mode === "drawing") {
+            for (const n of nodes) {
+                if (n.window !== undefined)
+                    add(n.window)
+            }
+        }
         snapXs = xs
         snapYs = ys
     }
@@ -228,6 +242,29 @@ MouseArea {
             y: Math.min(top, bottom - 1),
             width: Math.max(1, right - left),
             height: Math.max(1, bottom - top)
+        }
+    }
+
+    function dragDraw(atX, atY, free) {
+        startSnaps()
+        const sx = free ? {by: 0, at: -1} : snap([atX], snapXs)
+        const sy = free ? {by: 0, at: -1} : snap([atY], snapYs)
+        // Where it starts snaps to the frame only, which shows without a guide:
+        // a box drawn from a corner would miss it by what a screen pixel is
+        // worth when zoomed out.
+        const startX = pressedAt.x / zoom
+        const startY = pressedAt.y / zoom
+        const fromX = startX + (free ? 0 : snap([startX], [0, width / zoom]).by)
+        const fromY = startY + (free ? 0 : snap([startY], [0, height / zoom]).by)
+        const toX = atX + sx.by
+        const toY = atY + sy.by
+        guideX = sx.at
+        guideY = sy.at
+        ghost = {
+            x: Math.min(fromX, toX),
+            y: Math.min(fromY, toY),
+            width: Math.max(1, Math.abs(toX - fromX)),
+            height: Math.max(1, Math.abs(toY - fromY))
         }
     }
 
@@ -391,6 +428,126 @@ MouseArea {
         overlay.place(places)
     }
 
+    // A drawing goes in the object under where it starts when that can hold
+    // it and holds all of it; otherwise in the root. A layout places what is
+    // put in it, so nothing is written about where.
+    function drawInto(box) {
+        const layers = workspace.layers
+        const root = layers.length > 0 ? layers[0] : null
+        const under = nodes.length === 1 ? nodes[0] : null
+        const row = under === null ? undefined : layers.find(l => l.node === under.node)
+        if (row !== undefined && under.window !== undefined
+                && /^(Item|Rectangle|Pane|Frame|Page|GroupBox)$/.test(row.type)
+                && box.x >= under.window.x && box.y >= under.window.y
+                && box.x + box.width <= under.window.x + under.window.width
+                && box.y + box.height <= under.window.y + under.window.height) {
+            return {node: row.node, x: under.window.x, y: under.window.y, placed: true}
+        }
+        if (row !== undefined && /^(Row|Column|Grid|Flow|RowLayout|ColumnLayout|GridLayout)$/.test(row.type))
+            return {node: row.node, x: 0, y: 0, placed: false}
+        return root === null ? null : {node: root.node, x: 0, y: 0, placed: true}
+    }
+
+    function dropDrawing() {
+        // A click is a request for one of a usable size, starting there.
+        const clicked = ghost === null
+        const box = clicked ? {
+            x: pressedAt.x / zoom,
+            y: pressedAt.y / zoom,
+            width: drawing === "Text" ? 160 : 100,
+            height: drawing === "Text" ? 24 : 100
+        } : ghost
+        const into = drawInto(box)
+        const kind = drawing
+        drawn()
+        if (into === null)
+            return
+        const parts = []
+        if (into.placed)
+            parts.push("x: " + Math.round(box.x - into.x), "y: " + Math.round(box.y - into.y))
+        parts.push("width: " + Math.round(box.width))
+        if (kind === "Rectangle") {
+            parts.push("height: " + Math.round(box.height), 'color: "#c8ccd4"')
+        } else {
+            parts.push('text: "Text"', "font.pixelSize: 16", "wrapMode: Text.Wrap")
+            writing_ = {box: box, size: 16, written: "Text"}
+        }
+        workspace.dispatch("node_insert", {
+            doc: workspace.doc,
+            parent: {node: into.node},
+            text: kind + " {\n    " + parts.join("\n    ") + "\n}"
+        })
+    }
+
+    // Text being written on the canvas: the object's `node`, its `box` and what
+    // it said. Held in the overlay so the picture below does not have to follow.
+    property var editing: null
+    // A drawn text waits for `node_insert` to name it.
+    property var writing_: null
+
+    function editSelected() {
+        const n = selectedOne
+        if (n === null || recording !== null)
+            return
+        const row = workspace.inspector.find(r => r.name === "text")
+        if (row === undefined)
+            return
+        const written = workspace.literal(row.value) && /^["'`]/.test(row.value) ? decoded(row.value) : null
+        if (written === null) {
+            told = "This text is an expression: change it in the inspector"
+            return
+        }
+        const size = workspace.inspector.find(r => r.name === "font.pixelSize")
+        editing = {
+            doc: workspace.doc,
+            node: n.node,
+            box: n.window,
+            size: size !== undefined && !isNaN(Number(size.value)) ? Number(size.value) : 14,
+            written: written
+        }
+    }
+
+    // What a QML string says, in any of its quotes. A template with a
+    // placeholder says nothing until it runs: null, as for what cannot be read.
+    function decoded(literal) {
+        const body = literal.slice(1, -1)
+        if (literal[0] === "`" && body.includes("${"))
+            return null
+        const named = {n: "\n", t: "\t", r: "\r", b: "\b", f: "\f", v: "\v", "0": "\0"}
+        let readable = true
+        const text = body.replace(/\\(u\{[0-9a-fA-F]+\}|u[0-9a-fA-F]{4}|x[0-9a-fA-F]{2}|\r?\n|[^])/g, (_, what) => {
+            if (what[0] === "\n" || what[0] === "\r")
+                return ""
+            if (named[what] !== undefined)
+                return named[what]
+            if (what.length > 1)
+                return String.fromCodePoint(parseInt(what.replace(/[ux{}]/g, ""), 16))
+            if (what === "x" || what === "u")
+                readable = false
+            return what
+        })
+        return readable ? text : null
+    }
+
+    function finishEditing(keep) {
+        const was = editing
+        if (was === null)
+            return
+        const text = canvasText.text
+        const hadKeys = canvasText.activeFocus
+        editing = null
+        if (hadKeys)
+            forceActiveFocus()
+        if (keep && text !== was.written) {
+            workspace.dispatch("binding_set", {
+                doc: was.doc,
+                node: {node: was.node},
+                name: "text",
+                value: JSON.stringify(text)
+            })
+        }
+    }
+
     function selectedHandles() {
         return workspace.chosen.map(h => ({node: h}))
     }
@@ -408,8 +565,16 @@ MouseArea {
         endDrop(true)
         if (playing)
             return
+        finishEditing(true)
         told = ""
         pressedAt = Qt.point(mouse.x, mouse.y)
+        if (drawing !== "") {
+            ghost = null
+            mode = "drawing"
+            handle = -1
+            selectAt(mouse.x, mouse.y, false)
+            return
+        }
         const shift = (mouse.modifiers & Qt.ShiftModifier) !== 0
         handle = shift ? -1 : handleAt(mouse.x, mouse.y)
         if (handle >= 0) {
@@ -437,6 +602,11 @@ MouseArea {
         if (mode === "selecting")
             return
         const free = (mouse.modifiers & Qt.ControlModifier) !== 0
+        if (mode === "drawing") {
+            if (ghost !== null || Math.hypot(mouse.x - pressedAt.x, mouse.y - pressedAt.y) >= dragStart)
+                dragDraw(mouse.x / zoom, mouse.y / zoom, free)
+            return
+        }
         if (mode === "pressed") {
             const away = Math.hypot(mouse.x - pressedAt.x, mouse.y - pressedAt.y)
             if (away < dragStart)
@@ -467,6 +637,11 @@ MouseArea {
             return
         }
         let wrote = false
+        if (mode === "drawing") {
+            dropDrawing()
+            endDrag(false)
+            return
+        }
         if (mode === "moving")
             wrote = dropMove()
         else if (mode === "resizing")
@@ -479,11 +654,23 @@ MouseArea {
 
     onCanceled: endDrag(false)
 
+    // Text is written on the object it belongs to, as a person expects of text.
+    onDoubleClicked: if (!playing && drawing === "") editSelected()
+
     Keys.onPressed: (event) => {
         // While playing, keys are the running prototype's, and no outline
         // shows what an edit would hit.
         if (playing) {
             event.accepted = false
+            return
+        }
+        if (event.key === Qt.Key_Escape && drawing !== "") {
+            drawn()
+            event.accepted = true
+            return
+        }
+        if (toolKey(event)) {
+            event.accepted = true
             return
         }
         const ctrl = (event.modifiers & Qt.ControlModifier) !== 0
@@ -517,12 +704,16 @@ MouseArea {
         // reads again, or an idle window could feed itself and never rest.
         function onChosenChanged() {
             const key = JSON.stringify(overlay.workspace.chosen)
+            // What is typed is the person's: it goes in, on what it was for.
+            if (overlay.editing !== null && overlay.workspace.selected !== overlay.editing.node)
+                overlay.finishEditing(true)
             if (key !== overlay.seenChosen) {
                 overlay.seenChosen = key
                 overlay.told = ""
                 overlay.writing = false
-                // Choosing is how a press on another object starts its drag.
-                if (overlay.mode !== "selecting")
+                // Choosing is how a press on another object starts its drag,
+                // and a drawing chooses the container it starts in.
+                if (overlay.mode !== "selecting" && overlay.mode !== "drawing")
                     overlay.letGo()
                 overlay.refetch()
             }
@@ -539,8 +730,10 @@ MouseArea {
             }
         }
         function onAnswered(tool, answer) {
-            if (tool === "node_select" && overlay.mode === "selecting") {
+            if (tool === "node_select" && (overlay.mode === "selecting" || overlay.mode === "drawing")) {
                 overlay.refetch()
+            } else if (tool === "node_insert" && overlay.pendingDrawing(answer)) {
+                return
             } else if (tool === "node_move") {
                 overlay.endDrop(true)
                 overlay.refetch()
@@ -568,7 +761,7 @@ MouseArea {
                     overlay.siblings = answer.siblings !== undefined ? answer.siblings : []
                     overlay.ghost = overlay.dragging || overlay.dropping ? overlay.ghost : null
                     // The hand may be ahead of the siblings it snaps to.
-                    if (overlay.mode === "moving" || overlay.mode === "resizing")
+                    if (overlay.mode === "moving" || overlay.mode === "resizing" || overlay.mode === "drawing")
                         overlay.startSnaps()
                     if (overlay.mode === "selecting") {
                         overlay.startBox = overlay.around()
@@ -585,8 +778,13 @@ MouseArea {
                 }
             }
         }
+        function onDocChanged() {
+            overlay.finishEditing(true)
+        }
         function onRefused(tool, error) {
-            if (tool === "node_move") {
+            if (tool === "node_insert") {
+                overlay.writing_ = null
+            } else if (tool === "node_move") {
                 overlay.endDrop(false)
                 overlay.refetch()
             } else if (tool === "node_arrange") {
@@ -624,6 +822,17 @@ MouseArea {
             overlay.refetch()
         }
     }
+    // What was drawn is what is selected next, whoever draws in this window.
+    function pendingDrawing(answer) {
+        if (answer.node === undefined)
+            return false
+        const text = writing_
+        writing_ = null
+        workspace.dispatch("node_select", {doc: workspace.doc, nodes: [{node: answer.node}]})
+        if (text !== null)
+            editing = {doc: workspace.doc, node: answer.node, box: text.box, size: text.size, written: text.written}
+        return true
+    }
     // Geometry reads asked and not answered; they answer in order.
     property int reads: 0
     property bool dropWaits: false
@@ -632,7 +841,7 @@ MouseArea {
 
     // One outline per object; no drawing while nothing is selected.
     Repeater {
-        model: overlay.playing ? [] : overlay.nodes
+        model: overlay.playing || overlay.mode === "drawing" ? [] : overlay.nodes
         delegate: Rectangle {
             required property var modelData
             objectName: "selectionOutline"
@@ -677,7 +886,7 @@ MouseArea {
 
         Label {
             objectName: "dragSize"
-            visible: overlay.mode === "resizing"
+            visible: overlay.mode === "resizing" || overlay.mode === "drawing"
             y: parent.height + Spacing.xxs
             text: overlay.ghost !== null ? Math.round(overlay.ghost.width) + " × " + Math.round(overlay.ghost.height) : ""
             color: Colors.accent
@@ -700,5 +909,45 @@ MouseArea {
         width: overlay.width
         height: 1
         color: Colors.danger
+    }
+
+    TextArea {
+        id: canvasText
+        objectName: "canvasText"
+        visible: overlay.editing !== null
+        enabled: visible
+        x: visible ? overlay.editing.box.x * overlay.zoom : 0
+        y: visible ? overlay.editing.box.y * overlay.zoom : 0
+        width: visible ? Math.max(80, overlay.editing.box.width * overlay.zoom) : 0
+        padding: 0
+        font.pixelSize: visible ? overlay.editing.size * overlay.zoom : 14
+        wrapMode: TextEdit.Wrap
+        color: Colors.text
+        background: Rectangle {
+            color: Colors.surface
+            border.color: Colors.accent
+        }
+        Accessible.name: "Text of the selected object"
+        onActiveFocusChanged: {
+            if (!activeFocus && visible)
+                overlay.finishEditing(true)
+        }
+        onVisibleChanged: {
+            if (visible) {
+                text = overlay.editing.written
+                selectAll()
+                forceActiveFocus()
+            }
+        }
+        Keys.onPressed: (event) => {
+            if (event.key === Qt.Key_Escape) {
+                overlay.finishEditing(false)
+                event.accepted = true
+            } else if ((event.key === Qt.Key_Return || event.key === Qt.Key_Enter)
+                       && (event.modifiers & Qt.ShiftModifier) === 0) {
+                overlay.finishEditing(true)
+                event.accepted = true
+            }
+        }
     }
 }

@@ -1046,6 +1046,12 @@ fn palette_offers(w: &mut UiWorld, how: String, name: String) -> StepResult {
     Ok(())
 }
 
+#[then(regex = r#"^the palette says "(.*)"$"#)]
+fn palette_says(w: &mut UiWorld, text: String) -> StepResult {
+    let text = text.replace("\\\"", "\"");
+    w.window()?.node("Palette", None, &text).map(|_| ())
+}
+
 #[given(regex = r#"^the person has clicked the button "([^"]+)"$"#)]
 #[when(regex = r#"^the person clicks the button "([^"]+)"$"#)]
 fn clicks_button(w: &mut UiWorld, name: String) -> StepResult {
@@ -1958,6 +1964,7 @@ fn window_does_not_say(w: &mut UiWorld, want: String) -> StepResult {
 
 #[then(regex = r#"^the file "([^"]+)" says "(.*)"$"#)]
 fn file_says(w: &mut UiWorld, name: String, want: String) -> StepResult {
+    let want = unescape(&want);
     let got = std::fs::read_to_string(w.dir.path().join(&name)).map_err(|e| e.to_string())?;
     got.contains(&want)
         .then_some(())
@@ -2170,6 +2177,159 @@ fn double_clicks_layer(w: &mut UiWorld, name: String) -> StepResult {
     window.rest()
 }
 
+#[given(regex = r#"^the person has double-clicked the frame "([^"]+)" at (\d+), (\d+)$"#)]
+#[when(regex = r#"^the person double-clicks the frame "([^"]+)" at (\d+), (\d+)$"#)]
+fn double_clicks_frame(w: &mut UiWorld, target: String, x: f64, y: f64) -> StepResult {
+    let window = w.window()?;
+    let at = frame_point(window, &target, x, y)?;
+    window
+        .stage
+        .drive()
+        .click(at, MouseButtons::LEFT, 1)
+        .map_err(drive_error)?;
+    // The first click's selection and its box come back before the second,
+    // as they do between a person's two clicks.
+    window.rest()?;
+    window
+        .stage
+        .drive()
+        .click(at, MouseButtons::LEFT, 1)
+        .map_err(drive_error)?;
+    window.rest()
+}
+
+#[when(regex = r#"^the person writes "(.*)" on the canvas and presses "([^"]+)"$"#)]
+fn writes_on_canvas(w: &mut UiWorld, text: String, key: String) -> StepResult {
+    let text = unescape(&text);
+    let window = w.window()?;
+    let chord = Chord::parse(&key)?;
+    // What was there is selected when the field opens: typing replaces it.
+    window.stage.drive().commit(&text).map_err(drive_error)?;
+    window.rest()?;
+    window.stage.drive().chord(&chord, 0).map_err(drive_error)?;
+    window.rest()
+}
+
+#[given(regex = r#"^the person has typed "(.*)" on the canvas$"#)]
+fn has_typed_on_canvas(w: &mut UiWorld, text: String) -> StepResult {
+    let text = unescape(&text);
+    let window = w.window()?;
+    window.stage.drive().commit(&text).map_err(drive_error)?;
+    window.rest()
+}
+
+#[when(regex = r#"^the person types "([^"]+)" on the canvas$"#)]
+fn types_on_canvas(w: &mut UiWorld, key: String) -> StepResult {
+    let window = w.window()?;
+    let chord = Chord::parse(&key)?;
+    window.stage.drive().chord(&chord, 0).map_err(drive_error)?;
+    window.rest()
+}
+
+#[when(
+    regex = r#"^the person holds "([^"]+)" and drags in the frame "([^"]+)" from (\d+), (\d+) to (\d+), (\d+)$"#
+)]
+fn holds_and_drags(
+    w: &mut UiWorld,
+    key: String,
+    target: String,
+    from_x: f64,
+    from_y: f64,
+    to_x: f64,
+    to_y: f64,
+) -> StepResult {
+    let window = w.window()?;
+    let before = frame_bounds(window, &target)?;
+    let from = frame_point(window, &target, from_x, from_y)?;
+    let to = frame_point(window, &target, to_x, to_y)?;
+    let chord = Chord::parse(&key)?;
+    window.stage.drive().key_down(&chord).map_err(drive_error)?;
+    window.rest()?;
+    window
+        .stage
+        .drive()
+        .press(from, MouseButtons::LEFT)
+        .map_err(drive_error)?;
+    window.rest()?;
+    // In the steps a hand makes: a view starts following past a threshold.
+    let aside = Point::new((from.x + to.x) / 2.0, (from.y + to.y) / 2.0);
+    window.stage.drive().move_to(aside).map_err(drive_error)?;
+    window.stage.drive().move_to(to).map_err(drive_error)?;
+    window
+        .stage
+        .drive()
+        .release(to, MouseButtons::LEFT)
+        .map_err(drive_error)?;
+    window.rest()?;
+    window.stage.drive().key_up(&chord).map_err(drive_error)?;
+    window.rest()?;
+    w.frame_before = Some(before);
+    Ok(())
+}
+
+#[then(regex = r#"^the canvas's text holds "(.*)"$"#)]
+fn canvas_text_holds(w: &mut UiWorld, want: String) -> StepResult {
+    let want = unescape(&want);
+    let tree = w.window()?.tree();
+    let field = find(&tree, &|n| n.name == "Text of the selected object")
+        .ok_or("no text field is open on the canvas")?;
+    (field.value == want)
+        .then_some(())
+        .ok_or_else(|| format!("the canvas's text holds {:?}", field.value))
+}
+
+#[when(regex = r#"^the person holds "([^"]+)"$"#)]
+fn holds_key(w: &mut UiWorld, key: String) -> StepResult {
+    let window = w.window()?;
+    window
+        .stage
+        .drive()
+        .key_down(&Chord::parse(&key)?)
+        .map_err(drive_error)?;
+    window.rest()
+}
+
+#[when(regex = r#"^the person lets go of "([^"]+)"$"#)]
+fn lets_go_of_key(w: &mut UiWorld, key: String) -> StepResult {
+    let window = w.window()?;
+    window
+        .stage
+        .drive()
+        .key_up(&Chord::parse(&key)?)
+        .map_err(drive_error)?;
+    window.rest()
+}
+
+// A write that fails is what a person meets on a full disk or a read-only
+// checkout, and no gesture can bring it about.
+#[given("the project's folder takes no writes")]
+fn folder_takes_no_writes(w: &mut UiWorld) -> StepResult {
+    set_folder_read_only(w, true)
+}
+
+#[when("the project's folder takes writes again")]
+fn folder_takes_writes(w: &mut UiWorld) -> StepResult {
+    set_folder_read_only(w, false)
+}
+
+fn set_folder_read_only(w: &UiWorld, read_only: bool) -> StepResult {
+    let mut permissions = std::fs::metadata(w.dir.path())
+        .map_err(|e| e.to_string())?
+        .permissions();
+    permissions.set_readonly(read_only);
+    std::fs::set_permissions(w.dir.path(), permissions).map_err(|e| e.to_string())
+}
+
+#[then("the canvas has no text being written")]
+fn no_canvas_text(w: &mut UiWorld) -> StepResult {
+    let window = w.window()?;
+    let field = overlay_part(window, "canvasText")?;
+    if window.engine().read_by_name(field, "visible").to_boolean() {
+        return Err("a text field is open on the canvas".into());
+    }
+    Ok(())
+}
+
 #[when(regex = r#"^the person enters "([^"]+)" as the layer's name$"#)]
 fn enters_layer_name(w: &mut UiWorld, name: String) -> StepResult {
     let window = w.window()?;
@@ -2213,6 +2373,13 @@ fn inspector_has_button(w: &mut UiWorld, name: String) -> StepResult {
     find(&tree, &|n| n.name == name && n.role == "button")
         .map(|_| ())
         .ok_or_else(|| format!("no button {name:?}; the window holds {}", names(&tree)))
+}
+
+#[then(regex = r#"^the inspector has no row "([^"]+)"$"#)]
+fn inspector_no_row(w: &mut UiWorld, name: String) -> StepResult {
+    let tree = w.window()?.tree();
+    find(&tree, &|n| n.name == name && n.role == "textinput")
+        .map_or(Ok(()), |_| Err(format!("the inspector has a row {name:?}")))
 }
 
 #[then(regex = r#"^the inspector has no button "([^"]+)"$"#)]

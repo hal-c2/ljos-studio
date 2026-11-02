@@ -189,7 +189,13 @@ impl NativeHost {
             .stdout(Stdio::null())
             .stderr(stderr);
         let mut child = Reaped::spawn(&mut command).map_err(|e| {
-            PreviewError::Start(format!("cannot run `{}`: {e}", self.ljos.display()))
+            // The first thing a new checkout meets: say the way out.
+            let hint = if e.kind() == std::io::ErrorKind::NotFound {
+                "; `mise run setup` installs the pinned one, or name one with LJOS=/path/to/ljos"
+            } else {
+                ""
+            };
+            PreviewError::Start(format!("cannot run `{}`: {e}{hint}", self.ljos.display()))
         })?;
         let deadline = Instant::now() + START_LIMIT;
         let inspector = Inspector::connect(&self.state, child.id(), deadline, || {
