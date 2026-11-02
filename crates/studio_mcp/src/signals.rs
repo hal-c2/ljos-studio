@@ -294,7 +294,7 @@ impl Types<'_> {
             found.not_text.extend(
                 ty.properties
                     .iter()
-                    .filter(|p| !studio_core::outline::takes_string(&p.ty))
+                    .filter(|p| p.list || !studio_core::outline::takes_string(&p.ty))
                     .map(|p| p.name.clone()),
             );
             found.taken.extend(
