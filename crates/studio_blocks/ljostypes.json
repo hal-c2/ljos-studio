@@ -399,6 +399,20 @@
               "returnType": "void"
             },
             {
+              "name": "follow",
+              "parameters": [
+                {
+                  "name": "tool",
+                  "type": "string"
+                },
+                {
+                  "name": "args",
+                  "type": "var"
+                }
+              ],
+              "returnType": "void"
+            },
+            {
               "name": "lookAgain",
               "parameters": [],
               "returnType": "void"

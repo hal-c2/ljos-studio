@@ -20,7 +20,7 @@
 pub mod shell;
 
 use std::cell::RefCell;
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::hash::Hasher;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -265,7 +265,32 @@ impl Workspace {
     /// `refused` tells how each went.
     #[qml(invokable)]
     fn dispatch(cx: &Cx, tool: String, args: Json) -> Result<(), EngineError> {
-        enqueue(cx.engine, cx.this, Job::Call { tool, args });
+        enqueue(
+            cx.engine,
+            cx.this,
+            Job::Call {
+                tool,
+                args,
+                follows: false,
+            },
+        );
+        Ok(())
+    }
+
+    /// `dispatch` for a call that follows from what the person just did and
+    /// is no gesture of its own: it leaves the refusal on the window's line,
+    /// and says its own refusal only when that line is empty.
+    #[qml(invokable)]
+    fn follow(cx: &Cx, tool: String, args: Json) -> Result<(), EngineError> {
+        enqueue(
+            cx.engine,
+            cx.this,
+            Job::Call {
+                tool,
+                args,
+                follows: true,
+            },
+        );
         Ok(())
     }
 
@@ -327,6 +352,8 @@ struct Queue {
     /// The preview's clicks already looked at.
     clicks: u64,
     settling: Option<Settling>,
+    /// The lists last set, by the property's name.
+    given: HashMap<&'static str, Json>,
 }
 
 /// Looking again after a click. Nothing tells Studio when the app has come to
@@ -350,13 +377,12 @@ enum Job {
     Call {
         tool: String,
         args: Json,
+        follows: bool,
     },
     /// Read the session again.
     Refresh,
     /// Fetch the preview's picture.
-    Picture {
-        generation: u64,
-    },
+    Picture { generation: u64 },
 }
 
 /// What a job did, read off the UI thread.
@@ -364,9 +390,11 @@ enum Done {
     Call {
         tool: String,
         args: Json,
+        follows: bool,
         answer: Result<Json, Json>,
-        view: View,
-        seen: u64,
+        /// With the session's write count it was read at; none for a call
+        /// that changes nothing shown.
+        view: Option<(View, u64)>,
     },
     Refresh {
         view: View,
@@ -443,6 +471,7 @@ fn pump(engine: &Engine, ws: ObjectId) {
         Job::Call { tool, .. } => Some(tool.clone()),
         _ => None,
     };
+    let refreshing = matches!(job, Job::Refresh);
     let spawned = task::spawn_in(
         engine,
         Lane::Visible,
@@ -454,6 +483,8 @@ fn pump(engine: &Engine, ws: ObjectId) {
             if let Some(queue) = queue_of(engine, ws) {
                 queue.borrow_mut().busy = false;
             }
+            // A read that panics never catches up, and would ask again for ever.
+            let again = done.is_ok() || !refreshing;
             match done {
                 Ok(done) => finish(engine, ws, done),
                 Err(panic) => {
@@ -465,6 +496,9 @@ fn pump(engine: &Engine, ws: ObjectId) {
                         let _ = Workspace::emit_refused(&Cx::new(engine, ws), tool, error);
                     }
                 }
+            }
+            if again {
+                refresh_if_behind(engine, ws);
             }
             pump(engine, ws);
         },
@@ -488,18 +522,23 @@ fn run(server: &StudioServer, writes: &AtomicU64, doc: &str, job: Job) -> Done {
         (studio.view(doc), seen)
     };
     match job {
-        Job::Call { tool, args } => {
+        Job::Call {
+            tool,
+            args,
+            follows,
+        } => {
             let answer = server
                 .call(&tool, &person(), args.clone())
                 .map(|reply| reply.structured)
                 .map_err(|e| refusal(e.to_value()));
-            let (view, seen) = read();
+            // Reading where things are changes nothing a panel shows.
+            let view = (!is_geometry(&tool, &args)).then(read);
             Done::Call {
                 tool,
                 args,
+                follows,
                 answer,
                 view,
-                seen,
             }
         }
         Job::Refresh => {
@@ -573,6 +612,10 @@ fn decode(data: &[u8]) -> Result<(u32, u32, Vec<u8>), String> {
     Ok((info.width, info.height, rgba))
 }
 
+fn is_geometry(tool: &str, args: &Json) -> bool {
+    tool == "node_arrange" && args["action"] == "geometry"
+}
+
 /// Publishes what a job did, on the UI thread.
 fn finish(engine: &Engine, ws: ObjectId, done: Done) {
     let cx = Cx::new(engine, ws);
@@ -580,19 +623,23 @@ fn finish(engine: &Engine, ws: ObjectId, done: Done) {
         Done::Call {
             tool,
             args,
+            follows,
             answer,
             view,
-            seen,
         } => {
             if let Ok(answer) = &answer {
                 rebase(engine, ws, &tool, &args, answer);
             }
-            publish(engine, ws, view, seen);
+            if let Some((view, seen)) = view {
+                publish(engine, ws, view, seen);
+            }
             // What the canvas reads for itself is no gesture of the person's:
             // it neither clears the refusal of the drop before it nor raises one.
-            // The export panel shows its own answers and refusals.
-            let gesture =
-                !(tool == "node_arrange" && args["action"] == "geometry" || tool == "export");
+            // The export panel shows its own answers and refusals. A call made
+            // with `follow` must not clear or replace the refusal of the gesture
+            // it follows; with none on the line its own is the only word the
+            // person gets.
+            let gesture = !(is_geometry(&tool, &args) || tool == "export" || follows);
             match answer {
                 Ok(answer) => {
                     if gesture {
@@ -601,7 +648,13 @@ fn finish(engine: &Engine, ws: ObjectId, done: Done) {
                     let _ = Workspace::emit_answered(&cx, tool, answer);
                 }
                 Err(error) => {
-                    if gesture {
+                    let free = || {
+                        engine
+                            .get(ws, Workspace::ERROR)
+                            .unwrap_or_default()
+                            .is_empty()
+                    };
+                    if gesture || (follows && free()) {
                         let message = error["message"].as_str().unwrap_or_default().to_owned();
                         let _ = cx.set(Workspace::ERROR, message);
                     }
@@ -687,7 +740,9 @@ fn rebase(engine: &Engine, ws: ObjectId, tool: &str, args: &Json, answer: &Json)
         return;
     };
     for job in &mut queue.borrow_mut().jobs {
-        if let Job::Call { tool, args: next } = job
+        if let Job::Call {
+            tool, args: next, ..
+        } = job
             && tool == "document_edit"
             && next["doc"] == args["doc"]
             && next["generation"].as_u64() == Some(from)
@@ -737,33 +792,117 @@ fn publish(engine: &Engine, ws: ObjectId, view: View, seen: u64) {
         .map(|p| p.generation)
         .filter(|&g| resized || (g != picture && g != fetched));
     let _ = cx.set(Workspace::BLANK, view.blank);
-    let _ = cx.set(Workspace::DOCUMENTS, to_json(&view.documents));
+    give(
+        &cx,
+        Workspace::DOCUMENTS,
+        "DOCUMENTS",
+        to_json(&view.documents),
+        &queue,
+    );
     let _ = cx.set(Workspace::GENERATION, view.generation as f64);
     let _ = cx.set(Workspace::TEXT, view.text);
-    let _ = cx.set(Workspace::LAYERS, to_json(&view.layers));
+    give(
+        &cx,
+        Workspace::LAYERS,
+        "LAYERS",
+        to_json(&view.layers),
+        &queue,
+    );
     let _ = cx.set(Workspace::SELECTED, view.selected);
-    let _ = cx.set(Workspace::CHOSEN, to_json(&view.chosen));
-    let _ = cx.set(Workspace::SELECTION, to_json(&view.selection));
-    let _ = cx.set(Workspace::INSPECTOR, to_json(&view.inspector));
-    let _ = cx.set(Workspace::STATES, to_json(&view.states));
-    let _ = cx.set(Workspace::ROLES, to_json(&view.roles));
-    let _ = cx.set(Workspace::SIGNALS, to_json(&view.signals));
-    let _ = cx.set(Workspace::FLOW, to_json(&view.flow));
-    let _ = cx.set(Workspace::PALETTE, to_json(&view.palette));
-    let _ = cx.set(Workspace::TOOLKIT, to_json(&view.toolkit));
-    let _ = cx.set(Workspace::ROOT_STATES, to_json(&view.root_states));
-    let _ = cx.set(Workspace::DONE, to_json(&view.done));
-    let _ = cx.set(Workspace::UNDONE, to_json(&view.undone));
-    let _ = cx.set(Workspace::LEASES, to_json(&view.leases));
+    give(
+        &cx,
+        Workspace::CHOSEN,
+        "CHOSEN",
+        to_json(&view.chosen),
+        &queue,
+    );
+    give(
+        &cx,
+        Workspace::SELECTION,
+        "SELECTION",
+        to_json(&view.selection),
+        &queue,
+    );
+    give(
+        &cx,
+        Workspace::INSPECTOR,
+        "INSPECTOR",
+        to_json(&view.inspector),
+        &queue,
+    );
+    give(
+        &cx,
+        Workspace::STATES,
+        "STATES",
+        to_json(&view.states),
+        &queue,
+    );
+    give(&cx, Workspace::ROLES, "ROLES", to_json(&view.roles), &queue);
+    give(
+        &cx,
+        Workspace::SIGNALS,
+        "SIGNALS",
+        to_json(&view.signals),
+        &queue,
+    );
+    give(&cx, Workspace::FLOW, "FLOW", to_json(&view.flow), &queue);
+    give(
+        &cx,
+        Workspace::PALETTE,
+        "PALETTE",
+        to_json(&view.palette),
+        &queue,
+    );
+    give(
+        &cx,
+        Workspace::TOOLKIT,
+        "TOOLKIT",
+        to_json(&view.toolkit),
+        &queue,
+    );
+    give(
+        &cx,
+        Workspace::ROOT_STATES,
+        "ROOT_STATES",
+        to_json(&view.root_states),
+        &queue,
+    );
+    give(&cx, Workspace::DONE, "DONE", to_json(&view.done), &queue);
+    give(
+        &cx,
+        Workspace::UNDONE,
+        "UNDONE",
+        to_json(&view.undone),
+        &queue,
+    );
+    give(
+        &cx,
+        Workspace::LEASES,
+        "LEASES",
+        to_json(&view.leases),
+        &queue,
+    );
     if let Some(ms) = view.leases.iter().map(|l| l.ends_in_ms).min() {
         wake_after(engine, Duration::from_millis(ms));
     }
-    let _ = cx.set(Workspace::COMMENTS, to_json(&view.comments));
+    give(
+        &cx,
+        Workspace::COMMENTS,
+        "COMMENTS",
+        to_json(&view.comments),
+        &queue,
+    );
     let _ = cx.set(Workspace::PREVIEW, preview);
     let _ = cx.set(Workspace::PROBLEM, view.problem);
     let _ = cx.set(Workspace::PREVIEWS, view.previews);
     let _ = cx.set(Workspace::THEME, view.theme);
-    let _ = cx.set(Workspace::TOKENS, to_json(&view.tokens));
+    give(
+        &cx,
+        Workspace::TOKENS,
+        "TOKENS",
+        to_json(&view.tokens),
+        &queue,
+    );
     // A click changes what the app shows and no generation says so. A new
     // preview counts from nothing again, which is no click.
     let clicks = view
@@ -850,10 +989,30 @@ fn refresh_all(engine: &Engine) {
         all.clone()
     };
     for ws in live {
-        let behind = queue_of(engine, ws).is_some_and(|q| q.borrow().published < writes);
-        if behind {
-            enqueue(engine, ws, Job::Refresh);
+        // A job running or waiting may be what wrote, and reads after it: it
+        // says when it is done whether that was enough.
+        let (busy, empty) = queue_of(engine, ws).map_or((true, false), |q| {
+            let q = q.borrow();
+            (q.busy, q.jobs.is_empty())
+        });
+        if !busy && empty {
+            refresh_if_behind_of(engine, ws, writes);
+        } else if !busy {
+            // Jobs that could not start: this is the next write to ask again.
+            pump(engine, ws);
         }
+    }
+}
+
+fn refresh_if_behind(engine: &Engine, ws: ObjectId) {
+    let writes = engine.extension::<Context>().writes.load(Ordering::SeqCst);
+    refresh_if_behind_of(engine, ws, writes);
+}
+
+fn refresh_if_behind_of(engine: &Engine, ws: ObjectId, writes: u64) {
+    let behind = queue_of(engine, ws).is_some_and(|q| q.borrow().published < writes);
+    if behind {
+        enqueue(engine, ws, Job::Refresh);
     }
 }
 
@@ -863,6 +1022,17 @@ fn lock(
     studio
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+/// Sets a list a panel shows, if it is not what the panel has: a panel over a
+/// list made anew makes its rows anew, and most publishes change one list.
+fn give(cx: &Cx, prop: Prop<Json>, name: &'static str, value: Json, queue: &Rc<RefCell<Queue>>) {
+    let mut q = queue.borrow_mut();
+    if q.given.get(name) != Some(&value) {
+        q.given.insert(name, value.clone());
+        drop(q);
+        let _ = cx.set(prop, value);
+    }
 }
 
 /// A view's part as the JSON a script reads.

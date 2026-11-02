@@ -82,6 +82,27 @@ check("setting a token in the tokens panel writes the theme file", (await theme(
 await page.waitForFunction(() => document.querySelector('[aria-label="Spacing.md"] input')?.value === "20", null, { timeout: 5000 }).catch(() => {});
 check("the tokens panel shows the token's new value", (await md.inputValue()) === "20", await md.inputValue());
 
+// A call that follows from an edit. This page has no preview, so `preview_state`
+// is refused without one being asked to show anything; the shell's own
+// follow-ons do not run here, so these call the workspace as they would.
+const status = () => labelled("Status").innerText();
+const call = async (how, tool, args) => {
+  await page.evaluate(([how, tool, args]) => window.workspaces()[0][how](tool, args), [how, tool, args]);
+  await page.waitForFunction(() => {
+    const { $queue: queue } = window.workspaces()[0];
+    return queue.jobs.length === 0 && !queue.busy;
+  });
+};
+const followed = { node: { id: "root" }, show: "compact" };
+await call("follow", "preview_state", followed);
+const own = await status();
+check("a refused follow-on says why on an empty line", own !== "", own);
+await call("dispatch", "no_such_tool", {});
+const gesture = await status();
+check("a gesture's refusal replaces it", gesture.includes("no_such_tool"), gesture);
+await call("follow", "preview_state", followed);
+check("a refused follow-on leaves the refusal on the line", (await status()) === gesture, await status());
+
 if (shot) await page.screenshot({ path: shot });
 check("the page logged no errors", said.length === 0, said);
 await browser.close();

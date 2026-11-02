@@ -279,7 +279,9 @@ headless). Its shell is QML under `shell/`, and it binds one block,
   and its arguments. A gesture *is* a tool call: the shell has no path to
   the session that an agent lacks, which is how the UI scenarios
   (`features/ui/`) prove the same flows as the MCP ones with the same
-  oracle, the file text.
+  oracle, the file text. `follow(tool, args)` is the same call made as a
+  consequence of a gesture, not as one: it leaves the refusal on the
+  window's line, and says its own only when that line is empty.
 - **Its events**: `answered(tool, answer)` and `refused(tool, error)`.
 
 DECISION: one block with a `dispatch` action, not one native type per

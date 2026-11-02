@@ -75,6 +75,59 @@ Feature: Objects are moved and resized on the canvas
     Then the file "Main.qml" says "id: two;"
     And the history lists "move"
 
+  Scenario: A drop in a layout before the siblings are read still changes the order
+    Given the person has clicked the frame "Desktop" at 50, 220
+    When the person drags in the frame "Desktop" from 50, 220 to 280, 220 at once
+    Then the file "Main.qml" says "id: two;"
+    And the history lists "move"
+
+  Scenario: A flick's outline does not go back while the drop is on its way
+    Given the person has clicked the frame "Desktop" at 40, 40
+    When the person flicks in the frame "Desktop" from 40, 40 to 90, 63, watching the outline
+    Then the file "Main.qml" says "id: a; x: 70; y: 43;"
+    And the outline was never shown back at 20, 20 once the hand let go
+    And the canvas outlines the selection at 70, 43 sized 50 by 50
+
+  # The ghost of a drop is kept until the drop has ended, so each way it can
+  # end is a row: one left out leaves a dim outline and no handles behind.
+  Scenario Outline: However a drop ends, the ghost goes and the handles come back: <ending>
+    Given <before>
+    And the person has clicked the frame "Desktop" at <at>
+    When <gesture>
+    And <meanwhile>
+    And the canvas has had time to settle
+    Then no ghost is left on the canvas
+    And the canvas shows <handles> resize handles
+    And <written>
+
+    Examples:
+      | ending                       | before                 | at      | gesture                                                                                 | meanwhile                                       | handles | written                                                 |
+      | place answered               | nothing has happened   | 40, 40  | the person drags in the frame "Desktop" from 40, 40 to 90, 63                           | nothing has happened                            | 8       | the file "Main.qml" says "id: a; x: 70; y: 43;"         |
+      | place refused                | Ada holds "a"          | 40, 40  | the person drags in the frame "Desktop" from 40, 40 to 90, 63                           | nothing has happened                            | 8       | the history lists nothing                               |
+      | reorder answered             | nothing has happened   | 50, 220 | the person drags in the frame "Desktop" from 50, 220 to 280, 220                        | nothing has happened                            | 8       | the history lists "move"                                |
+      | reorder refused              | Ada holds "one"        | 50, 220 | the person drags in the frame "Desktop" from 50, 220 to 280, 220                        | nothing has happened                            | 8       | the history lists nothing                               |
+      | waiting drop reorders        | nothing has happened   | 50, 220 | the person drags in the frame "Desktop" from 50, 220 to 280, 220 at once                | nothing has happened                            | 8       | the history lists "move"                                |
+      | waiting drop changes nothing | nothing has happened   | 50, 220 | the person drags in the frame "Desktop" from 50, 220 to 60, 220 at once                 | nothing has happened                            | 8       | the history lists nothing                               |
+      | drop just after a nudge      | nothing has happened   | 40, 40  | the person presses "Right" and drags in the frame "Desktop" from 41, 40 to 91, 63       | nothing has happened                            | 8       | the file "Main.qml" says "id: a; x: 71; y: 43;"         |
+      | drag cancelled               | nothing has happened   | 40, 40  | the person presses in the frame "Desktop" at 40, 40 and holds it at 90, 63              | the window takes the press away                 | 8       | the history lists nothing                               |
+      | selection moved in the drag  | nothing has happened   | 40, 40  | the person presses in the frame "Desktop" at 40, 40 and holds it at 90, 63              | an agent selects "b" and the hand lets go       | 8       | the history lists nothing                               |
+      | selection moved in the wait  | nothing has happened   | 40, 40  | the person presses in the frame "Desktop" at 40, 40 and holds it at 90, 63              | the drop waits on a read and an agent selects "b" | 8       | the history lists nothing                               |
+
+  # The canvas is built on the preview: without one there is no overlay left
+  # to hold a ghost. The object the hand holds is still in the file, so the
+  # drop goes in.
+  Scenario Outline: A preview that goes takes the drop's canvas with it: <when>
+    Given the person has clicked the frame "Desktop" at 40, 40
+    When <gesture>
+    And <meanwhile>
+    Then the canvas has gone with the preview
+    And <written>
+
+    Examples:
+      | when           | gesture                                                                             | meanwhile                               | written                                         |
+      | in the drag    | the person presses in the frame "Desktop" at 40, 40 and holds it at 90, 63          | the preview closes and the hand lets go | the file "Main.qml" says "id: a; x: 70; y: 43;" |
+      | after the drop | the person lets a drag go in the frame "Desktop" from 40, 40 to 90, 63, not waiting | the preview closes                      | the file "Main.qml" says "id: a; x: 70; y: 43;" |
+
   Scenario: Arrow keys nudge, shift by ten
     Given the person has clicked the frame "Desktop" at 40, 40
     When the person presses "Right"

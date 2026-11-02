@@ -40,6 +40,9 @@ QtObject {
     function dispatch(tool: string, args: var) {
     }
 
+    function follow(tool: string, args: var) {
+    }
+
     function lookAgain() {
     }
 }

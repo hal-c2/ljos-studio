@@ -161,6 +161,20 @@ Feature: A person composes a shell in Studio's window
     When the person replaces "Rectangle { color: \"red\" }" with "Rectangle { color: \"red\" }\n    Image {}" in the code view
     Then the layers panel lists "Item root, Rectangle, Image, Text"
 
+  Scenario: Typing in the code view keeps the selected object marked
+    Given the person has opened "Main.qml" in the documents list
+    And the person has selected "Rectangle" in the layers panel
+    When the person replaces "hello" with "bye" in the code view
+    Then the code view marks "Rectangle { color: \"red\" }"
+
+  Scenario: Typing through text that does not parse keeps the selected object
+    Given the person has opened "Main.qml" in the documents list
+    And the person has selected "Rectangle" in the layers panel
+    When the person replaces "color: \"red\" }" with "color: \"red\" } /" in the code view
+    And the person replaces "} /" with "} // x" in the code view
+    Then the layers panel has "Rectangle" selected
+    And the code view marks "Rectangle { color: \"red\" }"
+
   Scenario: An agent's edit shows in the window
     Given the person has opened "Main.qml" in the documents list
     When an agent calls the tool "property_set" with:
