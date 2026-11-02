@@ -502,6 +502,173 @@ Feature: A tool does not write what would not load or would not show
       """
     Then the file "Native.qml" contains "import QtQuick.Layouts"
 
+  # qml6 6.11: `RowLayout { Thing {} }` needs both imports, whatever Studio can
+  # say of `Thing`, and `Thing` may come from any import of the file it was in.
+  Scenario Outline: A paste keeps the imports that may name what it holds
+    Given the file "Mixed.qml":
+      """qml
+      import QtQuick
+      import QtQuick.Layouts
+      import App.Native
+
+      Item {
+          id: mixed
+          RowLayout { id: withthing; Thing {} }
+          Thing { id: lone }
+      }
+      """
+    And the file "Native.qml":
+      """qml
+      import QtQuick
+      import App.Native
+
+      Item {
+          id: native
+      }
+      """
+    And the agent has called the tool "node_arrange" with:
+      """json
+      {"action": "copy", "doc": "Mixed.qml", "nodes": [{"id": "<node>"}]}
+      """
+    When the agent calls the tool "node_arrange" with:
+      """json
+      {"action": "paste", "doc": "<doc>", "parent": {"id": "<parent>"}}
+      """
+    Then the file "<doc>" contains "<import>"
+
+    Examples:
+      | node      | doc        | parent | import                 |
+      | withthing | Plain.qml  | plain  | import QtQuick.Layouts |
+      | withthing | Plain.qml  | plain  | import App.Native      |
+      | withthing | Native.qml | native | import QtQuick.Layouts |
+      | lone      | Plain.qml  | plain  | import App.Native      |
+
+  Scenario: A paste keeps the folder its file imported, from where it lands
+    Given the file "lib/Far.qml":
+      """qml
+      import QtQuick
+
+      Rectangle {}
+      """
+    And the file "From.qml":
+      """qml
+      import QtQuick
+      import "lib"
+
+      Item {
+          id: from
+          Far { id: far }
+      }
+      """
+    And the file "deep/Land.qml":
+      """qml
+      import QtQuick
+
+      Item {
+          id: land
+      }
+      """
+    And the agent has called the tool "node_arrange" with:
+      """json
+      {"action": "copy", "doc": "From.qml", "nodes": [{"id": "far"}]}
+      """
+    When the agent calls the tool "node_arrange" with:
+      """json
+      {"action": "paste", "doc": "deep/Land.qml", "parent": {"id": "land"}}
+      """
+    Then the file "deep/Land.qml" contains "import \"../lib\""
+
+  Scenario: A paste keeps the file beside the one it came from
+    Given the file "sub/Beside.qml":
+      """qml
+      import QtQuick
+
+      Rectangle {}
+      """
+    And the file "sub/Came.qml":
+      """qml
+      import QtQuick
+
+      Item {
+          id: came
+          Beside { id: near }
+      }
+      """
+    And the agent has called the tool "node_arrange" with:
+      """json
+      {"action": "copy", "doc": "sub/Came.qml", "nodes": [{"id": "near"}]}
+      """
+    When the agent calls the tool "node_arrange" with:
+      """json
+      {"action": "paste", "doc": "Plain.qml", "parent": {"id": "plain"}}
+      """
+    Then the file "Plain.qml" contains "import \"./sub\""
+
+  Scenario: A paste of a qualified type is not let through by a module nothing is known of
+    Given the file "Native.qml":
+      """qml
+      import QtQuick
+      import App.Native
+
+      Item {
+          id: native
+      }
+      """
+    And the agent has called the tool "node_arrange" with:
+      """json
+      {"action": "copy", "doc": "Named.qml", "nodes": [{"id": "row"}]}
+      """
+    When the agent calls the tool "node_arrange" with:
+      """json
+      {"action": "paste", "doc": "Native.qml", "parent": {"id": "native"}}
+      """
+    Then the agent is refused with "not_actionable"
+    And the refusal's "/details/kind" is "unknown_type"
+
+  # qml6 6.11 loads `Other.Inner` for a file beside it, and `Far.Inner` for a
+  # folder it imports, and refuses `Nothing.Inner`.
+  Scenario Outline: A qualified type is refused only when its qualifier is certainly nothing
+    Given the file "Other.qml":
+      """qml
+      import QtQuick
+
+      Item { component Inner: Rectangle {} }
+      """
+    And the file "lib/Far.qml":
+      """qml
+      import QtQuick
+
+      Item { component Inner: Rectangle {} }
+      """
+    And the file "Where.qml":
+      """qml
+      import QtQuick
+      <import>
+
+      Item {
+          id: where
+      }
+      """
+    When the agent calls the tool "node_insert" with:
+      """json
+      {"doc": "Where.qml", "parent": {"id": "where"}, "text": "<type> {}"}
+      """
+    Then the file "Where.qml" contains "<type> {"
+
+    Examples:
+      | type      | import       |
+      | Other.Inner | import QtQml |
+      | Far.Inner | import "lib" |
+      | Thing.Inner | import App.Native |
+
+  Scenario: A name Studio cannot vouch for is said to be so, not free
+    When the agent calls the tool "node_arrange" with:
+      """json
+      {"action": "component_extract", "doc": "Main.qml", "nodes": [{"id": "card"}], "name": "Sprocket"}
+      """
+    Then the file "Sprocket.qml" contains "Rectangle"
+    And the answer's "/name_unsure" is true
+
   Scenario: A paste that needs what no plain import brings is refused
     Given the agent has called the tool "node_arrange" with:
       """json
@@ -529,6 +696,9 @@ Feature: A tool does not write what would not load or would not show
       | GridLayout |
       | Timer     |
       | QtObject  |
+      | AnimatedSprite |
+      | WorkerScript |
+      | PathAnimation |
 
   Scenario Outline: A layout keeps only what its new kind has
     When the agent calls the tool "node_arrange" with:

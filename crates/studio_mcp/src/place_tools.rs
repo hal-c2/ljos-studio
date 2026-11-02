@@ -30,9 +30,10 @@ const DUPLICATE_OFFSET: f64 = 16.0;
 pub(crate) struct Copied {
     text: String,
     ids: Vec<String>,
-    /// The modules its document imports with no name, of which a paste into
+    /// The document it came from and what that imports, of which a paste into
     /// another document brings what it needs.
-    modules: Vec<String>,
+    from: String,
+    imports: Vec<Import>,
 }
 
 #[derive(Clone, Copy, Deserialize, JsonSchema)]
@@ -157,6 +158,10 @@ struct ArrangeOut {
     /// `component_extract`: what outside reads of the inside became.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     aliases: Vec<String>,
+    /// `component_extract`: Studio cannot tell whether an import has a type of
+    /// this name. If one has, the instance is that type, and not the new file.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    name_unsure: bool,
 }
 
 struct GeometryArgs {
@@ -640,14 +645,7 @@ fn copied(
 ) -> Result<Vec<(String, Node, Copied)>, SurfaceError> {
     let (tree, _) = studio.session.tree(doc).map_err(error)?;
     let text = studio.session.text(doc).map_err(error)?.0.to_owned();
-    let modules: Vec<String> = studio_core::outline::imports(&text)
-        .unwrap_or_default()
-        .into_iter()
-        .filter_map(|import| match import {
-            Import::Module { uri, alias: None } => Some(uri),
-            _ => None,
-        })
-        .collect();
+    let imports = studio_core::outline::imports(&text).unwrap_or_default();
     let mut out = Vec::new();
     for address in nodes {
         let (handle, node) = studio.session.resolve(doc, address).map_err(error)?;
@@ -659,7 +657,8 @@ fn copied(
         let copy = Copied {
             text: text[node.start..node.end].to_owned(),
             ids,
-            modules: modules.clone(),
+            from: doc.to_owned(),
+            imports: imports.clone(),
         };
         out.push((handle, node, copy));
     }
@@ -745,31 +744,33 @@ fn paste(studio: &mut Studio, a: &PasteArgs) -> Result<ManyOut, SurfaceError> {
     }
     let mut taken = taken_ids(studio, &a.doc)?;
     let source = studio.session.text(&a.doc).map_err(error)?.0.to_owned();
-    let imports: Vec<Option<String>> = studio
+    let imports: Vec<Vec<String>> = studio
         .clipboard
         .iter()
         .map(|copy| {
-            crate::loads::import_for(
+            crate::loads::imports_for(
                 studio.session.store(),
                 &a.doc,
                 &source,
                 &copy.text,
-                &copy.modules,
+                &copy.from,
+                &copy.imports,
             )
         })
         .collect::<Result<_, _>>()?;
-    let ops: Vec<Op> = studio
-        .clipboard
-        .iter()
-        .zip(imports)
-        .map(|(copy, import)| Op::Insert {
+    let mut ops: Vec<Op> = Vec::new();
+    for (copy, imports) in studio.clipboard.iter().zip(imports) {
+        let mut imports = imports.into_iter();
+        let import = imports.next();
+        ops.extend(imports.map(|module| Op::Import { module }));
+        ops.push(Op::Insert {
             parent: a.parent.clone(),
             index: None,
             text: place::with_fresh_ids(&copy.text, &copy.ids, &mut taken),
             add_id: false,
             import,
-        })
-        .collect();
+        });
+    }
     let (outcome, nodes) = studio
         .session
         .edit_many(&a.doc, a.generation, &ops, "paste", a.dry_run)
@@ -1051,6 +1052,7 @@ fn arrange(studio: &mut Studio, a: ArrangeArgs) -> Result<ArrangeOut, SurfaceErr
                 edit: Some(made.edit),
                 component: Some(made.component),
                 aliases: made.aliases,
+                name_unsure: made.name_unsure,
                 ..ArrangeOut::default()
             })
         }
@@ -1167,7 +1169,7 @@ fn relayout(
         ));
     }
     let source = studio.session.text(doc).map_err(error)?.0.to_owned();
-    let others: Vec<&str> = crate::signals::Names::of(studio.session.store(), doc, &source, None)
+    let others: Vec<&str> = crate::signals::Names::of(studio.session.store(), doc, &source, &[])
         .map(|names| {
             node.bindings
                 .iter()

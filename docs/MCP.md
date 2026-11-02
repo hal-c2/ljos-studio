@@ -742,5 +742,8 @@ load: `details.kind` is `no_such_member`, `unknown_type`, `not_an_id` or
 valid write is worse than missing a bad one, whose load error the preview still
 says. A misspelt type goes through, as does anything in a module Studio has not
 measured, and what a file says already is not held against a write beside it.
+Not being sure is not read as free either: `paste` brings every import of its
+source that might name what Studio can't vouch for, and `component_extract` to
+such a name answers `name_unsure: true`, since an import having it would win.
 `crates/studio_mcp/src/measured_*.txt` is what qml6 6.11 said: `mise run
 measure-members` writes them.
