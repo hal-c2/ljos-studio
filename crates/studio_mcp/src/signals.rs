@@ -336,6 +336,15 @@ impl<'s> Names<'s> {
         self.scope.imports.iter().any(|import| self.unread(import))
     }
 
+    /// How many of the document's imports nothing here can read.
+    pub(crate) fn unread_imports(&self) -> usize {
+        self.scope
+            .imports
+            .iter()
+            .filter(|import| self.unread(import))
+            .count()
+    }
+
     fn unread(&self, import: &Import) -> bool {
         match import {
             Import::Module { uri, .. } => {

@@ -138,10 +138,20 @@ pub fn is_group(object: &QmlObject<'_>) -> bool {
 
 /// Whether the objects of a parsed text declare the inline component `name`.
 pub fn declares_component(nodes: &[Node], name: &str) -> bool {
-    nodes
-        .iter()
-        .flat_map(|node| &node.path.0)
-        .any(|step| matches!(step, Step::Component(c) if c == name))
+    components(nodes).contains(&name)
+}
+
+/// The inline components the objects of a parsed text declare, each once.
+pub fn components(nodes: &[Node]) -> Vec<&str> {
+    let mut names: Vec<&str> = Vec::new();
+    for step in nodes.iter().flat_map(|node| &node.path.0) {
+        if let Step::Component(name) = step
+            && !names.contains(&name.as_str())
+        {
+            names.push(name);
+        }
+    }
+    names
 }
 
 /// The objects of `source`, root first in the order written; `None` when it

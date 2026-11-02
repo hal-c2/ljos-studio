@@ -704,6 +704,12 @@ fn shifted(node: &Node, text: &str) -> String {
 
 fn duplicate(studio: &mut Studio, a: &NodesArgs) -> Result<ManyOut, SurfaceError> {
     let mut items = copied(studio, &a.doc, &a.nodes)?;
+    for (_, _, copy) in &items {
+        let nodes = studio_core::outline::outline(&copy.text).unwrap_or_default();
+        if let Some(name) = studio_core::outline::components(&nodes).first() {
+            return Err(crate::loads::duplicate_component(&a.doc, name));
+        }
+    }
     let mut taken = taken_ids(studio, &a.doc)?;
     // Last in the file first: an insert only moves what comes after it, so
     // the places of those still to come stay true.
