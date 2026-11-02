@@ -308,6 +308,35 @@ impl<'s> Names<'s> {
         }
     }
 
+    /// A type the document uses from the file beside it, which `offer`, once
+    /// imported, would be found first for.
+    pub(crate) fn shadowed_by(&self, offer: &str) -> Option<String> {
+        let has = |import: &str, ty: &str| {
+            let found = &mut Found::default();
+            if import.contains('/') {
+                let dir = crate::blocks::join(&self.scope.dir, import);
+                return dir
+                    .is_some_and(|dir| self.types.in_dir(&dir, ty, found, 0) != Described::Not);
+            }
+            measured_types()
+                .get(ty)
+                .is_some_and(|modules| modules.contains(import))
+                || self.types.in_module(import, ty, found, 0) != Described::Not
+        };
+        let nodes = studio_core::outline::outline(&self.source)?;
+        nodes.into_iter().map(|node| node.ty).find(|ty| {
+            let local = self
+                .types
+                .in_dir(&self.scope.dir, ty, &mut Found::default(), 0);
+            let found_first = self.scope.imports.iter().any(|import| match import {
+                Import::Module { uri, alias: None } => has(uri, ty),
+                Import::Path { path, alias: None } => has(&format!("./{path}"), ty),
+                _ => false,
+            });
+            !ty.contains('.') && local != Described::Not && !found_first && has(offer, ty)
+        })
+    }
+
     /// Whether the document imports a module whose types nothing here knows.
     fn undescribed(&self) -> bool {
         self.scope.imports.iter().any(|import| match import {

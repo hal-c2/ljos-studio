@@ -162,6 +162,9 @@ struct ArrangeOut {
     /// this name. If one has, the instance is that type, and not the new file.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     name_unsure: bool,
+    /// `paste`: what it imported for what it holds.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    imported: Vec<String>,
 }
 
 struct GeometryArgs {
@@ -228,6 +231,8 @@ struct PlaceOne {
 pub(crate) struct ManyOut {
     pub(crate) edit: EditOut,
     pub(crate) nodes: Vec<String>,
+    /// What a paste imported.
+    pub(crate) imported: Vec<String>,
 }
 
 struct AlignArgs {
@@ -578,6 +583,7 @@ fn place_many(
     Ok(ManyOut {
         edit: outcome.into(),
         nodes,
+        imported: Vec::new(),
     })
 }
 
@@ -732,6 +738,7 @@ fn duplicate(studio: &mut Studio, a: &NodesArgs) -> Result<ManyOut, SurfaceError
     Ok(ManyOut {
         edit: outcome.into(),
         nodes,
+        imported: Vec::new(),
     })
 }
 
@@ -758,17 +765,27 @@ fn paste(studio: &mut Studio, a: &PasteArgs) -> Result<ManyOut, SurfaceError> {
             )
         })
         .collect::<Result<_, _>>()?;
-    let mut ops: Vec<Op> = Vec::new();
-    for (copy, imports) in studio.clipboard.iter().zip(imports) {
-        let mut imports = imports.into_iter();
-        let import = imports.next();
-        ops.extend(imports.map(|module| Op::Import { module }));
+    // Bare, even beside an import under a name: nothing has to qualify what
+    // the text holds.
+    let mut imported: Vec<String> = Vec::new();
+    for module in imports.into_iter().flatten() {
+        if !imported.contains(&module) {
+            imported.push(module);
+        }
+    }
+    let mut ops: Vec<Op> = imported
+        .iter()
+        .map(|module| Op::Import {
+            module: module.clone(),
+        })
+        .collect();
+    for copy in &studio.clipboard {
         ops.push(Op::Insert {
             parent: a.parent.clone(),
             index: None,
             text: place::with_fresh_ids(&copy.text, &copy.ids, &mut taken),
             add_id: false,
-            import,
+            import: None,
         });
     }
     let (outcome, nodes) = studio
@@ -778,6 +795,7 @@ fn paste(studio: &mut Studio, a: &PasteArgs) -> Result<ManyOut, SurfaceError> {
     Ok(ManyOut {
         edit: outcome.into(),
         nodes,
+        imported,
     })
 }
 
@@ -812,6 +830,7 @@ fn remove(studio: &mut Studio, a: &NodesArgs) -> Result<ManyOut, SurfaceError> {
     Ok(ManyOut {
         edit: outcome.into(),
         nodes,
+        imported: Vec::new(),
     })
 }
 
@@ -884,6 +903,7 @@ fn arrange(studio: &mut Studio, a: ArrangeArgs) -> Result<ArrangeOut, SurfaceErr
     let many = |many: ManyOut| ArrangeOut {
         edit: Some(many.edit),
         nodes: many.nodes,
+        imported: many.imported,
         ..ArrangeOut::default()
     };
     match a.action {
