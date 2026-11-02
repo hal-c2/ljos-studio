@@ -384,7 +384,7 @@ enum Done {
 /// Undo takes the person's edits and an agent's lease holds against them.
 fn person() -> CallCtx {
     CallCtx {
-        caps: CapSet::of([Cap::Inspect, Cap::Mutate, Cap::Run]),
+        caps: CapSet::of([Cap::Inspect, Cap::Mutate, Cap::Run, Cap::Fs]),
         client: Some(studio_mcp::PERSON.to_owned()),
     }
 }
@@ -439,6 +439,10 @@ fn pump(engine: &Engine, ws: ObjectId) {
     // A person's gestures are the screen's work: the visible lane, ahead
     // of what prefetches.
     let kept = job.clone();
+    let called = match &job {
+        Job::Call { tool, .. } => Some(tool.clone()),
+        _ => None,
+    };
     let spawned = task::spawn_in(
         engine,
         Lane::Visible,
@@ -453,7 +457,13 @@ fn pump(engine: &Engine, ws: ObjectId) {
             match done {
                 Ok(done) => finish(engine, ws, done),
                 Err(panic) => {
-                    let _ = engine.set(ws, Workspace::ERROR, panic.message().to_owned());
+                    let message = panic.message().to_owned();
+                    let _ = engine.set(ws, Workspace::ERROR, message.clone());
+                    // Whoever asked is still waiting for the answer.
+                    if let Some(tool) = called {
+                        let error = json!({"code": "internal", "message": message});
+                        let _ = Workspace::emit_refused(&Cx::new(engine, ws), tool, error);
+                    }
                 }
             }
             pump(engine, ws);
@@ -580,7 +590,9 @@ fn finish(engine: &Engine, ws: ObjectId, done: Done) {
             publish(engine, ws, view, seen);
             // What the canvas reads for itself is no gesture of the person's:
             // it neither clears the refusal of the drop before it nor raises one.
-            let gesture = !(tool == "node_arrange" && args["action"] == "geometry");
+            // The export panel shows its own answers and refusals.
+            let gesture =
+                !(tool == "node_arrange" && args["action"] == "geometry" || tool == "export");
             match answer {
                 Ok(answer) => {
                     if gesture {

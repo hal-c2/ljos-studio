@@ -1063,8 +1063,7 @@ bundle has where the system makes no links, so `import "alias"` resolves on
 the page too. Links that fan out and meet again would copy a directory once
 per way down, which doubles with every level, so past 10,000 entries reached
 through links (each link followed and each file placed) the export is
-refused rather than written. DECISION: Studio's window has no export UI, so the
-web target has none either. DECISION: Studio's interim builder is a task
+refused rather than written. DECISION: Studio's interim builder is a task
 (`export:web:build`) over ljos-web's own compiler and plugin, not code in a
 crate, so it is gone when request 30 lands; it copies only the listed files,
 asks for Qt only when the site imports the controls, and replaces only a
@@ -1085,6 +1084,45 @@ The fixture's site (`mise run export:web:check`): 3 files, 443 160 bytes
 (157 020 gzipped), almost all ljos-web's runtime and Solid; first
 contentful paint 60–72 ms in headless Chromium, the entry's text shown by
 70–87 ms, served from memory by Playwright.
+
+#### As built: the export panel
+
+`shell/Builtin/ExportPanel.qml` is a modal `Popup` that the toolbar's
+"Export" button and Ctrl+E open (Esc closes; Enter checks). It is the
+`export` call an agent makes: a target (native app, web site), an entry
+(`Main.qml`, else the document shown, else the first), an output directory
+(default `build/<target>`). Opening it, and each change, asks for a dry run
+(a typed directory once typing pauses; "Write bundle" waits for it), and the
+panel lists the files with sizes, blocks, theme, links, imports and
+`left_out` with reasons, and says so when the answer's size cap cut those
+lists short; "Write bundle" exports for real and shows the output, the
+manifest's `run` command (native) or `mise run export:web:build <path>` (web),
+and "Copy path", both with the answer's absolute `path`. A refusal shows the
+tool's message, in the panel only: its calls leave the window's error line be. The panel keeps the last answer and refusal from `Workspace`'s
+`answered`/`refused`. `Workspace` changed in three ways: the window's calls
+carry `fs`, `export` calls are no gesture for its error line, and a call whose
+job panics is refused to whoever waits for it. `features/ui/export.feature`.
+
+The tool's answer gained `replaces` (whether `out` already held a bundle),
+and `path` (`out` as an absolute path), so the warning is the tool's word and
+not the panel's guess (`features/project/export.feature`, golden updated). A
+dry run refuses what the write would.
+
+DECISION: the "Export" button is a toolbar button named by `Export`; the
+real-export button is "Write bundle" so the two have distinct names.
+DECISION: the window grants `fs` to a person's gestures, as it grants every
+capability an agent may hold.
+
+Measured in a release build (`export_perf -- 20 native dry|native|web` on
+the 200-file project; `STUDIO_PERF_EXPORT=hello|200 cargo test --release -p
+studio_blocks --test ui` for the panel):
+
+| Path | p50 | p95 |
+|---|---|---|
+| dry run, 200 files | 3.20 ms | 3.74 ms |
+| `export` native / web, 200 files | 7.59 / 7.14 ms | 8.21 / 8.60 ms |
+| panel open to first list, `samples/hello` | 3.07 ms | 3.49 ms |
+| panel open to first list, 200 files | 14.09 ms | 16.74 ms |
 
 **Requests to ljos-web** (M2's start at 17; these at 30):
 

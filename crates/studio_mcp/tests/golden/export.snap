@@ -72,16 +72,24 @@ expression: value
       "out": {
         "type": "string"
       },
+      "path": {
+        "type": "string"
+      },
+      "replaces": {
+        "type": "boolean"
+      },
       "written": {
         "type": "boolean"
       }
     },
     "required": [
       "out",
+      "path",
       "files",
       "bytes",
       "manifest",
       "written",
+      "replaces",
       "ms"
     ],
     "type": "object"

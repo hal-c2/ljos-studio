@@ -219,6 +219,8 @@ pub struct LeftOut {
 struct ExportOut {
     /// The bundle's directory, relative to the project.
     out: String,
+    /// `out` as an absolute path, which means the same wherever it is used.
+    path: String,
     /// How many files the bundle holds and their size, which stay true when
     /// a long manifest is cut short in this answer (the one written is whole),
     /// copies of links it could not hold as links included.
@@ -227,6 +229,9 @@ struct ExportOut {
     manifest: Manifest,
     /// False for a dry run.
     written: bool,
+    /// Whether `out` held a bundle of either kind before this call, which
+    /// a real export replaces: what a person is told before they write it.
+    replaces: bool,
     ms: f64,
 }
 
@@ -1007,17 +1012,24 @@ fn export(studio: &Mutex<Studio>, a: ExportArgs) -> Result<ExportOut, SurfaceErr
     let root = root.canonicalize().map_err(|e| io(&root, &e))?;
     let manifest = plan(&root, &studio, &a.entry, a.target)?;
     let out = out_dir(&root, a.out.as_deref(), a.target)?;
+    let path = root.join(&out);
+    let replaces = holds_bundle(&path);
+    let path = path.to_string_lossy().into_owned();
     let copied = if a.dry_run {
+        // What the write would refuse, the dry run says first.
+        may_replace(&root, &root.join(&out))?;
         Copied::default()
     } else {
         write(&root, &root.join(&out), &manifest)?
     };
     Ok(ExportOut {
         out,
+        path,
         files: manifest.files.len() + copied.files,
         bytes: manifest.files.iter().map(|f| f.bytes).sum::<u64>() + copied.bytes,
         manifest,
         written: !a.dry_run,
+        replaces,
         ms: studio_core::preview::ms(studio.timer.now().saturating_sub(started)),
     })
 }

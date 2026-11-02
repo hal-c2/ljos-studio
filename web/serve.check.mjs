@@ -19,10 +19,16 @@ console.log(`served at ${url}`);
 
 const browser = await chromium.launch({ headless: true });
 const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
-// The resizes the preview's frame is asked for, counted where they arrive.
+// The resizes the preview's frame is asked for, counted where they arrive,
+// and every size it is given, an open's too.
 await context.addInitScript(() => {
   window.resizes = [];
-  addEventListener("message", (e) => e.data?.request?.call === "resize" && window.resizes.push(e.data.request.size));
+  window.sizes = [];
+  addEventListener("message", (e) => {
+    const request = e.data?.request;
+    if (request?.call === "resize") window.resizes.push(request.size);
+    if (request?.call === "resize" || request?.call === "open") window.sizes.push(request.size);
+  });
 });
 const page = await context.newPage();
 const failures = [];
@@ -152,6 +158,26 @@ check("the page logged no errors", said.length === 0, said);
   });
   const after = (await asked()).slice(before);
   check("a new size is asked for, and the last is the frame's", JSON.stringify(after.at(-1)) === JSON.stringify(want), { after, want });
+}
+// A first preview is laid out at the frame's size even when the shell moved
+// the frame while it compiled, with nothing else happening to tell it so.
+{
+  const fresh = await context.newPage();
+  await fresh.goto(url);
+  await fresh.waitForFunction(() => document.getElementById("state").textContent === "Compiling…", null, { timeout: 60000 });
+  await fresh.setViewportSize({ width: 1000, height: 700 });
+  const during = await fresh.locator("#state").innerText();
+  await fresh.waitForFunction(() => document.getElementById("state").textContent === "Up to date (1)", null, { timeout: 60000 });
+  // Two frames: one for the observers to run, one for what they ask to arrive.
+  await fresh.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))));
+  const inFrame = fresh.frames().find((f) => f !== fresh.mainFrame());
+  const given = await inFrame.evaluate(() => window.sizes);
+  const box = await fresh.evaluate(() => {
+    const frame = document.getElementById("frame").getBoundingClientRect();
+    return { width: Math.round(frame.width), height: Math.round(frame.height) };
+  });
+  check("a first preview is laid out at the size its frame came to while it compiled", JSON.stringify(given.at(-1)) === JSON.stringify(box), { given, box, stateWhenResized: during });
+  await fresh.close();
 }
 await browser.close();
 await stop();

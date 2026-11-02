@@ -9,6 +9,8 @@ ToolBar {
     id: bar
     required property Workspace workspace
     readonly property var preview: workspace.preview
+    // The window shows the export panel when this is called.
+    signal exportRequested
 
     // A preview of the open document on another target or data, as an
     // agent starts one.
@@ -66,6 +68,13 @@ ToolBar {
 
         Item {
             Layout.fillWidth: true
+        }
+
+        ToolButton {
+            text: "Export"
+            Accessible.name: text
+            Accessible.description: "Write a bundle (Ctrl+E)"
+            onClicked: bar.exportRequested()
         }
     }
 }

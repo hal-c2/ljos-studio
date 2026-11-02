@@ -163,6 +163,9 @@ async function refresh() {
     element("state").textContent = failed ? "Not updated" : `Up to date (${++generation})`;
   } while (again);
   busy = false;
+  // The frame may have moved while it opened, when nothing was told a size:
+  // the first open had no picture yet, and an open's size is the one it began with.
+  place();
 }
 element("entry").onchange = refresh;
 refresh();

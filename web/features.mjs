@@ -503,6 +503,7 @@ const STEPS = [
 // written here or listed.
 const NATIVE_ONLY = new Map([
   ['when ^the agent opens the project "([^"]+)" by its absolute path$', "a browser's storage has no absolute paths"],
+  ["then ^the preview has opened no socket$", "a preview is a page of its own (@preview)"],
   ['then ^the preview shows "([^"]*)"$', "a preview is a page of its own (@preview): web/features.browser.mjs"],
   ['then ^Studio has reported the preview reloaded since it was read$', "a preview is a page of its own (@preview)"],
   ['then ^the preview shows "([^"]*)" within (\\d+) seconds$', "a preview is a page of its own (@preview)"],

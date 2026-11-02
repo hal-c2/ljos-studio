@@ -27,12 +27,23 @@ Item {
         onActivated: workspace.dispatch("history", {action: "redo"})
     }
 
+    Shortcut {
+        sequence: "Ctrl+E"
+        onActivated: exporter.show()
+    }
+
+    ExportPanel {
+        id: exporter
+        workspace: workspace
+    }
+
     ColumnLayout {
         anchors.fill: parent
         spacing: 0
 
         Toolbar {
             workspace: workspace
+            onExportRequested: exporter.show()
             Layout.fillWidth: true
         }
 
