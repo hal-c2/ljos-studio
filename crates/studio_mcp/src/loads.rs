@@ -173,10 +173,28 @@ pub(crate) fn imports_for(
             unvouched: Vec::new(),
         });
     };
+    let held = outline::outline(source).unwrap_or_default();
+    // Measured: a component takes `Head.Inner` too, but not from an alias.
+    let takes = |components: &[&str], name: &str| match name.split_once('.') {
+        Some((head, _)) => components.contains(&head) && !target.iter().any(|i| says(head, i)),
+        None => components.contains(&name),
+    };
+    let ours = outline::components(&held);
+    // qml6 won't load such a file whatever `Inner` was, so this can't be left
+    // to the answer, unlike a whole name taken, which may still load.
+    if let Some(left) = held
+        .iter()
+        .map(|node| node.ty.as_str())
+        .find(|ty| ty.contains('.') && takes(&brought, ty))
+    {
+        return Err(refused(
+            "component_takes_name",
+            format!("a pasted inline component would take the name `{left}` in `{doc}`"),
+        ));
+    }
     let was_at = Names::at(store, from, had);
     let here = dir_of(doc);
     let there = dir_of(from);
-    let held = outline::outline(source).unwrap_or_default();
     let mut holds: Vec<String> = Vec::new();
     for node in &held {
         if !holds.contains(&node.ty) && !outline::declares_component(&held, &node.ty) {
@@ -216,9 +234,7 @@ pub(crate) fn imports_for(
     let mut wanted: Vec<&String> = Vec::new();
     for name in &names {
         let was = was_at.lands(name);
-        if compare(&was, &before.lands(name)) == Keeps::Same
-            || outline::declares_component(&held, name)
-        {
+        if compare(&was, &before.lands(name)) == Keeps::Same || takes(&ours, name) {
             continue;
         }
         match &was {
@@ -251,7 +267,7 @@ pub(crate) fn imports_for(
     if let Some(after) = Names::of(store, doc, source, &imports) {
         for name in &names {
             let (was, now) = (was_at.lands(name), after.lands(name));
-            let taken = outline::declares_component(&held, name);
+            let taken = takes(&ours, name);
             if taken || compare(&was, &now) != Keeps::Same {
                 unvouched.push(Unvouched {
                     ty: name.clone(),
@@ -271,7 +287,7 @@ pub(crate) fn imports_for(
         let unread_added = after.unread_imports() > before.unread_imports();
         for ty in &holds {
             let (was, now) = (before.lands(ty), after.lands(ty));
-            let taken = brought.contains(&ty.as_str());
+            let taken = takes(&brought, ty);
             let moved = !imports.is_empty()
                 && compare(&was, &now) != Keeps::Same
                 && (was != now || (was == Lands::CantTell && unread_added));
