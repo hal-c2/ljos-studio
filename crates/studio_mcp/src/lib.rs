@@ -13,6 +13,8 @@ pub mod export;
 mod place_tools;
 pub mod preview;
 mod preview_tools;
+#[cfg(feature = "native")]
+mod project_watch;
 mod review;
 pub mod schema;
 pub mod signals;
@@ -37,7 +39,7 @@ use ljos_mcp_core::{
 use serde_json::json;
 #[cfg(feature = "native")]
 use studio_core::FsStore;
-use studio_core::{Error, Session, Store, StoreError};
+use studio_core::{Address, Error, Session, Store, StoreError};
 use timer::Timer;
 
 /// The writer a Studio window calls as: its edits are the person's, which
@@ -58,6 +60,15 @@ pub struct Studio {
     /// What `node_arrange` `copy` holds. Studio's own, not the system's: an agent has no
     /// system clipboard, and a tool must mean the same to both.
     clipboard: Vec<place_tools::Copied>,
+    /// The objects `node_arrange` `lock` locked, by handle. Studio's own, for
+    /// the session: nothing of it reaches the file.
+    locked: std::collections::HashSet<String>,
+    /// The old and new handle of each rename: an undo gives the object the
+    /// old one back, and it is locked under each.
+    rehandled: Vec<(String, String)>,
+    /// Hears of the files other programs change in the open project.
+    #[cfg(feature = "native")]
+    project_watch: Option<project_watch::ProjectWatch>,
 }
 
 /// Told that what a window shows may have changed. Called with the
@@ -112,11 +123,13 @@ impl Studio {
     pub fn open(workspace: impl Into<PathBuf>) -> Result<Self, StoreError> {
         let store = FsStore::new(workspace.into())?;
         let workspace = store.root().to_owned();
-        Ok(Self::new(
-            workspace,
+        let mut studio = Self::new(
+            workspace.clone(),
             Box::new(store),
             Arc::new(timer::ThreadTimer::default()),
-        ))
+        );
+        studio.watch_project(workspace);
+        Ok(studio)
     }
 
     /// [`Studio::open`] with the time leases are kept by taken from
@@ -128,7 +141,9 @@ impl Studio {
     ) -> Result<Self, StoreError> {
         let store = FsStore::new(workspace.into())?;
         let workspace = store.root().to_owned();
-        Ok(Self::new(workspace, Box::new(store), timer))
+        let mut studio = Self::new(workspace.clone(), Box::new(store), timer);
+        studio.watch_project(workspace);
+        Ok(studio)
     }
 
     fn new(workspace: PathBuf, store: Box<dyn Store>, timer: Arc<dyn Timer>) -> Self {
@@ -141,6 +156,10 @@ impl Studio {
             watchers: Watchers::default(),
             timer,
             clipboard: Vec::new(),
+            locked: std::collections::HashSet::new(),
+            rehandled: Vec::new(),
+            #[cfg(feature = "native")]
+            project_watch: None,
         };
         studio.follow();
         studio
@@ -190,6 +209,32 @@ impl Studio {
     pub fn file_changed(&self) {
         let (previews, watchers, timer) = self.written();
         told_of_write(&previews, &watchers, &timer);
+    }
+
+    /// Keeps the ids of the hidden objects to what the text says now, after a
+    /// call that may have renamed one or undone that.
+    fn hidden_now(&mut self) {
+        let hidden = preview::lock(&self.previews).hidden.clone();
+        if hidden.is_empty() {
+            return;
+        }
+        let ids: std::collections::BTreeSet<(String, String)> = hidden
+            .into_iter()
+            .filter_map(|(doc, handle)| {
+                // A handle an undo took away resolves to nothing, until a redo.
+                let (_, node) = self.session.resolve(&doc, &Address::Node(handle)).ok()?;
+                Some((doc, node.id?))
+            })
+            .collect();
+        let mut previews = preview::lock(&self.previews);
+        if ids == previews.hidden_ids {
+            return;
+        }
+        previews.hidden_ids = ids;
+        previews.write_hidden();
+        drop(previews);
+        // A window woken by the write's own tell may have read before this.
+        self.watchers.tell();
     }
 
     /// Calls `watcher` after every change a window shows: each write of the
@@ -303,12 +348,63 @@ impl Studio {
         if !store.root().starts_with(&self.workspace) {
             return Err(self.outside(asked));
         }
+        let root = store.root().to_owned();
         self.project = relative.to_owned();
         self.session = Session::open(Box::new(store));
         // A preview shows a project; another one needs its own.
-        preview::lock(&self.previews).open = None;
+        {
+            let mut previews = preview::lock(&self.previews);
+            previews.open = None;
+            previews.hidden.clear();
+            previews.hidden_ids.clear();
+        }
+        self.locked.clear();
+        self.rehandled.clear();
         self.follow();
+        self.watch_project(root);
         Ok(())
+    }
+
+    /// Follows the directory the session now holds. The session's own
+    /// writes are noted first, so the event each makes tells nobody twice.
+    #[cfg(feature = "native")]
+    fn watch_project(&mut self, root: PathBuf) {
+        let (previews, watchers, timer) = self.written();
+        let watch = project_watch::ProjectWatch::start(
+            root,
+            Box::new(move |news| match news {
+                project_watch::News::Document => told_of_write(&previews, &watchers, &timer),
+                // What changes the list of files is no reason to spend a
+                // reload: a log the app writes in its project would spend them
+                // all, and the edit it is there for would wait.
+                project_watch::News::Other => watchers.tell(),
+            }),
+        );
+        if let Some(watch) = &watch {
+            let own = watch.own_writes();
+            self.session.on_writing(own);
+        }
+        self.project_watch = watch;
+    }
+}
+
+/// `start` and all that pairs of old and new names link it to.
+fn linked<'a>(
+    pairs: impl Iterator<Item = (&'a str, &'a str)> + Clone,
+    start: &str,
+) -> std::collections::BTreeSet<String> {
+    let mut names = std::collections::BTreeSet::from([start.to_owned()]);
+    loop {
+        let before = names.len();
+        for (old, new) in pairs.clone() {
+            if names.contains(old) || names.contains(new) {
+                names.insert(old.to_owned());
+                names.insert(new.to_owned());
+            }
+        }
+        if names.len() == before {
+            return names;
+        }
     }
 }
 
@@ -366,6 +462,7 @@ impl StudioServer {
             return self.picture(ctx, args, preview_tools::Picturing::Latest);
         }
         let out = self.tools.call(name, ctx, args).0.map(ToolReply::from);
+        lock(&self.studio).hidden_now();
         // Writes tell the watchers as they happen (`follow`); these change
         // what a window shows without writing.
         if out.is_ok() && SHOWN_WITHOUT_WRITING.contains(&name) {

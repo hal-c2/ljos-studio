@@ -40,7 +40,7 @@ pub use slots::Mode;
 pub use states::{ChangeInfo, StateEdit, StateInfo, TransitionInfo, Variants};
 #[cfg(feature = "fs")]
 pub use store::FsStore;
-pub use store::{MemStore, Store, StoreError, inside, listed};
+pub use store::{MemStore, Store, StoreError, document_path, inside, listed};
 
 use address::{Tracked, find_by_key};
 use history::{History, Replayed};
@@ -530,6 +530,18 @@ impl Session {
     /// from now on, after the store has it.
     pub fn on_write(&mut self, f: impl FnMut(&str) + Send + 'static) {
         self.on_write.push(Box::new(f));
+    }
+
+    /// Calls `f` with each file the session is about to write (with its
+    /// text) or remove (`None`) from now on: told before the store has it,
+    /// so whoever watches the disk knows the change for its own however
+    /// fast the disk tells them.
+    pub fn on_writing(&mut self, f: impl Fn(&str, Option<&str>) + Send + Sync + 'static) {
+        let inner = std::mem::replace(&mut self.store, Box::new(MemStore::default()));
+        self.store = Box::new(store::Announcing {
+            inner,
+            writing: Box::new(f),
+        });
     }
 
     fn wrote(&mut self, path: &str) {
@@ -1381,6 +1393,32 @@ impl Session {
                 let (_, parent_node) = self.resolve_now(path, parent)?;
                 let (tree, _) = self.tree_now(path)?;
                 let count = child_count(&tree, &parent_node.path);
+                if let Some(name) = member_name(text) {
+                    if index.is_some() || import.is_some() {
+                        return Err(Error::Invalid(
+                            "a member goes after the object's others, and imports nothing: \
+                             leave `index` and `import` out"
+                                .to_owned(),
+                        ));
+                    }
+                    if has_member(&parent_node, name) {
+                        return Err(Error::Invalid(format!(
+                            "{} already has a member `{name}`",
+                            parent_node.ty
+                        )));
+                    }
+                    let out = qml_edit::apply(
+                        before,
+                        &qml_edit::Edit::InsertObject {
+                            parent: parent_node.path.clone(),
+                            index: count,
+                            text: text.trim().to_owned(),
+                        },
+                    )
+                    .map_err(|e| Error::Invalid(format!("that member does not fit: {e}")))?
+                    .text;
+                    return Ok((out, PathChange::Same, Some(parent_node.path.clone())));
+                }
                 let index = index.unwrap_or(count);
                 let mut text = text.trim().to_owned();
                 let imported = match import {
@@ -3225,6 +3263,50 @@ pub fn diff(before: &str, after: &str) -> Vec<Change> {
         range: start..b.len() - tail,
         replacement: after[start..a.len() - tail].to_owned(),
     }]
+}
+
+/// The name of the member `text` declares (a function, a signal, a property
+/// or a signal handler); `None` for an object, which starts with its type.
+fn member_name(text: &str) -> Option<&str> {
+    let ident = |s: &str| {
+        let end = s
+            .find(|c: char| !c.is_alphanumeric() && c != '_')
+            .unwrap_or(s.len());
+        (end > 0).then_some(end)
+    };
+    let text = text.trim();
+    let mut words = text.split_whitespace();
+    let mut first = words.next()?;
+    while matches!(first, "readonly" | "required" | "default") {
+        first = words.next()?;
+    }
+    let after = |word: &str, skip_type: bool| {
+        let at = text.find(word)? + word.len();
+        let mut rest = text[at..].trim_start();
+        if skip_type {
+            rest = rest[rest.find(char::is_whitespace)?..].trim_start();
+        }
+        Some(&rest[..ident(rest)?])
+    };
+    match first {
+        "function" => after("function", false),
+        "signal" => after("signal", false),
+        "property" => after("property", true),
+        _ => {
+            let end = ident(text)?;
+            let handler = text.starts_with("on")
+                && text[2..].starts_with(|c: char| c.is_ascii_uppercase())
+                && text[end..].trim_start().starts_with(':');
+            handler.then(|| &text[..end])
+        }
+    }
+}
+
+fn has_member(object: &outline::Node, name: &str) -> bool {
+    object.functions.iter().any(|f| f == name)
+        || object.properties.iter().any(|p| p == name)
+        || object.signals.iter().any(|s| s.name == name)
+        || object.bindings.iter().any(|b| b.name == name)
 }
 
 /// `text` (an object) with `id: <name>` as its first member, unless it has

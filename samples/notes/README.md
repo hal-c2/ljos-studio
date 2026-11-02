@@ -7,8 +7,8 @@ A small notes app for the phone frame, made to dogfood Studio
   `Motion`: the list (`ListScreen.qml`), a note (`DetailScreen.qml`), the
   add and edit form (`EditScreen.qml`) and settings (`SettingsScreen.qml`);
 - the list read from `entries.json` by a `JsonListModel` (`EntryModel.qml`,
-  as `document_new` with `data` writes it). `JsonListModel` is read-only,
-  so `Main.qml` copies its rows into a `ListModel` that the screens edit;
+  as `document_new` with `data` writes it). The screens edit
+  that model; `entries.json` is read again when the app starts;
 - form validation: a title and a place are required and the date must read
   `YYYY-MM-DD`; Save is enabled only when the form is valid, and each field
   says what is wrong with it;

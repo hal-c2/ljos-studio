@@ -40,6 +40,41 @@ pub trait Store: Send + Sync {
     }
 }
 
+/// Told of a file about to be written with its text, or removed (`None`).
+pub(crate) type Writing = Box<dyn Fn(&str, Option<&str>) + Send + Sync>;
+
+/// A store that says what it is about to write.
+pub(crate) struct Announcing {
+    pub(crate) inner: Box<dyn Store>,
+    pub(crate) writing: Writing,
+}
+
+impl Store for Announcing {
+    fn list(&self, extension: &str) -> Vec<String> {
+        self.inner.list(extension)
+    }
+    fn read(&self, path: &str) -> Result<String, StoreError> {
+        self.inner.read(path)
+    }
+    fn write(&self, path: &str, text: &str) -> Result<(), StoreError> {
+        (self.writing)(path, Some(text));
+        self.inner.write(path, text)
+    }
+    fn remove(&self, path: &str) -> Result<(), StoreError> {
+        (self.writing)(path, None);
+        self.inner.remove(path)
+    }
+    fn exists(&self, path: &str) -> bool {
+        self.inner.exists(path)
+    }
+    fn describe(&self) -> String {
+        self.inner.describe()
+    }
+    fn resolved(&self, path: &str) -> Result<String, StoreError> {
+        self.inner.resolved(path)
+    }
+}
+
 /// A project directory on disk.
 #[cfg(feature = "fs")]
 #[derive(Debug)]
@@ -101,7 +136,7 @@ impl FsStore {
 /// Whether `path` can be a document: a `.qml` file or a theme file, in
 /// normal form so one file is not two documents by spelling, outside the
 /// directories a walk leaves out.
-pub(crate) fn document_path(path: &str) -> bool {
+pub fn document_path(path: &str) -> bool {
     let mut parts = path.split('/').rev();
     let file = parts.next().unwrap_or_default();
     (file.ends_with(".qml") || file == crate::theme::FILE)

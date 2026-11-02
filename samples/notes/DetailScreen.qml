@@ -18,7 +18,6 @@ Rectangle {
         back: true
         onBackTapped: screen.stack.pop()
         ToolButton {
-            palette.buttonText: Colors.text
             text: "Edit"
             onClicked: screen.stack.push(Qt.resolvedUrl("EditScreen.qml"), { model: screen.model, index: screen.index, stack: screen.stack })
         }

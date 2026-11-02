@@ -561,6 +561,19 @@ impl Window {
         }
     }
 
+    /// The answer to a gesture's call, as the worker's arrives: for one that
+    /// was on its way when the person did something else.
+    fn answer(&mut self, tool: &str, answer: Json) -> StepResult {
+        let workspace = self.workspace;
+        let engine = &mut self.stage.engine;
+        studio_blocks::Workspace::emit_answered(
+            &Cx::new(engine, workspace),
+            tool.to_owned(),
+            answer,
+        )
+        .map_err(|e| format!("{e:?}"))
+    }
+
     fn tree(&self) -> AccessibleNode {
         ljos_drive::a11y::tree(&self.stage.scene, String::new())
     }
@@ -713,7 +726,15 @@ impl Window {
             .ok_or("no layers list in the window")?;
         let mut rows = Vec::new();
         collect(list, &mut |n| {
-            if n.key.is_some() && n.name != "Layers" && n.role != "label" && n.role != "statictext"
+            // The row's eye and lock and its name field are not rows.
+            let control = ["Hide ", "Show ", "Lock ", "Unlock ", "Name of "]
+                .iter()
+                .any(|p| n.name.starts_with(p));
+            if n.key.is_some()
+                && !control
+                && n.name != "Layers"
+                && n.role != "label"
+                && n.role != "statictext"
             {
                 rows.push(n.clone());
             }
@@ -1462,8 +1483,8 @@ fn call_as(w: &mut UiWorld, client: Option<String>, tool: &str, step: &Step) -> 
     let args: Json = serde_json::from_str(&docstring(step)?).map_err(|e| e.to_string())?;
     let window = w.window()?;
     let ctx = CallCtx {
-        caps: CapSet::of([Cap::Inspect, Cap::Mutate]),
         client,
+        ..CallCtx::new(CapSet::of([Cap::Inspect, Cap::Mutate]))
     };
     window
         .server
@@ -2023,6 +2044,295 @@ fn tokens_say(w: &mut UiWorld, pattern: String) -> StepResult {
         })
 }
 
+#[when(regex = r#"^the person drags the layer "([^"]+)" onto "([^"]+)"$"#)]
+fn drags_layer(w: &mut UiWorld, from: String, onto: String) -> StepResult {
+    let window = w.window()?;
+    let row = |window: &mut Window, name: &str| -> Result<Point, String> {
+        let node = window
+            .shown_layers()?
+            .into_iter()
+            .find(|n| n.name == name)
+            .ok_or_else(|| format!("no layer {name:?}"))?;
+        let key = node.key.ok_or("the row has no key")?;
+        window
+            .stage
+            .drive()
+            .aim_at_node(key)
+            .map_err(|why| format!("{why:?}"))
+    };
+    let start = row(window, &from)?;
+    let end = row(window, &onto)?;
+    let mut driver = window.stage.drive();
+    driver
+        .press(start, MouseButtons::LEFT)
+        .map_err(drive_error)?;
+    // Past the threshold wherever the row lies, so a drag back to its own row
+    // is still a drag.
+    let aside = Point::new(start.x + 12.0, start.y + 12.0);
+    driver.move_to(aside).map_err(drive_error)?;
+    driver.move_to(end).map_err(drive_error)?;
+    driver
+        .release(end, MouseButtons::LEFT)
+        .map_err(drive_error)?;
+    window.rest()
+}
+
+#[when(regex = r#"^the person double-clicks the layer "([^"]+)"$"#)]
+fn double_clicks_layer(w: &mut UiWorld, name: String) -> StepResult {
+    let window = w.window()?;
+    let node = window
+        .shown_layers()?
+        .into_iter()
+        .find(|n| n.name == name)
+        .ok_or_else(|| format!("no layer {name:?}"))?;
+    let key = node.key.ok_or("the row has no key")?;
+    let mut driver = window.stage.drive();
+    let at = driver.aim_at_node(key).map_err(|why| format!("{why:?}"))?;
+    driver
+        .click(at, MouseButtons::LEFT, 2)
+        .map_err(drive_error)?;
+    window.rest()
+}
+
+#[when(regex = r#"^the person enters "([^"]+)" as the layer's name$"#)]
+fn enters_layer_name(w: &mut UiWorld, name: String) -> StepResult {
+    let window = w.window()?;
+    let tree = window.tree();
+    let field = find(&tree, &|n| {
+        n.name.starts_with("Name of ") && n.key.is_some()
+    })
+    .cloned()
+    .ok_or_else(|| format!("no name field; the window holds {}", names(&tree)))?;
+    window.enter(&field, &name)
+}
+
+#[then(regex = r#"^the layers panel has the button "([^"]+)"$"#)]
+fn layers_has_button(w: &mut UiWorld, name: String) -> StepResult {
+    let tree = w.window()?.tree();
+    find(&tree, &|n| n.name == name && n.role == "button")
+        .map(|_| ())
+        .ok_or_else(|| format!("no button {name:?}; the window holds {}", names(&tree)))
+}
+
+#[then(regex = r#"^the history does not list "([^"]+)"$"#)]
+fn history_lists_not(w: &mut UiWorld, label: String) -> StepResult {
+    let done = w.window()?.read_json("done");
+    (!done.to_string().contains(&label))
+        .then_some(())
+        .ok_or_else(|| format!("the history lists {done}"))
+}
+
+#[then(regex = r#"^the file "([^"]+)" says:$"#)]
+fn file_says_all(w: &mut UiWorld, name: String, step: &Step) -> StepResult {
+    let got = std::fs::read_to_string(w.dir.path().join(&name)).map_err(|e| e.to_string())?;
+    let want = file_text(step)?;
+    (got == want)
+        .then_some(())
+        .ok_or_else(|| format!("`{name}` says:\n{got}"))
+}
+
+#[then(regex = r#"^the inspector has the button "([^"]+)"$"#)]
+fn inspector_has_button(w: &mut UiWorld, name: String) -> StepResult {
+    let tree = w.window()?.tree();
+    find(&tree, &|n| n.name == name && n.role == "button")
+        .map(|_| ())
+        .ok_or_else(|| format!("no button {name:?}; the window holds {}", names(&tree)))
+}
+
+#[then(regex = r#"^the inspector has no button "([^"]+)"$"#)]
+fn inspector_has_no_button(w: &mut UiWorld, name: String) -> StepResult {
+    let tree = w.window()?.tree();
+    find(&tree, &|n| n.name == name && n.role == "button")
+        .map_or(Ok(()), |_| Err(format!("a button {name:?}")))
+}
+
+#[then(
+    regex = r#"^the inspector's "([^"]+)" has (a picker|no picker), painted "([^"]*)", with the note "([^"]*)"$"#
+)]
+fn colour_row_offers(
+    w: &mut UiWorld,
+    row: String,
+    picker: String,
+    paint: String,
+    note: String,
+) -> StepResult {
+    let button = format!("Pick {row}");
+    let tree = w.window()?.tree();
+    let Some(swatch) = find(&tree, &|n| n.name == button && n.role == "button").cloned() else {
+        return (picker == "no picker")
+            .then_some(())
+            .ok_or_else(|| format!("no button {button:?}; the window holds {}", names(&tree)));
+    };
+    if picker == "no picker" {
+        return Err(format!("a button {button:?}"));
+    }
+    if swatch.description != paint {
+        return Err(format!("the swatch paints {:?}", swatch.description));
+    }
+    clicks_button(w, button)?;
+    let tree = w.window()?.tree();
+    let says = find(&tree, &|n| n.name.starts_with("Worked out by")).map(|n| n.name.as_str());
+    (says.unwrap_or("") == note)
+        .then_some(())
+        .ok_or_else(|| format!("the picker's note says {says:?}"))
+}
+
+#[when(regex = r#"^the person enters "([^"]*)" in the colour picker$"#)]
+fn enters_colour(w: &mut UiWorld, value: String) -> StepResult {
+    let window = w.window()?;
+    let tree = window.tree();
+    let field = find(&tree, &|n| n.name == "Colour" && n.key.is_some())
+        .cloned()
+        .ok_or_else(|| format!("no colour field; the window holds {}", names(&tree)))?;
+    window.enter(&field, &value)
+}
+
+#[when(
+    regex = r#"^the person drags the picker's "([^"]+)" to its middle while an agent selects "([^"]+)"$"#
+)]
+fn drags_picker_while_selecting(w: &mut UiWorld, name: String, other: String) -> StepResult {
+    let doc = w.window()?.read_json("doc");
+    let args = serde_json::json!({"doc": doc, "nodes": [{"id": other}]});
+    drags_picker_while(w, &name, "node_select", args)
+}
+
+#[when(
+    regex = r#"^the person drags the picker's "([^"]+)" to its middle while an agent calls "([^"]+)" with '(.+)'$"#
+)]
+fn drags_picker_while_calling(
+    w: &mut UiWorld,
+    name: String,
+    tool: String,
+    args: String,
+) -> StepResult {
+    let args = serde_json::from_str(&args).map_err(|e| format!("{e}"))?;
+    drags_picker_while(w, &name, &tool, args)
+}
+
+fn drags_picker_while(w: &mut UiWorld, name: &str, tool: &str, args: Json) -> StepResult {
+    let window = w.window()?;
+    let tree = window.tree();
+    let slider = find(&tree, &|n| n.name == name && n.role == "slider")
+        .cloned()
+        .ok_or_else(|| format!("no slider {name:?}; the window holds {}", names(&tree)))?;
+    let key = slider.key.ok_or("the slider has no key")?;
+    let mut driver = window.stage.drive();
+    let middle = driver.aim_at_node(key).map_err(|why| format!("{why:?}"))?;
+    driver
+        .press(middle, MouseButtons::LEFT)
+        .map_err(drive_error)?;
+    driver
+        .move_to(Point::new(middle.x - 12.0, middle.y))
+        .map_err(drive_error)?;
+    driver.move_to(middle).map_err(drive_error)?;
+    let ctx = CallCtx::new(CapSet::of([Cap::Inspect, Cap::Mutate]));
+    window
+        .server
+        .call(tool, &ctx, args)
+        .map_err(|e| format!("the agent was refused: {}", e.to_value()))?;
+    window.rest()?;
+    window
+        .stage
+        .drive()
+        .release(middle, MouseButtons::LEFT)
+        .map_err(drive_error)?;
+    window.rest()
+}
+
+#[when(
+    regex = r#"^the person clicks the button "([^"]+)" and the preview's answer about "([^"]+)" comes first, saying "([^"]+)"$"#
+)]
+fn late_answer(w: &mut UiWorld, button: String, about: String, says: String) -> StepResult {
+    let window = w.window()?;
+    let tree = window.tree();
+    let node = find(&tree, &|n| n.name == button && n.role == "button")
+        .cloned()
+        .ok_or_else(|| format!("no button {button:?}; the window holds {}", names(&tree)))?;
+    let key = node.key.ok_or("the button has no key")?;
+    let name = button
+        .strip_prefix("Pick ")
+        .ok_or("not a picker's button")?;
+    let mut driver = window.stage.drive();
+    let at = driver.aim_at_node(key).map_err(|why| format!("{why:?}"))?;
+    driver
+        .click(at, MouseButtons::LEFT, 1)
+        .map_err(drive_error)?;
+    let picker = ljos_drive::find_below(window.engine(), window.root, "colourPicker")
+        .ok_or("the window has no colour picker")?;
+    // The driver's click waits for the real answer, so the picker is put
+    // back to waiting for the late one to find it as it would have.
+    window
+        .engine()
+        .write_by_name(picker, "waiting", Value::Bool(true))
+        .map_err(|e| format!("{e:?}"))?;
+    let answer = serde_json::json!({"id": about, "state": {name: says}, "mocked": false});
+    window.answer("preview_state", answer)?;
+    window.rest()
+}
+
+#[then(regex = r#"^the window has no colour picker open$"#)]
+fn no_picker_open(w: &mut UiWorld) -> StepResult {
+    let tree = w.window()?.tree();
+    find(&tree, &|n| n.name == "Colour")
+        .is_none()
+        .then_some(())
+        .ok_or_else(|| "the colour picker is still open".to_owned())
+}
+
+#[then(regex = r#"^the picker's "([^"]+)" can be moved$"#)]
+fn picker_slider_enabled(w: &mut UiWorld, name: String) -> StepResult {
+    let window = w.window()?;
+    let picker = ljos_drive::find_below(window.engine(), window.root, "colourPicker")
+        .ok_or("the window has no colour picker")?;
+    (window.engine().read_by_name(picker, "known") == Value::Bool(true))
+        .then_some(())
+        .ok_or_else(|| format!("the picker's {name:?} stays still: it has no colour to start from"))
+}
+
+#[when(regex = r#"^the person drags the picker's "([^"]+)" to its middle$"#)]
+fn drags_picker_slider(w: &mut UiWorld, name: String) -> StepResult {
+    let window = w.window()?;
+    let tree = window.tree();
+    let slider = find(&tree, &|n| n.name == name && n.role == "slider")
+        .cloned()
+        .ok_or_else(|| format!("no slider {name:?}; the window holds {}", names(&tree)))?;
+    let key = slider.key.ok_or("the slider has no key")?;
+    let mut driver = window.stage.drive();
+    let middle = driver.aim_at_node(key).map_err(|why| format!("{why:?}"))?;
+    driver
+        .press(middle, MouseButtons::LEFT)
+        .map_err(drive_error)?;
+    // Past the threshold, as a hand goes: the end is the slider's middle.
+    let start = Point::new(middle.x - 12.0, middle.y);
+    driver.move_to(start).map_err(drive_error)?;
+    driver.move_to(middle).map_err(drive_error)?;
+    driver
+        .release(middle, MouseButtons::LEFT)
+        .map_err(drive_error)?;
+    window.rest()
+}
+
+#[then(regex = r#"^the colour picker waits on nothing$"#)]
+fn picker_waits_on_nothing(w: &mut UiWorld) -> StepResult {
+    let window = w.window()?;
+    let picker = ljos_drive::find_below(window.engine(), window.root, "colourPicker")
+        .ok_or("the window has no colour picker")?;
+    (window.engine().read_by_name(picker, "waiting") == Value::Bool(false))
+        .then_some(())
+        .ok_or_else(|| "the colour picker still waits for the preview".to_owned())
+}
+
+#[then(regex = r#"^the colour picker holds "([^"]+)"$"#)]
+fn picker_holds(w: &mut UiWorld, want: String) -> StepResult {
+    let tree = w.window()?.tree();
+    let field = find(&tree, &|n| n.name == "Colour" && n.key.is_some())
+        .cloned()
+        .ok_or_else(|| format!("no colour field; the window holds {}", names(&tree)))?;
+    (field.value == want)
+        .then_some(())
+        .ok_or_else(|| format!("the colour picker holds {:?}", field.value))
+}
+
 #[then(regex = r#"^the layers panel lists "([^"]*)"$"#)]
 fn layers_list(w: &mut UiWorld, want: String) -> StepResult {
     let window = w.window()?;
@@ -2243,6 +2553,39 @@ fn export_does_not_say(w: &mut UiWorld, pattern: String) -> StepResult {
         Some(n) => Err(format!("the export panel says {:?}", n.name)),
         None => Ok(()),
     }
+}
+
+#[when(regex = r#"^the file "([^"]+)" is written outside Studio:$"#)]
+fn written_outside(w: &mut UiWorld, name: String, step: &Step) -> StepResult {
+    the_file(w, name, step)
+}
+
+/// Lets the window run until `shown` holds for its documents panel. The
+/// report comes from another thread on the real clock.
+fn documents_until(w: &mut UiWorld, seconds: u64, name: &str, shown: bool) -> StepResult {
+    let window = w.window()?;
+    for _ in 0..seconds * 20 {
+        if window.node("Documents", None, name).is_ok() == shown {
+            return Ok(());
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        window.stage.drive().advance(50).map_err(drive_error)?;
+        window.rest()?;
+    }
+    Err(format!(
+        "after {seconds} seconds the documents panel still {} {name:?}",
+        if shown { "lacks" } else { "lists" }
+    ))
+}
+
+#[then(regex = r#"^the documents panel lists "([^"]+)" within (\d+) seconds$"#)]
+fn documents_lists(w: &mut UiWorld, name: String, seconds: u64) -> StepResult {
+    documents_until(w, seconds, &name, true)
+}
+
+#[then(regex = r#"^the documents panel does not list "([^"]+)" within (\d+) seconds$"#)]
+fn documents_lists_not(w: &mut UiWorld, name: String, seconds: u64) -> StepResult {
+    documents_until(w, seconds, &name, false)
 }
 
 #[when(regex = r#"^the file "([^"]+)" is deleted$"#)]

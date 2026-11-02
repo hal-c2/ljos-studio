@@ -168,7 +168,14 @@ impl StudioWorld {
         let caps = self.caps;
         let server = self.server()?;
         let started = std::time::Instant::now();
-        let out = server.call(tool, &CallCtx { caps, client }, args);
+        let out = server.call(
+            tool,
+            &CallCtx {
+                client,
+                ..CallCtx::new(caps)
+            },
+            args,
+        );
         let took = started.elapsed();
         let (out, images) = match out {
             Ok(reply) => (Ok(reply.structured), reply.images),
@@ -746,6 +753,15 @@ fn answer_contains(w: &mut StudioWorld, pointer: String, text: String) -> StepRe
     match got.as_str() {
         Some(got) if got.contains(&text) => Ok(()),
         _ => Err(format!("`{pointer}` is {got}, without {text:?}")),
+    }
+}
+
+#[then(regex = r#"^the answer's "(/[^"]*)" does not contain "([^"]*)"$"#)]
+fn answer_lacks(w: &mut StudioWorld, pointer: String, text: String) -> StepResult {
+    let got = at(w.answer()?, &pointer)?;
+    match got.as_str() {
+        Some(got) if !got.contains(&text) => Ok(()),
+        _ => Err(format!("`{pointer}` is {got}, with {text:?}")),
     }
 }
 

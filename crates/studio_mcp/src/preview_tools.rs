@@ -72,6 +72,10 @@ struct StateArgs {
     /// Put `node` in this QML state of its own for the preview, through
     /// reloads, until `""`; the file does not change.
     show: Option<String>,
+    /// Properties of `node` to read into `state`, as the running app has
+    /// them: what an expression works out to.
+    #[serde(default)]
+    read: Vec<String>,
     /// Values to assign to a block's state (mocked previews only).
     set: Option<Map<String, Value>>,
     /// An object (with an `id`) to click first, after `set`, as a person
@@ -295,10 +299,17 @@ fn open(studio: &Mutex<Studio>, a: OpenArgs) -> Result<OpenOut, SurfaceError> {
         let open = previews.open.as_mut().expect("checked");
         let mut reloads = Vec::new();
         let changed = change(open, size, target, state, &aliases, &mut reloads);
+        // A mock switched in starts the app again, with everything showing.
+        let restarted = reloads
+            .iter()
+            .any(|reload| matches!(reload, Reload::Applied { .. }));
         for reload in reloads {
             previews.record(reload, started_at);
         }
         changed.map_err(|e| preview_error(previews.failed(e)))?;
+        if restarted {
+            previews.write_hidden();
+        }
     } else {
         // One preview at a time: the last one ends before the next starts.
         if let Some(mut last) = previews.open.take() {
@@ -331,6 +342,7 @@ fn open(studio: &Mutex<Studio>, a: OpenArgs) -> Result<OpenOut, SurfaceError> {
             clicks: 0,
             shown: None,
         });
+        previews.write_hidden();
     }
     Ok(OpenOut {
         doc: a.doc,
@@ -461,6 +473,8 @@ fn state(studio: &Mutex<Studio>, a: StateArgs) -> Result<StateOut, SurfaceError>
         // It changes the picture without a reload, as a click does.
         open.clicks += 1;
     }
+    let mut names = names;
+    names.extend(a.read);
     let mut asked = names.clone();
     // A block may publish a `state` of its own; the variant is QML's.
     let qml_state = "state".to_owned();
@@ -605,6 +619,11 @@ pub(crate) fn pick(
             declared.column as usize,
         )
         .map_err(error)?;
+    // A locked object is not to be taken by a click: what lies under it is
+    // what the person is after, and the preview names only the topmost.
+    if studio.locked.contains(&handle) {
+        return Ok(None);
+    }
     Ok(Some((declared.file, handle)))
 }
 
@@ -737,9 +756,10 @@ pub(crate) fn add(registry: ToolRegistry, studio: &Arc<Mutex<Studio>>) -> ToolRe
         .with(
             ToolDef::new::<StateArgs>(
                 "preview_state",
-                "Read an object in the preview: its QML state (`variant`) and a block's published \
-                 state, which `set` assigns when the block is mocked. `click` or `click_at` clicks \
-                 first, as a person does, so a flow plays. Objects are found by `id`.",
+                "Read an object in the preview: its QML state (`variant`), a block's published \
+                 state, which `set` assigns when the block is mocked, and any property named in \
+                 `read`. `click` or `click_at` clicks first, as a person does, so a flow plays. \
+                 Objects are found by `id`.",
             )
             .answers::<StateOut>()
             .requires(Cap::Run)

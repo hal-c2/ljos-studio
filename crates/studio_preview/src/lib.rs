@@ -365,7 +365,18 @@ impl PreviewHost for NativeHost {
 
     fn outline(&mut self) -> Result<String, PreviewError> {
         let answer = self.call("app_snapshot", json!({}))?;
-        Ok(answer.text.unwrap_or_else(|| answer.structured.to_string()))
+        let shown = answer.text.unwrap_or_else(|| answer.structured.to_string());
+        let listed = self.call("app_objects", json!({ "max": 5000 }))?;
+        let rows = listed.structured["objects"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default();
+        let items = self.item_lines(&rows)?;
+        Ok(if items.is_empty() {
+            shown
+        } else {
+            format!("{shown}\n\nItems:\n{items}")
+        })
     }
 
     fn read(&mut self, id: &str, names: &[String]) -> Result<Map<String, Value>, PreviewError> {
@@ -474,9 +485,8 @@ impl PreviewHost for NativeHost {
         if types.is_empty() {
             return Ok(out);
         }
-        // Ljós lists objects without saying where each is or was declared
-        // (Ljós request 7), so an object with no id takes reading objects of
-        // its type one by one.
+        // A row has the box in the window but not the box in its parent, so
+        // an object with no id takes reading objects of its type one by one.
         let listed = self.call("app_objects", json!({ "max": 5000 }))?;
         let mut read = 0;
         let rows = listed.structured["objects"]
@@ -538,6 +548,70 @@ impl NativeHost {
             }
             Err(e) => Err(e),
         }
+    }
+
+    /// The project's visible items, one line each, indented by depth. The
+    /// snapshot above them only names what has an accessible role, so a
+    /// card of a `Rectangle` and a `Text` shows here. What a style's or a
+    /// module's file declares is left out: it is not the document's to read.
+    fn item_lines(&mut self, rows: &[Value]) -> Result<String, PreviewError> {
+        let mut lines = Vec::new();
+        let mut read = 0;
+        let mut hidden_below = None;
+        for row in rows {
+            let depth = row["depth"].as_u64().unwrap_or(0);
+            if hidden_below.is_some_and(|hidden| depth > hidden) {
+                continue;
+            }
+            hidden_below = None;
+            if row["visible"] == false {
+                hidden_below = Some(depth);
+                continue;
+            }
+            let (Some(bounds), Some(at)) = (row["bounds"].as_array(), row["at"].as_str()) else {
+                continue;
+            };
+            let at = at.rsplit_once(':').map_or(at, |(line, _column)| line);
+            let Some((file, line)) = at.rsplit_once(':') else {
+                continue;
+            };
+            let file = self.document(file);
+            if file.contains("://") || file.starts_with('/') {
+                continue;
+            }
+            let number = |i: usize| bounds.get(i).and_then(Value::as_f64).unwrap_or(0.0);
+            let id = row["id"]
+                .as_str()
+                .map(|id| format!("#{id}"))
+                .unwrap_or_default();
+            // A row does not carry what a text says, and it is what tells
+            // one card of a list from the next.
+            let mut says = String::new();
+            let ty = row["type"].as_str().unwrap_or("object");
+            if matches!(ty, "Text" | "Label") && read < MOST_READ {
+                read += 1;
+                if let Some(handle) = row["handle"].as_str() {
+                    let answer = self.call("app_inspect", json!({ "target": handle }))?;
+                    let rows = answer.structured["properties"].as_array();
+                    if let Some(text) = rows
+                        .and_then(|rows| rows.iter().find(|r| r["name"] == "text"))
+                        .map(value_of)
+                        .and_then(|v| v.as_str().map(str::to_owned))
+                    {
+                        says = format!(" {text:?}");
+                    }
+                }
+            }
+            lines.push(format!(
+                "{}{ty}{id} {},{} {}x{} {file}:{line}{says}",
+                "  ".repeat(usize::try_from(depth).unwrap_or(0)),
+                number(0),
+                number(1),
+                number(2),
+                number(3),
+            ));
+        }
+        Ok(lines.join("\n"))
     }
 
     /// An `app_inspect` answer as a [`Placed`]; `None` for what is not an item.

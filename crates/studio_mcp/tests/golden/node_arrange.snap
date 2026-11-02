@@ -9,7 +9,7 @@ expression: value
     "open_world": false,
     "read_only": false
   },
-  "description": "What a canvas gesture does; each edit one undo step, all or none. `geometry`: boxes, drag rules, siblings. `place`: x/y/size, writing what governs each object (anchor margins, Layout.preferred*); refused `arranged` or `anchored` where overridden. `align`, `copy`, `paste`, `duplicate`, `remove`.",
+  "description": "A canvas gesture; each edit one undo step. `geometry`: boxes, drag rules, siblings. `place`: x/y/size, writing what governs each object; refused `arranged`/`anchored` where overridden. `align`, `copy`, `paste`, `duplicate`, `remove`, `rename`. `hide`, `show`, `lock`, `unlock` leave the file alone.",
   "inputSchema": {
     "$defs": {
       "Action": {
@@ -20,7 +20,12 @@ expression: value
           "copy",
           "paste",
           "duplicate",
-          "remove"
+          "remove",
+          "rename",
+          "hide",
+          "show",
+          "lock",
+          "unlock"
         ],
         "type": "string"
       },
@@ -134,6 +139,13 @@ expression: value
         "description": "Needed when a node is named by path.",
         "type": [
           "integer",
+          "null"
+        ]
+      },
+      "name": {
+        "description": "For `rename`: the object's new `id`.",
+        "type": [
+          "string",
           "null"
         ]
       },

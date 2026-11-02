@@ -38,6 +38,10 @@ pub struct Layer {
     /// Who holds it, or an object it is in, when that is another writer
     /// than the window (`node_select` with `hold`); empty otherwise.
     pub held: String,
+    /// `node_arrange` `hide` took it out of the preview.
+    pub hidden: bool,
+    /// `node_arrange` `lock` keeps gestures off it.
+    pub locked: bool,
 }
 
 /// A review comment of the open document, as a window lists it.
@@ -60,6 +64,9 @@ pub struct Commented {
 pub struct Shown {
     pub name: String,
     pub value: String,
+    /// A row whose value is a colour by its declaration, a name too.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub colour: bool,
 }
 
 /// The selected object's place in [`View::text`], in UTF-16 units, as a
@@ -311,11 +318,19 @@ impl Studio {
                             index,
                             comments: 0,
                             held: String::new(),
+                            hidden: false,
+                            locked: self.locked.contains(node),
                         }
                     })
                     .collect();
             }
             Err(e) => view.problem = e.to_string(),
+        }
+        {
+            let previews = preview::lock(&self.previews);
+            for layer in &mut view.layers {
+                layer.hidden = previews.is_hidden(doc, &layer.node);
+            }
         }
         view.flow = self.flow(doc).unwrap_or_default();
         // A sidecar that does not read shows no comments here; `review`
@@ -396,8 +411,20 @@ impl Studio {
                 .map(|b| Shown {
                     name: b.name.clone(),
                     value: b.value.clone(),
+                    colour: b.colour,
                 })
                 .collect();
+            // Declared without a value (`property var stack`): nothing is
+            // written to show, and a row is how it gets one.
+            for name in &node.properties {
+                if !node.bindings.iter().any(|b| &b.name == name) {
+                    view.inspector.push(Shown {
+                        name: name.clone(),
+                        value: String::new(),
+                        colour: node.colours.contains(name),
+                    });
+                }
+            }
             if let Ok(variants) = self.session.variants(doc, &Address::Node(handle.clone())) {
                 view.states = variants.states;
             }

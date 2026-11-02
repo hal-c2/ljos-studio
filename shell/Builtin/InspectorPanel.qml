@@ -1,6 +1,7 @@
-// The selected object's bindings as written. A value is set as a literal
-// (`property_set`); "Bind" sets it as an expression (`binding_set`). The
-// last row adds a property not yet bound.
+// The selected object's bindings as written, and the properties it declares
+// without a value. A value is set as a literal (`property_set`); "Bind" sets
+// it as an expression (`binding_set`). The last row adds a property not yet
+// bound. A colour has a swatch, which opens a picker.
 //
 // Below them, its states (`state_edit`): one is picked to edit the values
 // it changes and the condition that turns it on, or to give it a
@@ -52,7 +53,11 @@ Panel {
     signal reseed()
     Connections {
         target: panel.workspace
-        function onSelectedChanged() { panel.reseed() }
+        function onSelectedChanged() {
+            panel.reseed()
+            // The selection is shared, and what is open was opened on another.
+            picker.close()
+        }
         function onRefused(tool, error) {
             if (["property_set", "binding_set", "state_edit"].includes(tool))
                 panel.reseed()
@@ -70,9 +75,39 @@ Panel {
     // goes back to it if the rename is refused.
     property string renamedPicked: ""
 
-    function set(name, text) {
+    // What a row offers of colour: all of the swatch, the picker and its note
+    // follow this, and features/ui/inspector.feature's table says what each
+    // kind of row gets. The row's type or name says it is meant to be a colour,
+    // which the runtime cannot: "red" is a fine colour and a fine label. So
+    // text only earns a picker by itself when it is `#`, a written colour by
+    // any reading.
+    function colourRow(row, written) {
+        const text = writtenText(written)
+        const colour = text !== null && writesColour(text) ? text : ""
+        return {
+            picker: row.colour === true || /(^|\.)[a-zA-Z]*[cC]olor$/.test(row.name) || colour.charAt(0) === "#",
+            paint: colour,
+            note: written !== "" && text === null
+        }
+    }
+    // The text a value spells out, or null when it is worked out instead.
+    function writtenText(value) {
+        return /^"[^"]*"$/.test(value) ? value.slice(1, -1) : null
+    }
+    // The runtime's own reading: what it does not parse would not paint.
+    function writesColour(text) {
+        try {
+            Qt.color(text)
+            return true
+        } catch (e) {
+            return false
+        }
+    }
+
+    // On the selected object unless a picker says which it was opened on.
+    function set(name, text, node) {
         if (picked !== "") {
-            record(name, text)
+            record(name, text, node)
             return
         }
         const parsed = literal(text)
@@ -83,7 +118,7 @@ Panel {
         refusal.text = ""
         workspace.dispatch("property_set", {
             doc: workspace.doc,
-            node: {node: workspace.selected},
+            node: {node: node || workspace.selected},
             name: name,
             value: parsed.value
         })
@@ -151,12 +186,13 @@ Panel {
 
     // What a state changes is written with the object's id: there is no other
     // way for a `PropertyChanges` to name it.
-    function record(name, text) {
-        if (selectedId === "") {
+    function record(name, text, node) {
+        const object = layer(node || workspace.selected)
+        if (object === null || object.id === "") {
             refusal.text = "A state names the object it changes: give this one an id"
             return
         }
-        change(selectedId, name, text)
+        change(object.id, name, text)
     }
 
     // The value the picked state gives the selected object's property.
@@ -208,6 +244,21 @@ Panel {
                 panel.adding = false
                 newComment.text = ""
             }
+            // An answer names its object: one on its way when the person opened
+            // this picker on another is not about what the sliders hold.
+            if (tool === "preview_state" && picker.waiting && answer.state !== undefined
+                    && answer.id === picker.objectId && answer.state[picker.name] !== undefined) {
+                const read = String(answer.state[picker.name])
+                // The running app has no value for it yet, so any is a start.
+                if (answer.state[picker.name] === null) {
+                    picker.start("#000000")
+                } else if (panel.writesColour(read)) {
+                    picker.start(read)
+                } else {
+                    picker.waiting = false
+                    refusal.text = read + " is not a colour"
+                }
+            }
             if (panel.rowEditing && ["property_set", "binding_set", "state_edit"].includes(tool)) {
                 panel.rowEditing = false
                 newName.text = ""
@@ -217,6 +268,9 @@ Panel {
         function onRefused(tool, error) {
             if (tool === "review")
                 panel.adding = false
+            // The reason is on the window's error line; the sliders stay still.
+            if (tool === "preview_state")
+                picker.waiting = false
             panel.rowEditing = false
         }
     }
@@ -240,6 +294,143 @@ Panel {
         })
     }
 
+    // Hue, saturation and value, or the hex a person has from elsewhere.
+    // Set when the hand lets go or Enter is pressed: a drag is one undo step.
+    // A colour an expression works out to is asked of the preview, so the
+    // sliders start from what is on the canvas; until it answers, or when
+    // it cannot, they stay still rather than start from black.
+    Popup {
+        id: picker
+        objectName: "colourPicker"
+        property var row: ({})
+        property string name: ""
+        // The object it was opened on: the selection can move while it is open.
+        property string node: ""
+        // Read when asked: the object can be named again while this is open.
+        readonly property string objectId: {
+            const object = panel.layer(node)
+            return object !== null ? object.id : ""
+        }
+        property string written: ""
+        property bool waiting: false
+        property bool known: false
+        // What the sliders have no say over stays as it was written.
+        property real alpha: 1
+        readonly property color chosen: Qt.hsva(hue.value, saturation.value, brightness.value, alpha)
+
+        function start(colour) {
+            const start = Qt.color(colour)
+            hue.value = Math.max(0, start.hsvHue)
+            saturation.value = start.hsvSaturation
+            brightness.value = start.hsvValue
+            alpha = start.a
+            hex.text = colour
+            waiting = false
+            known = true
+        }
+        function show(row, written, at) {
+            refusal.text = ""
+            picker.row = row
+            picker.name = row.name
+            picker.written = written
+            picker.node = panel.workspace.selected
+            // Beside the inspector, where it hides none of the rows.
+            x = -implicitWidth - Spacing.xs
+            y = at.mapToItem(panel, 0, 0).y
+            const paint = panel.colourRow(row, written).paint
+            if (paint !== "") {
+                start(paint)
+            } else {
+                known = false
+                hex.text = ""
+                waiting = true
+                panel.workspace.dispatch("preview_state", {
+                    doc: panel.workspace.doc,
+                    node: {node: picker.node},
+                    read: [name]
+                })
+            }
+            open()
+        }
+        function take(text) {
+            written = JSON.stringify(text)
+            if (panel.layer(node) === null) {
+                refusal.text = "The object this picker was opened on has gone"
+                return
+            }
+            panel.set(name, written, node)
+        }
+
+        onClosed: waiting = false
+        padding: Spacing.xs
+        ColumnLayout {
+            spacing: Spacing.xxs
+            Label {
+                visible: panel.colourRow(picker.row, picker.written).note
+                text: "Worked out by " + picker.written + ": picking replaces it"
+                color: Colors.text
+                font.pixelSize: Typography.captionSize
+                Layout.maximumWidth: 200
+                wrapMode: Text.Wrap
+            }
+            Rectangle {
+                Layout.fillWidth: true
+                Layout.preferredHeight: 32
+                color: picker.chosen
+                border.color: Colors.outline
+            }
+            Label {
+                text: "Hue"
+                color: Colors.text
+                font.pixelSize: Typography.captionSize
+            }
+            Slider {
+                id: hue
+                enabled: picker.known
+                Accessible.name: "Hue"
+                onPressedChanged: if (!pressed) picker.take(picker.chosen.toString())
+                onMoved: hex.text = picker.chosen.toString()
+            }
+            Label {
+                text: "Saturation"
+                color: Colors.text
+                font.pixelSize: Typography.captionSize
+            }
+            Slider {
+                id: saturation
+                enabled: picker.known
+                Accessible.name: "Saturation"
+                onPressedChanged: if (!pressed) picker.take(picker.chosen.toString())
+                onMoved: hex.text = picker.chosen.toString()
+            }
+            Label {
+                text: "Brightness"
+                color: Colors.text
+                font.pixelSize: Typography.captionSize
+            }
+            Slider {
+                id: brightness
+                enabled: picker.known
+                Accessible.name: "Brightness"
+                onPressedChanged: if (!pressed) picker.take(picker.chosen.toString())
+                onMoved: hex.text = picker.chosen.toString()
+            }
+            TextField {
+                id: hex
+                Layout.fillWidth: true
+                placeholderText: "#rrggbb"
+                Accessible.name: "Colour"
+                onAccepted: {
+                    if (!panel.writesColour(text))
+                        return
+                    picker.take(text)
+                    // The sliders go on from it, not from what it replaced.
+                    picker.start(text)
+                }
+            }
+        }
+    }
+
     ColumnLayout {
         anchors.fill: parent
         anchors.margins: Spacing.xs
@@ -257,14 +448,31 @@ Panel {
                 Label {
                     text: row.modelData.name
                     color: Colors.text
-                    Layout.preferredWidth: 96
+                    Layout.preferredWidth: 72
                     elide: Text.ElideRight
+                }
+                Button {
+                    id: swatch
+                    readonly property var kind: panel.colourRow(row.modelData, value.text)
+                    visible: kind.picker
+                    Layout.preferredWidth: 24
+                    Layout.preferredHeight: 24
+                    padding: 0
+                    Accessible.name: "Pick " + row.modelData.name
+                    Accessible.description: kind.paint
+                    onClicked: picker.show(row.modelData, value.text, this)
+                    contentItem: Rectangle {
+                        color: swatch.kind.paint || "transparent"
+                        border.color: Colors.outline
+                    }
                 }
                 TextField {
                     id: value
                     text: panel.inState(row.modelData.name, row.modelData.value)
+                    placeholderText: "no value"
                     Accessible.name: row.modelData.name
                     Layout.fillWidth: true
+                    Layout.minimumWidth: 96
                     onAccepted: panel.set(row.modelData.name, text)
                     // The rows are not made anew for a list that reads the
                     // same, and what is typed in one is not the next object's,

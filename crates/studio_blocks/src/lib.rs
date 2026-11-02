@@ -464,8 +464,8 @@ enum Done {
 /// Undo takes the person's edits and an agent's lease holds against them.
 fn person() -> CallCtx {
     CallCtx {
-        caps: CapSet::of([Cap::Inspect, Cap::Mutate, Cap::Run, Cap::Fs]),
         client: Some(studio_mcp::PERSON.to_owned()),
+        ..CallCtx::new(CapSet::of([Cap::Inspect, Cap::Mutate, Cap::Run, Cap::Fs]))
     }
 }
 

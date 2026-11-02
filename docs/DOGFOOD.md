@@ -205,7 +205,7 @@ view itself loses work.
 - **Fix:** an outline that includes every visible item with its type, id
   and geometry, not only the accessible ones. Owner: Ljós (request 2),
   since the outline comes from the preview.
-- **Open**: Ljós request 2.
+- **Fixed**: `format: "outline"` lists every visible item of the project with its type, id, box, file and line, and a text's words, below the accessible snapshot. Scenario in `features/preview/preview.feature`.
 
 #### D13. The Layers panel cannot reorder, rename, hide or lock
 
@@ -218,7 +218,7 @@ view itself loses work.
 - **Fix:** drag-to-reorder (a `node_move`), a double-click to rename the
   id, eye and lock toggles that are Studio's own (not written into the
   file). Owner: Studio, Layers block.
-- **Open**: Move up and Move down only, plus reorder by dragging on the canvas in a Layout.
+- **Fixed**: dragging a row is `node_move`; a double-click names the object, what the document says of it following (`node_arrange` `rename`); Hide/Show and Lock/Unlock on each row are `node_arrange` actions that leave the file alone; a scroll bar is the cue. Hiding needs an id, since the preview finds an object by it.
 
 #### D14. Basic controls do not follow `Colors.dark`
 
@@ -228,7 +228,7 @@ view itself loses work.
   dark; each control needed its `palette` set by hand.
 - **Fix:** Ljós request 1: the Basic style reads its palette from
   `Ljos.Design` when the module is imported.
-- **Open**: Ljós request 1.
+- **Fixed** in Ljós e318dad7; the notes sample no longer sets `palette.buttonText` by hand. Checked off-screen in light and dark.
 
 ### Minor
 
@@ -241,14 +241,14 @@ view itself loses work.
 - **Evidence:** `docs/dogfood/inspector-text.png`.
 - **Fix:** a swatch with a picker, a wider field, clear the row after Set,
   rows for declared properties. Owner: Studio, Inspector block.
-- **Partly fixed** (dff6a44): The property row empties once used. Remains: swatches and declared rows.
+- **Fixed**: a colour row has a swatch that opens a picker (hue, saturation, value, hex; one undo step per drag); the field is wider; a property declared without a value has a row. The swatch of a colour written as an expression paints nothing, since only what is written is read here.
 
 #### D16. A file made outside Studio shows only after the next tool call
 
 - **Where:** both.
 - **Fix:** watch the project directory as the preview already watches
   files. Owner: Studio, `studio_core` project.
-- **Open**: Studio does not watch the project directory.
+- **Fixed**: `studio_mcp` follows the project directory on kernel file events, one watch per directory a walk lists (so not `target` or `node_modules`). The session's own writes and files saved unchanged tell nobody, so the selection and edit budgets pay nothing. On no watch available it falls back to the next tool call, as before.
 
 #### D17. The first picture after a target switch is squeezed
 
@@ -278,7 +278,7 @@ view itself loses work.
   refused; the agent wrote those in `document_new`'s text instead.
 - **Fix:** accept members in `node_insert`, or a `member_insert` tool.
   Owner: Studio, `studio_core`.
-- **Open**: `node_insert` still cannot add a function or a signal handler.
+- **Fixed**: `node_insert` takes one member as its `text`; a name the object already has is refused (`features/edit/members.feature`).
 
 #### D20. `JsonListModel` is read-only
 
@@ -287,7 +287,7 @@ view itself loses work.
   `ListModel`. A copy made synchronously in `onCountChanged` seemed to hang
   once under load; `Qt.callLater` did not.
 - **Fix:** Ljós request 5.
-- **Open**: Ljós request 5.
+- **Fixed** in Ljós e318dad7; the notes sample edits its `JsonListModel` directly, no `ListModel` copy. Checked off-screen by adding a note.
 
 #### D21. The window sometimes never paints
 
@@ -332,8 +332,8 @@ view itself loses work.
 - **Where:** window (environment).
 - **Happened:** with wgpu in the headless sway sandbox the window stays
   black; `LJOS_PAINTER=cpu` draws.
-- **Fix:** none in Studio; noted for anyone driving it off-screen.
-- **Open**: An environment matter; the sandbox uses `LJOS_PAINTER=gl`.
+- **Fixed** by the pin at Ljós e318dad: the default painter draws in the
+  sandbox with no `LJOS_PAINTER`, driven and looked at on 2026-10-31.
 
 ## What worked
 

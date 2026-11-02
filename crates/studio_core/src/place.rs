@@ -510,6 +510,11 @@ pub fn with_fresh_ids(text: &str, ids: &[String], taken: &mut Vec<String>) -> St
     renamed(text, &renames)
 }
 
+/// `text` with the object named `old` named `new`, and what it says of it.
+pub fn with_id_renamed(text: &str, old: &str, new: &str) -> String {
+    renamed(text, &[(old.to_owned(), new.to_owned())])
+}
+
 /// Replaces the identifiers `renames` names, outside strings and comments,
 /// where one is a name of an object: not `foo.inner` and not a member `inner:`.
 fn renamed(text: &str, renames: &[(String, String)]) -> String {

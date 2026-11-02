@@ -28,7 +28,6 @@ Rectangle {
         back: true
         onBackTapped: screen.stack.pop()
         ToolButton {
-            palette.buttonText: Colors.text
             id: saveButton
             text: "Save"
             enabled: screen.valid

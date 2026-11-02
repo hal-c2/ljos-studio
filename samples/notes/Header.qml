@@ -19,7 +19,6 @@ Rectangle {
     }
 
     ToolButton {
-        palette.buttonText: Colors.text
         id: backButton
         visible: header.back
         anchors { left: parent.left; leftMargin: Spacing.xs; verticalCenter: parent.verticalCenter }
