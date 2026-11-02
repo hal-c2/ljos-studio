@@ -179,11 +179,12 @@ pub(crate) fn remove(studio: &Studio, name: &str) -> Result<String, SurfaceError
             format!("`{url}` is not an asset: {TAKEN} are taken out"),
         ));
     }
-    let users: Vec<String> = studio
-        .session
-        .documents()
+    // A script a document imports says urls as well as a document does.
+    let mut files = studio.session.documents();
+    files.extend(SCRIPTS.iter().flat_map(|extension| store.list(extension)));
+    let users: Vec<String> = files
         .into_iter()
-        .filter(|doc| store.read(doc).is_ok_and(|text| names_url(&text, &url)))
+        .filter(|file| store.read(file).is_ok_and(|text| names_url(&text, &url)))
         .collect();
     if !users.is_empty() {
         return Err(refused(
@@ -195,6 +196,8 @@ pub(crate) fn remove(studio: &Studio, name: &str) -> Result<String, SurfaceError
     store.remove(&url).map_err(store_error)?;
     Ok(url)
 }
+
+const SCRIPTS: [&str; 2] = ["js", "mjs"];
 
 /// Whether `text` says `url` as a whole path, however many `../` lead to it.
 /// A url a document builds at run time from parts is not seen here.

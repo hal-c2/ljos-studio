@@ -110,6 +110,8 @@ Feature: An object is renamed, hidden and locked through `node_arrange`
       | backdrop | id_taken |
       | Credit   | not_an_id |
       | two word | not_an_id |
+      | function | not_an_id |
+      | if       | not_an_id |
 
   Scenario: A locked object stays where it is, and the file does not change
     Given the agent has called the tool "node_arrange" with:

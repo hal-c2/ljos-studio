@@ -1919,7 +1919,6 @@ impl Session {
         Ok(outcome)
     }
 
-    /// A new document with `text`.
     /// Creates `path` as [`Session::create`] does and declares it a block in
     /// the `qmldir` beside it, as one undo step. The directory is the module
     /// of a `qmldir` that does not say, the file's name the block's.
@@ -1973,6 +1972,7 @@ impl Session {
         Ok(())
     }
 
+    /// A new document with `text`.
     pub fn create(&mut self, path: &str, text: &str, dry_run: bool) -> Result<Outcome, Error> {
         let path = &self.canonical(path)?;
         match self.sync(path) {

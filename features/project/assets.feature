@@ -140,6 +140,27 @@ Feature: A project's assets
     Then the answer's "/removed" is "assets/a.svg"
     And the file "assets/a.svg" does not exist
 
+  Scenario Outline: A file a script names is in use too
+    Given the file "<script>":
+      """
+      var logo = "assets/logo.png"
+      """
+    And the file "assets/logo.png":
+      """
+      not looked at
+      """
+    When the agent calls the tool "project_open" with:
+      """json
+      {"asset": "remove", "name": "logo.png"}
+      """
+    Then the agent is refused with "not_actionable"
+    And the refusal's "/details/kind" is "asset_in_use"
+
+    Examples:
+      | script    |
+      | util.js   |
+      | util.mjs  |
+
   Scenario: What a document uses stays, and the refusal says which
     Given the file "assets/a.svg":
       """
