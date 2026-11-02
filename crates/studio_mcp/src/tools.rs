@@ -1309,7 +1309,7 @@ fn contribute_op(studio: &Mutex<Studio>, a: &ContributeArgs) -> Result<Op, Surfa
     };
     if a.block.is_none() {
         let source = studio.session.text(&a.doc).map_err(error)?.0.to_owned();
-        crate::loads::check_text(studio.session.store(), &a.doc, &source, &delegate, None)?;
+        crate::loads::check_text(studio.session.store(), &a.doc, &source, &delegate, &[])?;
     }
     let (text, _) = studio.session.text(&a.doc).map_err(error)?;
     let unit = studio_core::states::unit(text);
@@ -1855,7 +1855,7 @@ fn edits(studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
                 let studio = s();
                 move |_, a: InsertArgs| {
                     let (text, import) = insert_text(&studio, &a)?;
-                    crate::loads::check_insert(&studio, &a.doc, &text, import.as_deref())?;
+                    crate::loads::check_insert(&studio, &a.doc, &text, import.as_slice())?;
                     let op = Op::Insert {
                         parent: a.parent,
                         index: a.index,

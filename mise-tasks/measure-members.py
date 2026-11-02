@@ -75,8 +75,12 @@ for name, mark in re.findall(r"ANY (\S+) (\S+)", run(body)):
 # Only `is not a type` says a module lacks a type: others are refused for how
 # they are used, as what is only attached is.
 modules = sorted({uri for uri, _, _, _ in rows})
+# Beyond the table, names to try, kept only if a module has them: what no module
+# was seen to have may be in a Qt other than this one.
+tabled = {name for _, name, _, _ in rows}
+candidates = set(open("mise-tasks/measure-candidates.txt").read().split()) - tabled
 body = ""
-for _, name, _, _ in rows:
+for name in sorted(tabled | candidates):
     for uri in modules:
         body += (
             f'try{{Qt.createQmlObject("import {uri}; {name} {{}}",this);'
@@ -84,11 +88,13 @@ for _, name, _, _ in rows:
             'if(e.qmlErrors[0].message.indexOf("is not a type")<0)'
             f'console.log("HAS {name} {uri}")}};\n'
         )
-has = {name: set() for _, name, _, _ in rows}
+has = {name: set() for name in tabled | candidates}
 for name, uri in re.findall(r"HAS (\S+) (\S+)", run(body)):
     has[name].add(uri)
 with open(types_written, "w") as out:
     for name in sorted(has):
+        if name in candidates and not has[name]:
+            continue
         out.write(f"{name} {','.join(sorted(has[name]))}\n")
 
 # What might be refused as an id: the language's words and every global.

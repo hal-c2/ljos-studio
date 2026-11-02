@@ -276,6 +276,10 @@ pub enum Op {
         add_id: bool,
         import: Option<String>,
     },
+    /// `module`, or a folder if it has a `/`, imported unless it is already.
+    Import {
+        module: String,
+    },
     Move {
         node: Address,
         parent: Address,
@@ -329,6 +333,7 @@ pub enum Op {
 impl Op {
     fn addresses(&self) -> Vec<&Address> {
         match self {
+            Op::Import { .. } => Vec::new(),
             Op::Insert { parent, .. } => vec![parent],
             Op::Move { node, parent, .. } => vec![node, parent],
             Op::Remove { node }
@@ -353,6 +358,7 @@ impl Op {
                     text.split(['{', ' ']).next().unwrap_or("object").trim()
                 )
             }
+            Op::Import { module } => format!("import {module}"),
             Op::Move { .. } => "move".to_owned(),
             Op::Remove { .. } => "remove".to_owned(),
             Op::SetBinding { name, .. } => format!("set {name}"),
@@ -1001,6 +1007,7 @@ impl Session {
             }
         };
         Ok(match op {
+            Op::Import { .. } => Vec::new(),
             Op::Insert { parent, .. } | Op::Contribute { parent, .. } => {
                 vec![(handle(self, parent)?, Some(CHILDREN.to_owned()))]
             }
@@ -1535,6 +1542,13 @@ impl Session {
                     },
                     Some(parent_node.path.child(index)),
                 ))
+            }
+            Op::Import { module } => {
+                let out = match imported(before, module) {
+                    Imported::No => with_import(before, module)?,
+                    _ => before.to_owned(),
+                };
+                Ok((out, PathChange::Same, None))
             }
             Op::Move {
                 node,

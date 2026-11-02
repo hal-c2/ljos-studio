@@ -227,20 +227,29 @@ pub(crate) struct Names<'s> {
 }
 
 impl<'s> Names<'s> {
-    /// For `doc`, whose text is `source`, once it imports `import` too. `None`
+    /// For `doc`, whose text is `source`, once it imports `added` too. `None`
     /// when the text does not read: the write is the one to refuse that.
     pub(crate) fn of(
         store: &'s dyn Store,
         doc: &str,
         source: &str,
-        import: Option<&str>,
+        added: &[String],
     ) -> Option<Self> {
         let mut imports = studio_core::outline::imports(source)?;
         // A qualified import of it writes the type qualified; bare is how the
         // text being checked names it either way.
-        imports.extend(import.map(|uri| Import::Module {
-            uri: uri.to_owned(),
-            alias: None,
+        imports.extend(added.iter().map(|uri| {
+            if uri.contains('/') {
+                Import::Path {
+                    path: uri.clone(),
+                    alias: None,
+                }
+            } else {
+                Import::Module {
+                    uri: uri.clone(),
+                    alias: None,
+                }
+            }
         }));
         Some(Self {
             types: types_of(store),
@@ -276,7 +285,9 @@ impl<'s> Names<'s> {
                     alias.as_deref() == Some(qualifier)
                 }
             };
-            return if self.scope.imports.iter().any(aliased) {
+            // `Other.Inner` names what a file or import called `Other` holds.
+            let names_type = self.types.lookup(&self.scope, qualifier, found, 0) != Described::Not;
+            return if names_type || self.scope.imports.iter().any(aliased) || self.undescribed() {
                 TypeIs::Unsure
             } else {
                 TypeIs::Missing
@@ -285,22 +296,28 @@ impl<'s> Names<'s> {
         let Some(modules) = measured_types().get(ty) else {
             return TypeIs::Unsure;
         };
-        let mut missing = TypeIs::Missing;
-        for import in &self.scope.imports {
-            let Import::Module { uri, alias } = import else {
-                continue;
-            };
-            if alias.is_none() && modules.contains(uri.as_str()) {
-                return TypeIs::Known;
-            }
-            let known = MEASURED_MODULES.contains(&uri.as_str())
-                || self.types.dumps.module_types(uri).is_some()
-                || self.types.qmldirs.contains_key(uri);
-            if !known {
-                missing = TypeIs::Unsure;
-            }
+        let has_it = self.scope.imports.iter().any(|import| {
+            matches!(import, Import::Module { uri, alias: None } if modules.contains(uri.as_str()))
+        });
+        if has_it {
+            TypeIs::Known
+        } else if self.undescribed() {
+            TypeIs::Unsure
+        } else {
+            TypeIs::Missing
         }
-        missing
+    }
+
+    /// Whether the document imports a module whose types nothing here knows.
+    fn undescribed(&self) -> bool {
+        self.scope.imports.iter().any(|import| match import {
+            Import::Module { uri, .. } => {
+                !MEASURED_MODULES.contains(&uri.as_str())
+                    && self.types.dumps.module_types(uri).is_none()
+                    && !self.types.qmldirs.contains_key(uri)
+            }
+            Import::Path { .. } => false,
+        })
     }
 
     /// Whether an object of type `ty`, declaring what `node` does, certainly

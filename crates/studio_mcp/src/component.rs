@@ -18,6 +18,7 @@ pub(crate) struct Extracted {
     pub(crate) edit: EditOut,
     pub(crate) component: String,
     pub(crate) aliases: Vec<String>,
+    pub(crate) name_unsure: bool,
 }
 
 fn check_name(name: &str) -> Result<(), SurfaceError> {
@@ -446,9 +447,8 @@ pub(crate) fn extract(
     // An import is found before the file beside the document: the instance
     // would be the other type, and the object gone from what shows.
     let store = studio.session.store();
-    if crate::signals::Names::of(store, doc, &text, None)
-        .is_some_and(|names| names.type_is(name, "") == crate::signals::TypeIs::Known)
-    {
+    let answer = crate::signals::Names::of(store, doc, &text, &[]).map(|n| n.type_is(name, ""));
+    if answer == Some(crate::signals::TypeIs::Known) {
         return Err(refused(
             "name_taken",
             format!("`{doc}` already has a type `{name}`, which would be used in its place"),
@@ -508,5 +508,6 @@ pub(crate) fn extract(
         edit: outcome.into(),
         component,
         aliases: outward.aliases.into_iter().map(|(name, ..)| name).collect(),
+        name_unsure: answer == Some(crate::signals::TypeIs::Unsure),
     })
 }
