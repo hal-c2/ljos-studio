@@ -36,6 +36,11 @@ export default defineConfig({
         const project = projects && new RegExp(`^(${escaped(projects)}/\\d+)/`).exec(file.replaceAll("\\", "/"));
         return project ? ["--root", project[1]] : [];
       },
+      // A previewed project's files say where things are written in them.
+      inspect: (file) => {
+        const projects = process.env.STUDIO_PREVIEW_PROJECTS?.replaceAll("\\", "/");
+        return Boolean(projects) && file.replaceAll("\\", "/").startsWith(`${projects}/`);
+      },
       standins: [path("./standins"), ...(process.env.LJOS_DESIGN ? [process.env.LJOS_DESIGN] : [])],
     }),
   ],

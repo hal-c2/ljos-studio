@@ -52,49 +52,7 @@ const uncompiled = (request, type) => {
       message.includes(missing) || (message === "the preview shows: []" && compiled.some((e) => e.includes(missing))),
   };
 };
-export const WAITING = new Map([
-  ["The preview starts in the base state", refused(4)],
-  ["A click on the trigger goes to the state", refused(4)],
-  ["A click at a point goes to the state", refused(4)],
-  ["A click lands at its point, whatever is drawn there", refused(4)],
-  // `Ljos.Models` is not in ljos-web's runtime (request 21).
-  ["features/preview/json-models.feature: The preview shows a row for each record", uncompiled(21, "JsonListModel")],
-  ["A save of the JSON shows without a reload", uncompiled(21, "JsonListModel")],
-  ["The mocked state reads the fixture", uncompiled(21, "JsonListModel")],
-  // The web preview makes no stand-ins from a project's type dumps
-  // (request 22).
-  ["A type the project's dump describes stands in", uncompiled(22, "Player")],
-  ["An edit to what is given the stand-in shows at once", uncompiled(22, "Player")],
-  ["The dumps of a project run as one", uncompiled(22, "Player")],
-  ["A dump that does not read stops the preview with the reason", uncompiled(22, "Player")],
-  ["A click where no trigger is changes nothing", refused(4)],
-  ["A click alone plays the flow and reads nothing", refused(4)],
-  ["A picture of the preview", refused(2)],
-  // A state is shown by writing the state property, so it is held up by the
-  // same request as a click that changes state.
-  ["A state is shown for the preview, through a reload, until cleared", refused(4)],
-  // The tool's refusal is the step before; the frame still in the base state
-  // is what the scenario's own last step sees.
-  ["The first change written into the shown state is drawn at once", { request: 4, cause: said(/^the preview shows: \["Overview"\]$/) }],
-  ["A mocked block's state is set from outside", refused(4)],
-  ["A live block's state is the app's own", refused(4)],
-  // ljos-web's `Ljos.Design` is the module's QML; it reads no theme file
-  // beside the entry, so a token set is not drawn (request 20). Nothing
-  // refuses it: the page cannot tell, so the failure is the drawn text.
-  ["A token set shows in the preview and is reported as a reload", { request: 20, cause: said(/^the preview shows: \["gap 16"\]$/) }],
-  // Its last step expects the module's value, which a preview that never
-  // drew the token shows too: it would pass having shown nothing. So the
-  // token is looked for once it is set (`probe`), as the scenario above
-  // does, and its absence is the wait.
-  [
-    "Undo of a token shows the module's value again",
-    {
-      request: 20,
-      cause: said(/^the preview shows: \["gap 16"\]$/),
-      probe: { after: 'the agent has called the tool "theme_set" with:', then: 'the preview shows "gap 20"' },
-    },
-  ],
-]);
+export const WAITING = new Map([]);
 
 // Every event of the preview's, and the reloads among them, as the native
 // runner's World reads them.
@@ -107,6 +65,28 @@ async function reloads(w) {
     events.push(...page);
   }
   return { events, reported: events.filter((e) => e.kind === "reloaded" || e.kind === "reload_failed") };
+}
+
+// DECISION: what the frame draws, as text: an element whose own text is the
+// text, as the native outline names a Text by its text. It is the test's eye,
+// not an outline given to the agent.
+async function previewShows(w, text, ms) {
+  // The reloads it was read after, for the step below.
+  w.reloadsRead = (await reloads(w)).reported.length;
+  const shown = await w.page.evaluate(
+    async ({ text, ms }) => {
+      const frame = document.querySelector("iframe");
+      const drawn = () =>
+        [...frame.contentDocument.querySelectorAll("#preview *")].map((e) =>
+          [...e.childNodes].filter((n) => n.nodeType === Node.TEXT_NODE).map((n) => n.textContent).join("").trim(),
+        );
+      const until = performance.now() + ms;
+      while (performance.now() < until && !drawn().includes(text)) await new Promise((r) => requestAnimationFrame(r));
+      return drawn().includes(text) ? null : drawn().filter(Boolean);
+    },
+    { text, ms },
+  );
+  if (shown) throw new Error(`the preview shows: ${JSON.stringify(shown)}`);
 }
 
 // The steps this runner has and `web/features.mjs` has not: the native
@@ -123,28 +103,14 @@ const PREVIEW_STEPS = [
   {
     kinds: ["then"],
     pattern: /^the preview shows "([^"]*)"$/,
-    // DECISION: what the frame draws, as text: an element whose own text
-    // is the text, as the native outline names a Text by its text. It is
-    // the test's eye, not an outline given to the agent (ljos-web request 3).
-    async action(w, s, text) {
-      // The reloads it was read after, for the step below.
-      w.reloadsRead = (await reloads(w)).reported.length;
-      const shown = await w.page.evaluate(
-        async ({ text, ms }) => {
-          const frame = document.querySelector("iframe");
-          const drawn = () =>
-            [...frame.contentDocument.querySelectorAll("#preview *")].map((e) =>
-              [...e.childNodes].filter((n) => n.nodeType === Node.TEXT_NODE).map((n) => n.textContent).join("").trim(),
-            );
-          // The mount's effects run after the reload answers; give them
-          // until the next frames are drawn.
-          for (let i = 0; i < ms / 16 && !drawn().includes(text); i++) await new Promise((r) => requestAnimationFrame(r));
-          return drawn().includes(text) ? null : drawn().filter(Boolean);
-        },
-        { text, ms: 1000 },
-      );
-      if (shown) throw new Error(`the preview shows: ${JSON.stringify(shown)}`);
-    },
+    // The mount's effects run after the reload answers; give them until the
+    // next frames are drawn.
+    action: (w, s, text) => previewShows(w, text, 1000),
+  },
+  {
+    kinds: ["then"],
+    pattern: /^the preview shows "([^"]*)" within (\d+) seconds$/,
+    action: (w, s, text, seconds) => previewShows(w, text, Number(seconds) * 1000),
   },
   {
     kinds: ["then"],
@@ -165,7 +131,7 @@ const PREVIEW_STEPS = [
     kinds: ["then"],
     pattern: /^the answer has a PNG picture at most (\d+) pixels on its longest side$/,
     action(w, s, side) {
-      const png = JSON.stringify(w.ok()).match(/"(iVBORw0KGgo[A-Za-z0-9+/=]+)"/)?.[1];
+      const png = (w.ok(), JSON.stringify(w.answer)).match(/"(iVBORw0KGgo[A-Za-z0-9+/=]+)"/)?.[1];
       if (!png) throw new Error("the answer has no PNG");
       const bytes = Buffer.from(png, "base64");
       const [width, height] = [bytes.readUInt32BE(16), bytes.readUInt32BE(20)];
@@ -324,21 +290,34 @@ export async function launch(app) {
       }
     };
   });
+  // A request that fails is the scenario's evidence, not the run's end: one a
+  // page outlives must not take every other scenario down with it, and one a
+  // page needs fails that scenario, whose report then names it.
+  const dropped = [];
   await context.route(`${ORIGIN}/**`, async (route) => {
     const request = route.request();
     const url = new URL(request.url());
-    if (url.pathname.startsWith("/preview/") || url.pathname === "/compile") {
-      const headers = { ...request.headers(), origin: served.url.replace(/\/$/, "") };
-      delete headers.host;
-      const response = await route.fetch({ url: `${served.url.replace(/\/$/, "")}${url.pathname}${url.search}`, headers });
-      return route.fulfill({ response, headers: { ...response.headers(), ...ISOLATED } });
+    try {
+      if (url.pathname.startsWith("/preview/") || url.pathname === "/compile") {
+        // A connection of its own: Playwright otherwise reuses one, which the
+        // server may close for idling just as the next request goes out.
+        const headers = { ...request.headers(), origin: served.url.replace(/\/$/, ""), connection: "close" };
+        delete headers.host;
+        const response = await route.fetch({ url: `${served.url.replace(/\/$/, "")}${url.pathname}${url.search}`, headers });
+        return await route.fulfill({ response, headers: { ...response.headers(), ...ISOLATED } });
+      }
+      const body = url.pathname === "/index.html" ? PAGE : readFileSync(join(here, url.pathname));
+      return await route.fulfill({ status: 200, headers: { "content-type": TYPES[extname(url.pathname)] ?? "application/octet-stream", ...ISOLATED }, body });
+    } catch (e) {
+      dropped.push(`${request.method()} ${url.pathname}: ${String(e.message).split("\n")[0]}`);
+      await route.abort().catch(() => {});
     }
-    const body = url.pathname === "/index.html" ? PAGE : readFileSync(join(here, url.pathname));
-    return route.fulfill({ status: 200, headers: { "content-type": TYPES[extname(url.pathname)] ?? "application/octet-stream", ...ISOLATED }, body });
   });
   return {
     // What the compiler refused, in order, since the server started.
     compiled: served.compiled,
+    // The requests that got no answer, in order, each with why.
+    dropped,
     async page() {
       const page = await context.newPage();
       await page.goto(`${ORIGIN}/index.html`);
@@ -373,6 +352,7 @@ async function main([app, ...paths]) {
       let failed = null;
       const began = performance.now();
       const compiledFrom = chromium.compiled.length;
+      const droppedFrom = chromium.dropped.length;
       // A name two features share is keyed with its file.
       const key = WAITING.has(`${name}: ${scenario.name}`) ? `${name}: ${scenario.name}` : scenario.name;
       const probe = WAITING.get(key)?.probe;
@@ -405,7 +385,8 @@ async function main([app, ...paths]) {
       if (verdict) {
         counts.failed += 1;
         failures.push(`${scenario.name}: ${verdict}`);
-        console.log(`  ✘ ${scenario.name}\n      ${verdict}${said.length ? `\n      ${said.join("\n      ")}` : ""}`);
+        const evidence = [...said, ...chromium.dropped.slice(droppedFrom).map((d) => `no answer to ${d}`)];
+        console.log(`  ✘ ${scenario.name}\n      ${verdict}${evidence.length ? `\n      ${evidence.join("\n      ")}` : ""}`);
       } else if (waits !== undefined) {
         counts.waiting += 1;
         console.log(`  ⏸ ${scenario.name}  (waits on ljos-web request ${waits.request})`);
@@ -417,6 +398,7 @@ async function main([app, ...paths]) {
   }
   for (const name of WAITING.keys()) if (!seen.has(name) && paths.length === 0) failures.push(`WAITING names \`${name}\`, which is no @preview scenario`);
   console.log(`\n${counts.passed + counts.failed + counts.waiting} scenarios (${counts.passed} passed, ${counts.waiting} waiting on ljos-web, ${counts.failed} failed), ${counts.steps} steps passed`);
+  for (const d of chromium.dropped) console.log(`no answer to ${d}`);
   if (process.env.FEATURES_TIMES) console.log(JSON.stringify(times));
   await chromium.close();
   if (failures.length > 0) process.exitCode = 1;

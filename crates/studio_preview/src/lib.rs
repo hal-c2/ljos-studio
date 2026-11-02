@@ -337,7 +337,16 @@ impl PreviewHost for NativeHost {
             "app_set_property",
             json!({ "target": locator(id), "property": name, "value": value }),
         )
-        .map_err(|e| no_object(e, id))?;
+        .map_err(|e| no_object(e, id))
+        .map_err(|e| match e {
+            // The inspector says the same of both, and only one of them means
+            // the object is not there.
+            PreviewError::NoObject(_) if self.read(id, &[]).is_ok() => PreviewError::Refused {
+                code: "no_property".to_owned(),
+                message: format!("`{id}` has no property `{name}`"),
+            },
+            e => e,
+        })?;
         Ok(())
     }
 
