@@ -308,3 +308,28 @@ Feature: The inspector shows colours and every declared property
     When the person picks the state "compact" in the inspector
     Then the inspector has no button "Bind width to parent.width"
     And the window shows no refusal
+
+  Scenario: A signal is handled from its row
+    Given the file "Other.qml":
+      """qml
+      import QtQuick
+
+      Item {
+          id: other
+          signal done(int code)
+      }
+      """
+    And the person has opened "Other.qml" in the documents list
+    When the person selects "Item other" in the layers panel
+    And the person sets "Handle done" to "console.log(code)" in the inspector
+    Then the file "Other.qml" says "onDone: console.log(code)"
+    And the inspector does not offer the field "Handle done"
+    And the inspector offers the field "onDone"
+
+
+  Scenario: An id changed in its row is one step back
+    When the person selects "Item other" in the layers panel
+    And the person sets "id" to "renamed" in the inspector
+    Then the file "Main.qml" says "id: renamed"
+    When the person clicks the button "Undo"
+    Then the file "Main.qml" says "id: other"

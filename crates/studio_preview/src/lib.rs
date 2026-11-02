@@ -25,6 +25,7 @@ use studio_core::preview::{
     Click, Declared, LogLine, Picture, Placed, PreviewError, PreviewHost, PreviewSpec, Reload,
     Rest, RestWatch, Size,
 };
+use studio_core::scene3d::{Body, Camera, Scene, rotate};
 
 use inspector::{Answer, Fault, Inspector};
 pub use state_dir::private_dir;
@@ -483,6 +484,132 @@ impl PreviewHost for NativeHost {
         }))
     }
 
+    fn scene(&mut self, at: &Declared) -> Result<Option<Scene>, PreviewError> {
+        let listed = self.call("app_objects", json!({ "max": 5000 }))?;
+        let rows = listed.structured["objects"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default();
+        let declared: Vec<Option<Declared>> = rows
+            .iter()
+            .map(|r| r["at"].as_str().and_then(|a| self.declared_of(a)))
+            .collect();
+        let depth = |i: usize| rows[i]["depth"].as_u64().unwrap_or(0);
+        let ty = |i: usize| rows[i]["type"].as_str().unwrap_or_default();
+        let Some(here) = declared.iter().position(|d| d.as_ref() == Some(at)) else {
+            return Ok(None);
+        };
+        // The nearest view around the object, or the object itself.
+        let mut view = (ty(here) == "View3D").then_some(here);
+        let mut below = depth(here);
+        for i in (0..here).rev() {
+            if view.is_some() {
+                break;
+            }
+            if depth(i) < below {
+                below = depth(i);
+                if ty(i) == "View3D" {
+                    view = Some(i);
+                }
+            }
+        }
+        let Some(view) = view else {
+            return Ok(None);
+        };
+        let end = (view + 1..rows.len())
+            .find(|i| depth(*i) <= depth(view))
+            .unwrap_or(rows.len());
+        let inner = view + 1..end;
+        let inspected = |host: &mut Self, i: usize| -> Result<Value, PreviewError> {
+            let handle = rows[i]["handle"].as_str().unwrap_or_default();
+            Ok(host
+                .call("app_inspect", json!({ "target": handle, "all": true }))?
+                .structured)
+        };
+        let seen = inspected(self, view)?;
+        let window = seen["geometry"]["window"]
+            .as_array()
+            .filter(|w| w.len() == 4)
+            .map(|w| {
+                w.iter()
+                    .map(|n| n.as_f64().unwrap_or(0.0))
+                    .collect::<Vec<_>>()
+            });
+        let Some(window) = window else {
+            return Ok(None);
+        };
+        let view_box = Rect {
+            x: window[0],
+            y: window[1],
+            width: window[2],
+            height: window[3],
+        };
+        // The view's own `camera`, else the first the scene declares.
+        let chosen = prop(&seen, "camera")
+            .and_then(|r| r["handle"].as_str())
+            .and_then(|h| inner.clone().find(|i| rows[*i]["handle"] == h))
+            .or_else(|| inner.clone().find(|i| ty(*i).ends_with("Camera")));
+        let camera = match chosen {
+            Some(i) => {
+                let c = inspected(self, i)?;
+                let perspective = c["types"]
+                    .as_array()
+                    .is_some_and(|t| t.iter().any(|t| t == "PerspectiveCamera"));
+                Some(Camera {
+                    position: vec3(&c, "scenePosition").unwrap_or([0.0; 3]),
+                    rotation: quat(&c, "sceneRotation").unwrap_or([1.0, 0.0, 0.0, 0.0]),
+                    field_of_view: number_of(&c, "fieldOfView").unwrap_or(60.0),
+                    perspective,
+                })
+            }
+            None => None,
+        };
+        let mut bodies = Vec::new();
+        for i in inner.filter(|i| ty(*i) == "Model").take(MOST_READ) {
+            let Some(declared) = declared[i].clone() else {
+                continue;
+            };
+            let m = inspected(self, i)?;
+            // `visible: false` takes the model out of the picture and so out
+            // of the click.
+            if prop(&m, "visible").is_some_and(|r| r["value"] == "false") {
+                continue;
+            }
+            let source = prop(&m, "source")
+                .and_then(|r| r["value"].as_str())
+                .unwrap_or_default()
+                .to_owned();
+            let parent = (0..i).rev().find(|p| depth(*p) + 1 == depth(i));
+            let axes = match parent.filter(|p| *p != view) {
+                Some(p) => {
+                    let p = inspected(self, p)?;
+                    let rotation = quat(&p, "sceneRotation").unwrap_or([1.0, 0.0, 0.0, 0.0]);
+                    let scale = vec3(&p, "sceneScale").unwrap_or([1.0; 3]);
+                    let along = |k: usize| {
+                        let mut unit = [0.0; 3];
+                        unit[k] = scale[k];
+                        rotate(rotation, unit)
+                    };
+                    [along(0), along(1), along(2)]
+                }
+                None => [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
+            };
+            bodies.push(Body {
+                declared,
+                source,
+                position: vec3(&m, "scenePosition").unwrap_or([0.0; 3]),
+                rotation: quat(&m, "sceneRotation").unwrap_or([1.0, 0.0, 0.0, 0.0]),
+                scale: vec3(&m, "sceneScale").unwrap_or([1.0; 3]),
+                axes,
+            });
+        }
+        Ok(Some(Scene {
+            view: view_box,
+            camera,
+            bodies,
+        }))
+    }
+
     fn placed(&mut self, ids: &[String], types: &[String]) -> Result<Vec<Placed>, PreviewError> {
         let mut out = Vec::new();
         for id in ids {
@@ -662,6 +789,17 @@ impl NativeHost {
         })
     }
 
+    /// Where an `app_objects` row says an object is declared: `file:line:column`.
+    fn declared_of(&self, at: &str) -> Option<Declared> {
+        let (rest, column) = at.rsplit_once(':')?;
+        let (file, line) = rest.rsplit_once(':')?;
+        Some(Declared {
+            file: self.document(file),
+            line: line.parse().ok()?,
+            column: column.parse().ok()?,
+        })
+    }
+
     /// A file the child names (a `file:` URL, as its engine does) as the
     /// store names it: relative to the project when it is below it.
     fn document(&self, file: &str) -> String {
@@ -706,6 +844,43 @@ fn percent_decoded(path: &str) -> String {
         i += 1;
     }
     String::from_utf8_lossy(&out).into_owned()
+}
+
+/// The row of `answer` for the property `name`.
+fn prop<'a>(answer: &'a Value, name: &str) -> Option<&'a Value> {
+    answer["properties"]
+        .as_array()?
+        .iter()
+        .find(|r| r["name"] == name)
+}
+
+/// The numbers in a value the inspector shows as text: `QVector3D(1, 2, 3)`.
+fn numbers_in(text: &str) -> Vec<f64> {
+    let inner = text.split_once('(').map_or(text, |(_, rest)| rest);
+    inner
+        .trim_end_matches(')')
+        .split(',')
+        .filter_map(|n| n.trim().parse().ok())
+        .collect()
+}
+
+fn vec3(answer: &Value, name: &str) -> Option<[f64; 3]> {
+    numbers_in(prop(answer, name)?["value"].as_str()?)
+        .try_into()
+        .ok()
+}
+
+fn quat(answer: &Value, name: &str) -> Option<[f64; 4]> {
+    numbers_in(prop(answer, name)?["value"].as_str()?)
+        .try_into()
+        .ok()
+}
+
+fn number_of(answer: &Value, name: &str) -> Option<f64> {
+    let row = prop(answer, name)?;
+    row["number"]
+        .as_f64()
+        .or_else(|| row["value"].as_str()?.parse().ok())
 }
 
 /// The inspector's locator for the object with the QML `id`.

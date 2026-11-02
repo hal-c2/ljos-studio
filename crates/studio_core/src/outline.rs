@@ -136,6 +136,24 @@ pub fn is_group(object: &QmlObject<'_>) -> bool {
         .is_some_and(|c| c.is_ascii_lowercase())
 }
 
+/// Whether the objects of a parsed text declare the inline component `name`.
+pub fn declares_component(nodes: &[Node], name: &str) -> bool {
+    components(nodes).contains(&name)
+}
+
+/// The inline components the objects of a parsed text declare, each once.
+pub fn components(nodes: &[Node]) -> Vec<&str> {
+    let mut names: Vec<&str> = Vec::new();
+    for step in nodes.iter().flat_map(|node| &node.path.0) {
+        if let Step::Component(name) = step
+            && !names.contains(&name.as_str())
+        {
+            names.push(name);
+        }
+    }
+    names
+}
+
 /// The objects of `source`, root first in the order written; `None` when it
 /// does not parse.
 pub fn outline(source: &str) -> Option<Vec<Node>> {
@@ -314,6 +332,21 @@ fn declared_signals(source: &str, object: &QmlObject<'_>) -> Vec<DeclaredSignal>
         .collect()
 }
 
+/// Whether an object has an `id` or a literal `objectName`, so that its key
+/// step is that name and it does not count among its unnamed siblings.
+fn is_named(source: &str, object: &QmlObject<'_>) -> bool {
+    object.members.iter().any(|m| match m {
+        QmlMember::Binding(b) => {
+            let name = b.name.to_string();
+            name == "id"
+                || (name == "objectName"
+                    && matches!(&b.value, QmlBindingValue::Expression(e)
+                        if literal_string(qml_syntax::text(source, e.span())).is_some()))
+        }
+        _ => false,
+    })
+}
+
 /// Whether a string can be written to a property declared with this type, by
 /// QML's name or a type dump's. Every value type qml6 loads a string for takes
 /// one (`"red"`, `"1,2"`, `"1x2"`, a date, a font), as an enum takes a value's
@@ -339,18 +372,85 @@ pub fn takes_string(ty: &str) -> bool {
     !(refuses || ty.starts_with("list<") || ty.starts_with("QQmlListProperty") || ty.ends_with('*'))
 }
 
-/// Whether an object has an `id` or a literal `objectName`, so that its key
-/// step is that name and it does not count among its unnamed siblings.
-fn is_named(source: &str, object: &QmlObject<'_>) -> bool {
-    object.members.iter().any(|m| match m {
-        QmlMember::Binding(b) => {
-            let name = b.name.to_string();
-            name == "id"
-                || (name == "objectName"
-                    && matches!(&b.value, QmlBindingValue::Expression(e)
-                        if literal_string(qml_syntax::text(source, e.span())).is_some()))
-        }
-        _ => false,
+/// What the object starting at `start` holds that no `Node` says and that is
+/// more than where it sits: its lists of objects, such as `states`, its objects
+/// that act on a property of it, and its enums.
+pub fn more_than_a_place(source: &str, start: usize) -> Vec<String> {
+    let allocator = Allocator::default();
+    let parsed = qml_syntax::parse(&allocator, source);
+    let Some(object) = object_at(&parsed.document.root, start) else {
+        return Vec::new();
+    };
+    object
+        .members
+        .iter()
+        .filter_map(|m| match m {
+            QmlMember::Binding(b) if matches!(b.value, QmlBindingValue::Objects(_)) => {
+                Some(b.name.to_string())
+            }
+            QmlMember::Object(o) => o.on.as_ref().map(|on| format!("{} on {on}", o.type_name)),
+            QmlMember::Enum(e) => Some(format!("enum {}", e.name.name)),
+            _ => None,
+        })
+        .collect()
+}
+
+/// Where the x, y and anchors of the object starting at `start` are written,
+/// whichever way, each member whole, in order. They say where it sits in its
+/// parent, not what it is.
+pub fn place_members(source: &str, start: usize) -> Vec<std::ops::Range<usize>> {
+    let allocator = Allocator::default();
+    let parsed = qml_syntax::parse(&allocator, source);
+    let Some(object) = object_at(&parsed.document.root, start) else {
+        return Vec::new();
+    };
+    let places = |name: &str| {
+        name == "x" || name == "y" || name == "anchors" || name.starts_with("anchors.")
+    };
+    object
+        .members
+        .iter()
+        .filter_map(|member| match member {
+            QmlMember::Binding(b) if places(&b.name.to_string()) => Some(b.span),
+            QmlMember::Object(inner) if is_group(inner) && places(&inner.type_name.to_string()) => {
+                Some(inner.span)
+            }
+            _ => None,
+        })
+        .map(|span| span.start as usize..span.end as usize)
+        .collect()
+}
+
+/// Where the id of the object starting at `start` is written.
+pub fn id_member(source: &str, start: usize) -> Option<std::ops::Range<usize>> {
+    let allocator = Allocator::default();
+    let parsed = qml_syntax::parse(&allocator, source);
+    object_at(&parsed.document.root, start)?
+        .members
+        .iter()
+        .find_map(|member| match member {
+            QmlMember::Binding(b) if b.name.to_string() == "id" => {
+                Some(b.span.start as usize..b.span.end as usize)
+            }
+            _ => None,
+        })
+}
+
+fn object_at<'o, 'a>(object: &'o QmlObject<'a>, start: usize) -> Option<&'o QmlObject<'a>> {
+    if object.span.start as usize == start {
+        return Some(object);
+    }
+    let in_value = |value: &'o QmlBindingValue<'a>| match value {
+        QmlBindingValue::Object(inner) => object_at(inner, start),
+        QmlBindingValue::Objects(list) => list.iter().find_map(|o| object_at(o, start)),
+        _ => None,
+    };
+    object.members.iter().find_map(|member| match member {
+        QmlMember::Object(inner) => object_at(inner, start),
+        QmlMember::Binding(b) => in_value(&b.value),
+        QmlMember::Property(p) => p.value.as_ref().and_then(in_value),
+        QmlMember::InlineComponent(c) => object_at(&c.object, start),
+        _ => None,
     })
 }
 

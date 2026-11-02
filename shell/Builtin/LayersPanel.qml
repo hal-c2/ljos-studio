@@ -150,8 +150,16 @@ Panel {
                 Accessible.name: modelData.label
                 highlighted: panel.workspace.chosen.indexOf(modelData.node) >= 0
                 opacity: modelData.hidden ? 0.5 : 1
+                // The handler below took a click with Shift held: selecting the
+                // row alone as well would have it add what it just chose,
+                // and adding what is chosen takes it out again.
+                property bool adding: false
                 onClicked: {
                     panel.naming = ""
+                    if (adding) {
+                        adding = false
+                        return
+                    }
                     panel.workspace.dispatch("node_select", {
                         doc: panel.workspace.doc,
                         nodes: [{node: modelData.node}]
@@ -206,6 +214,7 @@ Panel {
 
                 TapHandler {
                     acceptedModifiers: Qt.ShiftModifier
+                    onPressedChanged: if (pressed) row.adding = true
                     onTapped: panel.workspace.dispatch("node_select", {
                         doc: panel.workspace.doc,
                         nodes: [{node: row.modelData.node}],

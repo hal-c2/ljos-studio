@@ -336,6 +336,7 @@ fn open(studio: &Mutex<Studio>, a: OpenArgs) -> Result<OpenOut, SurfaceError> {
             behind: false,
             clicks: 0,
             shown: None,
+            breakpoint: None,
         });
         previews.write_hidden();
     }
@@ -463,6 +464,13 @@ fn state(studio: &Mutex<Studio>, a: StateArgs) -> Result<StateOut, SurfaceError>
             );
         }
         if let Err(e) = open.host.write(&id, "state", Value::String(show.clone())) {
+            return Err(preview_error(previews.failed(e)));
+        }
+        // Nothing asked for any more: back to what the width turns on.
+        if show.is_empty()
+            && let Some((root, state)) = &open.breakpoint
+            && let Err(e) = open.host.write(root, "state", Value::String(state.clone()))
+        {
             return Err(preview_error(previews.failed(e)));
         }
         open.shown = (!show.is_empty()).then(|| (id.clone(), show));
@@ -596,9 +604,28 @@ pub(crate) fn pick(
         .with_details(json!({ "kind": "preview_behind" })));
     }
     let open = previews.open.as_mut().ok_or_else(not_shown)?;
-    let Some(declared) = open.host.pick(x, y).map_err(preview_error)? else {
+    let Some(mut declared) = open.host.pick(x, y).map_err(preview_error)? else {
         return Ok(None);
     };
+    let mut scene = None;
+    if studio.session.store().exists(&declared.file) {
+        let (_, node) = studio
+            .session
+            .declared_at(
+                &declared.file,
+                declared.line as usize,
+                declared.column as usize,
+            )
+            .map_err(error)?;
+        // The picture of a 3D view is one object to the preview; the model
+        // under the point is found from the scene it reads.
+        if node.ty.rsplit('.').next() == Some("View3D") {
+            scene = open.host.scene(&declared).map_err(preview_error)?;
+        }
+    }
+    if let Some(body) = scene.as_ref().and_then(|s| s.pick(x, y).ok().flatten()) {
+        declared = body.declared.clone();
+    }
     drop(previews);
     if !studio.session.store().exists(&declared.file) {
         return Err(SurfaceError::not_found(format!(
@@ -621,6 +648,30 @@ pub(crate) fn pick(
         return Ok(None);
     }
     Ok(Some((declared.file, handle)))
+}
+
+/// The 3D scene around the object declared at `at` of `doc`: `None` when no
+/// preview of it is open, it runs older text than the session's, or the
+/// object is in no view.
+pub(crate) fn scene(
+    studio: &mut Studio,
+    doc: &str,
+    at: &studio_core::preview::Declared,
+) -> Result<Option<studio_core::scene3d::Scene>, SurfaceError> {
+    let previews = studio.previews.clone();
+    let mut previews = preview::caught_up(&previews);
+    let behind = previews.events.iter().rev().find_map(|e| match e {
+        PreviewEvent::Opened { .. } | PreviewEvent::Reloaded { .. } => Some(false),
+        PreviewEvent::ReloadFailed { .. } => Some(true),
+        _ => None,
+    });
+    if behind == Some(true) {
+        return Ok(None);
+    }
+    match previews.open.as_mut().filter(|o| o.doc == doc) {
+        Some(open) => open.host.scene(at).map_err(preview_error),
+        None => Ok(None),
+    }
 }
 
 /// What the host says of the objects with `ids` and of unnamed ones of

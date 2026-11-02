@@ -37,9 +37,32 @@ Panel {
         "BorderImage", "Canvas", "Button", "CheckBox", "RadioButton", "Switch", "Slider",
         "ProgressBar", "SpinBox", "TextField", "TextArea", "ComboBox", "Label", "ToolButton"]
     readonly property string needle: search.text.toLowerCase()
+    // A picture is a decode and a live button, so a folder of nine hundred
+    // shows its first few and the search reaches the rest.
+    readonly property var assetsFound: workspace.assets.filter(a => a.name.toLowerCase().includes(needle))
+    readonly property int assetsAtOnce: 24
     // A string, which changes only when the list does: `toolkit` is a new
     // value at each publish, and rebuilding the buttons would drop a press.
     readonly property string toolkit: JSON.stringify(workspace.toolkit)
+    // Read after a publish rather than inside it: every tile is rebuilt from
+    // this, deeper than JS may go at the end of a publish, and a binding out
+    // of stack keeps its old value without a word.
+    property var besideDocument: []
+    function readBeside() {
+        const open = workspace.doc
+        const beside = open.substring(0, open.lastIndexOf("/") + 1)
+        besideDocument = workspace.documents
+            .filter(doc => doc !== open && doc.startsWith(beside) && doc.endsWith(".qml"))
+            .map(doc => doc.substring(beside.length, doc.length - 4))
+            .filter(name => /^[A-Z][A-Za-z0-9_]*$/.test(name))
+    }
+    Component.onCompleted: readBeside()
+    Connections {
+        target: panel.workspace
+        function onDocChanged() { Qt.callLater(panel.readBeside) }
+        function onDocumentsChanged() { Qt.callLater(panel.readBeside) }
+    }
+
     // By what they are for, which is how a person looks for them; the module
     // a type comes from goes along, for the import.
     readonly property var groups: {
@@ -49,11 +72,8 @@ Panel {
         // A file beside the document is a type it can use with no import, and
         // the one open cannot hold itself. A file in another directory needs
         // an import of that directory, which `node_insert` does not write.
-        const beside = panel.workspace.doc.substring(0, panel.workspace.doc.lastIndexOf("/") + 1)
-        for (const doc of panel.workspace.documents) {
-            const name = doc.substring(beside.length, doc.length - 4)
-            if (doc !== panel.workspace.doc && doc.startsWith(beside) && doc.endsWith(".qml")
-                    && /^[A-Z][A-Za-z0-9_]*$/.test(name) && name.toLowerCase().includes(needle))
+        for (const name of panel.besideDocument) {
+            if (name.toLowerCase().includes(needle))
                 out[0].types.push({name: name, module: ""})
         }
         for (const g of JSON.parse(toolkit)) {
@@ -83,6 +103,11 @@ Panel {
         if (module.includes("Controls"))
             return "Controls"
         return "More"
+    }
+    // A picture's url as the open document writes it: urls resolve from the
+    // file that says them.
+    function fromDocument(url) {
+        return "../".repeat(panel.workspace.doc.split("/").length - 1) + url
     }
     // What a tile draws of it: its kind, in the look of the thing.
     function typeIcon(type) {
@@ -198,10 +223,10 @@ Panel {
                 IconButton {
                     icon_: "plus"
                     text: "Place " + row.modelData.name
-                    enabled: panel.workspace.selected !== ""
+                    enabled: panel.target !== ""
                     onClicked: panel.workspace.dispatch("node_insert", {
                         doc: panel.workspace.doc,
-                        parent: {node: panel.workspace.selected},
+                        parent: {node: panel.target},
                         block: row.modelData.module + "." + row.modelData.name
                     })
                 }
@@ -274,6 +299,117 @@ Panel {
                 Accessible.name: text
             }
 
+            Section {
+                id: assetsSection
+                title: "Assets"
+                width: parent.width
+
+                Label {
+                    visible: panel.assetsFound.length > panel.assetsAtOnce
+                    Layout.fillWidth: true
+                    wrapMode: Text.Wrap
+                    color: Colors.textMuted
+                    font.pixelSize: Typography.captionSize
+                    text: (panel.assetsFound.length - panel.assetsAtOnce) + " more: search for their names"
+                    Accessible.role: Accessible.StaticText
+                    Accessible.name: text
+                }
+
+                Flow {
+                    Layout.fillWidth: true
+                    spacing: Spacing.xxs
+
+                    Repeater {
+                        model: panel.assetsFound.slice(0, panel.assetsAtOnce)
+                        delegate: AbstractButton {
+                            id: picture
+                            required property var modelData
+                            text: modelData.name
+                            Accessible.name: "Place " + modelData.name
+                            Accessible.role: Accessible.Button
+                            enabled: panel.target !== ""
+                            width: (assetsSection.width - 2 * Spacing.xxs) / 3
+                            height: 68
+                            ToolTip.visible: hovered
+                            ToolTip.text: "Place " + modelData.name
+                            ToolTip.delay: 500
+                            background: Rectangle {
+                                radius: 6
+                                color: picture.down ? Colors.surfacePressed
+                                    : picture.hovered ? Colors.surfaceHover : Colors.surfaceRaised
+                                border.width: picture.visualFocus ? 2 : 1
+                                border.color: picture.visualFocus ? Colors.focusRing : Colors.surfacePressed
+                            }
+                            contentItem: Column {
+                                spacing: Spacing.xxs
+                                topPadding: Spacing.xxs
+                                Item {
+                                    width: parent.width
+                                    height: 40
+                                    Image {
+                                        id: thumbnail
+                                        anchors.fill: parent
+                                        anchors.margins: 2
+                                        source: picture.modelData.file
+                                        sourceSize.width: 96
+                                        sourceSize.height: 96
+                                        fillMode: Image.PreserveAspectFit
+                                        asynchronous: true
+                                    }
+                                    Icon {
+                                        anchors.centerIn: parent
+                                        visible: thumbnail.status !== Image.Ready
+                                        name: "image"
+                                        size: 24
+                                        color: Colors.textMuted
+                                    }
+                                }
+                                Text {
+                                    width: parent.width
+                                    leftPadding: 2
+                                    rightPadding: 2
+                                    text: picture.modelData.name
+                                    color: picture.enabled ? Colors.text : Colors.textDisabled
+                                    font.pixelSize: Typography.captionSize
+                                    horizontalAlignment: Text.AlignHCenter
+                                    elide: Text.ElideRight
+                                }
+                            }
+                            onClicked: panel.workspace.dispatch("node_insert", {
+                                doc: panel.workspace.doc,
+                                parent: {node: panel.target},
+                                import: "QtQuick",
+                                text: "Image {\n    source: \"" + panel.fromDocument(modelData.url) + "\"\n}"
+                            })
+                        }
+                    }
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    Layout.topMargin: Spacing.xxs
+                    spacing: Spacing.xxs
+
+                    Field {
+                        id: incoming
+                        placeholderText: "Path of a file to import"
+                        Accessible.name: "Path of a file to import"
+                        Layout.fillWidth: true
+                        onAccepted: bring.clicked()
+                    }
+                    TextButton {
+                        id: bring
+                        text: "Import"
+                        Accessible.name: "Import asset"
+                        enabled: incoming.text !== ""
+                        onClicked: {
+                            panel.workspace.dispatch("project_open", {asset: "import", file: incoming.text})
+                            incoming.text = ""
+                        }
+                    }
+                }
+            }
+
             Repeater {
                 model: panel.groups
                 delegate: Column {
@@ -320,11 +456,10 @@ Panel {
                                 contentItem: Column {
                                     spacing: Spacing.xxs
                                     topPadding: Spacing.xs
-                                    Icon {
+                                    TypeSketch {
                                         anchors.horizontalCenter: parent.horizontalCenter
-                                        name: panel.typeIcon(tile.modelData.name)
-                                        size: 24
-                                        color: tile.enabled ? Colors.text : Colors.textDisabled
+                                        kind: panel.typeIcon(tile.modelData.name)
+                                        ink: tile.enabled ? Colors.text : Colors.textDisabled
                                     }
                                     Text {
                                         width: parent.width

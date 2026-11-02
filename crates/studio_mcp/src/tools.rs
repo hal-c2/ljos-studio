@@ -2,6 +2,7 @@
 
 use std::sync::{Arc, Mutex};
 
+use crate::assets::{self, AssetAction, AssetInfo};
 use crate::schema::Answers;
 use ljos_mcp_core::{
     CallCtx, Cap, ErrorCode, SurfaceError, ToolAnnotations, ToolDef, ToolRegistry, denied,
@@ -28,6 +29,14 @@ const TREE_PAGE: usize = 200;
 struct ProjectOpenArgs {
     /// A directory below the workspace, relative or absolute (`.` is the workspace). Left out, describes the open project.
     path: Option<String>,
+    /// On the project's `assets/`: `list` it, `import` a picture or font (`fs`), `remove` one no document uses (`fs`).
+    asset: Option<AssetAction>,
+    /// `import`: a file below the workspace.
+    file: Option<String>,
+    /// `import`: the file's bytes in base64, for a client with no file here; needs `name`.
+    data: Option<String>,
+    /// `import`: the name to give it. `remove`: the asset's name.
+    name: Option<String>,
 }
 
 #[derive(Serialize, JsonSchema)]
@@ -35,6 +44,15 @@ struct ProjectInfo {
     project: String,
     /// QML documents, relative to the project.
     documents: Vec<String>,
+    /// What `list` found.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    assets: Option<Vec<AssetInfo>>,
+    /// What `import` wrote.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    asset: Option<AssetInfo>,
+    /// The url `remove` took out.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    removed: Option<String>,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -104,6 +122,9 @@ struct NewArgs {
     /// How `data` is kept: `json` (the default), or `list`.
     #[serde(default)]
     model: DataModel,
+    /// Also declare it a functional block in the `qmldir` beside it.
+    #[serde(default)]
+    block: bool,
     #[serde(default)]
     dry_run: bool,
 }
@@ -313,6 +334,9 @@ struct Inspected {
     /// What its type takes that the project says: the properties its files
     /// and type dumps declare, written here or not.
     takes: Vec<String>,
+    /// Every property it can be given, nearest first, with the values of
+    /// those that are enums.
+    offers: Vec<crate::signals::Offer>,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -812,7 +836,60 @@ fn info(studio: &Studio) -> ProjectInfo {
     ProjectInfo {
         project: studio.project().to_owned(),
         documents: studio.session.documents(),
+        assets: None,
+        asset: None,
+        removed: None,
     }
+}
+
+fn project_open(
+    studio: &mut Studio,
+    ctx: &CallCtx,
+    a: ProjectOpenArgs,
+) -> Result<ProjectInfo, SurfaceError> {
+    let action = match a.asset {
+        Some(action) => Some(action),
+        None if a.file.is_some() || a.data.is_some() || a.name.is_some() => {
+            return Err(SurfaceError::invalid_argument(
+                "`file`, `data` and `name` go with `asset`".to_owned(),
+            ));
+        }
+        None => None,
+    };
+    // Listing only reads; the registry checked `inspect`, the rest is
+    // checked here, refused the way the registry does.
+    if matches!(action, Some(AssetAction::Import | AssetAction::Remove))
+        && !ctx.caps.contains(Cap::Fs)
+    {
+        return Err(denied("project_open", Cap::Fs, ctx));
+    }
+    if let Some(path) = a.path {
+        studio.switch(&path)?;
+    }
+    let mut out = ProjectInfo {
+        documents: Vec::new(),
+        ..info(studio)
+    };
+    match action {
+        Some(AssetAction::List) => out.assets = Some(assets::list(studio.session.store())),
+        Some(AssetAction::Import) => {
+            out.asset = Some(assets::import(
+                studio,
+                a.file.as_deref(),
+                a.data.as_deref(),
+                a.name.as_deref(),
+            )?);
+        }
+        Some(AssetAction::Remove) => {
+            let name = a.name.ok_or_else(|| {
+                SurfaceError::invalid_argument("`remove` needs `name`".to_owned())
+            })?;
+            out.removed = Some(assets::remove(studio, &name)?);
+        }
+        None => {}
+    }
+    out.documents = studio.session.documents();
+    Ok(out)
 }
 
 pub(crate) const MUTATE: ToolAnnotations = ToolAnnotations {
@@ -1139,6 +1216,12 @@ fn state_op(studio: &Mutex<Studio>, a: StateEditArgs) -> Result<Op, SurfaceError
         },
         StateAction::Change => {
             let target = a.target.ok_or_else(|| needs("target", "change"))?;
+            if let Some(name) = &a.name {
+                let mut held = lock(studio);
+                if let Ok((_, object)) = held.session.resolve(&a.doc, &target) {
+                    crate::loads::check_member(&mut held, &a.doc, &object, name)?;
+                }
+            }
             let value = match (a.value, a.binding) {
                 (Some(_), Some(_)) => {
                     return Err(SurfaceError::invalid_argument(
@@ -1224,6 +1307,10 @@ fn contribute_op(studio: &Mutex<Studio>, a: &ContributeArgs) -> Result<Op, Surfa
             format!("{} {{}}", block.name)
         }
     };
+    if a.block.is_none() {
+        let source = studio.session.text(&a.doc).map_err(error)?.0.to_owned();
+        crate::loads::check_text(studio.session.store(), &a.doc, &source, &delegate, &[])?;
+    }
     let (text, _) = studio.session.text(&a.doc).map_err(error)?;
     let unit = studio_core::states::unit(text);
     let text = studio_core::slots::contribution(&slot, a.mode, a.order, &delegate, &unit)
@@ -1254,6 +1341,17 @@ fn edit(
         .map_err(error)
 }
 
+/// What names an object elsewhere has to follow its id, and a string written
+/// as an id names nothing.
+fn not_an_id(name: &str) -> Result<(), SurfaceError> {
+    if name == "id" {
+        return Err(SurfaceError::invalid_argument(
+            "an id is changed by `node_arrange`'s `rename`, which takes what reads it along",
+        ));
+    }
+    Ok(())
+}
+
 /// Sets a binding. A property the object declares with a value has its value
 /// there: a binding beside it would set it twice, which the app refuses. An
 /// alias has its target there, which stays.
@@ -1276,6 +1374,9 @@ fn set(
         .resolve(doc, node)
         .ok()
         .map(|(_, object)| object);
+    if let (Some(_), Some(object)) = (&value, &object) {
+        crate::loads::check_member(&mut studio, doc, object, name)?;
+    }
     let declared = object
         .iter()
         .flat_map(|object| &object.bindings)
@@ -1333,19 +1434,15 @@ fn edits(studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
         .with(
             ToolDef::new::<ProjectOpenArgs>(
                 "project_open",
-                "Open a project directory below the workspace, or describe the open one. Opening starts a new session: handles and history end.",
+                "Open a project directory below the workspace, or describe the open one. Opening starts a new session: handles and history end. `asset` lists, imports or removes the project's pictures and fonts.",
             )
             .answers::<ProjectInfo>()
-            .requires(Cap::Inspect),
+            .requires(Cap::Inspect)
+            // An asset's import or removal writes; a reader is told by `fs`.
+            .annotated(DESTRUCTIVE),
             typed({
                 let studio = s();
-                move |_, a: ProjectOpenArgs| {
-                    let mut studio = lock(&studio);
-                    if let Some(path) = a.path {
-                        studio.switch(&path)?;
-                    }
-                    Ok(info(&studio))
-                }
+                move |ctx: &CallCtx, a: ProjectOpenArgs| project_open(&mut lock(&studio), ctx, a)
             }),
         )
         .with(
@@ -1422,7 +1519,7 @@ fn edits(studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
             ToolDef::new::<NewArgs>(
                 "document_new",
                 "Create a QML document from `text`, or from a JSON file's records (`data`). Refused if it \
-                 exists or does not parse. Undo removes it.",
+                 exists or does not parse. `block` declares it in the `qmldir` beside it. Undo removes it.",
             )
             .answers::<EditOut>()
             .requires(Cap::Mutate)
@@ -1447,10 +1544,13 @@ fn edits(studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
                         }
                         (None, None) => NEW_DOCUMENT.to_owned(),
                     };
-                    studio
-                        .session
-                        .create(&a.doc, &text, a.dry_run)
-                        .map(EditOut::from)
+                    let session = &mut studio.session;
+                    if a.block {
+                        session.create_block(&a.doc, &text, a.dry_run)
+                    } else {
+                        session.create(&a.doc, &text, a.dry_run)
+                    }
+                    .map(EditOut::from)
                         .map_err(error)
                 }
             }),
@@ -1648,8 +1748,12 @@ fn edits(studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
                     let interactions = studio.session.interactions(&doc, &a.node).map_err(error)?;
                     let model = studio.session.model(&doc, &a.node).map_err(error)?;
                     let source = studio.session.text(&doc).map_err(error)?.0.to_owned();
-                    let crate::signals::TypeSays { signals, takes, .. } =
-                        crate::signals::described(studio.session.store(), &doc, &source, &node);
+                    let crate::signals::TypeSays {
+                        signals,
+                        takes,
+                        offers,
+                        ..
+                    } = crate::signals::described(studio.session.store(), &doc, &source, &node);
                     let (tree, generation) = studio.session.tree(&doc).map_err(error)?;
                     let parent_path = (!node.path.0.is_empty())
                         .then(|| studio_core::NodePath(node.path.0[..node.path.0.len() - 1].to_vec()));
@@ -1692,6 +1796,7 @@ fn edits(studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
                         model,
                         signals,
                         takes,
+                        offers,
                     })
                 }
             }),
@@ -1750,6 +1855,7 @@ fn edits(studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
                 let studio = s();
                 move |_, a: InsertArgs| {
                     let (text, import) = insert_text(&studio, &a)?;
+                    crate::loads::check_insert(&studio, &a.doc, &text, import.as_slice())?;
                     let op = Op::Insert {
                         parent: a.parent,
                         index: a.index,
@@ -1807,6 +1913,7 @@ fn edits(studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
             typed({
                 let studio = s();
                 move |_, a: PropertyArgs| {
+                    not_an_id(&a.name)?;
                     let op = match a.value.0 {
                         None => Op::RemoveBinding {
                             node: a.node,
@@ -1834,6 +1941,7 @@ fn edits(studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
             typed({
                 let studio = s();
                 move |_, a: BindingArgs| {
+                    not_an_id(&a.name)?;
                     let op = match a.value.0 {
                         None => Op::RemoveBinding {
                             node: a.node,

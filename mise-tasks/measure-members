@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+#MISE description="Measure what qml6 says the toolkit's types have, beyond the table Studio is built with, and which types and ids it refuses"
+set -euo pipefail
+
+# Refusing a member on the table's word would refuse real ones: it lacks some.
+out="${TMPDIR:?}/studio-members"
+mkdir -p "$out"
+TOOLKIT_TABLE="$out/table.tsv" cargo test -p studio_mcp --lib a_table_to_measure -- --ignored
+python3 -I mise-tasks/measure-members.py "$out" crates/studio_mcp/src/measured_members.txt \
+    crates/studio_mcp/src/measured_types.txt crates/studio_mcp/src/measured_ids.txt

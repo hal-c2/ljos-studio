@@ -10,7 +10,8 @@ Feature: Studio's tools and who may use them
   Starting a preview runs the project's code and needs `run`; looking at
   one that runs needs only `inspect`. Writing a bundle of the project
   outside its documents (`export`) needs `fs`; review comments are read
-  with `inspect` and written with `mutate`.
+  with `inspect` and written with `mutate`. `project_open` lists a project's
+  assets with `inspect`; bringing them in or out needs `fs`.
 
   Scenario: Every tool, in order
     Given the studio tools are connected
@@ -30,7 +31,7 @@ Feature: Studio's tools and who may use them
 
   Scenario: The list of tools fits one answer
     Given the studio tools are connected with the capabilities "inspect, mutate, fs, run"
-    Then the list of tools is at most 31000 bytes
+    Then the list of tools is at most 32000 bytes
 
   Scenario: A reader cannot change a document
     Given the file "Main.qml":

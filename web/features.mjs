@@ -433,14 +433,20 @@ const STEPS = [
     if (got === undefined) throw new Error(`\`${name}\` does not exist`);
     if (got !== want) throw new Error(`\`${name}\` is:\n${got}\nnot:\n${want}`);
   }),
-  // A page starts no program: the scenarios that say so are `@native`.
-  step("given", /^previews run the program "([^"]*)"$/, () => {
-    throw new Error("a browser's preview starts no program");
-  }),
   step("then", /^the file "([^"]+)" contains "(.*)"$/, (w, s, name, want) => {
     const got = w.backend.files.get(name);
     if (got === undefined) throw new Error(`\`${name}\` does not exist`);
     if (!got.includes(want.replaceAll('\\"', '"'))) throw new Error(`\`${name}\` does not contain ${want}:\n${got}`);
+  }),
+  // A page starts no program: the scenarios that say so are `@native`.
+  step("given", /^previews run the program "([^"]*)"$/, () => {
+    throw new Error("a browser's preview starts no program");
+  }),
+  step("then", /^the file "([^"]+)" contains:$/, (w, s, name) => {
+    const want = docstring(s);
+    const got = w.backend.files.get(name);
+    if (got === undefined) throw new Error(`\`${name}\` does not exist`);
+    if (!got.includes(want)) throw new Error(`\`${name}\` does not contain ${JSON.stringify(want)}:\n${got}`);
   }),
   step("then", /^the file "([^"]+)" does not contain "(.*)"$/, (w, s, name, want) => {
     const got = w.backend.files.get(name) ?? "";

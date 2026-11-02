@@ -456,9 +456,20 @@ hit that limit.
 - **Fixed:** the canvas says the object has no box and offers no alignment; a
   row holding an expression stays one when edited; a literal row still refuses
   (`features/ui/quick3d.feature`). Driven in a real window off-screen.
-- **Open:** a click on the picture selects the `View3D`, not the model under
-  the pointer, and there are no 3D handles or orbit: a 3D object is chosen in
-  Layers and edited in the inspector.
+- **Then (phase 6):** a click on the picture selects the `Model` under the
+  pointer (Studio casts the ray itself from the scene the preview can read,
+  as Ljós's own `pick` is not usable from outside), and a selected `Model`
+  has move arrows for `x`, `y`, `z`. A drag writes one axis as one undo step
+  and shows the arrow and its value live; an axis an expression sets is
+  refused. Driven in a real window off-screen; pictures in
+  `$S/studio/p6/shots` (`03-picked`, `04-dragging`, `05-dropped`,
+  `06-undone`, `08-hand-after`).
+- **Open:** no orbit and no rotate gizmo (`eulerRotation` is edited in the
+  inspector). The Hand tool over a `View3D` pans the canvas and writes
+  nothing. With the camera looking down z the z axis is a point, so only the
+  x and y arrows show there. A file mesh is not picked (its size is unknown
+  from outside) and an orthographic camera falls back to selecting the
+  view. The web host reads no scene, so there a click still selects the view.
 
 **Phase 5, measured before the review fixes** (machine load 10 to 17 from other
 builds). Selection to inspector, driver's clock advanced between clicks: p50 /
@@ -468,6 +479,46 @@ project on tmpfs 23.0 / 27.3 / 32.1. `samples/notes` on tmpfs 26.8 / 43.0 / 46.5
 on the drive 35.8 / 1121.2 / 3262.2. `samples/site` on the drive 34.2 / 41.9 /
 47.1; on tmpfs 41.0 / 57.7 / 130.8. Idle 0 ms CPU, 0 wakes, 0 frames. `tools/list` is 40 324 bytes
 against the scenario's 40 960: little room left.
+
+**Phase 6, built from an empty project.** Four things, each opened and judged
+by eye: a timer app by hand and through MCP only, its block skinned through a
+shell; a coffee app by hand with a QML block, skinned a second way through MCP;
+a marketing site through MCP only (581 877 bytes exported) and by hand (555 695
+bytes, Row turned into Flow in the inspector, a phone width as a State).
+
+Budgets, release, base `n4-export` against this head on the same Ljós, quiet
+rounds, p95 in ms: selection to inspector 25.6 / 39.3 against 19.6 / 34.4;
+inspector edit to picture 35.5 / 37.3 against 40.1 / 51.6, p50 31 to 32 against
+29 to 31; state edit to picture 38.4 / 40.3 against 24.5 / 24.4; `theme_set`
+30.3 / 31.5 against 22.6 / 23.7; back-to-back edits about 1030 / 872 against
+25.8 / 39.5. Idle 0 ms CPU and 0 wakes in all. At load 45 selection reaches
+220 ms against 20.7 at load 10, so the slower numbers seen on a busy machine are
+load. Selection misses the 16 ms budget on both base and head on this machine.
+A shell that throws now takes about 157 to 175 ms to show the built-in one,
+against about 105, since the built-in shell doubled to 5971 lines.
+
+**Phase 6, still not good enough.**
+
+- A Text drawn on a dark fill is black, so it cannot be seen until recoloured.
+- A placed object lands at 0, 0 of its parent; a placed picture can overflow it.
+- The inspector edits the first of several and says so, rather than all.
+- A non-visual block shows position pads and handles.
+- The light or dark look follows the system at start, and a choice in the
+  toolbar is not kept for the next launch.
+- A member `node_insert` adds goes after child objects; `id: true` cannot name
+  the id at insert.
+- The default Button is tiny; Layout's spacing repeats under Properties; rows
+  named `Layout.pref...` elide to the same text; an alias on an instance reads
+  "no value".
+- The Assets panel does not see a file added from outside until the next publish.
+- An export ships files nothing uses (`dusk-src.png`, twice).
+- The canvas's align bar can cover a tall frame's "Edit layout" button, and a
+  tooltip can linger.
+- Shutting the window logs `CanvasOverlay.qml:84: TypeError: Cannot read property
+  'chosen' of null`.
+- A window already on a document ran out of JS stack in the test build when the
+  palette rebuilt inside a publish. The palette now reads later, and the 512 KiB
+  limit stays Ljós's.
 
 ## Not done
 

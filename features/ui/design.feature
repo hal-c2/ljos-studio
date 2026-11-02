@@ -46,13 +46,13 @@ Feature: Studio's window is laid out to work in
     When the person clicks the button "Right panels"
     Then the window has no pane "Inspector"
     When the person clicks the button "Show code"
-    Then the window has no pane "Code"
+    Then the window has no pane "Code of Main.qml"
     When the person clicks the button "Left panels"
     And the person clicks the button "Right panels"
     And the person clicks the button "Show code"
     Then the window has a pane "Layers"
     And the window has a pane "Inspector"
-    And the window has a pane "Code"
+    And the window has a pane "Code of Main.qml"
 
   Scenario: The look turns dark and back, and the button says which is next
     When the person clicks the button "Dark look"
@@ -138,6 +138,17 @@ Feature: Studio's window is laid out to work in
     And the person has clicked the button "Hand"
     When the person zooms in with Ctrl and the wheel over the frame "Desktop" at 60, 40
     Then the frame "Desktop" grew, with its point under the pointer still there
+
+  # At the top of the window a tip has no room above its button; kept inside
+  # the window it would lie on the button and take the press meant for it.
+  @preview
+  Scenario: A button at the top of the window takes the press with its tip showing
+    Given the person has opened "Main.qml" in the documents list
+    And the person has selected "Rectangle root" in the layers panel
+    And the person has set "width" to "401" in the inspector
+    When the pointer rests on the button "Undo" until its tip has shown
+    And the person clicks the button "Undo"
+    Then the file "Main.qml" says "width: 400"
 
   @preview
   Scenario: With the hand a click in the frame selects nothing

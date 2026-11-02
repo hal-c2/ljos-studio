@@ -9,7 +9,7 @@ expression: value
     "open_world": false,
     "read_only": false
   },
-  "description": "A canvas gesture, one undo step. `geometry`: boxes, drag rules, siblings. `place`: x/y/size, writing what governs each object. `align`, `copy`, `paste`, `duplicate`, `remove`, `rename`. `hide`, `show`, `lock`, `unlock` leave the file alone.",
+  "description": "A canvas gesture, one undo step. `geometry`: boxes, drag rules, siblings. `place`: x/y/size, writing what governs each object. `component_extract`: one object to `name`.qml. `hide`, `show`, `lock`, `unlock` leave the file alone.",
   "inputSchema": {
     "$defs": {
       "Address": {
@@ -31,10 +31,15 @@ expression: value
           "duplicate",
           "remove",
           "rename",
+          "relayout",
           "hide",
           "show",
           "lock",
-          "unlock"
+          "unlock",
+          "wrap",
+          "unwrap",
+          "component_extract",
+          "anchor"
         ],
         "type": "string"
       },
@@ -52,18 +57,40 @@ expression: value
         ],
         "type": "string"
       },
+      "centerIn": {
+        "description": "For `anchor`.",
+        "type": "boolean"
+      },
+      "columns": {
+        "description": "For `wrap` in a Grid.",
+        "type": "integer"
+      },
       "doc": {
         "type": "string"
       },
       "dry_run": {
         "type": "boolean"
       },
+      "fill": {
+        "description": "For `anchor`.",
+        "type": "boolean"
+      },
       "generation": {
         "description": "For a `path`.",
         "type": "integer"
       },
+      "in": {
+        "description": "For `wrap`.",
+        "enum": [
+          "Row",
+          "Column",
+          "Grid",
+          "Item"
+        ],
+        "type": "string"
+      },
       "name": {
-        "description": "For `rename`: the object's new `id`.",
+        "description": "For `rename`: the object's new `id`. For `component_extract`: the new type. For `relayout`: its new kind.",
         "type": "string"
       },
       "nodes": {
@@ -96,6 +123,10 @@ expression: value
             },
             "y": {
               "type": "number"
+            },
+            "z": {
+              "description": "Of an object of a 3D scene.",
+              "type": "number"
             }
           },
           "required": [
@@ -106,7 +137,7 @@ expression: value
         "type": "array"
       },
       "record": {
-        "description": "For `place` and `align`: write into this state, not the object.",
+        "description": "For `place`, `align`: write into this state.",
         "properties": {
           "on": {
             "$ref": "#/$defs/Address"
@@ -120,6 +151,32 @@ expression: value
           "on"
         ],
         "type": "object"
+      },
+      "sides": {
+        "description": "For `anchor`: null unpins.",
+        "properties": {
+          "bottom": {
+            "type": "number"
+          },
+          "left": {
+            "type": "number"
+          },
+          "right": {
+            "type": "number"
+          },
+          "top": {
+            "type": "number"
+          }
+        },
+        "type": "object"
+      },
+      "spacing": {
+        "description": "For `wrap`.",
+        "type": "number"
+      },
+      "target": {
+        "description": "For `anchor`: `parent` or a sibling's id.",
+        "type": "string"
       },
       "within": {
         "description": "For `geometry`: the siblings are the first node's children, for something drawn inside it.",
@@ -140,19 +197,24 @@ expression: value
   "name": "node_arrange",
   "outputSchema": {
     "properties": {
+      "aliases": {},
       "boxes": {},
       "changes": {},
+      "component": {},
       "copied": {},
       "doc": {},
       "generation": {},
       "history": {},
+      "imported": {},
+      "name_unsure": {},
       "node": {},
       "nodes": {},
       "parent": {},
       "rebased_from": {},
       "siblings": {},
       "text": {},
-      "unchanged": {}
+      "unchanged": {},
+      "unvouched": {}
     },
     "type": "object"
   },

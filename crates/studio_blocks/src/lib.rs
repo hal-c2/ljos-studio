@@ -98,10 +98,16 @@ pub struct Workspace {
     /// The project's documents, as paths from its root.
     #[qml(readonly, notify)]
     pub documents: Json,
+    /// The pictures in the project's `assets/`, for the Insert tab.
+    #[qml(readonly, notify)]
+    pub assets: Json,
     /// The preview's picture may be out of date after a click: the shell
     /// calls `lookAgain` every so often until this is false.
     #[qml(readonly, notify)]
     pub settling: bool,
+    /// A click on the canvas is a click on the running app. The shell sets it.
+    #[qml(notify)]
+    pub playing: bool,
     /// How many pictures of the preview have been asked for.
     #[qml(readonly, notify)]
     pub looks: i32,
@@ -149,6 +155,10 @@ pub struct Workspace {
     /// change signal.
     #[qml(readonly, notify)]
     pub signals: Json,
+    /// What the selected object can be given: `name`, `type` and, for an
+    /// enum, `values` as a file writes them.
+    #[qml(readonly, notify)]
+    pub offers: Json,
     /// The open document's flow: `states`, the root's, the base state
     /// (`""`) first, and `edges`, each `kind` (`transition` or
     /// `interaction`), `from` (`*` for any), `to`, `label`, and an
@@ -220,7 +230,9 @@ impl Default for Workspace {
         let none = || Json::Array(Vec::new());
         Self {
             documents: none(),
+            assets: none(),
             settling: false,
+            playing: false,
             looks: 0,
             blank: false,
             doc: String::new(),
@@ -234,6 +246,7 @@ impl Default for Workspace {
             states: none(),
             roles: none(),
             signals: none(),
+            offers: none(),
             flow: json!({"states": [], "edges": []}),
             palette: none(),
             toolkit: none(),
@@ -345,7 +358,6 @@ impl Workspace {
             let mut q = queue.borrow_mut();
             if let Some(stop) = q.following.take() {
                 stop.stop();
-                // A thread waiting for a picture to land is told by these going.
             }
         }
         Ok(())
@@ -381,6 +393,9 @@ struct Queue {
     /// The preview's size when last published: a new size is a new picture
     /// of the same generation.
     size: (u32, u32),
+    /// The document of the preview when last published: each preview counts
+    /// its own generations, so another document's number says nothing.
+    previewed: String,
     image: Option<ImageHandle>,
     /// The generation `image` shows.
     picture: u64,
@@ -1041,18 +1056,34 @@ fn publish(engine: &Engine, ws: ObjectId, view: View, seen: u64) {
         .map_or((0, 0), |p| (p.width, p.height));
     let resized = queue_of(engine, ws)
         .is_some_and(|q| std::mem::replace(&mut q.borrow_mut().size, size) != size);
+    let other_doc = queue_of(engine, ws).is_some_and(|q| {
+        let doc = view.preview.as_ref().map_or("", |p| p.doc.as_str());
+        let mut q = q.borrow_mut();
+        let other = q.previewed != doc;
+        if other {
+            doc.clone_into(&mut q.previewed);
+        }
+        other
+    });
     let wanted = view
         .preview
         .as_ref()
         .filter(|p| p.doc == view.doc)
         .map(|p| p.generation)
-        .filter(|&g| resized || (g != picture && g != fetched));
+        .filter(|&g| resized || other_doc || (g != picture && g != fetched));
     let _ = cx.set(Workspace::BLANK, view.blank);
     give(
         &cx,
         Workspace::DOCUMENTS,
         "DOCUMENTS",
         to_json(&view.documents),
+        &queue,
+    );
+    give(
+        &cx,
+        Workspace::ASSETS,
+        "ASSETS",
+        to_json(&view.assets),
         &queue,
     );
     let _ = cx.set(Workspace::GENERATION, view.generation as f64);
@@ -1099,6 +1130,13 @@ fn publish(engine: &Engine, ws: ObjectId, view: View, seen: u64) {
         Workspace::SIGNALS,
         "SIGNALS",
         to_json(&view.signals),
+        &queue,
+    );
+    give(
+        &cx,
+        Workspace::OFFERS,
+        "OFFERS",
+        to_json(&view.offers),
         &queue,
     );
     give(&cx, Workspace::FLOW, "FLOW", to_json(&view.flow), &queue);
@@ -1401,4 +1439,25 @@ fn read_picture(engine: &Engine, obj: ObjectId) -> Rc<dyn ItemPaint> {
             .flatten()
     });
     Rc::new(Picture(image))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A follower waits on these for its picture. One still in line when the
+    /// Workspace goes never runs, and would otherwise hold the follower for
+    /// the whole of its wait. A running one holds the lane until it lands, so
+    /// no scenario can tell this from the thread having been told to stop.
+    #[test]
+    fn a_queue_going_lets_go_of_the_looks_in_line() {
+        let (landed, wait) = mpsc::channel();
+        let mut queue = Queue::default();
+        queue.jobs.push_back(Job::Picture {
+            generation: 0,
+            looks: vec![landed],
+        });
+        drop(queue);
+        assert_eq!(wait.try_recv(), Err(mpsc::TryRecvError::Disconnected));
+    }
 }

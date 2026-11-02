@@ -92,6 +92,11 @@ pub(crate) struct Open {
     /// The object and the state `preview_state` shows: a reload starts the
     /// app again in its base state, so it is shown again.
     pub shown: Option<(String, String)>,
+    /// The root's id and the state its breakpoint turns on at this width. A
+    /// `when` a reload writes is not looked at until what it reads changes,
+    /// and a window that stays one width never changes it, so it is shown as
+    /// `shown` is; and `shown` wins over it.
+    pub breakpoint: Option<(String, String)>,
 }
 
 pub(crate) struct Previews {
@@ -224,6 +229,34 @@ impl Previews {
         }
     }
 
+    /// Holds the state the open preview's width turns on, when the file or
+    /// the width has changed which that is. Whether anything was written.
+    pub(crate) fn hold_breakpoint(&mut self, now: Option<(String, String)>) -> bool {
+        let Some(open) = &mut self.open else {
+            return false;
+        };
+        if open.breakpoint == now {
+            return false;
+        }
+        let was = std::mem::replace(&mut open.breakpoint, now);
+        if open.shown.is_some() {
+            return false;
+        }
+        match (&open.breakpoint, was) {
+            (Some((id, state)), _) => {
+                for value in ["", state.as_str()] {
+                    let _ = open.host.write(id, "state", value.into());
+                }
+            }
+            (None, Some((id, _))) => {
+                let _ = open.host.write(&id, "state", "".into());
+            }
+            (None, None) => {}
+        }
+        open.clicks += 1;
+        true
+    }
+
     /// What `node_arrange` `hide` holds, on what a reload or a new app put back.
     pub(crate) fn write_hidden(&mut self) {
         if let Some(open) = &mut self.open {
@@ -271,7 +304,9 @@ impl Previews {
         // Only now: a host that panics has not shown the write, and the lock
         // outlives the panic for the next reader to catch up.
         open.behind = false;
-        if let (Ok(Reload::Applied { .. }), Some((id, state))) = (&reload, &open.shown) {
+        if let (Ok(Reload::Applied { .. }), Some((id, state))) =
+            (&reload, open.shown.as_ref().or(open.breakpoint.as_ref()))
+        {
             // Out and in again: the app comes back in the state it was in,
             // and setting that same state would not apply what the new text
             // adds to it. One the new text no longer has is the app's to
@@ -479,6 +514,7 @@ mod tests {
                 behind,
                 clicks: 0,
                 shown: None,
+                breakpoint: None,
             }),
             ..Previews::new(Arc::new(Still))
         };

@@ -47,6 +47,50 @@ Feature: A person places a 3D view from the palette
     And the inspector has no button "Align Left"
 
   @preview
+  # The camera looks down z, so the z axis is a point on the picture: there
+  # is nothing to drag, and its row in the inspector is where z is set.
+  Scenario: A model of a 3D scene is moved by the arrows the picture can show
+    Given the person has searched the palette for "View3D"
+    And the person has placed "View3D" from the palette
+    When the person selects "Model" in the layers panel
+    Then the canvas shows 2 move arrows
+
+  # The view is 320 by 240 at the corner and its camera 300 units away, so a
+  # unit is 0.69 pixel at the model: the 40 pixels of the drag are 58 units.
+  @preview
+  Scenario: Dragging an arrow moves the model along its axis as one undo step
+    Given the person has searched the palette for "View3D"
+    And the person has placed "View3D" from the palette
+    And the person has selected "Model" in the layers panel
+    When the person drags in the frame "Desktop" from 200, 120 to 240, 120
+    Then the file "Main.qml" says "x: 58"
+    And the history lists "place"
+    When the person presses "Ctrl+Z"
+    Then the file "Main.qml" does not say "x: 58"
+
+  @preview
+  Scenario: A click on the picture of the model selects the model
+    Given the person has searched the palette for "View3D"
+    And the person has placed "View3D" from the palette
+    When the person clicks the frame "Desktop" at 160, 120
+    Then the layers panel has "Model" selected
+
+  @preview
+  Scenario: With the hand a drag over a 3D view writes nothing
+    Given the person has searched the palette for "View3D"
+    And the person has placed "View3D" from the palette
+    And the person has clicked the button "Hand"
+    When the person drags in the frame "Desktop" from 100, 100 to 200, 150
+    Then the file "Main.qml" does not say " x: "
+
+  @preview
+  Scenario: A view has no arrows
+    Given the person has searched the palette for "View3D"
+    And the person has placed "View3D" from the palette
+    When the person selects "View3D view3D1" in the layers panel
+    Then the canvas shows 0 move arrows
+
+  @preview
   Scenario: The line-up buttons come back with an object that has a box
     Given the person has searched the palette for "View3D"
     And the person has placed "View3D" from the palette

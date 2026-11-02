@@ -123,6 +123,77 @@ Feature: A person edits variants and slots in Studio's window
     When the person chooses the target "Desktop"
     Then the frame "Desktop" shows no state
 
+  @preview
+  Scenario: A frame's button starts that frame's layout
+    When the person chooses the target "Phone"
+    And the person clicks the button "Phone layout"
+    Then the file "Main.qml" says "when: root.width < 600"
+    And the frame "Phone" shows the state "phone"
+    And the window says "Editing state phone"
+    When the person selects "Text label" in the layers panel
+    And the person sets "text" to "\"narrow\"" in the inspector
+    Then the file "Main.qml" says "target: label"
+    And the file "Main.qml" says "text: \"wide\""
+    And the file "Main.qml" says "text: \"narrow\""
+    When the person clicks the button "Done editing state"
+    Then the window does not say "Editing state phone"
+    When the person clicks the button "Edit phone layout"
+    Then the window says "Editing state phone"
+
+  @preview
+  # A hand-drawn document's root has no id, and a breakpoint compares the
+  # root's width by its id: the button gives it one rather than a refusal.
+  Scenario: A frame's button names a root that has no name
+    Given an agent has called the tool "document_new" with:
+      """json
+      {"doc": "Bare.qml", "text": "import QtQuick\n\nItem {\n    Text {\n        id: label\n        text: \"wide\"\n    }\n}\n"}
+      """
+    And the person has opened "Bare.qml" in the documents list
+    When the person chooses the target "Tablet"
+    And the person clicks the button "Tablet layout"
+    Then the file "Bare.qml" says "id: root"
+    And the file "Bare.qml" says "when: root.width >= 600 && root.width < 1024"
+    And the frame "Tablet" shows the state "tablet"
+
+  @preview
+  Scenario: A state of that name takes the frame's breakpoint
+    Given the person has added the state "phone" in the inspector
+    When the person chooses the target "Phone"
+    And the person clicks the button "Phone layout"
+    Then the inspector lists the states "phone"
+    And the file "Main.qml" says "when: root.width < 600"
+    And the frame "Phone" shows the state "phone"
+
+  # A `when` written into a running app is shown without a new generation,
+  # and the outline was read only at a new generation.
+  @preview
+  Scenario: The outline and the picture follow what a frame's state does
+    Given the person has selected "Text label" in the layers panel
+    And the person has looked at the frame "Desktop"
+    And the person has clicked the button "Desktop layout"
+    When the person sets "text" to "\"narrow\"" in the inspector
+    Then the frame "Desktop" has drawn a different picture since
+    When the person sets "width" to "100" in the inspector
+    And the person sets "height" to "20" in the inspector
+    And the person sets "x" to "40" in the inspector
+    Then the canvas outlines the selection at 40, 0 sized 100 by 20
+    When the person clicks the button "Done editing state"
+    Then the canvas outlines the selection at 40, 0 sized 100 by 20
+
+  @preview
+  Scenario: The outline follows the frame's width to another state
+    Given the person has selected "Text label" in the layers panel
+    And the person has set "width" to "100" in the inspector
+    And the person has set "height" to "20" in the inspector
+    And the person has chosen the target "Phone"
+    And the person has clicked the button "Phone layout"
+    And the person has set "x" to "40" in the inspector
+    And the person has clicked the button "Done editing state"
+    When the person chooses the target "Desktop"
+    Then the canvas outlines the selection at 0, 0 sized 100 by 20
+    When the person chooses the target "Phone"
+    Then the frame "Phone" outlines the selection at 40, 0 sized 100 by 20
+
   Scenario: The palette lists a block's slots
     Then the palette lists the slots "controls" of "Player"
 

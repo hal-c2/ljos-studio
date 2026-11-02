@@ -114,12 +114,21 @@ Feature: Objects are moved and resized on the canvas
       | place refused                | Ada holds "a"          | 40, 40  | the person drags in the frame "Desktop" from 40, 40 to 90, 63                           | nothing has happened                            | 8       | the history lists nothing                               |
       | reorder answered             | nothing has happened   | 50, 220 | the person drags in the frame "Desktop" from 50, 220 to 280, 220                        | nothing has happened                            | 8       | the history lists "move"                                |
       | reorder refused              | Ada holds "one"        | 50, 220 | the person drags in the frame "Desktop" from 50, 220 to 280, 220                        | nothing has happened                            | 8       | the history lists nothing                               |
-      | waiting drop reorders        | nothing has happened   | 50, 220 | the person drags in the frame "Desktop" from 50, 220 to 280, 220 at once                | nothing has happened                            | 8       | the history lists "move"                                |
-      | waiting drop changes nothing | nothing has happened   | 50, 220 | the person drags in the frame "Desktop" from 50, 220 to 60, 220 at once                 | nothing has happened                            | 8       | the history lists nothing                               |
+      | waiting drop reorders        | the preview takes 500 ms to say where its objects are | 50, 220 | the person drags in the frame "Desktop" from 50, 220 to 280, 220 at once                | nothing has happened                            | 8       | the history lists "move"                                |
+      | waiting drop changes nothing | the preview takes 500 ms to say where its objects are | 50, 220 | the person drags in the frame "Desktop" from 50, 220 to 60, 220 at once                 | nothing has happened                            | 8       | the history lists nothing                               |
       | drop just after a nudge      | nothing has happened   | 40, 40  | the person presses "Right" and drags in the frame "Desktop" from 41, 40 to 91, 63       | nothing has happened                            | 8       | the file "Main.qml" says "id: a; x: 71; y: 43;"         |
       | drag cancelled               | nothing has happened   | 40, 40  | the person presses in the frame "Desktop" at 40, 40 and holds it at 90, 63              | the window takes the press away                 | 8       | the history lists nothing                               |
       | selection moved in the drag  | nothing has happened   | 40, 40  | the person presses in the frame "Desktop" at 40, 40 and holds it at 90, 63              | an agent selects "b" and the hand lets go       | 8       | the history lists nothing                               |
       | selection moved in the wait  | nothing has happened   | 40, 40  | the person presses in the frame "Desktop" at 40, 40 and holds it at 90, 63              | the drop waits on a read and an agent selects "b" | 8       | the history lists nothing                               |
+
+  # A press is a new gesture: the read of the last drop answering while the
+  # hand is down would otherwise decide that drop with where this drag has got.
+  Scenario: A press ends a drop that was waiting on a read
+    Given the person has clicked the frame "Desktop" at 50, 220
+    And the preview takes 500 ms to say where its objects are
+    And the person has dragged in the frame "Desktop" from 50, 220 to 60, 220 at once, leaving the read on its way
+    When the person presses in the frame "Desktop" at 50, 220 and at once holds it at 280, 220
+    Then the history lists nothing
 
   # The canvas is built on the preview: without one there is no overlay left
   # to hold a ghost. The object the hand holds is still in the file, so the
@@ -272,3 +281,41 @@ Feature: Objects are moved and resized on the canvas
     Then the window says "A state cannot change the order of a layout"
     And the file "Main.qml" says "id: one;"
     And the file "Main.qml" does not say "target: one"
+
+  Scenario: A multiple selection is wrapped from the bar above the canvas
+    Given an agent has called the tool "node_select" with:
+      """json
+      {"doc": "Main.qml", "nodes": [{"id": "a"}, {"id": "b"}]}
+      """
+    When the person clicks the button "Wrap in Column"
+    Then the file "Main.qml" says "Column {"
+    And the layers panel lists "Rectangle root, Column column, Rectangle a, Rectangle b, RowLayout row, Rectangle one, Rectangle two"
+
+  Scenario: Objects are gathered with Shift on the canvas and wrapped together
+    When the person clicks the frame "Desktop" at 30, 30
+    And the person clicks the frame "Desktop" at 210, 110 holding Shift
+    And the person clicks the button "Wrap in Row"
+    Then the layers panel lists "Rectangle root, Row row1, Rectangle a, Rectangle b, RowLayout row, Rectangle one, Rectangle two"
+
+  # The inspector edits the first of what is gathered, and looked as if it
+  # edited them all.
+  Scenario: The inspector says it edits one of what is gathered
+    When the person clicks the frame "Desktop" at 30, 30
+    Then the window does not say "2 selected. This edits the first."
+    When the person clicks the frame "Desktop" at 210, 110 holding Shift
+    Then the window says "2 selected. This edits the first."
+
+  Scenario: Objects are gathered with Shift in the layers panel and wrapped together
+    Given the person has selected "Rectangle a" in the layers panel
+    When the person selects "Rectangle b" in the layers panel holding Shift
+    And the person clicks the button "Wrap in Row"
+    Then the layers panel lists "Rectangle root, Row row1, Rectangle a, Rectangle b, RowLayout row, Rectangle one, Rectangle two"
+
+  Scenario: What only holds its children is taken away from around them
+    Given an agent has called the tool "node_arrange" with:
+      """json
+      {"action": "wrap", "doc": "Main.qml", "nodes": [{"id": "a"}, {"id": "b"}], "in": "Item"}
+      """
+    When the person selects "Item item" in the layers panel
+    And the person clicks the button "Unwrap"
+    Then the file "Main.qml" says "id: a; x: 20; y: 20;"

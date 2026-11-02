@@ -597,3 +597,12 @@ Feature: Objects are placed by the tools a canvas drag drops through
       """
     Then the agent is refused with "invalid_argument"
     And the file "Plain.qml" contains "Rectangle { x: 1;"
+
+  Scenario: A depth is for an object of a 3D scene
+    Given the studio tools are connected
+    When the agent calls the tool "node_arrange" with:
+      """json
+      {"action": "place", "doc": "Main.qml", "places": [{"node": {"id": "a"}, "z": 5}]}
+      """
+    Then the agent is refused with "invalid_argument"
+    And the file "Main.qml" does not contain "z: 5"

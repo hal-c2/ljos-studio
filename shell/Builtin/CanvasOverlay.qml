@@ -3,6 +3,11 @@
 // moves a ghost, so a frame costs a few rectangles. The drop is one call of
 // the tool an agent has, `node_arrange`, which is one undo step.
 //
+// An object of a 3D scene has no box. It gets three arrows instead, one per
+// axis of its `x`, `y` and `z`, drawn from the camera the answer carries, so
+// a drag follows the pointer without asking the running app. The drop writes
+// one axis through the same tool.
+//
 // Everything here is in the document's logical pixels times `zoom`.
 import QtQuick
 import QtQuick.Controls
@@ -47,6 +52,20 @@ MouseArea {
     property var snapYs: []
     readonly property bool dragging: mode !== ""
 
+    // The one selected object of a 3D scene, with what draws its arrows.
+    readonly property var spatial: nodes.length === 1 && nodes[0].scene !== undefined ? nodes[0].scene : null
+    // An arrow's length on screen, and how near the pointer must be to take it.
+    readonly property real arrowLength: 72
+    readonly property real arrowReach: 6
+    // Which axis (0, 1, 2) is pressed, where on its line, and what its
+    // value was; the value a drag would write is in `ghost3`.
+    property int axis: -1
+    property real axisFrom: 0
+    property var ghost3: null
+    readonly property var axisNames: ["x", "y", "z"]
+    readonly property var arrows: arrowsOf(spatial, ghost3, zoom, playing)
+    readonly property int arrowsShown: arrows.length
+
     // Past this many screen pixels a press is a drag.
     readonly property real dragStart: 3
     // Within this many screen pixels an edge snaps.
@@ -64,10 +83,10 @@ MouseArea {
     readonly property string says: {
         if (workspace.chosen.length === 0 || playing)
             return ""
-        if (nodes.length > 0 && nodes.every(n => n.window === undefined))
-            return "This object has no box on the canvas"
         if (told !== "")
             return told
+        if (nodes.length > 0 && nodes.every(n => n.window === undefined))
+            return "This object has no box on the canvas"
         return nodes.length === 1 ? nodes[0].drag.says : ""
     }
 
@@ -109,6 +128,120 @@ MouseArea {
         })
     }
 
+    function dot(a, b) {
+        return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+    }
+
+    function plus(a, b, by) {
+        return [a[0] + by * b[0], a[1] + by * b[1], a[2] + by * b[2]]
+    }
+
+    // A point of the scene on the window, in logical pixels; null behind the
+    // camera.
+    function project(s, p) {
+        const eye = s.eye
+        const d = [p[0] - eye.position[0], p[1] - eye.position[1], p[2] - eye.position[2]]
+        const depth = dot(d, eye.forward)
+        if (depth <= 0.001)
+            return null
+        const nx = dot(d, eye.right) / (depth * eye.tan_y * eye.aspect)
+        const ny = dot(d, eye.up) / (depth * eye.tan_y)
+        return {x: s.view.x + (nx + 1) / 2 * s.view.width, y: s.view.y + (1 - ny) / 2 * s.view.height}
+    }
+
+    // The arrows for `s`, its origin moved by the drag in progress: where each
+    // starts and ends on the window, and the value it would write.
+    function arrowsOf(s, moved, scale, off) {
+        if (s === null || off)
+            return []
+        let origin = s.origin
+        if (moved !== null)
+            origin = plus(origin, s.axes[moved.axis], moved.value - s.local[moved.axis])
+        const from = project(s, origin)
+        if (from === null)
+            return []
+        const out = []
+        for (let i = 0; i < 3; ++i) {
+            // One unit of the axis shows how long the arrow is to be, whatever
+            // the view's distance, so it is drawn the same size.
+            const unit = project(s, plus(origin, s.axes[i], 1))
+            if (unit === null)
+                continue
+            const per = Math.hypot(unit.x - from.x, unit.y - from.y)
+            if (per < 1e-6)
+                continue
+            const length = arrowLength / scale / per
+            const to = project(s, plus(origin, s.axes[i], length))
+            if (to === null)
+                continue
+            out.push({axis: i, name: axisNames[i], from: from, to: to, refused: s.refused[i]})
+        }
+        return out
+    }
+
+    // The arrow under a point of the overlay, if any.
+    function arrowAt(x, y) {
+        let best = -1
+        let nearest = arrowReach + 1
+        for (const a of arrows) {
+            const ax = a.from.x * zoom
+            const ay = a.from.y * zoom
+            const dx = a.to.x * zoom - ax
+            const dy = a.to.y * zoom - ay
+            const along = Math.max(0, Math.min(1, ((x - ax) * dx + (y - ay) * dy) / (dx * dx + dy * dy)))
+            const off = Math.hypot(x - (ax + along * dx), y - (ay + along * dy))
+            if (off <= arrowReach && off < nearest) {
+                nearest = off
+                best = a.axis
+            }
+        }
+        return best
+    }
+
+    // Where on the line of axis `i` through the object the pointer is, in
+    // units of that axis: the point of the line nearest the ray the pointer
+    // casts. Perspective is in it, so the object stays under the pointer.
+    // NaN when the line points at the camera and the pointer says nothing.
+    function axisAt(i, x, y) {
+        const s = spatial
+        const eye = s.eye
+        const nx = 2 * (x / zoom - s.view.x) / s.view.width - 1
+        const ny = 1 - 2 * (y / zoom - s.view.y) / s.view.height
+        const sx = nx * eye.tan_y * eye.aspect
+        const sy = ny * eye.tan_y
+        const d = [eye.forward[0] + eye.right[0] * sx + eye.up[0] * sy,
+                   eye.forward[1] + eye.right[1] * sx + eye.up[1] * sy,
+                   eye.forward[2] + eye.right[2] * sx + eye.up[2] * sy]
+        const a = s.axes[i]
+        const w = [s.origin[0] - eye.position[0], s.origin[1] - eye.position[1], s.origin[2] - eye.position[2]]
+        const aa = dot(a, a)
+        const ad = dot(a, d)
+        const dd = dot(d, d)
+        const denominator = aa * dd - ad * ad
+        if (Math.abs(denominator) < 1e-9 * aa * dd)
+            return NaN
+        return (ad * dot(d, w) - dd * dot(a, w)) / denominator
+    }
+
+    function dragArrow(x, y, free) {
+        const at = axisAt(axis, x, y)
+        if (isNaN(at))
+            return
+        let value = spatial.local[axis] + at - axisFrom
+        // Whole units unless Ctrl asks for the hand's own.
+        value = free ? Math.round(value * 100) / 100 : Math.round(value)
+        ghost3 = {axis: axis, value: value}
+    }
+
+    function dropArrow() {
+        if (ghost3 === null || ghost3.value === spatial.local[axis])
+            return false
+        const place = {node: {node: nodes[0].node}}
+        place[axisNames[axis]] = ghost3.value
+        overlay.place([place])
+        return true
+    }
+
     function around() {
         const shown = nodes.filter(n => n.window !== undefined)
         if (shown.length === 0)
@@ -140,6 +273,8 @@ MouseArea {
                           && at.x >= n.window.x && at.x <= n.window.x + n.window.width
                           && at.y >= n.window.y && at.y <= n.window.y + n.window.height)
     }
+
+    property bool gathering: false
 
     function selectAt(x, y, add) {
         const args = {doc: workspace.doc, at: {x: Math.floor(x / zoom), y: Math.floor(y / zoom)}}
@@ -377,6 +512,7 @@ MouseArea {
             dropping = true
         else
             endDrop(false)
+        axis = -1
     }
 
     // Every way a drop ends comes here. A write that went in keeps the ghost
@@ -386,8 +522,10 @@ MouseArea {
     function endDrop(wentIn) {
         dropWaits = false
         dropping = false
-        if (!wentIn && !dragging)
+        if (!wentIn && !dragging) {
             ghost = null
+            ghost3 = null
+        }
     }
 
     // What was held was for an object no longer selected: letting go must
@@ -576,8 +714,20 @@ MouseArea {
             return
         }
         const shift = (mouse.modifiers & Qt.ShiftModifier) !== 0
+        gathering = shift
         handle = shift ? -1 : handleAt(mouse.x, mouse.y)
-        if (handle >= 0) {
+        const arrow = shift || spatial === null ? -1 : arrowAt(mouse.x, mouse.y)
+        if (arrow >= 0) {
+            // An axis that an expression sets is not drawn over: the person
+            // is told, and the file is not touched.
+            if (spatial.refused[arrow] !== "") {
+                told = spatial.refused[arrow]
+                return
+            }
+            axis = arrow
+            axisFrom = axisAt(arrow, mouse.x, mouse.y)
+            mode = "pressed3"
+        } else if (handle >= 0) {
             startBox = selectedOne.window
             mode = "pressed"
             refetch()
@@ -596,7 +746,17 @@ MouseArea {
             return
         if (mode === "") {
             const at = handleAt(mouse.x, mouse.y)
-            hoverCursor = at >= 0 ? cursors[at] : (inside(mouse.x, mouse.y) ? Qt.SizeAllCursor : Qt.ArrowCursor)
+            hoverCursor = at >= 0 ? cursors[at]
+                : (arrowAt(mouse.x, mouse.y) >= 0 ? Qt.SizeAllCursor
+                   : (inside(mouse.x, mouse.y) ? Qt.SizeAllCursor : Qt.ArrowCursor))
+            return
+        }
+        if (mode === "pressed3" || mode === "moving3") {
+            const away = Math.hypot(mouse.x - pressedAt.x, mouse.y - pressedAt.y)
+            if (mode === "pressed3" && away < dragStart)
+                return
+            mode = "moving3"
+            dragArrow(mouse.x, mouse.y, (mouse.modifiers & Qt.ControlModifier) !== 0)
             return
         }
         if (mode === "selecting")
@@ -642,13 +802,17 @@ MouseArea {
             endDrag(false)
             return
         }
-        if (mode === "moving")
+        if (mode === "moving3")
+            wrote = dropArrow()
+        else if (mode === "moving")
             wrote = dropMove()
         else if (mode === "resizing")
             wrote = dropResize()
         else if (mode === "pressed")
-            // A click inside the selection may mean what is under it.
-            selectAt(mouse.x, mouse.y, false)
+            // A click inside the selection may mean what is under it, unless
+            // it was Shift's: that one has just added it.
+            if (!gathering)
+                selectAt(mouse.x, mouse.y, false)
         endDrag(wrote)
     }
 
@@ -720,7 +884,11 @@ MouseArea {
         }
         function onPreviewChanged() {
             const preview = overlay.workspace.preview
-            const generation = preview !== null ? preview.generation : -1
+            // The boxes are the running app's: a state or a width moves what
+            // is in it with no new text to read.
+            const generation = preview !== null
+                ? [preview.generation, preview.clicks, preview.width, preview.variant].join()
+                : ""
             if (generation !== overlay.seenGeneration) {
                 overlay.seenGeneration = generation
                 if (overlay.writing)
@@ -760,6 +928,7 @@ MouseArea {
                     overlay.parentBox = answer.parent !== undefined ? answer.parent : null
                     overlay.siblings = answer.siblings !== undefined ? answer.siblings : []
                     overlay.ghost = overlay.dragging || overlay.dropping ? overlay.ghost : null
+                    overlay.ghost3 = overlay.dragging || overlay.dropping ? overlay.ghost3 : null
                     // The hand may be ahead of the siblings it snaps to.
                     if (overlay.mode === "moving" || overlay.mode === "resizing" || overlay.mode === "drawing")
                         overlay.startSnaps()
@@ -836,7 +1005,7 @@ MouseArea {
     // Geometry reads asked and not answered; they answer in order.
     property int reads: 0
     property bool dropWaits: false
-    property int seenGeneration: -1
+    property string seenGeneration: ""
     property string seenChosen: "[]"
 
     // One outline per object; no drawing while nothing is selected.
@@ -871,6 +1040,62 @@ MouseArea {
             border.color: Colors.accent
             border.width: 1
         }
+    }
+
+    // The arrows of an object of a 3D scene, the colours telling the axes
+    // apart and each named, since a colour alone does not.
+    Repeater {
+        model: overlay.arrows
+        delegate: Item {
+            id: arrow
+            required property var modelData
+            objectName: "moveArrow"
+            readonly property real dx: (modelData.to.x - modelData.from.x) * overlay.zoom
+            readonly property real dy: (modelData.to.y - modelData.from.y) * overlay.zoom
+            readonly property color tint: modelData.axis === 0 ? Colors.danger
+                : (modelData.axis === 1 ? Colors.accent : Colors.text)
+            // A refused axis is still shown, dimmed: it is there, it is not
+            // the pointer's to move.
+            opacity: modelData.refused !== "" ? 0.4 : (overlay.ghost3 !== null && overlay.ghost3.axis !== modelData.axis ? 0.4 : 1)
+            x: modelData.from.x * overlay.zoom
+            y: modelData.from.y * overlay.zoom
+            Rectangle {
+                width: Math.hypot(arrow.dx, arrow.dy)
+                height: 2
+                y: -1
+                color: arrow.tint
+                transformOrigin: Item.Left
+                rotation: Math.atan2(arrow.dy, arrow.dx) * 180 / Math.PI
+            }
+            Rectangle {
+                x: arrow.dx - width / 2
+                y: arrow.dy - height / 2
+                width: overlay.handleSize + 2
+                height: width
+                radius: width / 2
+                color: Colors.surface
+                border.color: arrow.tint
+                border.width: 2
+            }
+            Label {
+                x: arrow.dx + (arrow.dx >= 0 ? Spacing.xs : -width - Spacing.xs)
+                y: arrow.dy - height / 2
+                text: modelData.name.toUpperCase()
+                color: arrow.tint
+                font.pixelSize: Typography.captionSize
+                font.weight: Typography.bodyStrongWeight
+            }
+        }
+    }
+
+    Label {
+        objectName: "dragValue"
+        visible: overlay.ghost3 !== null
+        x: overlay.arrows.length > 0 ? overlay.arrows[0].from.x * overlay.zoom + Spacing.sm : 0
+        y: overlay.arrows.length > 0 ? overlay.arrows[0].from.y * overlay.zoom + Spacing.sm : 0
+        text: overlay.ghost3 !== null ? overlay.axisNames[overlay.ghost3.axis] + " " + overlay.ghost3.value : ""
+        color: Colors.accent
+        font.pixelSize: Typography.captionSize
     }
 
     Rectangle {
