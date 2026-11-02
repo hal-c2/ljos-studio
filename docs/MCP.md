@@ -748,7 +748,7 @@ such a name answers `name_unsure: true`, since an import having it would win.
 A `paste` answers `imported` with what it added. An import that would turn an
 object the file has from the file beside it into something else stays out, and
 if the paste needs it the refusal's kind is `import_changes_type`. A type whose place in the source can be said stays there: the paste imports that place, in the source's
-order, or is refused the same way. Where either file imports what Studio can't read, it brings the source's imports and
+order, or is refused the same way. Where either file imports, without an alias, what Studio can't read, it brings the source's imports and
 is never refused for this.
 `crates/studio_mcp/src/measured_*.txt` is what qml6 6.11 said: `mise run
 measure-members` writes them.

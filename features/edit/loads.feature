@@ -1280,3 +1280,147 @@ Feature: A tool does not write what would not load or would not show
       """
     Then the agent is refused with "not_actionable"
     And the refusal's "/details/kind" is "import_changes_type"
+
+  Scenario: A folder the target already imports can't be moved to keep a type
+    Given the file "a/Slider.qml":
+      """qml
+      import QtQuick
+
+      Item {}
+      """
+    And the file "c/Slider.qml":
+      """qml
+      import QtQuick
+
+      Item {}
+      """
+    And the file "Target.qml":
+      """qml
+      import QtQuick
+      import "./a"
+      import "./c"
+
+      Item {
+          id: holder
+      }
+      """
+    And the file "Has.qml":
+      """qml
+      import QtQuick
+      import "./a"
+
+      Item {
+          id: has
+          Slider { id: s }
+      }
+      """
+    And the agent has called the tool "node_arrange" with:
+      """json
+      {"action": "copy", "doc": "Has.qml", "nodes": [{"id": "s"}]}
+      """
+    When the agent calls the tool "node_arrange" with:
+      """json
+      {"action": "paste", "doc": "Target.qml", "parent": {"id": "holder"}}
+      """
+    Then the agent is refused with "not_actionable"
+    And the refusal's "/details/kind" is "import_changes_type"
+
+  Scenario: Objects copied together bring their folders in the source's order
+    Given the file "a/Slider.qml":
+      """qml
+      import QtQuick
+
+      Item {}
+      """
+    And the file "a/Foo.qml":
+      """qml
+      import QtQuick
+
+      Item {}
+      """
+    And the file "b/Slider.qml":
+      """qml
+      import QtQuick
+
+      Item {}
+      """
+    And the file "Has.qml":
+      """qml
+      import QtQuick
+      import "./a"
+      import "./b"
+
+      Item {
+          id: has
+          Slider { id: sl }
+          Foo { id: fo }
+      }
+      """
+    And the agent has called the tool "node_arrange" with:
+      """json
+      {"action": "copy", "doc": "Has.qml", "nodes": [{"id": "sl"}, {"id": "fo"}]}
+      """
+    When the agent calls the tool "node_arrange" with:
+      """json
+      {"action": "paste", "doc": "Plain.qml", "parent": {"id": "plain"}}
+      """
+    Then the file "Plain.qml" contains:
+      """
+      import "./a"
+      import "./b"
+      """
+
+  Scenario: An unread module under an alias can't have a bare name, so it changes no refusal
+    Given the file "a/Slider.qml":
+      """qml
+      import QtQuick
+
+      Item {}
+      """
+    And the file "a/Foo.qml":
+      """qml
+      import QtQuick
+
+      Item {}
+      """
+    And the file "c/Slider.qml":
+      """qml
+      import QtQuick
+
+      Item {}
+      """
+    And the file "Target.qml":
+      """qml
+      import QtQuick
+      import "./c"
+
+      Item {
+          id: holder
+      }
+      """
+    And the file "Has.qml":
+      """qml
+      import QtQuick
+      import App.Native as N
+      import "./a"
+      import "./c"
+
+      Item {
+          id: has
+          Item {
+              id: both
+              Slider {}
+              Foo {}
+          }
+      }
+      """
+    And the agent has called the tool "node_arrange" with:
+      """json
+      {"action": "copy", "doc": "Has.qml", "nodes": [{"id": "both"}]}
+      """
+    When the agent calls the tool "node_arrange" with:
+      """json
+      {"action": "paste", "doc": "Target.qml", "parent": {"id": "holder"}}
+      """
+    Then the agent is refused with "not_actionable"
+    And the refusal's "/details/kind" is "import_changes_type"

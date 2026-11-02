@@ -357,7 +357,7 @@ impl<'s> Names<'s> {
 
     /// Where qml6 would find `ty` here: the folder imported last, before any
     /// module, before the file beside the document. `None` when nothing has it, or it is qualified. What can't be read counts
-    /// as not having it: `undescribed` says when that may be wrong.
+    /// as not having it: `bare_unread` says when that may be wrong.
     pub(crate) fn finds(&self, ty: &str) -> Option<Finds> {
         if ty.contains('.') {
             return None;
@@ -419,15 +419,29 @@ impl<'s> Names<'s> {
     }
 
     /// Whether the document imports a module whose types nothing here knows.
-    pub(crate) fn undescribed(&self) -> bool {
-        self.scope.imports.iter().any(|import| match import {
+    fn undescribed(&self) -> bool {
+        self.scope.imports.iter().any(|import| self.unread(import))
+    }
+
+    /// Whether such an import could have a bare name: one under an alias can't.
+    pub(crate) fn bare_unread(&self) -> bool {
+        self.scope.imports.iter().any(|import| {
+            let aliased = match import {
+                Import::Module { alias, .. } | Import::Path { alias, .. } => alias.is_some(),
+            };
+            !aliased && self.unread(import)
+        })
+    }
+
+    fn unread(&self, import: &Import) -> bool {
+        match import {
             Import::Module { uri, .. } => {
                 !MEASURED_MODULES.contains(&uri.as_str())
                     && self.types.dumps.module_types(uri).is_none()
                     && !self.types.qmldirs.contains_key(uri)
             }
             Import::Path { path, .. } => !readable_folder(&self.scope.dir, path),
-        })
+        }
     }
 
     /// Whether an object of type `ty`, declaring what `node` does, certainly
