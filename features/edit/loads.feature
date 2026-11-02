@@ -1079,3 +1079,204 @@ Feature: A tool does not write what would not load or would not show
       """
     Then the agent is refused with "not_actionable"
     And the refusal's "/details/kind" is "no_such_member"
+
+  Scenario Outline: A toolkit's object stays one where the file beside the target has its name, with a module nobody can read in <case>
+    Given the file "Slider.qml":
+      """qml
+      import QtQuick
+
+      Item {}
+      """
+    And the file "Nat.qml":
+      """qml
+      import QtQuick
+      import App.Native
+
+      Item {
+          id: holder
+      }
+      """
+    And the file "other/Has.qml":
+      """qml
+      import QtQuick
+      import QtQuick.Controls
+      <also>
+
+      Item {
+          id: has
+          Slider { id: s }
+      }
+      """
+    And the agent has called the tool "node_arrange" with:
+      """json
+      {"action": "copy", "doc": "other/Has.qml", "nodes": [{"id": "s"}]}
+      """
+    When the agent calls the tool "node_arrange" with:
+      """json
+      {"action": "paste", "doc": "<doc>", "parent": {"id": "<parent>"}}
+      """
+    Then the file "<doc>" contains "import QtQuick.Controls"
+
+    Examples:
+      | case       | also              | doc       | parent |
+      | the source | import App.Native | Plain.qml | plain  |
+      | the target | import QtQuick    | Nat.qml   | holder |
+
+  Scenario: A file that beat a module in its source stays that file
+    Given the file "lib/Slider.qml":
+      """qml
+      import QtQuick
+
+      Item {}
+      """
+    And the file "Has.qml":
+      """qml
+      import QtQuick
+      import QtQuick.Controls
+      import "./lib"
+
+      Item {
+          id: has
+          Slider { id: s }
+      }
+      """
+    And the agent has called the tool "node_arrange" with:
+      """json
+      {"action": "copy", "doc": "Has.qml", "nodes": [{"id": "s"}]}
+      """
+    When the agent calls the tool "node_arrange" with:
+      """json
+      {"action": "paste", "doc": "Plain.qml", "parent": {"id": "plain"}}
+      """
+    Then the file "Plain.qml" contains "import \"./lib\""
+    And the file "Plain.qml" does not contain "QtQuick.Controls"
+
+  Scenario: A module that beat the file beside its source stays that module
+    Given the file "sub/Slider.qml":
+      """qml
+      import QtQuick
+
+      Item {}
+      """
+    And the file "sub/Has.qml":
+      """qml
+      import QtQuick
+      import QtQuick.Controls
+
+      Item {
+          id: has
+          Slider { id: s }
+      }
+      """
+    And the agent has called the tool "node_arrange" with:
+      """json
+      {"action": "copy", "doc": "sub/Has.qml", "nodes": [{"id": "s"}]}
+      """
+    When the agent calls the tool "node_arrange" with:
+      """json
+      {"action": "paste", "doc": "Plain.qml", "parent": {"id": "plain"}}
+      """
+    Then the file "Plain.qml" contains "import QtQuick.Controls"
+    And the file "Plain.qml" does not contain "./sub"
+
+  Scenario: Two folders come in the order that keeps which one wins
+    Given the file "a/Slider.qml":
+      """qml
+      import QtQuick
+
+      Item {}
+      """
+    And the file "a/Foo.qml":
+      """qml
+      import QtQuick
+
+      Item {}
+      """
+    And the file "b/Slider.qml":
+      """qml
+      import QtQuick
+
+      Item {}
+      """
+    And the file "Has.qml":
+      """qml
+      import QtQuick
+      import "./a"
+      import "./b"
+
+      Item {
+          id: has
+          Item {
+              id: both
+              Slider {}
+              Foo {}
+          }
+      }
+      """
+    And the agent has called the tool "node_arrange" with:
+      """json
+      {"action": "copy", "doc": "Has.qml", "nodes": [{"id": "both"}]}
+      """
+    When the agent calls the tool "node_arrange" with:
+      """json
+      {"action": "paste", "doc": "Plain.qml", "parent": {"id": "plain"}}
+      """
+    Then the file "Plain.qml" contains:
+      """
+      import "./a"
+      import "./b"
+      """
+
+  Scenario: A paste is refused when the folder one part needs takes another part's name
+    Given the file "a/Slider.qml":
+      """qml
+      import QtQuick
+
+      Item {}
+      """
+    And the file "a/Foo.qml":
+      """qml
+      import QtQuick
+
+      Item {}
+      """
+    And the file "c/Slider.qml":
+      """qml
+      import QtQuick
+
+      Item {}
+      """
+    And the file "Target.qml":
+      """qml
+      import QtQuick
+      import "./c"
+
+      Item {
+          id: holder
+      }
+      """
+    And the file "Has.qml":
+      """qml
+      import QtQuick
+      import "./a"
+      import "./c"
+
+      Item {
+          id: has
+          Item {
+              id: both
+              Slider {}
+              Foo {}
+          }
+      }
+      """
+    And the agent has called the tool "node_arrange" with:
+      """json
+      {"action": "copy", "doc": "Has.qml", "nodes": [{"id": "both"}]}
+      """
+    When the agent calls the tool "node_arrange" with:
+      """json
+      {"action": "paste", "doc": "Target.qml", "parent": {"id": "holder"}}
+      """
+    Then the agent is refused with "not_actionable"
+    And the refusal's "/details/kind" is "import_changes_type"
