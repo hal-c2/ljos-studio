@@ -102,8 +102,8 @@ pub(crate) fn check_text(
     Ok(())
 }
 
-/// What a paste of `text` from `from`, whose imports are `had`, has to import
-/// into `doc`. A type not `Known` takes the first of them that makes it so; one
+/// What a paste of `texts`, together, from `from`, whose imports are `had`, has
+/// to import into `doc`. A type not `Known` takes the first of them that makes it so; one
 /// that stays `Unsure` might come from any, so all of them come. A type whose
 /// place in `from` can be said stays there, by an import of it, or the paste is
 /// refused. An import wins over a file beside the document, so one that would
@@ -113,15 +113,18 @@ pub(crate) fn imports_for(
     store: &dyn Store,
     doc: &str,
     source: &str,
-    text: &str,
+    texts: &[&str],
     from: &str,
     had: &[Import],
 ) -> Result<Vec<String>, SurfaceError> {
-    let Some(nodes) = outline::outline(text) else {
-        return Ok(Vec::new());
-    };
+    let nodes: Vec<_> = texts
+        .iter()
+        .filter_map(|text| outline::outline(text))
+        .flatten()
+        .collect();
+    let beside = texts.join("\n");
     let is = |ty: &str, imports: &[String]| {
-        Names::of(store, doc, source, imports).map(|names| names.type_is(ty, text))
+        Names::of(store, doc, source, imports).map(|names| names.type_is(ty, &beside))
     };
     let here = dir_of(doc);
     let there = dir_of(from);
@@ -160,15 +163,21 @@ pub(crate) fn imports_for(
     };
     let with_offer = |wanted: &[String], offer: Option<&str>| {
         let mut with = wanted.to_vec();
-        with.extend(offer.map(str::to_owned).filter(|o| !wanted.contains(o)));
+        // An import the target has stays where it is: adding it moves nothing.
+        with.extend(
+            offer
+                .filter(|o| !imported_by(&target, here, o))
+                .map(str::to_owned)
+                .filter(|o| !wanted.contains(o)),
+        );
         with.sort_by_key(rank);
         with
     };
     let was_at = Names::at(store, from, had);
     // Where either file imports what can't be read, an answer here may be
     // wrong, so it can bring imports along but never refuses.
-    let unread = was_at.undescribed()
-        || Names::of(store, doc, source, &[]).is_some_and(|names| names.undescribed());
+    let unread = was_at.bare_unread()
+        || Names::of(store, doc, source, &[]).is_some_and(|names| names.bare_unread());
     let changes = |ty: &str| {
         refused(
             "import_changes_type",
@@ -269,7 +278,10 @@ pub(crate) fn imports_for(
             }
         }
     }
-    check_text(store, doc, source, text, &wanted).map(|()| wanted)
+    for text in texts {
+        check_text(store, doc, source, text, &wanted)?;
+    }
+    Ok(wanted)
 }
 
 fn dir_of(file: &str) -> &str {

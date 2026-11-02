@@ -751,28 +751,20 @@ fn paste(studio: &mut Studio, a: &PasteArgs) -> Result<ManyOut, SurfaceError> {
     }
     let mut taken = taken_ids(studio, &a.doc)?;
     let source = studio.session.text(&a.doc).map_err(error)?.0.to_owned();
-    let imports: Vec<Vec<String>> = studio
-        .clipboard
-        .iter()
-        .map(|copy| {
-            crate::loads::imports_for(
-                studio.session.store(),
-                &a.doc,
-                &source,
-                &copy.text,
-                &copy.from,
-                &copy.imports,
-            )
-        })
-        .collect::<Result<_, _>>()?;
+    // All at once and in the source's order: one copy is one document's, and
+    // a folder one object brings can take another object's name.
+    let texts: Vec<&str> = studio.clipboard.iter().map(|c| c.text.as_str()).collect();
+    let first = &studio.clipboard[0];
     // Bare, even beside an import under a name: nothing has to qualify what
     // the text holds.
-    let mut imported: Vec<String> = Vec::new();
-    for module in imports.into_iter().flatten() {
-        if !imported.contains(&module) {
-            imported.push(module);
-        }
-    }
+    let imported = crate::loads::imports_for(
+        studio.session.store(),
+        &a.doc,
+        &source,
+        &texts,
+        &first.from,
+        &first.imports,
+    )?;
     let mut ops: Vec<Op> = imported
         .iter()
         .map(|module| Op::Import {
