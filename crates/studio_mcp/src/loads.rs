@@ -89,6 +89,31 @@ pub(crate) fn check_text(
     {
         return Err(duplicate_component(doc, twice));
     }
+    // qml6 won't load a component and a `Head.Inner` of its name in one file,
+    // whatever `Inner` was, and it does when the head is an alias. What the
+    // file already says isn't held against a write.
+    let ours = outline::components(&here);
+    let brought = outline::components(&nodes);
+    let imported = outline::imports(source).unwrap_or_default();
+    let taken = |ty: &str, by: &[&[&str]]| {
+        ty.split_once('.').is_some_and(|(head, _)| {
+            by.iter().any(|names| names.contains(&head))
+                && !imported.iter().any(|i| has_alias(i, head))
+        })
+    };
+    if let Some(left) = nodes
+        .iter()
+        .find(|node| taken(&node.ty, &[&ours, &brought]))
+        .or_else(|| here.iter().find(|node| taken(&node.ty, &[&brought])))
+    {
+        return Err(refused(
+            "component_takes_name",
+            format!(
+                "an inline component takes the name `{}` in `{doc}`",
+                left.ty
+            ),
+        ));
+    }
     for node in &nodes {
         if names.type_is(&node.ty, text) == TypeIs::Missing {
             return Err(unknown_type(doc, &node.ty));
@@ -151,14 +176,10 @@ pub(crate) fn imports_for(
     }
     let target = outline::imports(source).unwrap_or_default();
     // What a qualifier meant stays behind with the alias: qml6 won't load it.
-    let says = |qualifier: &str, import: &Import| match import {
-        Import::Module { alias, .. } | Import::Path { alias, .. } => {
-            alias.as_deref() == Some(qualifier)
-        }
-    };
     if let Some(left) = names.iter().find(|name| {
         name.rsplit_once('.').is_some_and(|(qualifier, _)| {
-            had.iter().any(|i| says(qualifier, i)) && !target.iter().any(|i| says(qualifier, i))
+            had.iter().any(|i| has_alias(i, qualifier))
+                && !target.iter().any(|i| has_alias(i, qualifier))
         })
     }) {
         return Err(unknown_type(doc, left));
@@ -174,24 +195,6 @@ pub(crate) fn imports_for(
         });
     };
     let held = outline::outline(source).unwrap_or_default();
-    // Measured: a component takes `Head.Inner` too, but not from an alias.
-    let takes = |components: &[&str], name: &str| match name.split_once('.') {
-        Some((head, _)) => components.contains(&head) && !target.iter().any(|i| says(head, i)),
-        None => components.contains(&name),
-    };
-    let ours = outline::components(&held);
-    // qml6 won't load such a file whatever `Inner` was, so this can't be left
-    // to the answer, unlike a whole name taken, which may still load.
-    if let Some(left) = held
-        .iter()
-        .map(|node| node.ty.as_str())
-        .find(|ty| ty.contains('.') && takes(&brought, ty))
-    {
-        return Err(refused(
-            "component_takes_name",
-            format!("a pasted inline component would take the name `{left}` in `{doc}`"),
-        ));
-    }
     let was_at = Names::at(store, from, had);
     let here = dir_of(doc);
     let there = dir_of(from);
@@ -234,7 +237,9 @@ pub(crate) fn imports_for(
     let mut wanted: Vec<&String> = Vec::new();
     for name in &names {
         let was = was_at.lands(name);
-        if compare(&was, &before.lands(name)) == Keeps::Same || takes(&ours, name) {
+        if compare(&was, &before.lands(name)) == Keeps::Same
+            || outline::declares_component(&held, name)
+        {
             continue;
         }
         match &was {
@@ -267,7 +272,7 @@ pub(crate) fn imports_for(
     if let Some(after) = Names::of(store, doc, source, &imports) {
         for name in &names {
             let (was, now) = (was_at.lands(name), after.lands(name));
-            let taken = takes(&ours, name);
+            let taken = outline::declares_component(&held, name);
             if taken || compare(&was, &now) != Keeps::Same {
                 unvouched.push(Unvouched {
                     ty: name.clone(),
@@ -287,7 +292,7 @@ pub(crate) fn imports_for(
         let unread_added = after.unread_imports() > before.unread_imports();
         for ty in &holds {
             let (was, now) = (before.lands(ty), after.lands(ty));
-            let taken = takes(&brought, ty);
+            let taken = brought.contains(&ty.as_str());
             let moved = !imports.is_empty()
                 && compare(&was, &now) != Keeps::Same
                 && (was != now || (was == Lands::CantTell && unread_added));
@@ -306,6 +311,12 @@ pub(crate) fn imports_for(
         }
     }
     Ok(Pasted { imports, unvouched })
+}
+
+fn has_alias(import: &Import, name: &str) -> bool {
+    match import {
+        Import::Module { alias, .. } | Import::Path { alias, .. } => alias.as_deref() == Some(name),
+    }
 }
 
 fn check_all(

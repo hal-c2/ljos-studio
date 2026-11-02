@@ -758,8 +758,8 @@ paste declares it (`held: true`), pasted objects when the file declares it. Such
 paste is written even if an object taken this way sets a member the component lacks,
 which qml6 then won't load (known limit; the preview shows the load error). It also
 takes the head of `Name.Inner`, unless that head is an import's alias, and qml6 never
-loads that, so such a paste is refused: `component_takes_name` for what the file has,
-`unknown_type` for what the paste brings. An inline
+loads that, so an insert or paste that would put the two in one file is refused,
+`component_takes_name`. An inline
 component the file already declares is refused, `duplicate_component`, on every
 insert, `paste` and `duplicate`, since qml6 won't load a file with two of one name.
 Only what qml6 would refuse is refused, which includes an object whose only import
