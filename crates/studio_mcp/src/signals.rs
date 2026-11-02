@@ -356,16 +356,17 @@ impl<'s> Names<'s> {
     }
 
     /// Where qml6 would find `ty` here: the folder imported last, before any
-    /// module, before the file beside the document. `None` when something it
-    /// can't read might have it, or nothing does.
+    /// module, before the file beside the document. `None` when nothing has it, or it is qualified. What can't be read counts
+    /// as not having it: `undescribed` says when that may be wrong.
     pub(crate) fn finds(&self, ty: &str) -> Option<Finds> {
-        if ty.contains('.') || self.undescribed() {
+        if ty.contains('.') {
             return None;
         }
         let file = format!("{ty}.qml");
         for import in self.scope.imports.iter().rev() {
             if let Import::Path { path, alias: None } = import
                 && !path.ends_with(".js")
+                && readable_folder(&self.scope.dir, path)
                 && let Some(found) = crate::blocks::join(&self.scope.dir, path)
                     .and_then(|dir| crate::blocks::join(&dir, &file))
                 && self.types.store.exists(&found)
@@ -418,7 +419,7 @@ impl<'s> Names<'s> {
     }
 
     /// Whether the document imports a module whose types nothing here knows.
-    fn undescribed(&self) -> bool {
+    pub(crate) fn undescribed(&self) -> bool {
         self.scope.imports.iter().any(|import| match import {
             Import::Module { uri, .. } => {
                 !MEASURED_MODULES.contains(&uri.as_str())

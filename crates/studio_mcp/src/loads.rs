@@ -104,9 +104,11 @@ pub(crate) fn check_text(
 
 /// What a paste of `text` from `from`, whose imports are `had`, has to import
 /// into `doc`. A type not `Known` takes the first of them that makes it so; one
-/// that stays `Unsure` might come from any, so all of them come. An import wins
-/// over a file beside the document, so one that would turn an object `doc` has
-/// into something else stays out, and is refused if the paste needs it.
+/// that stays `Unsure` might come from any, so all of them come. A type whose
+/// place in `from` can be said stays there, by an import of it, or the paste is
+/// refused. An import wins over a file beside the document, so one that would
+/// turn an object `doc` has into something else stays out, and is refused if the
+/// paste needs it.
 pub(crate) fn imports_for(
     store: &dyn Store,
     doc: &str,
@@ -148,6 +150,38 @@ pub(crate) fn imports_for(
         )),
         None => Ok(offer.to_owned()),
     };
+    // The last folder imported wins, so what comes keeps the source's order; a
+    // folder that came for the file beside the source had nothing to beat.
+    let rank = |import: &String| {
+        offered
+            .iter()
+            .position(|o| o == import)
+            .map_or(0, |i| i + 1)
+    };
+    let with_offer = |wanted: &[String], offer: Option<&str>| {
+        let mut with = wanted.to_vec();
+        with.extend(offer.map(str::to_owned).filter(|o| !wanted.contains(o)));
+        with.sort_by_key(rank);
+        with
+    };
+    let was_at = Names::at(store, from, had);
+    // Where either file imports what can't be read, an answer here may be
+    // wrong, so it can bring imports along but never refuses.
+    let unread = was_at.undescribed()
+        || Names::of(store, doc, source, &[]).is_some_and(|names| names.undescribed());
+    let changes = |ty: &str| {
+        refused(
+            "import_changes_type",
+            format!("`{ty}` in `{doc}` would be another type, and no import can keep it"),
+        )
+    };
+    let bring_all = |wanted: &mut Vec<String>| {
+        for uri in &offered {
+            if shadows(uri).is_none() {
+                *wanted = with_offer(wanted, Some(uri));
+            }
+        }
+    };
     let mut wanted: Vec<String> = Vec::new();
     for node in &nodes {
         // What the text's qualifier meant stays behind with the alias.
@@ -165,31 +199,35 @@ pub(crate) fn imports_for(
         let Some(names) = Names::of(store, doc, source, &wanted) else {
             continue;
         };
-        // What it was and what it would be, when both can be said: only an
-        // import of what it was can keep it that.
-        let was = Names::at(store, from, had).finds(&node.ty);
-        if let (Some(was), Some(would)) = (&was, names.finds(&node.ty)) {
-            if was.same(&would) {
+        // Only an import of where it was can keep it that, whatever the target
+        // would do with the name: another type, or none yet.
+        if let Some(was) = was_at.finds(&node.ty) {
+            let would = names.finds(&node.ty);
+            if would.is_some_and(|would| was.same(&would)) {
                 continue;
             }
-            let offer = match was {
+            let offer = match &was {
                 Finds::File(file) => folder_from("", dir_of(file), here),
                 Finds::Modules(modules) => modules.first().cloned(),
             };
-            let with = [wanted.as_slice(), offer.as_slice()].concat();
+            let with = with_offer(&wanted, offer.as_deref());
             let kept = Names::of(store, doc, source, &with)
                 .and_then(|names| names.finds(&node.ty))
-                .is_some_and(|now| now.same(was));
-            let (Some(offer), true) = (offer, kept) else {
-                return Err(refused(
-                    "import_changes_type",
-                    format!(
-                        "`{}` in `{doc}` would be another type, and no import can keep it",
-                        node.ty
-                    ),
-                ));
-            };
-            wanted.push(needed(&offer)?);
+                .is_some_and(|now| now.same(&was));
+            match offer {
+                Some(offer) if kept => {
+                    needed(&offer)?;
+                    wanted = with;
+                }
+                _ if unread => bring_all(&mut wanted),
+                _ => return Err(changes(&node.ty)),
+            }
+            continue;
+        }
+        // Something the source imports that nothing here can read has it, so
+        // a name the target has as well may be another type.
+        if unread && !node.ty.contains('.') && names.finds(&node.ty).is_some() {
+            bring_all(&mut wanted);
             continue;
         }
         if is(&node.ty, &wanted) == Some(TypeIs::Known) {
@@ -203,9 +241,8 @@ pub(crate) fn imports_for(
             .then(|| folder_from(there, ".", here))
             .flatten();
         if let Some(folder) = beside {
-            if !wanted.contains(&folder) {
-                wanted.push(needed(&folder)?);
-            }
+            needed(&folder)?;
+            wanted = with_offer(&wanted, Some(&folder));
             continue;
         }
         let with = |uri: &String| [wanted.as_slice(), std::slice::from_ref(uri)].concat();
@@ -215,12 +252,20 @@ pub(crate) fn imports_for(
             .collect();
         if let Some(uri) = making.first() {
             let free = making.iter().find(|uri| shadows(uri).is_none());
-            wanted.push(needed(free.unwrap_or(uri))?);
+            let uri = free.unwrap_or(uri);
+            needed(uri)?;
+            wanted = with_offer(&wanted, Some(uri));
         } else if is(&node.ty, &offered) == Some(TypeIs::Unsure) {
-            for uri in &offered {
-                if !wanted.contains(uri) && shadows(uri).is_none() {
-                    wanted.push(uri.clone());
-                }
+            bring_all(&mut wanted);
+        }
+    }
+    // A folder that came for one part may have taken another part's name.
+    if !unread && let Some(names) = Names::of(store, doc, source, &wanted) {
+        for node in &nodes {
+            if let Some(was) = was_at.finds(&node.ty)
+                && !names.finds(&node.ty).is_some_and(|now| now.same(&was))
+            {
+                return Err(changes(&node.ty));
             }
         }
     }
