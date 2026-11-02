@@ -805,6 +805,78 @@ Feature: A tool does not write what would not load or would not show
       | Item { id: inner }  | the file "Holds.qml" contains "import QtQuick.Controls"     |
       | Button { id: mine } | the agent is refused with "not_actionable"                  |
 
+  # qml6 6.11: the folder imported last is found first, a folder before a module,
+  # and a module before the file beside the document.
+  Scenario: A pasted object stays the file beside the one it came from
+    Given the file "Button.qml":
+      """qml
+      import QtQuick
+
+      Item {}
+      """
+    And the file "other/Button.qml":
+      """qml
+      import QtQuick
+
+      Rectangle {}
+      """
+    And the file "other/Has.qml":
+      """qml
+      import QtQuick
+
+      Item {
+          id: has
+          Button { id: s }
+      }
+      """
+    And the agent has called the tool "node_arrange" with:
+      """json
+      {"action": "copy", "doc": "other/Has.qml", "nodes": [{"id": "s"}]}
+      """
+    When the agent calls the tool "node_arrange" with:
+      """json
+      {"action": "paste", "doc": "Plain.qml", "parent": {"id": "plain"}}
+      """
+    Then the file "Plain.qml" contains "import \"./other\""
+
+  Scenario: A toolkit's object is refused where a folder the file imports has its name
+    Given the file "lib/Slider.qml":
+      """qml
+      import QtQuick
+
+      Item {}
+      """
+    And the file "Lib.qml":
+      """qml
+      import QtQuick
+      import "./lib"
+
+      Item {
+          id: holder
+      }
+      """
+    And the file "Has.qml":
+      """qml
+      import QtQuick
+      import QtQuick.Controls
+
+      Item {
+          id: has
+          Slider { id: s }
+      }
+      """
+    And the agent has called the tool "node_arrange" with:
+      """json
+      {"action": "copy", "doc": "Has.qml", "nodes": [{"id": "s"}]}
+      """
+    When the agent calls the tool "node_arrange" with:
+      """json
+      {"action": "paste", "doc": "Lib.qml", "parent": {"id": "holder"}}
+      """
+    Then the agent is refused with "not_actionable"
+    And the refusal's "/details/kind" is "import_changes_type"
+    And the file "Lib.qml" does not contain "Slider"
+
   Scenario: A paste says what it imported
     Given the agent has called the tool "node_arrange" with:
       """json

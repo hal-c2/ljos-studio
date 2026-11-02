@@ -18,7 +18,7 @@ use studio_core::outline::Import;
 use studio_core::{Node, Step, Store, outline};
 
 use crate::place_tools::refused;
-use crate::signals::{Names, TypeIs, not_an_id};
+use crate::signals::{Finds, Names, TypeIs, not_an_id};
 use crate::{Studio, error, lock};
 
 /// `name` on `object` of `doc`, if `object`'s type is known not to have it.
@@ -162,28 +162,37 @@ pub(crate) fn imports_for(
         if alias_left {
             return Err(unknown_type(doc, &node.ty));
         }
-        let names = Names::of(store, doc, source, &wanted);
-        // Known here by the file beside `doc` is another object than the one
-        // its source's imports found.
-        let becomes_other = names.as_ref().is_some_and(|names| {
-            names.only_beside(&node.ty) && offered.iter().any(|uri| names.import_has(uri, &node.ty))
-        });
-        if is(&node.ty, &wanted) == Some(TypeIs::Known) && !becomes_other {
+        let Some(names) = Names::of(store, doc, source, &wanted) else {
+            continue;
+        };
+        // What it was and what it would be, when both can be said: only an
+        // import of what it was can keep it that.
+        let was = Names::at(store, from, had).finds(&node.ty);
+        if let (Some(was), Some(would)) = (&was, names.finds(&node.ty)) {
+            if was.same(&would) {
+                continue;
+            }
+            let offer = match was {
+                Finds::File(file) => folder_from("", dir_of(file), here),
+                Finds::Modules(modules) => modules.first().cloned(),
+            };
+            let with = [wanted.as_slice(), offer.as_slice()].concat();
+            let kept = Names::of(store, doc, source, &with)
+                .and_then(|names| names.finds(&node.ty))
+                .is_some_and(|now| now.same(was));
+            let (Some(offer), true) = (offer, kept) else {
+                return Err(refused(
+                    "import_changes_type",
+                    format!(
+                        "`{}` in `{doc}` would be another type, and no import can keep it",
+                        node.ty
+                    ),
+                ));
+            };
+            wanted.push(needed(&offer)?);
             continue;
         }
-        if becomes_other {
-            let names = names.as_ref();
-            let has: Vec<&String> = offered
-                .iter()
-                .filter(|uri| names.is_some_and(|names| names.import_has(uri, &node.ty)))
-                .collect();
-            let free = has
-                .iter()
-                .find(|uri| shadows(uri).is_none())
-                .or(has.first());
-            if let Some(uri) = free.filter(|uri| !wanted.contains(uri)) {
-                wanted.push(needed(uri)?);
-            }
+        if is(&node.ty, &wanted) == Some(TypeIs::Known) {
             continue;
         }
         // The folder of the file it came from is imported without a word. A

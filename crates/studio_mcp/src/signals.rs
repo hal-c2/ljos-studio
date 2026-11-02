@@ -224,6 +224,23 @@ fn readable_folder(dir: &str, path: &str) -> bool {
     !path.starts_with('/') && !path.contains(':') && crate::blocks::join(dir, path).is_some()
 }
 
+/// Where a name is found: one file, or a type the same modules have.
+pub(crate) enum Finds {
+    File(String),
+    Modules(Vec<String>),
+}
+
+impl Finds {
+    /// The same type: a module the other has too has it as that one does.
+    pub(crate) fn same(&self, other: &Finds) -> bool {
+        match (self, other) {
+            (Finds::File(a), Finds::File(b)) => a == b,
+            (Finds::Modules(a), Finds::Modules(b)) => a.iter().any(|m| b.contains(m)),
+            _ => false,
+        }
+    }
+}
+
 /// What a document can name, read once for all a write asks of it.
 pub(crate) struct Names<'s> {
     types: Types<'s>,
@@ -264,6 +281,18 @@ impl<'s> Names<'s> {
             },
             source: source.to_owned(),
         })
+    }
+
+    /// For the file `doc`, with what it imports already read.
+    pub(crate) fn at(store: &'s dyn Store, doc: &str, imports: &[Import]) -> Self {
+        Self {
+            types: types_of(store),
+            scope: Scope {
+                dir: dir_of(doc).to_owned(),
+                imports: imports.to_vec(),
+            },
+            source: String::new(),
+        }
     }
 
     /// `ty` as this document, plus the object text `beside` it, names it. It
@@ -324,6 +353,43 @@ impl<'s> Names<'s> {
             .get(ty)
             .is_some_and(|modules| modules.contains(import))
             || self.types.in_module(import, ty, found, 0) != Described::Not
+    }
+
+    /// Where qml6 would find `ty` here: the folder imported last, before any
+    /// module, before the file beside the document. `None` when something it
+    /// can't read might have it, or nothing does.
+    pub(crate) fn finds(&self, ty: &str) -> Option<Finds> {
+        if ty.contains('.') || self.undescribed() {
+            return None;
+        }
+        let file = format!("{ty}.qml");
+        for import in self.scope.imports.iter().rev() {
+            if let Import::Path { path, alias: None } = import
+                && !path.ends_with(".js")
+                && let Some(found) = crate::blocks::join(&self.scope.dir, path)
+                    .and_then(|dir| crate::blocks::join(&dir, &file))
+                && self.types.store.exists(&found)
+            {
+                return Some(Finds::File(found));
+            }
+        }
+        let modules: Vec<String> = self
+            .scope
+            .imports
+            .iter()
+            .filter_map(|import| match import {
+                Import::Module { uri, alias: None } if self.import_has(uri, ty) => {
+                    Some(uri.clone())
+                }
+                _ => None,
+            })
+            .collect();
+        if !modules.is_empty() {
+            return Some(Finds::Modules(modules));
+        }
+        crate::blocks::join(&self.scope.dir, &file)
+            .filter(|found| self.types.store.exists(found))
+            .map(Finds::File)
     }
 
     /// Whether `ty` here is the file beside the document, no import having it.
