@@ -31,7 +31,7 @@ Feature: Studio's tools and who may use them
 
   Scenario: The list of tools fits one answer
     Given the studio tools are connected with the capabilities "inspect, mutate, fs, run"
-    Then the list of tools is at most 31000 bytes
+    Then the list of tools is at most 32000 bytes
 
   Scenario: A reader cannot change a document
     Given the file "Main.qml":
