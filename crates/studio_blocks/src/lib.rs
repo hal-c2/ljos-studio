@@ -21,6 +21,7 @@ pub mod shell;
 
 use std::cell::RefCell;
 use std::collections::VecDeque;
+use std::hash::Hasher;
 use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -97,6 +98,13 @@ pub struct Workspace {
     /// The project's documents, as paths from its root.
     #[qml(readonly, notify)]
     pub documents: Json,
+    /// The preview's picture may be out of date after a click: the shell
+    /// calls `lookAgain` every so often until this is false.
+    #[qml(readonly, notify)]
+    pub settling: bool,
+    /// The project's directory has nothing in it yet.
+    #[qml(readonly, notify)]
+    pub blank: bool,
     /// The document the window shows. The shell sets it; the rest of the
     /// state follows.
     #[qml(notify, change = Self::doc_changed)]
@@ -115,6 +123,9 @@ pub struct Workspace {
     /// The handle of the selected object of `doc`; empty when none is.
     #[qml(readonly, notify)]
     pub selected: String,
+    /// The handles of every selected object of `doc`; `selected` is the first.
+    #[qml(readonly, notify)]
+    pub chosen: Json,
     /// The selected object's place in `text` (`start`, `end`, in the
     /// characters a script counts).
     #[qml(readonly, notify)]
@@ -145,6 +156,12 @@ pub struct Workspace {
     /// `slots`.
     #[qml(readonly, notify)]
     pub palette: Json,
+    /// The toolkit types the document can place, by module.
+    #[qml(readonly, notify)]
+    pub toolkit: Json,
+    /// The root's states, which stay editable while another object is selected.
+    #[qml(readonly, notify)]
+    pub root_states: Json,
     /// What other writers hold (`node_select` with `hold`): `doc`, `node`,
     /// `holder`, `ends_in_ms`. A layer another holds, or that is in one,
     /// names the holder in `held`; the window's edit of it is refused.
@@ -200,11 +217,14 @@ impl Default for Workspace {
         let none = || Json::Array(Vec::new());
         Self {
             documents: none(),
+            settling: false,
+            blank: false,
             doc: String::new(),
             generation: 0.0,
             text: String::new(),
             layers: none(),
             selected: String::new(),
+            chosen: json!([]),
             selection: json!({"start": 0, "end": 0}),
             inspector: none(),
             states: none(),
@@ -212,6 +232,8 @@ impl Default for Workspace {
             signals: none(),
             flow: json!({"states": [], "edges": []}),
             palette: none(),
+            toolkit: none(),
+            root_states: none(),
             done: none(),
             undone: none(),
             leases: none(),
@@ -247,6 +269,23 @@ impl Workspace {
         Ok(())
     }
 
+    /// Fetches the preview's picture again while `settling`.
+    #[qml(invokable, name = "lookAgain")]
+    fn look_again(cx: &Cx) -> Result<(), EngineError> {
+        let Some(queue) = queue_of(cx.engine, cx.this) else {
+            return Ok(());
+        };
+        let generation = {
+            let q = queue.borrow();
+            let waiting = q.jobs.iter().any(|j| matches!(j, Job::Picture { .. }));
+            (q.settling.is_some() && !waiting).then_some(q.fetched)
+        };
+        if let Some(generation) = generation {
+            enqueue(cx.engine, cx.this, Job::Picture { generation });
+        }
+        Ok(())
+    }
+
     #[qml(on_complete)]
     fn completed(cx: &Cx) -> Result<(), EngineError> {
         let context = cx.engine.extension::<Context>();
@@ -274,9 +313,36 @@ struct Queue {
     /// not, so a picture that cannot be had is not asked for again until
     /// the preview changes.
     fetched: u64,
+    /// The preview's size when last published: a new size is a new picture
+    /// of the same generation.
+    size: (u32, u32),
     image: Option<ImageHandle>,
     /// The generation `image` shows.
     picture: u64,
+    /// What `image`'s pixels hash to, so a look that finds the same picture
+    /// draws nothing.
+    pixels: u64,
+    /// How many different pictures have been drawn.
+    shots: u64,
+    /// The preview's clicks already looked at.
+    clicks: u64,
+    settling: Option<Settling>,
+}
+
+/// Looking again after a click. Nothing tells Studio when the app has come to
+/// rest (Ljós request 3), so the picture is fetched until it stops changing,
+/// a bounded number of times: a click on an app that animates for ever must
+/// not cost a screenshot for ever.
+struct Settling {
+    looks_left: u32,
+    same: u32,
+}
+
+impl Settling {
+    /// A click may take a frame or two to show, so one unchanged picture does
+    /// not mean it is over.
+    const SAME: u32 = 3;
+    const LOOKS: u32 = 30;
 }
 
 #[derive(Clone)]
@@ -308,7 +374,8 @@ enum Done {
     },
     Picture {
         generation: u64,
-        picture: Result<(u32, u32, Vec<u8>), String>,
+        /// Width, height, pixels, and what the pixels hash to.
+        picture: Result<(u32, u32, Vec<u8>, u64), String>,
     },
 }
 
@@ -440,7 +507,11 @@ fn run(server: &StudioServer, writes: &AtomicU64, doc: &str, job: Job) -> Done {
                         .into_iter()
                         .find(|i| i.mime == "image/png")
                         .ok_or_else(|| "the preview answered no PNG".to_owned())?;
-                    decode(&image.data)
+                    // Here, not where it lands: hashing a window's pixels is
+                    // milliseconds the engine's thread has no use for.
+                    let (w, h, rgba) = decode(&image.data)?;
+                    let pixels = hash_of(&rgba);
+                    Ok((w, h, rgba, pixels))
                 });
             Done::Picture {
                 generation,
@@ -507,14 +578,21 @@ fn finish(engine: &Engine, ws: ObjectId, done: Done) {
                 rebase(engine, ws, &tool, &args, answer);
             }
             publish(engine, ws, view, seen);
+            // What the canvas reads for itself is no gesture of the person's:
+            // it neither clears the refusal of the drop before it nor raises one.
+            let gesture = !(tool == "node_arrange" && args["action"] == "geometry");
             match answer {
                 Ok(answer) => {
-                    let _ = cx.set(Workspace::ERROR, String::new());
+                    if gesture {
+                        let _ = cx.set(Workspace::ERROR, String::new());
+                    }
                     let _ = Workspace::emit_answered(&cx, tool, answer);
                 }
                 Err(error) => {
-                    let message = error["message"].as_str().unwrap_or_default().to_owned();
-                    let _ = cx.set(Workspace::ERROR, message);
+                    if gesture {
+                        let message = error["message"].as_str().unwrap_or_default().to_owned();
+                        let _ = cx.set(Workspace::ERROR, message);
+                    }
                     let _ = Workspace::emit_refused(&cx, tool, error);
                 }
             }
@@ -527,18 +605,30 @@ fn finish(engine: &Engine, ws: ObjectId, done: Done) {
             let Some(queue) = queue_of(engine, ws) else {
                 return;
             };
-            match picture.and_then(|(w, h, rgba)| {
-                ImageHandle::from_straight(w, h, rgba).map_err(|e| e.to_string())
-            }) {
-                Ok(image) => {
+            let picture = picture.and_then(|(w, h, rgba, pixels)| {
+                let image = ImageHandle::from_straight(w, h, rgba).map_err(|e| e.to_string())?;
+                Ok((image, pixels))
+            });
+            let failed = picture.is_err();
+            let mut changed = false;
+            match picture {
+                Ok((image, pixels)) => {
                     {
                         let mut q = queue.borrow_mut();
-                        q.image = Some(image);
-                        q.picture = generation;
+                        changed = q.pixels != pixels || q.picture != generation;
+                        if changed {
+                            q.image = Some(image);
+                            q.picture = generation;
+                            q.pixels = pixels;
+                            q.shots += 1;
+                        }
                     }
                     let mut preview = engine.get(ws, Workspace::PREVIEW).unwrap_or_default();
-                    if let Some(fields) = preview.as_object_mut() {
+                    if let Some(fields) = preview.as_object_mut()
+                        && changed
+                    {
                         fields.insert("picture".to_owned(), json!(generation));
+                        fields.insert("shots".to_owned(), json!(queue.borrow().shots));
                         let _ = cx.set(Workspace::PREVIEW, preview);
                     }
                 }
@@ -546,8 +636,24 @@ fn finish(engine: &Engine, ws: ObjectId, done: Done) {
                     let _ = cx.set(Workspace::ERROR, format!("no picture of the preview: {e}"));
                 }
             }
+            let mut q = queue.borrow_mut();
+            if let Some(settling) = &mut q.settling {
+                settling.same = if changed { 0 } else { settling.same + 1 };
+                settling.looks_left = settling.looks_left.saturating_sub(1);
+                if failed || settling.same >= Settling::SAME || settling.looks_left == 0 {
+                    q.settling = None;
+                    drop(q);
+                    let _ = cx.set(Workspace::SETTLING, false);
+                }
+            }
         }
     }
+}
+
+fn hash_of(bytes: &[u8]) -> u64 {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    hasher.write(bytes);
+    hasher.finish()
 }
 
 /// A person types on in the code view while their last edit is on its way:
@@ -588,10 +694,10 @@ fn publish(engine: &Engine, ws: ObjectId, view: View, seen: u64) {
     if engine.get(ws, Workspace::DOC).unwrap_or_default() != view.doc {
         return;
     }
-    let (picture, fetched) = {
+    let (picture, fetched, shots) = {
         let mut q = queue.borrow_mut();
         q.published = q.published.max(seen);
-        (q.picture, q.fetched)
+        (q.picture, q.fetched, q.shots)
     };
     let preview = match &view.preview {
         Some(p) if p.doc == view.doc => json!({
@@ -602,20 +708,29 @@ fn publish(engine: &Engine, ws: ObjectId, view: View, seen: u64) {
             "state": p.state,
             "variant": p.variant,
             "picture": picture,
+            "shots": shots,
         }),
         _ => Json::Null,
     };
+    let size = view
+        .preview
+        .as_ref()
+        .map_or((0, 0), |p| (p.width, p.height));
+    let resized = queue_of(engine, ws)
+        .is_some_and(|q| std::mem::replace(&mut q.borrow_mut().size, size) != size);
     let wanted = view
         .preview
         .as_ref()
         .filter(|p| p.doc == view.doc)
         .map(|p| p.generation)
-        .filter(|&g| g != picture && g != fetched);
+        .filter(|&g| resized || (g != picture && g != fetched));
+    let _ = cx.set(Workspace::BLANK, view.blank);
     let _ = cx.set(Workspace::DOCUMENTS, to_json(&view.documents));
     let _ = cx.set(Workspace::GENERATION, view.generation as f64);
     let _ = cx.set(Workspace::TEXT, view.text);
     let _ = cx.set(Workspace::LAYERS, to_json(&view.layers));
     let _ = cx.set(Workspace::SELECTED, view.selected);
+    let _ = cx.set(Workspace::CHOSEN, to_json(&view.chosen));
     let _ = cx.set(Workspace::SELECTION, to_json(&view.selection));
     let _ = cx.set(Workspace::INSPECTOR, to_json(&view.inspector));
     let _ = cx.set(Workspace::STATES, to_json(&view.states));
@@ -623,6 +738,8 @@ fn publish(engine: &Engine, ws: ObjectId, view: View, seen: u64) {
     let _ = cx.set(Workspace::SIGNALS, to_json(&view.signals));
     let _ = cx.set(Workspace::FLOW, to_json(&view.flow));
     let _ = cx.set(Workspace::PALETTE, to_json(&view.palette));
+    let _ = cx.set(Workspace::TOOLKIT, to_json(&view.toolkit));
+    let _ = cx.set(Workspace::ROOT_STATES, to_json(&view.root_states));
     let _ = cx.set(Workspace::DONE, to_json(&view.done));
     let _ = cx.set(Workspace::UNDONE, to_json(&view.undone));
     let _ = cx.set(Workspace::LEASES, to_json(&view.leases));
@@ -635,6 +752,28 @@ fn publish(engine: &Engine, ws: ObjectId, view: View, seen: u64) {
     let _ = cx.set(Workspace::PREVIEWS, view.previews);
     let _ = cx.set(Workspace::THEME, view.theme);
     let _ = cx.set(Workspace::TOKENS, to_json(&view.tokens));
+    // A click changes what the app shows and no generation says so. A new
+    // preview counts from nothing again, which is no click.
+    let clicks = view
+        .preview
+        .as_ref()
+        .filter(|p| p.doc == view.doc)
+        .map_or(0, |p| p.clicks);
+    let clicked = {
+        let mut q = queue.borrow_mut();
+        let clicked = clicks > q.clicks;
+        q.clicks = clicks;
+        if clicked {
+            q.settling = Some(Settling {
+                looks_left: Settling::LOOKS,
+                same: 0,
+            });
+        }
+        clicked
+    };
+    if clicked {
+        let _ = cx.set(Workspace::SETTLING, true);
+    }
     // A picture is fetched once for each generation the preview applies.
     if let Some(generation) = wanted {
         let queued = queue

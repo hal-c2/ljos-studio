@@ -28,7 +28,6 @@ expression: value
         ]
       }
     },
-    "additionalProperties": false,
     "properties": {
       "data": {
         "description": "A project JSON file, an array of records: the document is a\n`JsonListModel` reading it, or with `model: \"list\"` a `ListModel`\ncopy, a `ListElement` for each (flat) record. Not with `text`.",
@@ -60,88 +59,46 @@ expression: value
     "required": [
       "doc"
     ],
-    "title": "NewArgs",
     "type": "object"
   },
   "max_result_bytes": 40960,
   "name": "document_new",
   "outputSchema": {
-    "$defs": {
-      "ChangeOut": {
-        "properties": {
-          "end": {
-            "format": "uint",
-            "minimum": 0,
-            "type": "integer"
-          },
-          "start": {
-            "description": "Byte range of the text before the edit.",
-            "format": "uint",
-            "minimum": 0,
-            "type": "integer"
-          },
-          "text": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "start",
-          "end",
-          "text"
-        ],
-        "type": "object"
-      }
-    },
     "properties": {
       "changes": {
-        "items": {
-          "$ref": "#/$defs/ChangeOut"
-        },
         "type": "array"
       },
       "doc": {
         "type": "string"
       },
       "generation": {
-        "description": "The document's generation now; pass it with the next edit.",
-        "format": "uint64",
-        "minimum": 0,
         "type": "integer"
       },
       "history": {
-        "description": "The history entry; absent for a dry run or an unchanged document.",
-        "format": "uint64",
-        "minimum": 0,
         "type": [
           "integer",
           "null"
         ]
       },
       "node": {
-        "description": "The handle of the object put or moved.",
         "type": [
           "string",
           "null"
         ]
       },
       "rebased_from": {
-        "description": "The `generation` the edit was made against, when the document had\nmoved on since and the edit was applied past what others wrote.",
-        "format": "uint64",
-        "minimum": 0,
         "type": [
           "integer",
           "null"
         ]
       },
       "text": {
-        "description": "The text the edit would give, for a dry run.",
         "type": [
           "string",
           "null"
         ]
       },
       "unchanged": {
-        "description": "The document already said this: nothing was written and no history\nentry made.",
         "type": "boolean"
       }
     },
@@ -151,7 +108,6 @@ expression: value
       "changes",
       "unchanged"
     ],
-    "title": "EditOut",
     "type": "object"
   },
   "required_cap": "mutate"

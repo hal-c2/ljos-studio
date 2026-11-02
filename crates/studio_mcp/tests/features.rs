@@ -175,10 +175,9 @@ impl StudioWorld {
             Err(e) => (Err(e), Vec::new()),
         };
         // A refusal is an error result, which the output schema does not cover.
-        let output = server.tools().all().find(|d| d.name == tool);
-        if let (Ok(answer), Some(output)) = (&out, output.and_then(|d| d.output_schema.as_deref()))
-        {
-            let broken = schema::validate(&Value::Object(output.clone()), answer);
+        // The whole shape: the one the list advertises is only its fields.
+        if let (Ok(answer), Some(output)) = (&out, studio_mcp::schema::answer_schema(tool)) {
+            let broken = schema::validate(&output, answer);
             if !broken.is_empty() {
                 let broken: Vec<String> = broken.iter().map(ToString::to_string).collect();
                 return Err(format!(
@@ -520,6 +519,13 @@ fn calls(w: &mut StudioWorld, tool: String) -> StepResult {
     w.call(&tool, Value::Object(Default::default()))
 }
 
+#[when(regex = r#"^the agent opens the project "([^"]+)" by its absolute path$"#)]
+fn opens_by_absolute_path(w: &mut StudioWorld, name: String) -> StepResult {
+    let path = w.dir.path().join(&name);
+    let path = path.to_str().ok_or("the path is not text")?.to_owned();
+    w.call("project_open", serde_json::json!({ "path": path }))
+}
+
 #[given(regex = r#"^the agent has called the tool "([^"]+)" with:$"#)]
 #[when(regex = r#"^the agent calls the tool "([^"]+)" with:$"#)]
 fn calls_with(w: &mut StudioWorld, tool: String, step: &Step) -> StepResult {
@@ -671,6 +677,15 @@ fn answer_absent(w: &mut StudioWorld, pointer: String) -> StepResult {
     }
 }
 
+#[then(regex = r#"^the answer's "(/[^"]*)" contains "([^"]*)"$"#)]
+fn answer_contains(w: &mut StudioWorld, pointer: String, text: String) -> StepResult {
+    let got = at(w.answer()?, &pointer)?;
+    match got.as_str() {
+        Some(got) if got.contains(&text) => Ok(()),
+        _ => Err(format!("`{pointer}` is {got}, without {text:?}")),
+    }
+}
+
 #[then(regex = r#"^the answer's "(/[^"]*)" lists "([^"]*)"$"#)]
 fn answer_lists(w: &mut StudioWorld, pointer: String, names: String) -> StepResult {
     let got = at(w.answer()?, &pointer)?;
@@ -723,6 +738,35 @@ fn file_is(w: &mut StudioWorld, name: String, step: &Step) -> StepResult {
     (got == want)
         .then_some(())
         .ok_or_else(|| format!("`{name}` is:\n{got}\nnot:\n{want}"))
+}
+
+#[then(regex = r"^the history has (\d+) entr(?:y|ies)$")]
+fn history_has(w: &mut StudioWorld, want: usize) -> StepResult {
+    w.call("history", serde_json::json!({ "action": "list" }))?;
+    let answer = w.answer()?;
+    let got = answer["done"].as_array().map_or(0, Vec::len);
+    (got == want)
+        .then_some(())
+        .ok_or_else(|| format!("the history has {got} entries, not {want}: {answer}"))
+}
+
+#[then(regex = r#"^the file "([^"]+)" contains "(.*)"$"#)]
+fn file_contains(w: &mut StudioWorld, name: String, want: String) -> StepResult {
+    let want = want.replace("\\\"", "\"");
+    let got =
+        std::fs::read_to_string(w.dir.path().join(&name)).map_err(|e| format!("`{name}`: {e}"))?;
+    got.contains(&want)
+        .then_some(())
+        .ok_or_else(|| format!("`{name}` does not contain {want:?}:\n{got}"))
+}
+
+#[then(regex = r#"^the file "([^"]+)" does not contain "(.*)"$"#)]
+fn file_lacks(w: &mut StudioWorld, name: String, want: String) -> StepResult {
+    let got =
+        std::fs::read_to_string(w.dir.path().join(&name)).map_err(|e| format!("`{name}`: {e}"))?;
+    (!got.contains(&want))
+        .then_some(())
+        .ok_or_else(|| format!("`{name}` contains {want:?}:\n{got}"))
 }
 
 #[then(regex = r#"^the file "([^"]+)" does not exist$"#)]
@@ -855,6 +899,31 @@ fn offered(w: &mut StudioWorld, names: String) -> StepResult {
     (got == want)
         .then_some(())
         .ok_or_else(|| format!("offered {got:?}"))
+}
+
+// As `tools/list` writes each tool; the listing is one answer and is paid for
+// by every session.
+#[then(regex = r#"^the list of tools is at most (\d+) bytes$"#)]
+fn list_within(w: &mut StudioWorld, cap: usize) -> StepResult {
+    let caps = w.caps;
+    let tools: Vec<Value> = w
+        .server()?
+        .tools()
+        .visible(caps)
+        .map(|d| {
+            json!({
+                "name": d.name,
+                "description": d.description,
+                "annotations": d.annotations,
+                "inputSchema": &*d.input_schema,
+                "outputSchema": d.output_schema.as_deref(),
+            })
+        })
+        .collect();
+    let bytes = json!({ "tools": tools }).to_string().len();
+    (bytes <= cap)
+        .then_some(())
+        .ok_or_else(|| format!("the list is {bytes} bytes"))
 }
 
 /// A reload Studio reported, applied or not.

@@ -1,6 +1,7 @@
 // The document's text. Typing applies through `document_edit`, the tool a
-// person typing in an agent's editor goes through too; the selected
-// object's text is selected here.
+// person typing in an agent's editor goes through too. The selected object is
+// marked by a band behind nothing: a text selection there would be replaced
+// by the next key pressed.
 import QtQuick
 import QtQuick.Controls
 import Ljos.Design
@@ -28,8 +29,19 @@ Panel {
 
     function showSelection() {
         const s = workspace.selection
-        if (pending === 0 && workspace.selected !== "" && s.end <= area.length)
-            area.select(s.start, s.end)
+        if (pending > 0 || workspace.selected === "" || s.end > area.length) {
+            band.marks = ""
+            return
+        }
+        const first = area.positionToRectangle(s.start)
+        const last = area.positionToRectangle(s.end)
+        band.y = first.y
+        band.height = last.y + last.height - first.y
+        band.marks = area.getText(s.start, s.end)
+        // Someone typing here keeps their caret; anyone else starts typing at
+        // the object they chose.
+        if (!area.activeFocus)
+            area.cursorPosition = s.start
     }
 
     Connections {
@@ -62,6 +74,17 @@ Panel {
             font.pixelSize: Typography.bodySize
             enabled: panel.workspace.doc !== ""
             selectByMouse: true
+
+            Rectangle {
+                id: band
+                objectName: "codeBand"
+                property string marks: ""
+                visible: marks !== ""
+                width: area.width
+                color: Colors.accent
+                opacity: 0.2
+            }
+
             onTextChanged: {
                 if (panel.syncing || panel.workspace.doc === "")
                     return
@@ -69,8 +92,10 @@ Panel {
                 panel.workspace.dispatch("document_edit", {
                     doc: panel.workspace.doc,
                     generation: panel.workspace.generation,
-                    text: text
+                    text: text,
+                    typing: true
                 })
+                band.marks = ""
             }
         }
     }

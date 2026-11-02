@@ -20,8 +20,9 @@ use std::{
 
 use ljos_child::Reaped;
 use serde_json::{Map, Value, json};
+use studio_core::place::Rect;
 use studio_core::preview::{
-    Click, Declared, LogLine, Picture, PreviewError, PreviewHost, PreviewSpec, Reload, Size,
+    Click, Declared, LogLine, Picture, Placed, PreviewError, PreviewHost, PreviewSpec, Reload, Size,
 };
 
 use inspector::{Answer, Fault, Inspector};
@@ -39,6 +40,13 @@ const CAPS: &str = "inspect,input,mutate";
 /// reload and a picture, and Ljós's default of 20 kept them waiting on its
 /// one-second `Retry-After` at a brisk pace.
 const CALLS_PER_SECOND: u32 = 200;
+
+/// Objects read to find those without an id, in one call: past this a call
+/// would spend the inspector's whole second, and the object is reported as
+/// not found rather than making the person wait.
+const MOST_READ: usize = 150;
+/// Copies of a delegate read for their places.
+const MOST_COPIES: usize = 16;
 
 /// The project's type dumps run as one, in the state directory.
 const MERGED_TYPES: &str = "types.json";
@@ -397,6 +405,43 @@ impl PreviewHost for NativeHost {
         }))
     }
 
+    fn placed(&mut self, ids: &[String], types: &[String]) -> Result<Vec<Placed>, PreviewError> {
+        let mut out = Vec::new();
+        for id in ids {
+            out.extend(self.placed_by_id(id)?);
+        }
+        if types.is_empty() {
+            return Ok(out);
+        }
+        // Ljós lists objects without saying where each is or was declared
+        // (Ljós request 7), so an object with no id takes reading objects of
+        // its type one by one.
+        let listed = self.call("app_objects", json!({ "max": 5000 }))?;
+        let mut read = 0;
+        let rows = listed.structured["objects"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default();
+        for row in rows {
+            let of_type = row["type"]
+                .as_str()
+                .is_some_and(|ty| types.iter().any(|t| t == ty));
+            if !of_type || row["id"].is_string() {
+                continue;
+            }
+            if read == MOST_READ {
+                break;
+            }
+            read += 1;
+            let Some(handle) = row["handle"].as_str() else {
+                continue;
+            };
+            let answer = self.call("app_inspect", json!({ "target": handle }))?;
+            out.extend(self.placed_from(&answer.structured));
+        }
+        Ok(out)
+    }
+
     fn close(&mut self) {
         if let Some(mut running) = self.running.take() {
             let _ = running.child.stop();
@@ -405,6 +450,77 @@ impl PreviewHost for NativeHost {
 }
 
 impl NativeHost {
+    /// The object with the QML id `id`, or each copy when a delegate has it.
+    fn placed_by_id(&mut self, id: &str) -> Result<Vec<Placed>, PreviewError> {
+        match self.call("app_inspect", json!({ "target": locator(id) })) {
+            Ok(answer) => Ok(self.placed_from(&answer.structured).into_iter().collect()),
+            Err(PreviewError::Refused { code, .. })
+                if code == "not_found" || code == "no_match" =>
+            {
+                Ok(Vec::new())
+            }
+            Err(PreviewError::Refused { code, .. }) if code == "ambiguous" => {
+                let found = self.call("app_objects", json!({ "max": 5000 }))?;
+                let rows = found.structured["objects"]
+                    .as_array()
+                    .cloned()
+                    .unwrap_or_default();
+                let mut out = Vec::new();
+                for row in rows.iter().filter(|r| r["id"] == id).take(MOST_COPIES) {
+                    let Some(handle) = row["handle"].as_str() else {
+                        continue;
+                    };
+                    let answer = self.call("app_inspect", json!({ "target": handle }))?;
+                    out.extend(self.placed_from(&answer.structured));
+                }
+                Ok(out)
+            }
+            Err(e) => Err(e),
+        }
+    }
+
+    /// An `app_inspect` answer as a [`Placed`]; `None` for what is not an item.
+    fn placed_from(&self, answer: &Value) -> Option<Placed> {
+        let geometry = &answer["geometry"];
+        let number = |v: &Value| v.as_f64().unwrap_or(0.0);
+        let window = geometry["window"].as_array()?;
+        let source = &answer["source"];
+        let line = |name: &str| {
+            source[name]
+                .as_u64()
+                .and_then(|n| u32::try_from(n).ok())
+                .unwrap_or(0)
+        };
+        Some(Placed {
+            local: Rect {
+                x: number(&geometry["x"]),
+                y: number(&geometry["y"]),
+                width: number(&geometry["width"]),
+                height: number(&geometry["height"]),
+            },
+            window: Rect {
+                x: number(window.first()?),
+                y: number(window.get(1)?),
+                width: number(window.get(2)?),
+                height: number(window.get(3)?),
+            },
+            declared: source["file"].as_str().map(|file| Declared {
+                file: self.document(file),
+                line: line("line"),
+                column: line("column"),
+            }),
+            types: answer["types"]
+                .as_array()
+                .map(|types| {
+                    types
+                        .iter()
+                        .filter_map(|t| t.as_str().map(str::to_owned))
+                        .collect()
+                })
+                .unwrap_or_default(),
+        })
+    }
+
     /// A file the child names (a `file:` URL, as its engine does) as the
     /// store names it: relative to the project when it is below it.
     fn document(&self, file: &str) -> String {

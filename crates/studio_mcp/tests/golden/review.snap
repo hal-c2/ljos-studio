@@ -23,51 +23,23 @@ expression: value
         "type": "string"
       },
       "Address": {
-        "description": "How a caller names an object.",
-        "oneOf": [
-          {
-            "additionalProperties": false,
-            "description": "A handle the session gave out (`n7`); stable for the session.",
-            "properties": {
-              "node": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "node"
-            ],
-            "type": "object"
+        "description": "One of: `node`, a handle the session gave out (`n7`), stable for the session; `id`, the object's `id`; `path`, as `document_tree` prints it (`root/0/contentItem:`), true of the current text only.",
+        "maxProperties": 1,
+        "minProperties": 1,
+        "properties": {
+          "id": {
+            "type": "string"
           },
-          {
-            "additionalProperties": false,
-            "description": "The object's `id` in the document.",
-            "properties": {
-              "id": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "id"
-            ],
-            "type": "object"
+          "node": {
+            "type": "string"
           },
-          {
-            "additionalProperties": false,
-            "description": "A path as `document_tree` prints it (`root/0/contentItem:`), true of\nthe current text only.",
-            "properties": {
-              "path": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "path"
-            ],
-            "type": "object"
+          "path": {
+            "type": "string"
           }
-        ]
+        },
+        "type": "object"
       }
     },
-    "additionalProperties": false,
     "properties": {
       "action": {
         "$ref": "#/$defs/Action"
@@ -115,134 +87,20 @@ expression: value
     "required": [
       "action"
     ],
-    "title": "ReviewArgs",
     "type": "object"
   },
   "max_result_bytes": 40960,
   "name": "review",
   "outputSchema": {
-    "$defs": {
-      "AnchorOut": {
-        "properties": {
-          "id": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "line": {
-            "format": "uint",
-            "minimum": 0,
-            "type": "integer"
-          },
-          "path": {
-            "description": "True of the text the comment was last placed in.",
-            "type": "string"
-          },
-          "type": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "path",
-          "line",
-          "type"
-        ],
-        "type": "object"
-      },
-      "CommentOut": {
-        "properties": {
-          "anchor": {
-            "$ref": "#/$defs/AnchorOut",
-            "description": "Where the object is, or last was."
-          },
-          "doc": {
-            "type": "string"
-          },
-          "id": {
-            "type": "string"
-          },
-          "node": {
-            "description": "The object's handle; absent once it is orphaned.",
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "orphaned": {
-            "description": "The object was taken out; the comment is kept.",
-            "type": "boolean"
-          },
-          "resolved": {
-            "type": "boolean"
-          },
-          "thread": {
-            "description": "The comment, then its replies.",
-            "items": {
-              "$ref": "#/$defs/NoteOut"
-            },
-            "type": "array"
-          }
-        },
-        "required": [
-          "id",
-          "doc",
-          "anchor",
-          "orphaned",
-          "resolved",
-          "thread"
-        ],
-        "type": "object"
-      },
-      "NoteOut": {
-        "properties": {
-          "at": {
-            "description": "Milliseconds since the Unix epoch.",
-            "format": "uint64",
-            "minimum": 0,
-            "type": "integer"
-          },
-          "author": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "text": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "text",
-          "at"
-        ],
-        "type": "object"
-      }
-    },
     "properties": {
-      "comment": {
-        "anyOf": [
-          {
-            "$ref": "#/$defs/CommentOut"
-          },
-          {
-            "type": "null"
-          }
-        ],
-        "description": "The comment added or changed."
-      },
+      "comment": {},
       "comments": {
-        "description": "What `list` found, in the order the comments were made.",
-        "items": {
-          "$ref": "#/$defs/CommentOut"
-        },
         "type": [
           "array",
           "null"
         ]
       }
     },
-    "title": "ReviewOut",
     "type": "object"
   },
   "required_cap": "inspect"

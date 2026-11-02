@@ -63,11 +63,20 @@ Panel {
                 leftPadding: Spacing.xs + modelData.depth * Spacing.md
                 text: modelData.label
                 Accessible.name: modelData.label
-                highlighted: modelData.node === panel.workspace.selected
+                highlighted: panel.workspace.chosen.indexOf(modelData.node) >= 0
                 onClicked: panel.workspace.dispatch("node_select", {
                     doc: panel.workspace.doc,
                     nodes: [{node: modelData.node}]
                 })
+
+                TapHandler {
+                    acceptedModifiers: Qt.ShiftModifier
+                    onTapped: panel.workspace.dispatch("node_select", {
+                        doc: panel.workspace.doc,
+                        nodes: [{node: row.modelData.node}],
+                        add: true
+                    })
+                }
 
                 Row {
                     anchors.right: parent.right

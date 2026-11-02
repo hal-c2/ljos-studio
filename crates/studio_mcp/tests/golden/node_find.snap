@@ -11,7 +11,6 @@ expression: value
   },
   "description": "Find objects by id, type, binding name or text in a binding's value, in one document or all (naming those it could not parse or read). Returns handles.",
   "inputSchema": {
-    "additionalProperties": false,
     "properties": {
       "binding": {
         "description": "Has a binding of this name (`font.bold`).",
@@ -47,62 +46,19 @@ expression: value
         ]
       }
     },
-    "title": "FindArgs",
     "type": "object"
   },
   "max_result_bytes": 40960,
   "name": "node_find",
   "outputSchema": {
-    "$defs": {
-      "Found": {
-        "properties": {
-          "doc": {
-            "type": "string"
-          },
-          "id": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "node": {
-            "type": "string"
-          },
-          "path": {
-            "type": "string"
-          },
-          "type": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "doc",
-          "node",
-          "path",
-          "type"
-        ],
-        "type": "object"
-      }
-    },
     "properties": {
       "broken": {
-        "description": "Documents left out because they do not parse.",
-        "items": {
-          "type": "string"
-        },
         "type": "array"
       },
       "nodes": {
-        "items": {
-          "$ref": "#/$defs/Found"
-        },
         "type": "array"
       },
       "unreadable": {
-        "description": "Documents left out because they could not be read (not UTF-8, gone\nsince they were listed); `document_text` on one says why.",
-        "items": {
-          "type": "string"
-        },
         "type": "array"
       }
     },
@@ -111,7 +67,6 @@ expression: value
       "broken",
       "unreadable"
     ],
-    "title": "FindOut",
     "type": "object"
   },
   "required_cap": "inspect"

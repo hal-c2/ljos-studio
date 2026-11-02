@@ -13,51 +13,23 @@ expression: value
   "inputSchema": {
     "$defs": {
       "Address": {
-        "description": "How a caller names an object.",
-        "oneOf": [
-          {
-            "additionalProperties": false,
-            "description": "A handle the session gave out (`n7`); stable for the session.",
-            "properties": {
-              "node": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "node"
-            ],
-            "type": "object"
+        "description": "One of: `node`, a handle the session gave out (`n7`), stable for the session; `id`, the object's `id`; `path`, as `document_tree` prints it (`root/0/contentItem:`), true of the current text only.",
+        "maxProperties": 1,
+        "minProperties": 1,
+        "properties": {
+          "id": {
+            "type": "string"
           },
-          {
-            "additionalProperties": false,
-            "description": "The object's `id` in the document.",
-            "properties": {
-              "id": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "id"
-            ],
-            "type": "object"
+          "node": {
+            "type": "string"
           },
-          {
-            "additionalProperties": false,
-            "description": "A path as `document_tree` prints it (`root/0/contentItem:`), true of\nthe current text only.",
-            "properties": {
-              "path": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "path"
-            ],
-            "type": "object"
+          "path": {
+            "type": "string"
           }
-        ]
+        },
+        "type": "object"
       }
     },
-    "additionalProperties": false,
     "properties": {
       "doc": {
         "type": "string"
@@ -70,326 +42,25 @@ expression: value
       "doc",
       "node"
     ],
-    "title": "NodeArgs",
     "type": "object"
   },
   "max_result_bytes": 40960,
   "name": "node_inspect",
   "outputSchema": {
-    "$defs": {
-      "Argument": {
-        "properties": {
-          "name": {
-            "type": "string"
-          },
-          "type": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "name",
-          "type"
-        ],
-        "type": "object"
-      },
-      "BindingOut": {
-        "properties": {
-          "declared": {
-            "description": "A `property` this object declares, not a setting of an inherited one.",
-            "type": "boolean"
-          },
-          "end": {
-            "format": "uint",
-            "minimum": 0,
-            "type": "integer"
-          },
-          "name": {
-            "type": "string"
-          },
-          "start": {
-            "format": "uint",
-            "minimum": 0,
-            "type": "integer"
-          },
-          "value": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "name",
-          "value",
-          "start",
-          "end",
-          "declared"
-        ],
-        "type": "object"
-      },
-      "ChangeInfo": {
-        "description": "One value a state changes: `target`'s property `name` to `value`.",
-        "properties": {
-          "name": {
-            "type": "string"
-          },
-          "target": {
-            "description": "The changed object's `id`.",
-            "type": "string"
-          },
-          "value": {
-            "description": "As written after the `:`.",
-            "type": "string"
-          }
-        },
-        "required": [
-          "target",
-          "name",
-          "value"
-        ],
-        "type": "object"
-      },
-      "Found": {
-        "properties": {
-          "doc": {
-            "type": "string"
-          },
-          "id": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "node": {
-            "type": "string"
-          },
-          "path": {
-            "type": "string"
-          },
-          "type": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "doc",
-          "node",
-          "path",
-          "type"
-        ],
-        "type": "object"
-      },
-      "Interaction": {
-        "description": "One flow of a document, as [`Session::interactions`] lists it.",
-        "properties": {
-          "navigator": {
-            "description": "The `id` of the `Loader` or `StackView` that opens the document.",
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "open": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "owner": {
-            "description": "The `id` of the object whose state it sets.",
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "signal": {
-            "description": "The signal handled: `tapped` for a `TapHandler`'s.",
-            "type": "string"
-          },
-          "state": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "trigger": {
-            "description": "The handle of the object that is tapped.",
-            "type": "string"
-          },
-          "trigger_id": {
-            "type": [
-              "string",
-              "null"
-            ]
-          }
-        },
-        "required": [
-          "trigger",
-          "signal"
-        ],
-        "type": "object"
-      },
-      "Model": {
-        "description": "The data an object sees.",
-        "properties": {
-          "doc": {
-            "description": "The document the model is written in.",
-            "type": "string"
-          },
-          "roles": {
-            "description": "Its roles, in the order the rows first bind them.",
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
-          },
-          "rows": {
-            "format": "uint",
-            "minimum": 0,
-            "type": "integer"
-          },
-          "source": {
-            "description": "The JSON file a `JsonListModel` reads, relative to the project.",
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "view": {
-            "description": "The handle of the list whose delegate the object is in.",
-            "type": [
-              "string",
-              "null"
-            ]
-          }
-        },
-        "required": [
-          "roles",
-          "rows",
-          "doc"
-        ],
-        "type": "object"
-      },
-      "Signal": {
-        "description": "One signal, which `on<Name>` handles.",
-        "properties": {
-          "arguments": {
-            "description": "What a handler may call its arguments, in order, each with its type\n(empty where nothing says it). An argument without a name has an\nempty one.",
-            "items": {
-              "$ref": "#/$defs/Argument"
-            },
-            "type": "array"
-          },
-          "change": {
-            "description": "A property's change signal (`widthChanged`): every property has one,\nso a person picking what a tap does looks past them.",
-            "type": "boolean"
-          },
-          "name": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "name",
-          "arguments",
-          "change"
-        ],
-        "type": "object"
-      },
-      "StateInfo": {
-        "description": "One `State` of an object.",
-        "properties": {
-          "changes": {
-            "description": "The values it changes, in the order written.",
-            "items": {
-              "$ref": "#/$defs/ChangeInfo"
-            },
-            "type": "array"
-          },
-          "end": {
-            "format": "uint",
-            "minimum": 0,
-            "type": "integer"
-          },
-          "name": {
-            "type": "string"
-          },
-          "start": {
-            "description": "Byte range of the `State` in the text.",
-            "format": "uint",
-            "minimum": 0,
-            "type": "integer"
-          },
-          "when": {
-            "description": "The condition that turns it on, as written.",
-            "type": [
-              "string",
-              "null"
-            ]
-          }
-        },
-        "required": [
-          "name",
-          "changes",
-          "start",
-          "end"
-        ],
-        "type": "object"
-      },
-      "TransitionInfo": {
-        "description": "One `Transition` of an object.",
-        "properties": {
-          "animations": {
-            "description": "The objects it runs (its animations), as written.",
-            "type": "string"
-          },
-          "end": {
-            "format": "uint",
-            "minimum": 0,
-            "type": "integer"
-          },
-          "from": {
-            "description": "A state's name, or `*` for any.",
-            "type": "string"
-          },
-          "start": {
-            "format": "uint",
-            "minimum": 0,
-            "type": "integer"
-          },
-          "to": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "from",
-          "to",
-          "animations",
-          "start",
-          "end"
-        ],
-        "type": "object"
-      }
-    },
     "properties": {
       "bindings": {
-        "items": {
-          "$ref": "#/$defs/BindingOut"
-        },
         "type": "array"
       },
       "children": {
-        "items": {
-          "$ref": "#/$defs/Found"
-        },
         "type": "array"
       },
       "doc": {
         "type": "string"
       },
       "end": {
-        "format": "uint",
-        "minimum": 0,
         "type": "integer"
       },
       "generation": {
-        "format": "uint64",
-        "minimum": 0,
         "type": "integer"
       },
       "id": {
@@ -399,28 +70,12 @@ expression: value
         ]
       },
       "interactions": {
-        "description": "The flows written in it and in everything it holds, in order.",
-        "items": {
-          "$ref": "#/$defs/Interaction"
-        },
         "type": "array"
       },
       "line": {
-        "format": "uint",
-        "minimum": 0,
         "type": "integer"
       },
-      "model": {
-        "anyOf": [
-          {
-            "$ref": "#/$defs/Model"
-          },
-          {
-            "type": "null"
-          }
-        ],
-        "description": "The data it sees: its own as a `ListModel`, a list's model's, or\nin a list's delegate the list's, whose roles bind as `model.role`."
-      },
+      "model": {},
       "node": {
         "type": "string"
       },
@@ -434,31 +89,18 @@ expression: value
         "type": "string"
       },
       "signals": {
-        "description": "Every signal it has, which a flow's `signal` may name: what it\ndeclares, then its type's own and inherited, each with its\narguments. Absent for a type described nowhere Studio looks (no\nimport, project file, type dump or Ljós type has it).",
-        "items": {
-          "$ref": "#/$defs/Signal"
-        },
         "type": [
           "array",
           "null"
         ]
       },
       "start": {
-        "format": "uint",
-        "minimum": 0,
         "type": "integer"
       },
       "states": {
-        "description": "Its `State`s in order, each with the values it changes as written.",
-        "items": {
-          "$ref": "#/$defs/StateInfo"
-        },
         "type": "array"
       },
       "transitions": {
-        "items": {
-          "$ref": "#/$defs/TransitionInfo"
-        },
         "type": "array"
       },
       "type": {
@@ -480,7 +122,6 @@ expression: value
       "transitions",
       "interactions"
     ],
-    "title": "Inspected",
     "type": "object"
   },
   "required_cap": "inspect"

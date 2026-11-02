@@ -399,6 +399,10 @@ const STEPS = [
     const got = at(w.ok(), pointer);
     if (got !== undefined) throw new Error(`\`${pointer}\` is ${JSON.stringify(got)}`);
   }),
+  step("then", /^the answer's "(\/[^"]*)" contains "([^"]*)"$/, (w, s, pointer, text) => {
+    const got = must(w.ok(), pointer);
+    if (typeof got !== "string" || !got.includes(text)) throw new Error(`\`${pointer}\` is ${JSON.stringify(got)}, without ${JSON.stringify(text)}`);
+  }),
   step("then", /^the answer's "(\/[^"]*)" lists "([^"]*)"$/, (w, s, pointer, names) => {
     const got = must(w.ok(), pointer);
     if (!equal(got, list(names))) throw new Error(`\`${pointer}\` is ${JSON.stringify(got)}`);
@@ -424,6 +428,20 @@ const STEPS = [
     const got = w.backend.files.get(name);
     if (got === undefined) throw new Error(`\`${name}\` does not exist`);
     if (got !== want) throw new Error(`\`${name}\` is:\n${got}\nnot:\n${want}`);
+  }),
+  step("then", /^the file "([^"]+)" contains "(.*)"$/, (w, s, name, want) => {
+    const got = w.backend.files.get(name);
+    if (got === undefined) throw new Error(`\`${name}\` does not exist`);
+    if (!got.includes(want.replaceAll('\\"', '"'))) throw new Error(`\`${name}\` does not contain ${want}:\n${got}`);
+  }),
+  step("then", /^the file "([^"]+)" does not contain "(.*)"$/, (w, s, name, want) => {
+    const got = w.backend.files.get(name) ?? "";
+    if (got.includes(want.replaceAll('\\"', '"'))) throw new Error(`\`${name}\` contains ${want}:\n${got}`);
+  }),
+  step("then", /^the history has (\d+) entr(?:y|ies)$/, async (w, s, want) => {
+    await w.call("history", { action: "list" });
+    const got = (w.answer.ok?.done ?? []).length;
+    if (got !== Number(want)) throw new Error(`the history has ${got} entries, not ${want}`);
   }),
   step("then", /^the file "([^"]+)" exists$/, (w, s, name) => {
     if (!w.backend.files.has(name)) throw new Error(`\`${name}\` does not exist`);
@@ -461,6 +479,10 @@ const STEPS = [
     const got = (await w.server()).tools().map((t) => t.name);
     if (!equal(got, list(names))) throw new Error(`offered ${JSON.stringify(got)}`);
   }),
+  step("then", /^the list of tools is at most (\d+) bytes$/, async (w, s, cap) => {
+    const bytes = JSON.stringify({ tools: (await w.server()).tools() }).length;
+    if (bytes > Number(cap)) throw new Error(`the list is ${bytes} bytes`);
+  }),
   // Browser storage's own (`@web`): the native store is a directory.
   step("given", /^storage refuses to keep "([^"]+)"$/, (w, s, name) => {
     const write = w.backend.write;
@@ -480,6 +502,7 @@ const STEPS = [
 // runner's source, so a step added there is a failure here until it is
 // written here or listed.
 const NATIVE_ONLY = new Map([
+  ['when ^the agent opens the project "([^"]+)" by its absolute path$', "a browser's storage has no absolute paths"],
   ['then ^the preview shows "([^"]*)"$', "a preview is a page of its own (@preview): web/features.browser.mjs"],
   ['then ^Studio has reported the preview reloaded since it was read$', "a preview is a page of its own (@preview)"],
   ['then ^the preview shows "([^"]*)" within (\\d+) seconds$', "a preview is a page of its own (@preview)"],

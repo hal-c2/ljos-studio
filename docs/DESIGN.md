@@ -1222,6 +1222,21 @@ reach it. The project stays in browser storage (OPFS, with the names in
 What each task finds and what it says when something is missing is pinned by
 `mise run check:tasks`; the pin of ljos-web is `web/ljos-web.rev`.
 
+#### As built: dogfooding numbers
+
+`docs/DOGFOOD.md` has the ranked findings and the commands. In release, with a
+debug `ljos` as the preview, on a loaded machine: edit to canvas picture p95
+265 ms on `samples/site` and 237 ms on `samples/notes` (budget 50 ms, most of it
+the picture's fetch); cold start p95 61 ms and 60 ms; a pointer move over the
+canvas p95 33 us and 30 us of engine work. That last number has no paint in it
+and times a pan, since a node could not be dragged when it was taken. A real
+drag since then has a frame interval of p50/p95/max 17/18/24 ms under llvmpipe,
+which is cadence and not paint, so the 60 fps drag budget on a GPU is still
+unmeasured.
+
+DECISION: the code view counts as "in Studio" when ranking dogfood items.
+DECISION: picture numbers use the debug `ljos`, the only one built, and say so.
+
 #### Phase 4: rebase by handle, as built
 
 MULTIPLAYER.md chose one authority, ordered edits addressed by handle, and

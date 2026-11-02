@@ -9,12 +9,18 @@ expression: value
     "open_world": false,
     "read_only": true
   },
-  "description": "List the project's functional blocks (`# block` qmldir comments, `#[qml(block)]` types in ljostypes.json) with their contracts: state, inputs, actions, events and slots. `node_insert` places one by `Module.Name`. Unreadable ones are in `errors`.",
+  "description": "List the project's functional blocks with their contracts; `node_insert` places one by `Module.Name`. Unreadable ones are in `errors`. With `doc`, `types` lists the toolkit types it can place: its imports first, and `node_insert`'s `import` adds a missing one.",
   "inputSchema": {
-    "additionalProperties": false,
     "properties": {
       "cursor": {
         "description": "From a previous page's `next`.",
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "doc": {
+        "description": "Also answer `types`, the toolkit types this document can place.",
         "type": [
           "string",
           "null"
@@ -26,9 +32,15 @@ expression: value
           "string",
           "null"
         ]
+      },
+      "search": {
+        "description": "Only blocks and types whose name holds this, in any case.",
+        "type": [
+          "string",
+          "null"
+        ]
       }
     },
-    "title": "BlocksArgs",
     "type": "object"
   },
   "max_result_bytes": 40960,
@@ -36,13 +48,9 @@ expression: value
   "outputSchema": {
     "properties": {
       "blocks": {
-        "description": "By module, then name: `module`, `name`, `version`, `origin`,\n`category`?, `summary`?, and `state`, `inputs`, `actions`, `events`,\n`slots` as `ljos_blocks` writes them.",
-        "items": true,
         "type": "array"
       },
       "errors": {
-        "description": "Declarations that could not be read: `file`, `line`?, `message`.",
-        "items": true,
         "type": "array"
       },
       "next": {
@@ -50,13 +58,16 @@ expression: value
           "string",
           "null"
         ]
+      },
+      "types": {
+        "type": "array"
       }
     },
     "required": [
       "blocks",
+      "types",
       "errors"
     ],
-    "title": "BlocksOut",
     "type": "object"
   },
   "required_cap": "inspect"

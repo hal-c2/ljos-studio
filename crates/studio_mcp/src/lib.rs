@@ -10,11 +10,14 @@ mod blocks;
 #[cfg(feature = "http")]
 pub mod endpoint;
 pub mod export;
+mod place_tools;
 pub mod preview;
 mod preview_tools;
 mod review;
+pub mod schema;
 pub mod signals;
 pub mod timer;
+pub mod toolkit;
 mod tools;
 pub mod view;
 
@@ -52,6 +55,9 @@ pub struct Studio {
     hosts: Option<preview::Hosts>,
     watchers: Watchers,
     timer: Arc<dyn Timer>,
+    /// What `node_arrange` `copy` holds. Studio's own, not the system's: an agent has no
+    /// system clipboard, and a tool must mean the same to both.
+    clipboard: Vec<place_tools::Copied>,
 }
 
 /// Told that what a window shows may have changed. Called with the
@@ -118,9 +124,17 @@ impl Studio {
             hosts: None,
             watchers: Watchers::default(),
             timer,
+            clipboard: Vec::new(),
         };
         studio.follow();
         studio
+    }
+
+    /// Closes the preview when called, from any thread. A tool call waiting
+    /// on the session does not hold it up.
+    pub fn preview_closer(&self) -> impl FnOnce() + Send + 'static {
+        let previews = self.previews.clone();
+        move || preview::lock(&previews).open = None
     }
 
     /// Previews of this project run on hosts `hosts` makes in its
@@ -199,22 +213,56 @@ impl Studio {
         // A path that leaves is denied whatever holds the project: the answer
         // says what is wrong with the path before what this server lacks.
         let path = Path::new(relative);
-        if path.components().any(|c| {
-            !matches!(
-                c,
-                std::path::Component::Normal(_) | std::path::Component::CurDir
-            )
-        }) {
-            return Err(SurfaceError::new(
-                ErrorCode::PathDenied,
-                format!("`{relative}` is outside the workspace"),
-            ));
+        let below = if path.is_absolute() {
+            self.below_workspace(path)
+        } else {
+            let plain = path.components().all(|c| {
+                matches!(
+                    c,
+                    std::path::Component::Normal(_) | std::path::Component::CurDir
+                )
+            });
+            plain.then(|| relative.to_owned())
+        };
+        let Some(below) = below else {
+            return Err(self.outside(relative));
+        };
+        self.switch_in_dir(Path::new(&below), &below, relative)
+    }
+
+    /// `absolute` as a path from the workspace, if it is below it. It may not
+    /// exist yet, and then its spelling is all there is to judge.
+    fn below_workspace(&self, absolute: &Path) -> Option<String> {
+        if self.workspace.as_os_str().is_empty() {
+            return None;
         }
-        self.switch_in_dir(path, relative)
+        let real = absolute.canonicalize();
+        let rest = real
+            .as_deref()
+            .unwrap_or(absolute)
+            .strip_prefix(&self.workspace)
+            .ok()?;
+        if rest.as_os_str().is_empty() {
+            return Some(".".to_owned());
+        }
+        rest.to_str().map(str::to_owned)
+    }
+
+    /// The refusal says what stays open: an agent that carries on after it
+    /// writes there.
+    fn outside(&self, path: &str) -> SurfaceError {
+        SurfaceError::new(
+            ErrorCode::PathDenied,
+            format!(
+                "`{path}` is outside the workspace; the project `{}` stays open",
+                self.project
+            ),
+        )
+        .with_details(serde_json::json!({ "project": self.project }))
     }
 
     #[cfg(not(feature = "native"))]
-    fn switch_in_dir(&mut self, _: &Path, _: &str) -> Result<(), SurfaceError> {
+    fn switch_in_dir(&mut self, _: &Path, _: &str, _: &str) -> Result<(), SurfaceError> {
         Err(SurfaceError::new(
             ErrorCode::NotActionable,
             "this server holds one project and cannot open another",
@@ -222,7 +270,12 @@ impl Studio {
     }
 
     #[cfg(feature = "native")]
-    fn switch_in_dir(&mut self, path: &Path, relative: &str) -> Result<(), SurfaceError> {
+    fn switch_in_dir(
+        &mut self,
+        path: &Path,
+        relative: &str,
+        asked: &str,
+    ) -> Result<(), SurfaceError> {
         if self.workspace.as_os_str().is_empty() {
             return Err(SurfaceError::new(
                 ErrorCode::NotActionable,
@@ -232,10 +285,7 @@ impl Studio {
         let store = FsStore::new(self.workspace.join(path)).map_err(store_error)?;
         // A link inside the workspace may point out of it.
         if !store.root().starts_with(&self.workspace) {
-            return Err(SurfaceError::new(
-                ErrorCode::PathDenied,
-                format!("`{relative}` is outside the workspace"),
-            ));
+            return Err(self.outside(asked));
         }
         self.project = relative.to_owned();
         self.session = Session::open(Box::new(store));

@@ -170,3 +170,99 @@ Feature: Undo gives back the bytes
       """
     Then the agent is refused with "not_actionable"
     And the refusal's "/details/kind" is "nothing_to_do"
+
+  Scenario: Typing a word is one step to undo
+    Given the file "Note.qml":
+      """qml
+      Item {}
+      """
+    When the agent calls the tool "document_edit" with:
+      """json
+      {"doc": "Note.qml", "generation": 1, "start": 0, "end": 0, "text": "a", "typing": true}
+      """
+    And the agent calls the tool "document_edit" with:
+      """json
+      {"doc": "Note.qml", "generation": 2, "start": 1, "end": 1, "text": "b", "typing": true}
+      """
+    And the agent calls the tool "document_edit" with:
+      """json
+      {"doc": "Note.qml", "generation": 3, "start": 2, "end": 2, "text": "c", "typing": true}
+      """
+    And the agent calls the tool "history" with:
+      """json
+      {"action": "undo"}
+      """
+    Then the file "Note.qml" is:
+      """qml
+      Item {}
+      """
+
+  Scenario: A new word is a step of its own
+    Given the file "Note.qml":
+      """qml
+      Item {}
+      """
+    When the agent calls the tool "document_edit" with:
+      """json
+      {"doc": "Note.qml", "generation": 1, "start": 0, "end": 0, "text": "a", "typing": true}
+      """
+    And the agent calls the tool "document_edit" with:
+      """json
+      {"doc": "Note.qml", "generation": 2, "start": 1, "end": 1, "text": " ", "typing": true}
+      """
+    And the agent calls the tool "document_edit" with:
+      """json
+      {"doc": "Note.qml", "generation": 3, "start": 2, "end": 2, "text": "b", "typing": true}
+      """
+    And the agent calls the tool "history" with:
+      """json
+      {"action": "undo"}
+      """
+    Then the file "Note.qml" is:
+      """qml
+      a Item {}
+      """
+
+  Scenario: A paste is a step of its own
+    Given the file "Note.qml":
+      """qml
+      Item {}
+      """
+    When the agent calls the tool "document_edit" with:
+      """json
+      {"doc": "Note.qml", "generation": 1, "start": 0, "end": 0, "text": "a", "typing": true}
+      """
+    And the agent calls the tool "document_edit" with:
+      """json
+      {"doc": "Note.qml", "generation": 2, "start": 1, "end": 1, "text": "pasted", "typing": true}
+      """
+    And the agent calls the tool "history" with:
+      """json
+      {"action": "undo"}
+      """
+    Then the file "Note.qml" is:
+      """qml
+      aItem {}
+      """
+
+  Scenario: An agent's edits stay a step each
+    Given the file "Note.qml":
+      """qml
+      Item {}
+      """
+    When the agent calls the tool "document_edit" with:
+      """json
+      {"doc": "Note.qml", "generation": 1, "start": 0, "end": 0, "text": "a"}
+      """
+    And the agent calls the tool "document_edit" with:
+      """json
+      {"doc": "Note.qml", "generation": 2, "start": 1, "end": 1, "text": "b"}
+      """
+    And the agent calls the tool "history" with:
+      """json
+      {"action": "undo"}
+      """
+    Then the file "Note.qml" is:
+      """qml
+      aItem {}
+      """

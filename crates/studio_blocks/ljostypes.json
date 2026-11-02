@@ -31,6 +31,30 @@
               "notify": "documentsChanged"
             },
             {
+              "name": "settling",
+              "type": "bool",
+              "kind": "value",
+              "list": false,
+              "readonly": true,
+              "final": true,
+              "required": false,
+              "constant": false,
+              "group": false,
+              "notify": "settlingChanged"
+            },
+            {
+              "name": "blank",
+              "type": "bool",
+              "kind": "value",
+              "list": false,
+              "readonly": true,
+              "final": true,
+              "required": false,
+              "constant": false,
+              "group": false,
+              "notify": "blankChanged"
+            },
+            {
               "name": "doc",
               "type": "string",
               "kind": "value",
@@ -89,6 +113,18 @@
               "constant": false,
               "group": false,
               "notify": "selectedChanged"
+            },
+            {
+              "name": "chosen",
+              "type": "var",
+              "kind": "value",
+              "list": false,
+              "readonly": true,
+              "final": true,
+              "required": false,
+              "constant": false,
+              "group": false,
+              "notify": "chosenChanged"
             },
             {
               "name": "selection",
@@ -173,6 +209,30 @@
               "constant": false,
               "group": false,
               "notify": "paletteChanged"
+            },
+            {
+              "name": "toolkit",
+              "type": "var",
+              "kind": "value",
+              "list": false,
+              "readonly": true,
+              "final": true,
+              "required": false,
+              "constant": false,
+              "group": false,
+              "notify": "toolkitChanged"
+            },
+            {
+              "name": "rootStates",
+              "type": "var",
+              "kind": "value",
+              "list": false,
+              "readonly": true,
+              "final": true,
+              "required": false,
+              "constant": false,
+              "group": false,
+              "notify": "rootStatesChanged"
             },
             {
               "name": "leases",
@@ -336,6 +396,11 @@
                   "type": "var"
                 }
               ],
+              "returnType": "void"
+            },
+            {
+              "name": "lookAgain",
+              "parameters": [],
               "returnType": "void"
             }
           ],

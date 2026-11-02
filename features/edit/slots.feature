@@ -53,6 +53,28 @@ Feature: An agent contributes to a block's slot
       """
     And the studio tools are connected
 
+  Scenario: An agent asks which toolkit types a document can place
+    Given the file "Main.qml":
+      """qml
+      import QtQuick.Layouts
+
+      Item {}
+      """
+    When the agent calls the tool "blocks_list" with:
+      """json
+      {"doc": "Main.qml", "search": "row"}
+      """
+    Then the answer's "/types/0/module" is "QtQuick.Layouts"
+    And the answer's "/types/0/imported" is true
+    And the answer's "/types/0/types/0" is "RowLayout"
+    And the answer's "/types/1/module" is "QtQuick"
+    And the answer's "/types/1/imported" is false
+    And the answer's "/types/1/types/0" is "Row"
+
+  Scenario: Toolkit types are asked for by document
+    When the agent calls the tool "blocks_list"
+    Then the answer's "/types" has 0 entries
+
   Scenario: A contribution written in QML
     When the agent calls the tool "slot_contribute" with:
       """json

@@ -20,7 +20,6 @@ expression: value
         "type": "string"
       }
     },
-    "additionalProperties": false,
     "properties": {
       "format": {
         "$ref": "#/$defs/Format",
@@ -28,15 +27,12 @@ expression: value
       },
       "max_size": {
         "description": "Longest side of a PNG in pixels (default 800, at most 1280).",
-        "format": "uint32",
-        "minimum": 0,
         "type": [
           "integer",
           "null"
         ]
       }
     },
-    "title": "ScreenshotArgs",
     "type": "object"
   },
   "max_result_bytes": 40960,
@@ -44,16 +40,12 @@ expression: value
   "outputSchema": {
     "properties": {
       "bytes": {
-        "format": "uint",
-        "minimum": 0,
         "type": [
           "integer",
           "null"
         ]
       },
       "height": {
-        "format": "uint32",
-        "minimum": 0,
         "type": [
           "integer",
           "null"
@@ -66,15 +58,12 @@ expression: value
         ]
       },
       "width": {
-        "format": "uint32",
-        "minimum": 0,
         "type": [
           "integer",
           "null"
         ]
       }
     },
-    "title": "ScreenshotOut",
     "type": "object"
   },
   "required_cap": "inspect"

@@ -109,6 +109,8 @@ pub struct Previewed {
     /// What the preview shows: 1 when it started, one more for each reload
     /// it applied.
     pub generation: u64,
+    /// Clicks the running app has been given since it started.
+    pub clicks: u64,
     /// `live` or `mocked`.
     pub state: String,
     /// The root's state whose `when` is the breakpoint of the preview's
@@ -145,6 +147,8 @@ pub struct Edge {
 #[derive(Clone, Debug, Default, PartialEq, Serialize)]
 pub struct View {
     pub documents: Vec<String>,
+    /// The project's directory has nothing in it a walk would list.
+    pub blank: bool,
     pub doc: String,
     pub generation: u64,
     pub text: String,
@@ -153,10 +157,15 @@ pub struct View {
     pub layers: Vec<Layer>,
     /// The handle of the selected object in `doc`; empty when none is.
     pub selected: String,
+    /// Every selected object in `doc`, `selected` first.
+    pub chosen: Vec<String>,
     pub selection: Span,
     pub inspector: Vec<Shown>,
     /// The selected object's states.
     pub states: Vec<StateInfo>,
+    /// The root's states, which stay editable while another object is
+    /// selected.
+    pub root_states: Vec<StateInfo>,
     /// The roles of the data the selected object sees, as a delegate's
     /// bindings read them (`model.name`).
     pub roles: Vec<String>,
@@ -164,6 +173,8 @@ pub struct View {
     pub signals: Vec<crate::signals::Signal>,
     pub flow: Flow,
     pub palette: Vec<Offered>,
+    /// The toolkit types the document can place, by module.
+    pub toolkit: Vec<crate::toolkit::Group>,
     pub done: Vec<String>,
     pub undone: Vec<String>,
     /// The document's review comments, in the order they were made.
@@ -195,8 +206,10 @@ pub struct Held {
 impl Studio {
     /// The session as a window showing `doc` sees it now.
     pub fn view(&mut self, doc: &str) -> View {
+        let documents = self.session.documents();
         let mut view = View {
-            documents: self.session.documents(),
+            blank: documents.is_empty() && self.session.blank(),
+            documents,
             previews: self
                 .hosts
                 .as_ref()
@@ -236,7 +249,10 @@ impl Studio {
             .collect();
         view.preview = preview_of(&preview::lock(&self.previews));
         if let Some(p) = &mut view.preview {
-            p.variant = self.variant(&p.doc, p.width).unwrap_or_default();
+            let shown = shown(&preview::lock(&self.previews));
+            p.variant = shown
+                .or_else(|| self.variant(&p.doc, p.width))
+                .unwrap_or_default();
         }
         view.theme = crate::tools::running_theme_file(self.session.store(), doc);
         if let Ok(read) = self.session.tokens(&view.theme, None) {
@@ -250,8 +266,15 @@ impl Studio {
         let Ok((text, generation)) = self.session.text(doc) else {
             return view;
         };
+        view.toolkit = crate::toolkit::offered(text, "");
         view.text = text.to_owned();
         view.generation = generation;
+        if let Ok(variants) = self
+            .session
+            .variants(doc, &Address::Path("root".to_owned()))
+        {
+            view.root_states = variants.states;
+        }
         match self.session.tree(doc) {
             Ok((tree, _)) => {
                 let handle_of = |path: &[Step]| {
@@ -352,12 +375,14 @@ impl Studio {
                 layer.comments += 1;
             }
         }
-        let selected = self
+        view.chosen = self
             .session
             .selection()
             .into_iter()
-            .find(|(d, _)| d == doc)
-            .map(|(_, handle)| handle);
+            .filter(|(d, _)| d == doc)
+            .map(|(_, handle)| handle)
+            .collect();
+        let selected = view.chosen.first().cloned();
         if let Some(handle) = selected
             && let Ok((handle, node)) = self.session.resolve(doc, &Address::Node(handle))
         {
@@ -462,6 +487,16 @@ impl Studio {
     }
 }
 
+/// The state `preview_state` is showing, which wins over a breakpoint's.
+fn shown(previews: &preview::Previews) -> Option<String> {
+    previews
+        .open
+        .as_ref()?
+        .shown
+        .as_ref()
+        .map(|(_, s)| s.clone())
+}
+
 fn row(t: studio_core::theme::Token) -> TokenRow {
     let set = t.theme.is_some();
     let shown = |variant: &str| {
@@ -515,6 +550,7 @@ fn preview_of(previews: &preview::Previews) -> Option<Previewed> {
         width: open.size.width,
         height: open.size.height,
         generation,
+        clicks: open.clicks,
         state: match open.state {
             preview::State::Live => "live",
             preview::State::Mocked => "mocked",

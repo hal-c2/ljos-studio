@@ -40,6 +40,15 @@ Feature: The canvas shows the document running on a target
     When the person chooses the target "Phone"
     Then the canvas has a frame "Phone" of 390 by 844
 
+  # The size is not a new generation of the files, and a picture was fetched
+  # once per generation: the old size's stayed, squeezed into the new frame.
+  @preview
+  Scenario: Choosing a target draws the picture at the target's size
+    Given the person has opened "Main.qml" in the documents list
+    And the person has looked at the frame "Desktop"
+    When the person chooses the target "Phone"
+    Then the frame "Phone" has drawn a different picture since
+
   @preview
   Scenario: Clicking an object in the frame selects it everywhere
     Given the person has opened "Main.qml" in the documents list

@@ -32,7 +32,7 @@ export function serve(studio) {
 }
 
 // The view's parts, as the workspace's properties.
-const PARTS = ["documents", "generation", "text", "layers", "selected", "selection", "inspector", "states", "roles", "flow", "palette", "done", "undone", "problem", "previews", "theme", "tokens", "comments", "leases"];
+const PARTS = ["documents", "generation", "text", "layers", "selected", "selection", "inspector", "states", "roles", "flow", "palette", "done", "undone", "problem", "previews", "theme", "tokens", "comments", "leases", "blank", "chosen", "toolkit"];
 
 export const Workspace = defineType("Workspace", QtObject, {
   properties: {
@@ -61,6 +61,13 @@ export const Workspace = defineType("Workspace", QtObject, {
     comments: [],
     // What other writers hold: `doc`, `node`, `holder`, `ends_in_ms`.
     leases: [],
+    blank: typed(kinds.bool, false),
+    chosen: [],
+    toolkit: [],
+    rootStates: [],
+    // The page's preview is the page's own, so nothing here is ever waiting
+    // on a picture to settle.
+    settling: typed(kinds.bool, false),
   },
   signals: ["answered", "refused"],
   methods: {
@@ -69,6 +76,7 @@ export const Workspace = defineType("Workspace", QtObject, {
     dispatch(tool, args) {
       this.$queue.enqueue({ tool, args: args ?? {} });
     },
+    lookAgain() {},
   },
   setup(self) {
     const queue = new Queue(self);
@@ -171,6 +179,7 @@ class Queue {
     if (untrack(() => self.doc) !== view.doc) return;
     this.published = Math.max(this.published, seen);
     for (const part of PARTS) this.#give(part, view[part]);
+    this.#give("rootStates", view.root_states);
     // A lease ends with no write to tell of it: read the session again
     // then, as the native block's `wake_after` does. One wake at a time,
     // the earliest.

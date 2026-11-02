@@ -19,6 +19,7 @@ mod history;
 mod log;
 pub mod models;
 pub mod outline;
+pub mod place;
 pub mod preview;
 pub mod review;
 pub mod slots;
@@ -33,7 +34,7 @@ pub use flows::{Goal, Interaction};
 pub use history::{Entry, EntrySummary};
 pub use models::Model;
 pub use outline::{Binding, DeclaredSignal, Import, Node};
-pub use qml_edit::{Change, Error as EditError, NodePath};
+pub use qml_edit::{Change, Error as EditError, NodePath, Step};
 pub use review::{Anchor, Comment, Note};
 pub use slots::Mode;
 pub use states::{ChangeInfo, StateEdit, StateInfo, TransitionInfo, Variants};
@@ -386,6 +387,20 @@ fn problem(text: &str) -> String {
     }
 }
 
+/// A pause this long ends a step of typing.
+const TYPING_PAUSE: std::time::Duration = std::time::Duration::from_secs(1);
+/// The most one character takes.
+const MAX_CHAR_BYTES: usize = 4;
+
+/// The step the last character typed went into.
+#[derive(Debug)]
+struct Typed {
+    doc: String,
+    entry: u64,
+    at: std::time::Duration,
+    ended_word: bool,
+}
+
 /// A project open in Studio.
 pub struct Session {
     store: Box<dyn Store>,
@@ -395,6 +410,7 @@ pub struct Session {
     next_handle: u64,
     /// The last generation of documents no longer held.
     retired: BTreeMap<String, u64>,
+    typed: Option<Typed>,
     /// Told the path of every file the session wrote or removed, after it
     /// did: what shows the project (a preview) follows edits through it
     /// rather than by watching the files.
@@ -460,6 +476,7 @@ impl Session {
             selection: Vec::new(),
             next_handle: 1,
             retired: BTreeMap::new(),
+            typed: None,
             on_write: Vec::new(),
             review: None,
             unmade: BTreeMap::new(),
@@ -528,6 +545,11 @@ impl Session {
     /// The project's QML documents.
     pub fn documents(&self) -> Vec<String> {
         self.store.list(".qml")
+    }
+
+    /// Whether the project holds no file at all that a walk would list.
+    pub fn blank(&self) -> bool {
+        self.store.list("").is_empty()
     }
 
     /// A document [`Session::sync`] has brought up to date.
@@ -1177,6 +1199,150 @@ impl Session {
         })
     }
 
+    /// Applies several structural edits as one: one write, so one reload, and
+    /// one history entry, so one undo. Later edits see what earlier ones did;
+    /// the handles of the objects they put or moved are answered in order.
+    ///
+    /// # Errors
+    /// As [`edit`](Self::edit), for any of them; nothing changes then.
+    pub fn edit_many(
+        &mut self,
+        path: &str,
+        generation: Option<u64>,
+        ops: &[Op],
+        label: &str,
+        dry_run: bool,
+    ) -> Result<(Outcome, Vec<String>), Error> {
+        let path = &self.canonical(path)?;
+        if generation.is_none()
+            && let Some(Address::Path(p)) = ops
+                .iter()
+                .flat_map(Op::addresses)
+                .find(|a| matches!(a, Address::Path(_)))
+        {
+            return Err(Error::Invalid(format!(
+                "the path `{p}` names an object only in the generation it was read at: give \
+                 `generation`"
+            )));
+        }
+        // Against the log as it stands: what an older read could not have seen
+        // is judged before any of these edits is part of it.
+        let mut rebased = None;
+        for op in ops {
+            rebased = self.rebase(path, generation, op)?.or(rebased);
+        }
+        // Comments follow handles: theirs must be known before the handles
+        // move.
+        self.look_up(path);
+        let taps = self.taps_now(path);
+        let saved = self.doc(path)?.clone();
+        let mut nodes = Vec::new();
+        let mut touched = Vec::new();
+        for op in ops {
+            if let Err(e) = self.apply_unwritten(path, op, &mut touched, &mut nodes) {
+                *self.doc(path)? = saved;
+                return Err(e);
+            }
+        }
+        if let Err(e) = self.check_leased(path, touched.iter().map(|(h, _)| *h)) {
+            *self.doc(path)? = saved;
+            return Err(e);
+        }
+        let after = self.doc(path)?.text.clone();
+        let before = saved.text.clone();
+        let changes = diff(&before, &after);
+        if dry_run {
+            *self.doc(path)? = saved;
+            return Ok((
+                Outcome {
+                    doc: path.to_owned(),
+                    generation: self.doc(path)?.generation,
+                    unchanged: after == before,
+                    changes,
+                    history: None,
+                    node: None,
+                    text: Some(after),
+                    rebased,
+                },
+                Vec::new(),
+            ));
+        }
+        if after == before {
+            *self.doc(path)? = saved;
+            let outcome = self.unchanged(path, None)?;
+            return Ok((outcome, nodes));
+        }
+        if let Err(e) = self.store.write(path, &after) {
+            *self.doc(path)? = saved;
+            return Err(e.into());
+        }
+        // One edit is one generation, however many steps it took: the log
+        // holds an entry for every generation or rebases across none.
+        let generation = saved.generation + 1;
+        let doc = self.doc(path)?;
+        doc.generation = generation;
+        let handles_after = doc.tracked.clone();
+        let entry = Entry {
+            id: 0,
+            doc: path.to_owned(),
+            label: label.to_owned(),
+            author: self.author.clone(),
+            outside: false,
+            generation,
+            side: side(&after),
+            forward: changes.clone(),
+            inverse: diff(&after, &before),
+            created: false,
+            handles_before: saved.tracked,
+            handles_after,
+            change: None,
+            exact: true,
+        };
+        let touched = self.with_taps(path, &taps, Some(touched));
+        self.log(&entry, touched);
+        let id = self.history.push(entry);
+        self.reanchor(path);
+        self.wrote(path);
+        Ok((
+            Outcome {
+                doc: path.to_owned(),
+                generation,
+                changes,
+                history: Some(id),
+                node: nodes.first().cloned(),
+                text: None,
+                unchanged: false,
+                rebased,
+            },
+            nodes,
+        ))
+    }
+
+    /// One edit of [`edit_many`](Self::edit_many), on the held text alone.
+    fn apply_unwritten(
+        &mut self,
+        path: &str,
+        op: &Op,
+        touched: &mut Vec<Touch>,
+        nodes: &mut Vec<String>,
+    ) -> Result<(), Error> {
+        for touch in self.touches(path, op)? {
+            if !touched.contains(&touch) {
+                touched.push(touch);
+            }
+        }
+        let current = self.doc(path)?.text.clone();
+        let (text, change, focus) = self.plan(path, &current, op)?;
+        if text != current {
+            let (next, _) = self.step(path, current, text, Some(change), String::new(), false)?;
+            *self.doc(path)? = next;
+        }
+        if let Some(at) = focus {
+            nodes.push(self.handle_at(path, &at)?);
+        }
+        Ok(())
+    }
+
     /// The new text, what it does to paths, and where the object it put or
     /// moved ends up.
     fn plan(
@@ -1479,6 +1645,76 @@ impl Session {
             unchanged: false,
             rebased,
         })
+    }
+
+    /// [`replace_text`](Self::replace_text) from a person typing. One
+    /// character typed or removed joins the step before it, as a text editor
+    /// does, unless a second has passed or it starts a new word; 26 characters
+    /// are not 26 undos. A paste is a step of its own. `now` is any clock's.
+    pub fn type_text(
+        &mut self,
+        path: &str,
+        generation: u64,
+        range: Option<std::ops::Range<usize>>,
+        text: &str,
+        now: std::time::Duration,
+    ) -> Result<Outcome, Error> {
+        // The newest of anybody's, and this writer's: a word another writer
+        // landed in the middle of is two words.
+        let top = self
+            .history
+            .peek_undo(None)
+            .filter(|e| e.author == self.author)
+            .map(|e| e.id);
+        let mut out = self.replace_text(path, Some(generation), range, text, false)?;
+        let Some(entry) = out.history else {
+            return Ok(out);
+        };
+        let [change] = out.changes.as_slice() else {
+            self.typed = None;
+            return Ok(out);
+        };
+        let typed = change.replacement.chars().next();
+        if change.replacement.chars().count() > 1 || change.range.len() > MAX_CHAR_BYTES {
+            self.typed = None;
+            return Ok(out);
+        }
+        let joins = self.typed.as_ref().is_some_and(|last| {
+            last.doc == out.doc
+                && Some(last.entry) == top
+                && now.saturating_sub(last.at) < TYPING_PAUSE
+                && !(last.ended_word && typed.is_some_and(|c| !c.is_whitespace()))
+        });
+        if joins {
+            out.history = Some(self.join_last(&out.doc)?);
+        }
+        self.typed = Some(Typed {
+            doc: out.doc.clone(),
+            entry: out.history.unwrap_or(entry),
+            at: now,
+            ended_word: typed.is_some_and(char::is_whitespace),
+        });
+        Ok(out)
+    }
+
+    /// Makes the last entry and the one before it, both of `path`, one.
+    fn join_last(&mut self, path: &str) -> Result<u64, Error> {
+        let after = self.doc(path)?.text.clone();
+        let (last, earlier) = self.history.pop_and_top();
+        let (Some(last), Some(earlier)) = (last, earlier) else {
+            return Err(Error::NothingTo("join"));
+        };
+        let before_last = qml_edit::splice(&after, &last.inverse);
+        let first = qml_edit::splice(&before_last, &earlier.inverse);
+        earlier.forward = diff(&first, &after);
+        earlier.inverse = diff(&after, &first);
+        // Already every handle on the text this leaves.
+        earlier.handles_after = last.handles_after;
+        // What the document is now is what an undo checks it against, and
+        // what the log has since then is what it moves past.
+        earlier.generation = last.generation;
+        earlier.side = last.side;
+        Ok(earlier.id)
     }
 
     /// `range` of generation `given`, moved past every change since. One
@@ -2679,6 +2915,37 @@ impl Session {
         let mut handles = Vec::new();
         for address in addresses {
             handles.push(self.resolve(path, address)?.0);
+        }
+        self.selection = handles
+            .iter()
+            .map(|h| (path.to_owned(), h.clone()))
+            .collect();
+        Ok(handles)
+    }
+
+    /// Adds each of `addresses` to the selection, or takes it out if it is
+    /// in: what a shift-click does. A selection is of one document, as its
+    /// box and its one undo step are: another document's is left behind.
+    pub fn toggle_selected(
+        &mut self,
+        path: &str,
+        addresses: &[Address],
+    ) -> Result<Vec<String>, Error> {
+        let path = &self.canonical(path)?;
+        let mut handles: Vec<String> = self
+            .selection
+            .iter()
+            .filter(|(doc, _)| doc == path)
+            .map(|(_, handle)| handle.clone())
+            .collect();
+        for address in addresses {
+            let handle = self.resolve(path, address)?.0;
+            match handles.iter().position(|h| *h == handle) {
+                Some(at) => {
+                    handles.remove(at);
+                }
+                None => handles.push(handle),
+            }
         }
         self.selection = handles
             .iter()

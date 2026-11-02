@@ -2,6 +2,7 @@
 
 use std::sync::{Arc, Mutex};
 
+use crate::schema::Answers;
 use ljos_mcp_core::{
     CallCtx, Cap, ErrorCode, SurfaceError, ToolAnnotations, ToolDef, ToolRegistry, denied,
     paginate, typed,
@@ -25,7 +26,8 @@ const TREE_PAGE: usize = 200;
 #[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct ProjectOpenArgs {
-    /// A directory below the workspace, `.` for the workspace itself. Left
+    /// A directory below the workspace, from it or absolute; `.` for the
+    /// workspace itself. Left
     /// out, the open project is described without reopening it.
     path: Option<String>,
 }
@@ -132,6 +134,10 @@ struct EditTextArgs {
     start: Option<usize>,
     end: Option<usize>,
     text: String,
+    /// A person's typing: a character joins the last one in one undo step,
+    /// until a pause of a second or a new word.
+    #[serde(default)]
+    typing: bool,
     #[serde(default)]
     dry_run: bool,
 }
@@ -145,7 +151,7 @@ struct ChangeOut {
 }
 
 #[derive(Serialize, JsonSchema)]
-struct EditOut {
+pub(crate) struct EditOut {
     doc: String,
     /// The document's generation now; pass it with the next edit.
     generation: u64,
@@ -240,6 +246,9 @@ struct SelectArgs {
     /// logical pixels. Selects the object declared where the preview's
     /// topmost object there is declared; nothing there clears it.
     at: Option<Point>,
+    /// Toggle these in the selection instead of replacing it.
+    #[serde(default)]
+    add: bool,
     /// Also hold the selected objects and all they hold (`mutate`): another
     /// writer's edit of them is refused as `busy` until the caller has made
     /// no call for five seconds, and for five minutes at most. Selecting
@@ -827,7 +836,7 @@ fn info(studio: &Studio) -> ProjectInfo {
     }
 }
 
-const MUTATE: ToolAnnotations = ToolAnnotations {
+pub(crate) const MUTATE: ToolAnnotations = ToolAnnotations {
     read_only: false,
     destructive: false,
     idempotent: false,
@@ -844,6 +853,10 @@ const DESTRUCTIVE: ToolAnnotations = ToolAnnotations {
 struct BlocksArgs {
     /// Only this module's blocks (`App.Media`).
     module: Option<String>,
+    /// Also answer `types`, the toolkit types this document can place.
+    doc: Option<String>,
+    /// Only blocks and types whose name holds this, in any case.
+    search: Option<String>,
     /// From a previous page's `next`.
     cursor: Option<String>,
 }
@@ -854,6 +867,8 @@ struct BlocksOut {
     /// `category`?, `summary`?, and `state`, `inputs`, `actions`, `events`,
     /// `slots` as `ljos_blocks` writes them.
     blocks: Vec<serde_json::Value>,
+    /// The toolkit types `doc` can place, by module.
+    types: Vec<crate::toolkit::Group>,
     /// Declarations that could not be read: `file`, `line`?, `message`.
     errors: Vec<serde_json::Value>,
     next: Option<String>,
@@ -1261,7 +1276,8 @@ fn edit(
 }
 
 pub(crate) fn registry(studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
-    let registry = crate::preview_tools::add(edits(studio), studio);
+    let registry = crate::place_tools::add(edits(studio), studio);
+    let registry = crate::preview_tools::add(registry, studio);
     crate::review::add(crate::export::add(registry, studio), studio)
 }
 
@@ -1272,10 +1288,11 @@ fn edits(studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
         .with(
             ToolDef::new::<ProjectOpenArgs>(
                 "project_open",
-                "Open a project directory below the workspace, or describe the open one. Opening \
-                 starts a new session: earlier handles and history end.",
+                "Open a project directory below the workspace (relative or absolute path), or \
+                 describe the open one. Opening starts a new session: earlier handles and history \
+                 end.",
             )
-            .output::<ProjectInfo>()
+            .answers::<ProjectInfo>()
             .requires(Cap::Inspect),
             typed({
                 let studio = s();
@@ -1294,7 +1311,7 @@ fn edits(studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
                 "A document's objects in order: handle, path, type, id, bindings. Grouped \
                  properties are bindings (`font.bold`), not objects. Paginated by `cursor`.",
             )
-            .output::<Tree>()
+            .answers::<Tree>()
             .requires(Cap::Inspect),
             typed({
                 let studio = s();
@@ -1334,7 +1351,7 @@ fn edits(studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
                 "document_text",
                 "A document's text or a byte range of it, with its generation and whether it parses.",
             )
-            .output::<Text>()
+            .answers::<Text>()
             .requires(Cap::Inspect),
             typed({
                 let studio = s();
@@ -1366,7 +1383,7 @@ fn edits(studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
                  JsonListModel of the file, or with `model: \"list\"` a ListModel copy. Refused \
                  if it exists or does not parse. Undo removes it.",
             )
-            .output::<EditOut>()
+            .answers::<EditOut>()
             .requires(Cap::Mutate)
             .annotated(MUTATE),
             typed({
@@ -1403,7 +1420,7 @@ fn edits(studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
                 "Replace a byte range of a document's text, as the code view does. The result may \
                  not parse; structural edits then wait and handles hold. Needs the generation read.",
             )
-            .output::<EditOut>()
+            .answers::<EditOut>()
             .requires(Cap::Mutate)
             .annotated(DESTRUCTIVE),
             typed({
@@ -1419,10 +1436,14 @@ fn edits(studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
                         }
                     };
                     let mut studio = lock(&studio);
-                    studio
-                        .session
-                        .replace_text(&a.doc, Some(a.generation), range, &a.text, a.dry_run)
-                        .map(EditOut::from)
+                    let now = studio.timer.now();
+                    let session = &mut studio.session;
+                    if a.typing && !a.dry_run {
+                        session.type_text(&a.doc, a.generation, range, &a.text, now)
+                    } else {
+                        session.replace_text(&a.doc, Some(a.generation), range, &a.text, a.dry_run)
+                    }
+                    .map(EditOut::from)
                         .map_err(error)
                 }
             }),
@@ -1433,7 +1454,7 @@ fn edits(studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
                 "Find objects by id, type, binding name or text in a binding's value, in one \
                  document or all (naming those it could not parse or read). Returns handles.",
             )
-            .output::<FindOut>()
+            .answers::<FindOut>()
             .requires(Cap::Inspect),
             typed({
                 let studio = s();
@@ -1501,7 +1522,7 @@ fn edits(studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
                  or by a point `at` in the document's preview (the object declared there). \
                  Empty clears it.",
             )
-            .output::<Selection>()
+            .answers::<Selection>()
             .requires(Cap::Inspect),
             typed({
                 let studio = s();
@@ -1519,16 +1540,30 @@ fn edits(studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
                             ));
                         }
                         Some(at) => match crate::preview_tools::pick(&mut studio, &a.doc, at.x, at.y)? {
+                            Some((doc, handle)) if a.add => {
+                                studio
+                                    .session
+                                    .toggle_selected(&doc, &[Address::Node(handle)])
+                                    .map_err(error)?;
+                            }
                             Some((doc, handle)) => {
                                 studio
                                     .session
                                     .select(&doc, &[Address::Node(handle)])
                                     .map_err(error)?;
                             }
+                            // A shift-click that misses keeps what is selected.
+                            None if a.add => {}
                             None => {
                                 studio.session.select(&a.doc, &[]).map_err(error)?;
                             }
                         },
+                        None if a.add => {
+                            studio
+                                .session
+                                .toggle_selected(&a.doc, &a.nodes)
+                                .map_err(error)?;
+                        }
                         None => {
                             studio.session.select(&a.doc, &a.nodes).map_err(error)?;
                         }
@@ -1567,7 +1602,7 @@ fn edits(studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
                  arguments, and the roles and rows of the data it sees (a ListModel's, a JsonListModel's file's, \
                  a list's model's, in a delegate its list's).",
             )
-            .output::<Inspected>()
+            .answers::<Inspected>()
             .requires(Cap::Inspect),
             typed({
                 let studio = s();
@@ -1628,11 +1663,12 @@ fn edits(studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
         .with(
             ToolDef::new::<BlocksArgs>(
                 "blocks_list",
-                "List the project's functional blocks (`# block` qmldir comments, `#[qml(block)]` \
-                 types in ljostypes.json) with their contracts: state, inputs, actions, events and \
-                 slots. `node_insert` places one by `Module.Name`. Unreadable ones are in `errors`.",
+                "List the project's functional blocks with their contracts; `node_insert` places \
+                 one by `Module.Name`. Unreadable ones are in `errors`. With `doc`, `types` lists \
+                 the toolkit types it can place: its imports first, and `node_insert`'s `import` \
+                 adds a missing one.",
             )
-            .output::<BlocksOut>()
+            .answers::<BlocksOut>()
             .requires(Cap::Inspect),
             typed({
                 let studio = s();
@@ -1644,9 +1680,25 @@ fn edits(studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
                     };
                     let value = registry.to_value();
                     let list = |key: &str| value[key].as_array().cloned().unwrap_or_default();
-                    let (blocks, next) = paginate(list("blocks"), a.cursor.as_deref(), BLOCKS_PAGE)?;
+                    let search = a.search.as_deref().unwrap_or_default();
+                    let mut all = list("blocks");
+                    all.retain(|b| {
+                        b["name"].as_str().is_some_and(|n| {
+                            n.to_lowercase().contains(&search.to_lowercase())
+                        })
+                    });
+                    let (blocks, next) = paginate(all, a.cursor.as_deref(), BLOCKS_PAGE)?;
+                    let types = match &a.doc {
+                        Some(doc) => {
+                            let mut studio = lock(&studio);
+                            let (text, _) = studio.session.text(doc).map_err(error)?;
+                            crate::toolkit::offered(text, search)
+                        }
+                        None => Vec::new(),
+                    };
                     Ok(BlocksOut {
                         blocks,
+                        types,
                         errors: list("errors"),
                         next,
                     })
@@ -1660,7 +1712,7 @@ fn edits(studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
                  index. It gets an id unless it has one; `import` (a block's module) is added once. \
                  Returns the new object's handle.",
             )
-            .output::<EditOut>()
+            .answers::<EditOut>()
             .requires(Cap::Mutate)
             .annotated(MUTATE),
             typed({
@@ -1683,7 +1735,7 @@ fn edits(studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
                 "node_move",
                 "Move an object to a parent and child index, with its comments: reorder or reparent.",
             )
-            .output::<EditOut>()
+            .answers::<EditOut>()
             .requires(Cap::Mutate)
             .annotated(MUTATE),
             typed({
@@ -1703,7 +1755,7 @@ fn edits(studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
                 "node_remove",
                 "Remove an object with its comments. Its handle then answers `stale_ref` until undo.",
             )
-            .output::<EditOut>()
+            .answers::<EditOut>()
             .requires(Cap::Mutate)
             .annotated(DESTRUCTIVE),
             typed({
@@ -1719,7 +1771,7 @@ fn edits(studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
                 "Set a property to a literal (bool, number, string) or remove it with null. Grouped \
                  and dotted forms are one property; a new one follows the file's style.",
             )
-            .output::<EditOut>()
+            .answers::<EditOut>()
             .requires(Cap::Mutate)
             .annotated(MUTATE),
             typed({
@@ -1746,7 +1798,7 @@ fn edits(studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
                 "Set a binding expression or a signal handler, or remove it with null. Refused \
                  with `would_break` if the file would not parse.",
             )
-            .output::<EditOut>()
+            .answers::<EditOut>()
             .requires(Cap::Mutate)
             .annotated(MUTATE),
             typed({
@@ -1775,7 +1827,7 @@ fn edits(studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
                  or take out a flow: a tap on `trigger` goes to `state` or opens a document. \
                  Refused with `would_break` if the file would not parse.",
             )
-            .output::<EditOut>()
+            .answers::<EditOut>()
             .requires(Cap::Mutate)
             .annotated(DESTRUCTIVE),
             typed({
@@ -1794,7 +1846,7 @@ fn edits(studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
                  Ljos.Blocks and the block's module once; or `remove` one. Refuses a slot no block \
                  offers (`blocks_list`).",
             )
-            .output::<EditOut>()
+            .answers::<EditOut>()
             .requires(Cap::Mutate)
             .annotated(DESTRUCTIVE),
             typed({
@@ -1812,7 +1864,7 @@ fn edits(studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
                  one (`mutate`), moved past what others wrote since; `all` takes the newest \
                  whoever made it. Undo gives back the document's bytes.",
             )
-            .output::<HistoryOut>()
+            .answers::<HistoryOut>()
             .requires(Cap::Inspect)
             .annotated(DESTRUCTIVE),
             typed({
@@ -1858,7 +1910,7 @@ fn edits(studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
                  one (`null` gives it back) in the theme file Ljós reads, the project's made when none, \
                  the rest kept byte for byte. A theme Ljós would refuse is refused with its message.",
             )
-            .output::<ThemeOut>()
+            .answers::<ThemeOut>()
             .requires(Cap::Mutate)
             .annotated(DESTRUCTIVE),
             typed({

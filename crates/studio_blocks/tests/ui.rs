@@ -16,6 +16,9 @@ use ljos_drive::{Chord, DriveError, Stage, Wheel};
 use ljos_mcp_core::{CallCtx, Cap, CapSet};
 use ljos_runtime::SystemClock;
 use serde_json::Value as Json;
+use studio_core::preview::{
+    Declared, LogLine, Picture, PreviewError, PreviewHost, PreviewSpec, Reload, Size,
+};
 use studio_mcp::{Studio, StudioServer};
 use studio_preview::NativeHost;
 
@@ -32,6 +35,67 @@ struct UiWorld {
     /// project the preview watches.
     state: tempfile::TempDir,
     window: Option<Window>,
+    /// How many different pictures the frame had drawn when last looked at.
+    looked: u64,
+    /// The previews say nothing of where their objects are, as a web host.
+    no_places: bool,
+}
+
+/// A preview that answers everything but `placed`, whose default refuses.
+struct NoPlaces(NativeHost);
+
+impl PreviewHost for NoPlaces {
+    fn open(&mut self, spec: &PreviewSpec) -> Result<(), PreviewError> {
+        self.0.open(spec)
+    }
+
+    fn reload(&mut self) -> Result<Reload, PreviewError> {
+        self.0.reload()
+    }
+
+    fn alias(&mut self, module: &str, dir: Option<&str>) -> Result<Reload, PreviewError> {
+        self.0.alias(module, dir)
+    }
+
+    fn resize(&mut self, size: Size) -> Result<(), PreviewError> {
+        self.0.resize(size)
+    }
+
+    fn screenshot(&mut self, max_side: u32) -> Result<Picture, PreviewError> {
+        self.0.screenshot(max_side)
+    }
+
+    fn outline(&mut self) -> Result<String, PreviewError> {
+        self.0.outline()
+    }
+
+    fn read(
+        &mut self,
+        id: &str,
+        names: &[String],
+    ) -> Result<serde_json::Map<String, Json>, PreviewError> {
+        self.0.read(id, names)
+    }
+
+    fn write(&mut self, id: &str, name: &str, value: Json) -> Result<(), PreviewError> {
+        self.0.write(id, name, value)
+    }
+
+    fn logs(&mut self, since: u64) -> Result<(Vec<LogLine>, u64), PreviewError> {
+        self.0.logs(since)
+    }
+
+    fn pick(&mut self, x: f64, y: f64) -> Result<Option<Declared>, PreviewError> {
+        self.0.pick(x, y)
+    }
+
+    fn alive(&mut self) -> Result<(), PreviewError> {
+        self.0.alive()
+    }
+
+    fn close(&mut self) {
+        self.0.close();
+    }
 }
 
 struct Window {
@@ -71,6 +135,8 @@ impl UiWorld {
             dir: tempfile::tempdir().expect("a temporary directory"),
             state: tempfile::tempdir().expect("a temporary directory"),
             window: None,
+            looked: 0,
+            no_places: false,
         }
     }
 
@@ -147,10 +213,16 @@ impl UiWorld {
         // A directory for the host to make, as the program names one: a
         // temporary directory itself is as open as the umask leaves it.
         let state = self.state.path().join("preview");
+        let no_places = self.no_places;
         let studio = Studio::open(self.dir.path())
             .map_err(|e| e.to_string())?
             .with_previews(Arc::new(move |dir| {
-                Box::new(NativeHost::new(dir, NativeHost::default_program(), &state))
+                let host = NativeHost::new(dir, NativeHost::default_program(), &state);
+                if no_places {
+                    Box::new(NoPlaces(host))
+                } else {
+                    Box::new(host)
+                }
             }));
         let server = Arc::new(StudioServer::new(studio));
         let engine = ljos::engine();
@@ -638,6 +710,15 @@ fn the_file(w: &mut UiWorld, name: String, step: &Step) -> StepResult {
     std::fs::write(path, file_text(step)?).map_err(|e| e.to_string())
 }
 
+#[given(regex = r"^(\d+) more documents$")]
+fn more_documents(w: &mut UiWorld, count: usize) -> StepResult {
+    for n in 0..count {
+        let path = w.dir.path().join(format!("More{n}.qml"));
+        std::fs::write(path, "Item {}\n").map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
 #[given("Studio's window shows the project")]
 fn shows_the_project(w: &mut UiWorld) -> StepResult {
     w.open()
@@ -748,6 +829,36 @@ fn places(w: &mut UiWorld, name: String) -> StepResult {
     let window = w.window()?;
     let button = window.node("Palette", None, &format!("Place {name}"))?;
     window.click_node(&button)
+}
+
+#[when(regex = r#"^the person searches the palette for "([^"]*)"$"#)]
+fn searches_palette(w: &mut UiWorld, text: String) -> StepResult {
+    let window = w.window()?;
+    let field = window.node("Palette", Some("textinput"), "Search the palette")?;
+    window.click_shown(&field)?;
+    for chord in ["Ctrl+A", "Delete"] {
+        window
+            .stage
+            .drive()
+            .chord(&Chord::parse(chord)?, 0)
+            .map_err(drive_error)?;
+    }
+    if !text.is_empty() {
+        window.stage.drive().commit(&text).map_err(drive_error)?;
+    }
+    window.rest()
+}
+
+#[then(regex = r#"^the palette (offers|does not offer) "([^"]+)"$"#)]
+fn palette_offers(w: &mut UiWorld, how: String, name: String) -> StepResult {
+    let window = w.window()?;
+    let found = window
+        .node("Palette", None, &format!("Place {name}"))
+        .is_ok();
+    if found != (how == "offers") {
+        return Err(format!("the palette {how} {name}, and found it: {found}"));
+    }
+    Ok(())
 }
 
 #[given(regex = r#"^the person has clicked the button "([^"]+)"$"#)]
@@ -936,6 +1047,27 @@ fn inspector_button_disabled(w: &mut UiWorld, name: String) -> StepResult {
         .ok_or_else(|| format!("{name:?} is {:?}", button.states))
 }
 
+#[then(regex = r#"^the inspector's new property row holds "(.*)"$"#)]
+fn new_row_holds(w: &mut UiWorld, want: String) -> StepResult {
+    let field = w
+        .window()?
+        .node("Inspector", Some("textinput"), "New property")?;
+    (field.value == want)
+        .then_some(())
+        .ok_or_else(|| format!("the row holds {:?}", field.value))
+}
+
+#[then(regex = r#"^the documents panel shows (a|no) scroll bar$"#)]
+fn documents_scroll(w: &mut UiWorld, want: String) -> StepResult {
+    let shown = w
+        .window()?
+        .node("Documents", None, "Scroll the documents")
+        .is_ok();
+    (shown == (want == "a"))
+        .then_some(())
+        .ok_or_else(|| format!("a scroll bar shown: {shown}"))
+}
+
 #[then(regex = r#"^the inspector's comment box holds "(.*)"$"#)]
 fn comment_box_holds(w: &mut UiWorld, want: String) -> StepResult {
     let field = w
@@ -1074,11 +1206,22 @@ fn contributes(w: &mut UiWorld, text: String, slot: String) -> StepResult {
     window.enter(&field, &text)
 }
 
+#[given(regex = r#"^the person has pressed "([^"]+)"$"#)]
 #[when(regex = r#"^the person presses "([^"]+)"$"#)]
 fn presses(w: &mut UiWorld, chord: String) -> StepResult {
     let window = w.window()?;
     let chord = Chord::parse(&chord)?;
     window.stage.drive().chord(&chord, 0).map_err(drive_error)?;
+    window.rest()
+}
+
+#[when(regex = r#"^the person presses "([^"]+)" without waiting between them$"#)]
+fn presses_quickly(w: &mut UiWorld, chords: String) -> StepResult {
+    let window = w.window()?;
+    for chord in chords.split(", ") {
+        let chord = Chord::parse(chord)?;
+        window.stage.drive().chord(&chord, 0).map_err(drive_error)?;
+    }
     window.rest()
 }
 
@@ -1122,6 +1265,35 @@ fn replaces_in_code(w: &mut UiWorld, old: String, new: String) -> StepResult {
     window.rest()
 }
 
+#[when(regex = r#"^the person enters "([^"]+)" as the new document's name$"#)]
+fn enters_new_name(w: &mut UiWorld, name: String) -> StepResult {
+    let window = w.window()?;
+    let field = window.node("Documents", Some("textinput"), "New document's name")?;
+    window.click_shown(&field)?;
+    window.stage.drive().commit(&name).map_err(drive_error)?;
+    window.rest()
+}
+
+// Focus without a click: a click would drop a text selection by itself, and
+// the object the layers panel chose would seem safe from the next key.
+#[when(regex = r#"^the person tabs to the code view and types "(.*)"$"#)]
+fn tabs_and_types(w: &mut UiWorld, new: String) -> StepResult {
+    let new = unescape(&new);
+    let window = w.window()?;
+    let code = window.code()?;
+    let item = window
+        .stage
+        .scene
+        .accessible_item(code.key.ok_or("the code view has no key")?)
+        .ok_or("the code view is not an item")?;
+    let engine = window.engine().clone();
+    engine
+        .invoke_by_name(item, "forceActiveFocus", &[])
+        .map_err(|e| e.to_string())?;
+    window.stage.drive().commit(&new).map_err(drive_error)?;
+    window.rest()
+}
+
 #[given(regex = r#"^an agent has called the tool "([^"]+)" with:$"#)]
 #[when(regex = r#"^an agent calls the tool "([^"]+)" with:$"#)]
 fn agent_calls(w: &mut UiWorld, tool: String, step: &Step) -> StepResult {
@@ -1162,6 +1334,7 @@ fn chooses_target(w: &mut UiWorld, target: String) -> StepResult {
     window.click_node(&button)
 }
 
+#[given(regex = r#"^the person has clicked the frame "([^"]+)" at (\d+), (\d+)$"#)]
 #[when(regex = r#"^the person clicks the frame "([^"]+)" at (\d+), (\d+)$"#)]
 fn clicks_frame(w: &mut UiWorld, target: String, x: f64, y: f64) -> StepResult {
     let window = w.window()?;
@@ -1182,6 +1355,158 @@ fn clicks_frame(w: &mut UiWorld, target: String, x: f64, y: f64) -> StepResult {
         .click(at, MouseButtons::LEFT, 1)
         .map_err(drive_error)?;
     window.rest()
+}
+
+/// Where a point of the frame is in the window.
+fn frame_point(window: &Window, target: &str, x: f64, y: f64) -> Result<Point, String> {
+    let bounds = window
+        .bounds(&|role, name| role == "image" && name == target)
+        .ok_or_else(|| format!("the canvas has no frame {target:?} drawn"))?;
+    let zoom = bounds.width() / window.read_json("preview")["width"].as_f64().unwrap_or(1.0);
+    Ok(Point::new(bounds.x0 + x * zoom, bounds.y0 + y * zoom))
+}
+
+#[when(regex = r#"^the person drags in the frame "([^"]+)" from (\d+), (\d+) to (\d+), (\d+)$"#)]
+fn drags_in_frame(
+    w: &mut UiWorld,
+    target: String,
+    x0: f64,
+    y0: f64,
+    x1: f64,
+    y1: f64,
+) -> StepResult {
+    let window = w.window()?;
+    let from = frame_point(window, &target, x0, y0)?;
+    let to = frame_point(window, &target, x1, y1)?;
+    // A person's press reaches the geometry before the hand moves on; the
+    // pause is what a frame of a real drag gives it.
+    window
+        .stage
+        .drive()
+        .press(from, MouseButtons::LEFT)
+        .map_err(drive_error)?;
+    window.rest()?;
+    window.stage.drive().move_to(to).map_err(drive_error)?;
+    window
+        .stage
+        .drive()
+        .release(to, MouseButtons::LEFT)
+        .map_err(drive_error)?;
+    window.rest()
+}
+
+#[when(
+    regex = r#"^the person presses in the frame "([^"]+)" at (\d+), (\d+) and holds it at (\d+), (\d+)$"#
+)]
+fn holds_in_frame(
+    w: &mut UiWorld,
+    target: String,
+    x0: f64,
+    y0: f64,
+    x1: f64,
+    y1: f64,
+) -> StepResult {
+    let window = w.window()?;
+    let from = frame_point(window, &target, x0, y0)?;
+    let to = frame_point(window, &target, x1, y1)?;
+    window
+        .stage
+        .drive()
+        .press(from, MouseButtons::LEFT)
+        .map_err(drive_error)?;
+    window.rest()?;
+    window.stage.drive().move_to(to).map_err(drive_error)?;
+    window.rest()
+}
+
+fn overlay_part(window: &Window, name: &str) -> Result<ObjectId, String> {
+    let frame = window.frame("Desktop")?;
+    ljos_drive::find_below(window.engine(), frame, name)
+        .ok_or_else(|| format!("the canvas has no {name}"))
+}
+
+#[then(regex = r#"^the file "([^"]+)" does not say "(.*)"$"#)]
+fn file_does_not_say(w: &mut UiWorld, name: String, want: String) -> StepResult {
+    let got = std::fs::read_to_string(w.dir.path().join(&name)).map_err(|e| e.to_string())?;
+    if got.contains(&want) {
+        return Err(format!("`{name}` says {want:?}:\n{got}"));
+    }
+    Ok(())
+}
+
+#[then(regex = r#"^the window says "(.*)"$"#)]
+fn window_says(w: &mut UiWorld, want: String) -> StepResult {
+    let tree = w.window()?.tree();
+    find(&tree, &|n| n.name == want)
+        .map(drop)
+        .ok_or_else(|| format!("the window does not say {want:?}"))
+}
+
+#[then(regex = r#"^the file "([^"]+)" says "(.*)"$"#)]
+fn file_says(w: &mut UiWorld, name: String, want: String) -> StepResult {
+    let got = std::fs::read_to_string(w.dir.path().join(&name)).map_err(|e| e.to_string())?;
+    got.contains(&want)
+        .then_some(())
+        .ok_or_else(|| format!("`{name}` does not say {want:?}:\n{got}"))
+}
+
+#[then(regex = r#"^the canvas outlines the selection at (\d+), (\d+) sized (\d+) by (\d+)$"#)]
+fn outline_at(w: &mut UiWorld, x: f64, y: f64, width: f64, height: f64) -> StepResult {
+    let window = w.window()?;
+    let outline = overlay_part(window, "selectionOutline")?;
+    let zoom = window
+        .engine()
+        .read_by_name(overlay_part(window, "overlay")?, "zoom")
+        .to_number();
+    let read = |name: &str| window.engine().read_by_name(outline, name).to_number() / zoom;
+    let got = (read("x"), read("y"), read("width"), read("height"));
+    let close = |a: f64, b: f64| (a - b).abs() < 0.5;
+    (close(got.0, x) && close(got.1, y) && close(got.2, width) && close(got.3, height))
+        .then_some(())
+        .ok_or_else(|| format!("the outline is at {got:?}"))
+}
+
+#[then(regex = r#"^the canvas shows (\d+) resize handles$"#)]
+fn handles_shown(w: &mut UiWorld, want: usize) -> StepResult {
+    let window = w.window()?;
+    let overlay = overlay_part(window, "overlay")?;
+    let got = window
+        .engine()
+        .read_by_name(overlay, "handlesShown")
+        .to_number() as usize;
+    (got == want)
+        .then_some(())
+        .ok_or_else(|| format!("{got} handles"))
+}
+
+#[then(regex = r#"^the canvas shows a ([xy]) guide at (\d+)$"#)]
+fn guide_at(w: &mut UiWorld, axis: String, at: f64) -> StepResult {
+    let window = w.window()?;
+    let guide = overlay_part(window, &format!("guide{}", axis.to_uppercase()))?;
+    let zoom = window
+        .engine()
+        .read_by_name(overlay_part(window, "overlay")?, "zoom")
+        .to_number();
+    let got = window.engine().read_by_name(guide, &axis).to_number() / zoom;
+    let visible = window.engine().read_by_name(guide, "visible").to_boolean();
+    (visible && (got - at).abs() < 0.5)
+        .then_some(())
+        .ok_or_else(|| format!("the guide is at {got}, visible {visible}"))
+}
+
+#[then(regex = r#"^the canvas says "(.+)"$"#)]
+fn canvas_says(w: &mut UiWorld, want: String) -> StepResult {
+    let window = w.window()?;
+    let hint =
+        ljos_drive::find_below(window.engine(), window.root, "canvasHint").ok_or("no hint")?;
+    let got = window
+        .engine()
+        .read_by_name(hint, "text")
+        .to_js_string()
+        .to_string();
+    (got == want)
+        .then_some(())
+        .ok_or_else(|| format!("the canvas says {got:?}"))
 }
 
 #[when(regex = r#"^nobody touches the window for (\d+) seconds?$"#)]
@@ -1317,6 +1642,45 @@ fn code_selects(w: &mut UiWorld, want: String) -> StepResult {
     (code.selected == want)
         .then_some(())
         .ok_or_else(|| format!("the code view selects {:?}", code.selected))
+}
+
+#[then(regex = r#"^the window shows the document "([^"]+)"$"#)]
+fn window_shows_document(w: &mut UiWorld, want: String) -> StepResult {
+    let doc = w.window()?.read("doc").to_js_string().to_string();
+    (doc == want)
+        .then_some(())
+        .ok_or_else(|| format!("the window shows the document {doc:?}"))
+}
+
+#[then("the documents panel says why it made no document")]
+fn documents_says_why(w: &mut UiWorld) -> StepResult {
+    let window = w.window()?;
+    let label = ljos_drive::find_below(window.engine(), window.root, "newDocumentRefusal")
+        .ok_or("the documents panel has no place for a refusal")?;
+    let text = window
+        .engine()
+        .read_by_name(label, "text")
+        .to_js_string()
+        .to_string();
+    (!text.is_empty())
+        .then_some(())
+        .ok_or_else(|| "the documents panel says nothing".to_owned())
+}
+
+#[then(regex = r#"^the code view marks "(.*)"$"#)]
+fn code_marks(w: &mut UiWorld, want: String) -> StepResult {
+    let want = unescape(&want);
+    let window = w.window()?;
+    let band = ljos_drive::find_below(window.engine(), window.root, "codeBand")
+        .ok_or("the code view has no band")?;
+    let engine = window.engine();
+    if engine.read_by_name(band, "visible") != Value::Bool(true) {
+        return Err("the band is not shown".to_owned());
+    }
+    let marks = engine.read_by_name(band, "marks");
+    (marks == Value::from(want.as_str()))
+        .then_some(())
+        .ok_or_else(|| format!("the code view marks {marks:?}"))
 }
 
 #[then(regex = r#"^the inspector shows "([^"]+)" as "(.*)"$"#)]
@@ -1478,6 +1842,33 @@ fn frame_shows_picture(w: &mut UiWorld, target: String) -> StepResult {
     picture_drawn(w.window()?, &target).map(drop)
 }
 
+#[given(regex = r#"^the person has looked at the frame "([^"]+)"$"#)]
+fn looks_at_frame(w: &mut UiWorld, target: String) -> StepResult {
+    let window = w.window()?;
+    picture_drawn(window, &target)?;
+    let shots = window.read_json("preview")["shots"].as_u64().unwrap_or(0);
+    w.looked = shots;
+    Ok(())
+}
+
+#[then(regex = r#"^the frame "([^"]+)" has drawn a different picture since$"#)]
+fn frame_drew_another(w: &mut UiWorld, target: String) -> StepResult {
+    let looked = w.looked;
+    let window = w.window()?;
+    // The app is another process on the real clock, the window's timers on
+    // the driver's: both have to move. Studio stops looking by itself.
+    while window.read("settling") == Value::Bool(true) {
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        window.stage.drive().advance(100).map_err(drive_error)?;
+        window.rest()?;
+    }
+    picture_drawn(window, &target)?;
+    let preview = window.read_json("preview");
+    (preview["shots"].as_u64().unwrap_or(0) > looked)
+        .then_some(())
+        .ok_or_else(|| format!("the frame still draws the picture it had; {preview}"))
+}
+
 #[then(regex = r#"^the frame "([^"]+)" shows the preview's generation (\d+)$"#)]
 fn frame_shows_generation(w: &mut UiWorld, target: String, generation: u64) -> StepResult {
     let shown = picture_drawn(w.window()?, &target)?;
@@ -1499,6 +1890,11 @@ fn ran_no_frames(w: &mut UiWorld) -> StepResult {
     (idle.shown == 0)
         .then_some(())
         .ok_or_else(|| format!("the window showed {} new frames", idle.shown))
+}
+
+#[given("the preview does not say where its objects are")]
+fn no_places(w: &mut UiWorld) {
+    w.no_places = true;
 }
 
 #[given("Studio's window runs the person's shell, a copy of its own")]

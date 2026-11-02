@@ -21,6 +21,8 @@ qml_edit = { git = "https://github.com/hal-c2/ljos-ui", rev = "330a33754d39b32c5
 # Which `onName` handlers an object takes: the type table cut down to
 # modules, properties and signals, small enough for the web build.
 qt_signals = { git = "https://github.com/hal-c2/ljos-ui", rev = "330a33754d39b32c5a92e173d7d467c24a621271" }
+# Only in build scripts: the full table stays out of what ships.
+qt_types = { git = "https://github.com/hal-c2/ljos-ui", rev = "330a33754d39b32c5a92e173d7d467c24a621271" }
 ljos_ir = { git = "https://github.com/hal-c2/ljos-ui", rev = "330a33754d39b32c5a92e173d7d467c24a621271" }
 # What a theme may say and when Ljós refuses one, judged by Ljós itself.
 ljos_design = { git = "https://github.com/hal-c2/ljos-ui", rev = "330a33754d39b32c5a92e173d7d467c24a621271" }

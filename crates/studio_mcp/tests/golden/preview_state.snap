@@ -13,59 +13,29 @@ expression: value
   "inputSchema": {
     "$defs": {
       "Address": {
-        "description": "How a caller names an object.",
-        "oneOf": [
-          {
-            "additionalProperties": false,
-            "description": "A handle the session gave out (`n7`); stable for the session.",
-            "properties": {
-              "node": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "node"
-            ],
-            "type": "object"
+        "description": "One of: `node`, a handle the session gave out (`n7`), stable for the session; `id`, the object's `id`; `path`, as `document_tree` prints it (`root/0/contentItem:`), true of the current text only.",
+        "maxProperties": 1,
+        "minProperties": 1,
+        "properties": {
+          "id": {
+            "type": "string"
           },
-          {
-            "additionalProperties": false,
-            "description": "The object's `id` in the document.",
-            "properties": {
-              "id": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "id"
-            ],
-            "type": "object"
+          "node": {
+            "type": "string"
           },
-          {
-            "additionalProperties": false,
-            "description": "A path as `document_tree` prints it (`root/0/contentItem:`), true of\nthe current text only.",
-            "properties": {
-              "path": {
-                "type": "string"
-              }
-            },
-            "required": [
-              "path"
-            ],
-            "type": "object"
+          "path": {
+            "type": "string"
           }
-        ]
+        },
+        "type": "object"
       },
       "ClickAt": {
-        "additionalProperties": false,
         "properties": {
           "x": {
             "description": "The preview's logical pixels.",
-            "format": "double",
             "type": "number"
           },
           "y": {
-            "format": "double",
             "type": "number"
           }
         },
@@ -76,7 +46,6 @@ expression: value
         "type": "object"
       }
     },
-    "additionalProperties": false,
     "properties": {
       "click": {
         "anyOf": [
@@ -124,9 +93,15 @@ expression: value
           "object",
           "null"
         ]
+      },
+      "show": {
+        "description": "Put `node` in this QML state of its own for the preview, through\nreloads, until `\"\"`; the file does not change.",
+        "type": [
+          "string",
+          "null"
+        ]
       }
     },
-    "title": "StateArgs",
     "type": "object"
   },
   "max_result_bytes": 40960,
@@ -134,14 +109,12 @@ expression: value
   "outputSchema": {
     "properties": {
       "block": {
-        "description": "`Module.Name`, when the object is a block.",
         "type": [
           "string",
           "null"
         ]
       },
       "id": {
-        "description": "The object read; absent when only a click was asked for.",
         "type": [
           "string",
           "null"
@@ -151,12 +124,9 @@ expression: value
         "type": "boolean"
       },
       "state": {
-        "additionalProperties": true,
-        "description": "A block's published state as the preview has it now.",
         "type": "object"
       },
       "variant": {
-        "description": "The object's QML `state` now: the variant it shows, `\"\"` for its\nbase state. Absent when no object was read.",
         "type": [
           "string",
           "null"
@@ -167,7 +137,6 @@ expression: value
       "state",
       "mocked"
     ],
-    "title": "StateOut",
     "type": "object"
   },
   "required_cap": "run"

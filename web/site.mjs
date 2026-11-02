@@ -135,6 +135,19 @@ check('no file of the site names "mocks/" or ".studio"', naming.length === 0, na
 // And the page does not show "Playing", which only the mock module says
 check('the page does not show "Playing"', !(await page.evaluate(() => document.body.innerText)).includes("Playing"));
 
+// When the page is made 390 by 844 pixels
+await page.setViewportSize({ width: 390, height: 844 });
+// Then the entry's root is 390 by 844 pixels
+// The browser sends its resize event on a later frame than the size changes.
+await page
+  .waitForFunction(() => document.querySelector("#app > *").getBoundingClientRect().width === 390, null, { timeout: 2000 })
+  .catch(() => {});
+const root = await page.evaluate(() => {
+  const box = document.querySelector("#app > *").getBoundingClientRect();
+  return { width: box.width, height: box.height };
+});
+check("the entry's root is 390 by 844 pixels", root.width === 390 && root.height === 844, root);
+
 await browser.close();
 
 const bytes = files.reduce((n, f) => n + statSync(join(site, f)).size, 0);

@@ -20,7 +20,7 @@ Studio composes three servers rather than duplicating them:
 
 Budgets follow ARCHITECTURE.md section 19.6: tools listed in a fixed order,
 descriptions ≤ 300 characters, responses ≤ 40 KB with cursors, ≤ 25 tools
-on one server. Studio offers 24 tools. Capabilities as in section 19.7:
+on one server. Studio offers 25 tools. Capabilities as in section 19.7:
 `inspect` (read), `mutate` (edit documents), `fs` (write files outside
 documents: export), `run` (start previews). They are granted at launch with
 `--caps`: by default `inspect` on a running window's endpoint and
@@ -49,11 +49,12 @@ documents: export), `run` (start previews). They are granted at launch with
 | 17 | `history` | List, undo or redo edits (each with its inverse changes and its author); undo and redo take the caller's own, `all` the newest | inspect to list; mutate to undo or redo |
 | 18 | `theme_set` | Read the tokens (`Ljos.Design` roles and the theme file, light and dark), or set one; the preview reloads live | mutate |
 | 19 | `preview_open` | Start a preview of a shell on a target (desktop, tablet, phone) or size with live or mocked state; on the open one, change size or state in place | run |
-| 20 | `preview_state` | Read an object's state and a block's published state in the preview; set it when the block is mocked; click first | run |
+| 20 | `preview_state` | Read an object's state and a block's published state in the preview; set it when the block is mocked; hold an object in a state of its own (`show`); click first | run |
 | 21 | `preview_screenshot` | A PNG of the preview (≤ 1280 px), or its outline as text | inspect |
 | 22 | `preview_events` | Since a cursor: opened, reloaded (with ms), reload failed, logs, ended | inspect |
 | 23 | `export` | Write a bundle that `ljos run` starts (`native`) or that ljos-web builds a site from (`web`): the project's QML, theme, assets and own modules with a manifest, never mocks or `.studio/` | fs |
 | 24 | `review` | Add, reply to, resolve, reopen or list design review comments on objects, kept in `.studio/` | inspect (writing: mutate) |
+| 25 | `node_arrange` | What a canvas gesture does: `geometry` (boxes, what a drag does, siblings), `place`, `align`, `copy`, `paste`, `duplicate`, `remove`; each edit is one undo step, all or none | inspect; mutate to edit |
 
 A document is a `.qml` file or a `theme.json` of the project outside the
 directories a walk leaves out, judged where its links lead; anything else is
@@ -158,7 +159,7 @@ shows it; the watcher's quiet time is not on that path.
   app's own.
 - DECISION: `preview_screenshot {format: "outline"}` gives the preview's
   items as text (the inspector's outline) instead of a separate tool:
-  Studio's list of 24 stays within 25 tools.
+  Studio's list of 25 stays within 25 tools.
 - DECISION (phase 3): the native preview runs with the project's type
   dumps (every `ljostypes.json` in it, `--types`), so the types an app
   registers from Rust stand in with the members they declare and a shell

@@ -79,6 +79,7 @@ fn main() -> anyhow::Result<()> {
         .with_previews(Arc::new(move |project| {
             Box::new(NativeHost::new(project, &ljos, &previews))
         }));
+    stop_on_signal(studio.preview_closer(), state.clone());
     let server = Arc::new(StudioServer::new(studio));
     if args.mcp {
         let server = Arc::into_inner(server).expect("nothing else holds the server yet");
@@ -114,10 +115,72 @@ fn main() -> anyhow::Result<()> {
             .filter(|d| d.join("Shell.qml").is_file()),
     };
     let theme = args.theme.or_else(|| config.map(|c| c.join("theme.json")));
+    // A watched window watches where the theme file would be, and a first run
+    // has no such directory yet.
+    if let (Some(_), Some(dir)) = (&shell, theme.as_deref().and_then(Path::parent)) {
+        std::fs::create_dir_all(dir).with_context(|| format!("making {}", dir.display()))?;
+    }
     match shell {
         Some(shell) => watched_window(server, &shell, theme, &state),
         None => window(server, theme),
     }
+}
+
+/// A signal skips every `Drop`, which is what closes a preview, so a stopped
+/// Studio would leave its `ljos` running. A SIGKILL still does: only the child
+/// can notice that (Ljós, request 4).
+fn stop_on_signal(close: impl FnOnce() + Send + 'static, state: PathBuf) {
+    std::thread::spawn(move || {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_io()
+            .build();
+        let signal = match runtime.map(|r| r.block_on(stop_asked())) {
+            Ok(Ok(signal)) => signal,
+            Ok(Err(e)) | Err(e) => {
+                eprintln!("studio: signals will not close a preview: {e}");
+                return;
+            }
+        };
+        // Bounded: asked to stop, Studio stops, whatever a preview is doing.
+        let (closed, wait) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            close();
+            let _ = closed.send(());
+        });
+        let _ = wait.recv_timeout(std::time::Duration::from_secs(2));
+        let _ = std::fs::remove_dir_all(&state);
+        end(128 + signal);
+    });
+}
+
+/// Ends the process without exit handlers: they would run here while the
+/// window's thread still draws with what they free, as a GL driver's did.
+#[cfg(unix)]
+fn end(code: i32) -> ! {
+    signal_hook::low_level::exit(code)
+}
+
+#[cfg(not(unix))]
+fn end(code: i32) -> ! {
+    std::process::exit(code)
+}
+
+/// Waits for a request to stop, and says which signal it was.
+#[cfg(unix)]
+async fn stop_asked() -> std::io::Result<i32> {
+    use tokio::signal::unix::{SignalKind, signal};
+    let (term, int) = (SignalKind::terminate(), SignalKind::interrupt());
+    let (mut terms, mut ints) = (signal(term)?, signal(int)?);
+    tokio::select! {
+        _ = terms.recv() => Ok(term.as_raw_value()),
+        _ = ints.recv() => Ok(int.as_raw_value()),
+    }
+}
+
+#[cfg(not(unix))]
+async fn stop_asked() -> std::io::Result<i32> {
+    tokio::signal::ctrl_c().await?;
+    Ok(2)
 }
 
 /// What a client may do. The endpoint can be reached by whatever else runs on

@@ -162,3 +162,67 @@ fn a_preview_opens_and_answers_through_the_stdio_server() {
     let found = state.symlink_metadata().unwrap();
     assert_eq!(found.mode() & 0o777, 0o700);
 }
+
+/// The programs `pid` started.
+fn children(pid: u32) -> Vec<u32> {
+    let mut found = Vec::new();
+    for task in std::fs::read_dir(format!("/proc/{pid}/task"))
+        .unwrap()
+        .flatten()
+    {
+        let text = std::fs::read_to_string(task.path().join("children")).unwrap_or_default();
+        found.extend(
+            text.split_whitespace()
+                .filter_map(|c| c.parse::<u32>().ok()),
+        );
+    }
+    found
+}
+
+fn stopped_by(signal: &str) {
+    let project = tempfile::tempdir().unwrap();
+    let runtime = tempfile::tempdir().unwrap();
+    std::fs::write(
+        project.path().join("Main.qml"),
+        "import QtQuick\n\nRectangle {\n    width: 200\n    height: 100\n}\n",
+    )
+    .unwrap();
+    let mut server = Server::start(project.path(), runtime.path());
+    server.tool(
+        "preview_open",
+        json!({ "doc": "Main.qml", "target": "phone" }),
+    );
+    let studio = server.child.id();
+    let previews = children(studio);
+    assert_eq!(previews.len(), 1, "{previews:?}");
+    let state = runtime.path().join(format!("ljos-studio-{studio}"));
+    assert!(state.is_dir());
+
+    let sent = Command::new("kill")
+        .args([signal, &studio.to_string()])
+        .status()
+        .unwrap();
+    assert!(sent.success());
+    server.child.wait().unwrap();
+
+    let preview = std::path::PathBuf::from(format!("/proc/{}", previews[0]));
+    let alive = preview.exists();
+    if alive {
+        // Not to leave one behind when this test fails.
+        let _ = Command::new("kill").arg(previews[0].to_string()).status();
+    }
+    assert!(!alive, "the preview outlived Studio");
+    assert!(!state.exists(), "the state directory outlived Studio");
+}
+
+#[test]
+#[ignore = "needs LJOS: run by `mise run features`"]
+fn sigterm_takes_the_preview_down_with_studio() {
+    stopped_by("-TERM");
+}
+
+#[test]
+#[ignore = "needs LJOS: run by `mise run features`"]
+fn sigint_takes_the_preview_down_with_studio() {
+    stopped_by("-INT");
+}

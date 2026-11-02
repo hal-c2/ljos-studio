@@ -70,6 +70,12 @@ export const WAITING = new Map([
   ["A click where no trigger is changes nothing", refused(4)],
   ["A click alone plays the flow and reads nothing", refused(4)],
   ["A picture of the preview", refused(2)],
+  // A state is shown by writing the state property, so it is held up by the
+  // same request as a click that changes state.
+  ["A state is shown for the preview, through a reload, until cleared", refused(4)],
+  // The tool's refusal is the step before; the frame still in the base state
+  // is what the scenario's own last step sees.
+  ["The first change written into the shown state is drawn at once", { request: 4, cause: said(/^the preview shows: \["Overview"\]$/) }],
   ["A mocked block's state is set from outside", refused(4)],
   ["A live block's state is the app's own", refused(4)],
   // ljos-web's `Ljos.Design` is the module's QML; it reads no theme file

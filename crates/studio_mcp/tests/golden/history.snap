@@ -21,7 +21,6 @@ expression: value
         "type": "string"
       }
     },
-    "additionalProperties": false,
     "properties": {
       "action": {
         "$ref": "#/$defs/HistoryAction"
@@ -35,85 +34,23 @@ expression: value
     "required": [
       "action"
     ],
-    "title": "HistoryArgs",
     "type": "object"
   },
   "max_result_bytes": 40960,
   "name": "history",
   "outputSchema": {
-    "$defs": {
-      "EntryOut": {
-        "properties": {
-          "added": {
-            "format": "uint",
-            "minimum": 0,
-            "type": "integer"
-          },
-          "author": {
-            "description": "Who made it: an MCP client's name, `agent` for one that gave none,\n`person` for the window, `outside Studio` for a change found in the\nfile.",
-            "type": "string"
-          },
-          "doc": {
-            "type": "string"
-          },
-          "id": {
-            "format": "uint64",
-            "minimum": 0,
-            "type": "integer"
-          },
-          "label": {
-            "type": "string"
-          },
-          "removed": {
-            "format": "uint",
-            "minimum": 0,
-            "type": "integer"
-          }
-        },
-        "required": [
-          "id",
-          "doc",
-          "label",
-          "author",
-          "removed",
-          "added"
-        ],
-        "type": "object"
-      }
-    },
     "properties": {
       "done": {
-        "description": "Oldest first.",
-        "items": {
-          "$ref": "#/$defs/EntryOut"
-        },
         "type": "array"
       },
-      "entry": {
-        "anyOf": [
-          {
-            "$ref": "#/$defs/EntryOut"
-          },
-          {
-            "type": "null"
-          }
-        ],
-        "description": "The entry undone or redone."
-      },
+      "entry": {},
       "generation": {
-        "description": "Its document's generation after it, when the document still exists.",
-        "format": "uint64",
-        "minimum": 0,
         "type": [
           "integer",
           "null"
         ]
       },
       "undone": {
-        "description": "Next to redo first.",
-        "items": {
-          "$ref": "#/$defs/EntryOut"
-        },
         "type": "array"
       }
     },
@@ -121,7 +58,6 @@ expression: value
       "done",
       "undone"
     ],
-    "title": "HistoryOut",
     "type": "object"
   },
   "required_cap": "inspect"

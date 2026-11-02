@@ -1,0 +1,217 @@
+---
+source: crates/studio_mcp/tests/golden_tools.rs
+expression: value
+---
+{
+  "annotations": {
+    "destructive": false,
+    "idempotent": false,
+    "open_world": false,
+    "read_only": false
+  },
+  "description": "What a canvas gesture does; each edit one undo step, all or none. `geometry`: boxes, drag rules, siblings. `place`: x/y/size, writing what governs each object (anchor margins, Layout.preferred*); refused `arranged` or `anchored` where overridden. `align`, `copy`, `paste`, `duplicate`, `remove`.",
+  "inputSchema": {
+    "$defs": {
+      "Action": {
+        "enum": [
+          "geometry",
+          "place",
+          "align",
+          "copy",
+          "paste",
+          "duplicate",
+          "remove"
+        ],
+        "type": "string"
+      },
+      "Address": {
+        "description": "One of: `node`, a handle the session gave out (`n7`), stable for the session; `id`, the object's `id`; `path`, as `document_tree` prints it (`root/0/contentItem:`), true of the current text only.",
+        "maxProperties": 1,
+        "minProperties": 1,
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "node": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "Align": {
+        "description": "How `node_arrange` `align` lines objects up.",
+        "enum": [
+          "left",
+          "hcenter",
+          "right",
+          "top",
+          "vcenter",
+          "bottom",
+          "distribute_h",
+          "distribute_v"
+        ],
+        "type": "string"
+      },
+      "PlaceOne": {
+        "properties": {
+          "height": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "node": {
+            "$ref": "#/$defs/Address"
+          },
+          "width": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "x": {
+            "description": "In the parent's coordinates. What is left out stays.",
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "y": {
+            "type": [
+              "number",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "node"
+        ],
+        "type": "object"
+      }
+    },
+    "properties": {
+      "action": {
+        "$ref": "#/$defs/Action"
+      },
+      "align": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/Align"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "description": "For `align`: left, hcenter, right, top, vcenter, bottom, distribute_h,\ndistribute_v. One object lines up with its parent."
+      },
+      "doc": {
+        "type": "string"
+      },
+      "dry_run": {
+        "default": false,
+        "type": "boolean"
+      },
+      "generation": {
+        "description": "Needed when a node is named by path.",
+        "type": [
+          "integer",
+          "null"
+        ]
+      },
+      "nodes": {
+        "default": [],
+        "description": "For all but `place` and `paste`. A path needs `generation` where the\naction writes.",
+        "items": {
+          "$ref": "#/$defs/Address"
+        },
+        "type": "array"
+      },
+      "parent": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/Address"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "description": "For `paste`, into any document. Ids it has are renamed."
+      },
+      "places": {
+        "description": "For `place`.",
+        "items": {
+          "$ref": "#/$defs/PlaceOne"
+        },
+        "type": [
+          "array",
+          "null"
+        ]
+      }
+    },
+    "required": [
+      "action",
+      "doc"
+    ],
+    "type": "object"
+  },
+  "max_result_bytes": 40960,
+  "name": "node_arrange",
+  "outputSchema": {
+    "properties": {
+      "boxes": {
+        "type": "array"
+      },
+      "changes": {
+        "type": "array"
+      },
+      "copied": {
+        "type": "array"
+      },
+      "doc": {
+        "type": "string"
+      },
+      "generation": {
+        "type": "integer"
+      },
+      "history": {
+        "type": [
+          "integer",
+          "null"
+        ]
+      },
+      "node": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "nodes": {
+        "type": "array"
+      },
+      "parent": {},
+      "rebased_from": {
+        "type": [
+          "integer",
+          "null"
+        ]
+      },
+      "siblings": {
+        "type": "array"
+      },
+      "text": {
+        "type": [
+          "string",
+          "null"
+        ]
+      },
+      "unchanged": {
+        "type": "boolean"
+      }
+    },
+    "type": "object"
+  },
+  "required_cap": "inspect"
+}

@@ -187,6 +187,17 @@ Feature: A person wires and plays a prototype's flow in Studio's window
     When the person clicks the frame "Desktop" at 50, 150
     Then the flow panel says the app is in the state "details"
 
+  # The picture was fetched once for each generation, and a click is no new
+  # generation, so the frame kept showing the app as it was before the click.
+  @preview
+  Scenario: A click in play mode shows in the frame's picture
+    Given the person has selected "Rectangle card" in the layers panel
+    And the person has clicked the button "Tap selection to go to details"
+    And the person has clicked the button "Play"
+    And the person has looked at the frame "Desktop"
+    When the person clicks the frame "Desktop" at 50, 150
+    Then the frame "Desktop" has drawn a different picture since
+
   # The badge has no `id` and is drawn over the card's right end, reaching
   # past it: the click is at its point, not at the middle of the badge.
   @preview

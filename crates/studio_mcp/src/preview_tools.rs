@@ -7,6 +7,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 
+use crate::schema::Answers;
 use ljos_mcp_core::{
     Cap, ErrorCode, SurfaceError, ToolAnnotations, ToolDef, ToolRegistry, ToolReply, typed,
 };
@@ -68,6 +69,9 @@ struct StateArgs {
     /// prototype plays without an `id` on the object whose state it reads.
     node: Option<Address>,
     doc: Option<String>,
+    /// Put `node` in this QML state of its own for the preview, through
+    /// reloads, until `""`; the file does not change.
+    show: Option<String>,
     /// Values to assign to a block's state (mocked previews only).
     set: Option<Map<String, Value>>,
     /// An object (with an `id`) to click first, after `set`, as a person
@@ -312,6 +316,8 @@ fn open(studio: &Mutex<Studio>, a: OpenArgs) -> Result<OpenOut, SurfaceError> {
             mocked: aliases.clone(),
             reloads: VecDeque::new(),
             behind: false,
+            clicks: 0,
+            shown: None,
         });
     }
     Ok(OpenOut {
@@ -361,6 +367,7 @@ fn state(studio: &Mutex<Studio>, a: StateArgs) -> Result<StateOut, SurfaceError>
         if let Err(e) = open.host.click(&click) {
             return Err(preview_error(previews.failed(e)));
         }
+        open.clicks += 1;
         return Ok(StateOut {
             block: None,
             id: None,
@@ -414,10 +421,33 @@ fn state(studio: &Mutex<Studio>, a: StateArgs) -> Result<StateOut, SurfaceError>
             }
         }
     }
-    if let Some(click) = click
-        && let Err(e) = open.host.click(&click)
-    {
-        return Err(preview_error(previews.failed(e)));
+    if let Some(click) = click {
+        if let Err(e) = open.host.click(&click) {
+            return Err(preview_error(previews.failed(e)));
+        }
+        open.clicks += 1;
+    }
+    if let Some(show) = a.show {
+        let known = show.is_empty()
+            || studio
+                .session
+                .variants(&doc, &address)
+                .map_err(error)?
+                .states
+                .iter()
+                .any(|s| s.name == show);
+        if !known {
+            return Err(
+                SurfaceError::not_found(format!("`{id}` has no state `{show}`"))
+                    .with_details(json!({ "kind": "no_state" })),
+            );
+        }
+        if let Err(e) = open.host.write(&id, "state", Value::String(show.clone())) {
+            return Err(preview_error(previews.failed(e)));
+        }
+        open.shown = (!show.is_empty()).then(|| (id.clone(), show));
+        // It changes the picture without a reload, as a click does.
+        open.clicks += 1;
     }
     let mut asked = names.clone();
     // A block may publish a `state` of its own; the variant is QML's.
@@ -566,6 +596,35 @@ pub(crate) fn pick(
     Ok(Some((declared.file, handle)))
 }
 
+/// What the host says of the objects with `ids` and of unnamed ones of
+/// `types`; `None` when no preview of `doc` is open or it runs older text
+/// than the session's, whose lines would name other objects.
+pub(crate) fn placed(
+    studio: &mut Studio,
+    doc: &str,
+    ids: &[String],
+    types: &[String],
+) -> Result<Option<Vec<studio_core::preview::Placed>>, SurfaceError> {
+    let previews = studio.previews.clone();
+    let mut previews = preview::caught_up(&previews);
+    let behind = previews.events.iter().rev().find_map(|e| match e {
+        PreviewEvent::Opened { .. } | PreviewEvent::Reloaded { .. } => Some(false),
+        PreviewEvent::ReloadFailed { .. } => Some(true),
+        _ => None,
+    });
+    if behind == Some(true) {
+        return Ok(None);
+    }
+    match previews.open.as_mut().filter(|o| o.doc == doc) {
+        Some(open) => open
+            .host
+            .placed(ids, types)
+            .map(Some)
+            .map_err(preview_error),
+        None => Ok(None),
+    }
+}
+
 fn events(studio: &Mutex<Studio>, a: EventsArgs) -> EventsOut {
     let studio = lock(studio);
     // What a burst of writes left out is reloaded first, so its outcome
@@ -591,7 +650,7 @@ pub(crate) fn add(registry: ToolRegistry, studio: &Arc<Mutex<Studio>>) -> ToolRe
                  live blocks or the project's mock modules. On the open preview it changes size or \
                  state in place, keeping the app's state. Edits show in it at once.",
             )
-            .output::<OpenOut>()
+            .answers::<OpenOut>()
             .requires(Cap::Run)
             .annotated(ToolAnnotations::WRITE),
             typed({
@@ -606,7 +665,7 @@ pub(crate) fn add(registry: ToolRegistry, studio: &Arc<Mutex<Studio>>) -> ToolRe
                  state, which `set` assigns when the block is mocked. `click` or `click_at` clicks \
                  first, as a person does, so a flow plays. Objects are found by `id`.",
             )
-            .output::<StateOut>()
+            .answers::<StateOut>()
             .requires(Cap::Run)
             .annotated(ToolAnnotations::WRITE),
             typed({
@@ -620,7 +679,7 @@ pub(crate) fn add(registry: ToolRegistry, studio: &Arc<Mutex<Studio>>) -> ToolRe
                 "What the preview shows: a PNG at most `max_size` pixels on its longest side \
                  (default 800), or with `format: \"outline\"` its items as text, one per line.",
             )
-            .output::<ScreenshotOut>()
+            .answers::<ScreenshotOut>()
             .requires(Cap::Inspect)
             .annotated(ToolAnnotations::READ_ONLY),
             typed({
@@ -634,7 +693,7 @@ pub(crate) fn add(registry: ToolRegistry, studio: &Arc<Mutex<Studio>>) -> ToolRe
                 "What happened to the preview since a cursor: opened, reloaded (with ms), \
                  reload_failed (the last good one stays), log lines, ended.",
             )
-            .output::<EventsOut>()
+            .answers::<EventsOut>()
             .requires(Cap::Inspect)
             .annotated(ToolAnnotations::READ_ONLY),
             typed({
