@@ -165,6 +165,10 @@ struct ArrangeOut {
     /// `paste`: what it imported for what it holds.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     imported: Vec<String>,
+    /// `paste`: each name it could not show still lands where it did: written
+    /// anyway, for the agent to look at.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    unvouched: Vec<crate::signals::Unvouched>,
 }
 
 struct GeometryArgs {
@@ -233,6 +237,8 @@ pub(crate) struct ManyOut {
     pub(crate) nodes: Vec<String>,
     /// What a paste imported.
     pub(crate) imported: Vec<String>,
+    /// What a paste could not show still lands where it did.
+    pub(crate) unvouched: Vec<crate::signals::Unvouched>,
 }
 
 struct AlignArgs {
@@ -584,6 +590,7 @@ fn place_many(
         edit: outcome.into(),
         nodes,
         imported: Vec::new(),
+        unvouched: Vec::new(),
     })
 }
 
@@ -739,6 +746,7 @@ fn duplicate(studio: &mut Studio, a: &NodesArgs) -> Result<ManyOut, SurfaceError
         edit: outcome.into(),
         nodes,
         imported: Vec::new(),
+        unvouched: Vec::new(),
     })
 }
 
@@ -757,7 +765,10 @@ fn paste(studio: &mut Studio, a: &PasteArgs) -> Result<ManyOut, SurfaceError> {
     let first = &studio.clipboard[0];
     // Bare, even beside an import under a name: nothing has to qualify what
     // the text holds.
-    let imported = crate::loads::imports_for(
+    let crate::loads::Pasted {
+        imports: imported,
+        unvouched,
+    } = crate::loads::imports_for(
         studio.session.store(),
         &a.doc,
         &source,
@@ -788,6 +799,7 @@ fn paste(studio: &mut Studio, a: &PasteArgs) -> Result<ManyOut, SurfaceError> {
         edit: outcome.into(),
         nodes,
         imported,
+        unvouched,
     })
 }
 
@@ -823,6 +835,7 @@ fn remove(studio: &mut Studio, a: &NodesArgs) -> Result<ManyOut, SurfaceError> {
         edit: outcome.into(),
         nodes,
         imported: Vec::new(),
+        unvouched: Vec::new(),
     })
 }
 
@@ -896,6 +909,7 @@ fn arrange(studio: &mut Studio, a: ArrangeArgs) -> Result<ArrangeOut, SurfaceErr
         edit: Some(many.edit),
         nodes: many.nodes,
         imported: many.imported,
+        unvouched: many.unvouched,
         ..ArrangeOut::default()
     };
     match a.action {

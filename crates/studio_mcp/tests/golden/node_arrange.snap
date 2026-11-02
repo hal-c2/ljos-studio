@@ -213,7 +213,8 @@ expression: value
       "rebased_from": {},
       "siblings": {},
       "text": {},
-      "unchanged": {}
+      "unchanged": {},
+      "unvouched": {}
     },
     "type": "object"
   },

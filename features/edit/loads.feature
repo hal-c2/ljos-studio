@@ -687,7 +687,7 @@ Feature: A tool does not write what would not load or would not show
     Then the file "Holds.qml" does not contain "import QtQuick.Controls"
     And the file "Holds.qml" contains "Sprocket"
 
-  Scenario: An import a paste needs that would change what the file has is refused
+  Scenario: An import that would change what the file has stays out, and an object that needs it stays out too
     Given the file "Button.qml":
       """qml
       import QtQuick
@@ -722,10 +722,9 @@ Feature: A tool does not write what would not load or would not show
       {"action": "paste", "doc": "Holds.qml", "parent": {"id": "holds"}}
       """
     Then the agent is refused with "not_actionable"
-    And the refusal's "/details/kind" is "import_changes_type"
-    And the file "Holds.qml" does not contain "Slider"
+    And the refusal's "/details/kind" is "unknown_type"
+    And the file "Holds.qml" does not contain "QtQuick.Controls"
 
-  # qml6 6.11: a folder imported beats a module, in either order.
   Scenario: A folder that would change what a module gave the file stays out
     Given the file "lib/Button.qml":
       """qml
@@ -803,7 +802,7 @@ Feature: A tool does not write what would not load or would not show
     Examples:
       | has                 | then                                                        |
       | Item { id: inner }  | the file "Holds.qml" contains "import QtQuick.Controls"     |
-      | Button { id: mine } | the agent is refused with "not_actionable"                  |
+      | Button { id: mine } | the answer's "/unvouched/0/was" is "QtQuick.Controls"       |
 
   # qml6 6.11: the folder imported last is found first, a folder before a module,
   # and a module before the file beside the document.
@@ -839,7 +838,7 @@ Feature: A tool does not write what would not load or would not show
       """
     Then the file "Plain.qml" contains "import \"./other\""
 
-  Scenario: A toolkit's object is refused where a folder the file imports has its name
+  Scenario: A toolkit's object goes in where a folder the file imports has its name, and the paste says so
     Given the file "lib/Slider.qml":
       """qml
       import QtQuick
@@ -873,9 +872,8 @@ Feature: A tool does not write what would not load or would not show
       """json
       {"action": "paste", "doc": "Lib.qml", "parent": {"id": "holder"}}
       """
-    Then the agent is refused with "not_actionable"
-    And the refusal's "/details/kind" is "import_changes_type"
-    And the file "Lib.qml" does not contain "Slider"
+    Then the answer's "/unvouched/0/was" is "QtQuick.Controls"
+    And the answer's "/unvouched/0/now" is "the folder lib"
 
   Scenario: A paste says what it imported
     Given the agent has called the tool "node_arrange" with:
@@ -1227,7 +1225,7 @@ Feature: A tool does not write what would not load or would not show
       import "./b"
       """
 
-  Scenario: A paste is refused when the folder one part needs takes another part's name
+  Scenario: A paste says so when the folder one part needs takes another part's name
     Given the file "a/Slider.qml":
       """qml
       import QtQuick
@@ -1278,10 +1276,12 @@ Feature: A tool does not write what would not load or would not show
       """json
       {"action": "paste", "doc": "Target.qml", "parent": {"id": "holder"}}
       """
-    Then the agent is refused with "not_actionable"
-    And the refusal's "/details/kind" is "import_changes_type"
+    Then the file "Target.qml" contains "import \"./a\""
+    And the answer's "/unvouched/0/type" is "Slider"
+    And the answer's "/unvouched/0/was" is "the folder c"
+    And the answer's "/unvouched/0/now" is "the folder a"
 
-  Scenario: A folder the target already imports can't be moved to keep a type
+  Scenario: A folder the target already imports isn't moved, and the paste says what that cost
     Given the file "a/Slider.qml":
       """qml
       import QtQuick
@@ -1322,8 +1322,9 @@ Feature: A tool does not write what would not load or would not show
       """json
       {"action": "paste", "doc": "Target.qml", "parent": {"id": "holder"}}
       """
-    Then the agent is refused with "not_actionable"
-    And the refusal's "/details/kind" is "import_changes_type"
+    Then the answer's "/unvouched/0/was" is "the folder a"
+    And the answer's "/unvouched/0/now" is "the folder c"
+    And the answer's "/imported" is absent
 
   Scenario: Objects copied together bring their folders in the source's order
     Given the file "a/Slider.qml":
@@ -1370,7 +1371,7 @@ Feature: A tool does not write what would not load or would not show
       import "./b"
       """
 
-  Scenario: An unread module under an alias can't have a bare name, so it changes no refusal
+  Scenario: An unread module under an alias can't have a bare name, so it changes no answer
     Given the file "a/Slider.qml":
       """qml
       import QtQuick
@@ -1422,5 +1423,39 @@ Feature: A tool does not write what would not load or would not show
       """json
       {"action": "paste", "doc": "Target.qml", "parent": {"id": "holder"}}
       """
-    Then the agent is refused with "not_actionable"
-    And the refusal's "/details/kind" is "import_changes_type"
+    Then the answer's "/unvouched/0/was" is "the folder c"
+    And the answer's "/unvouched/0/now" is "the folder a"
+
+  Scenario: What Studio can't read comes along, and the paste says it couldn't vouch for it
+    Given the file "Has.qml":
+      """qml
+      import QtQuick
+      import App.Native
+
+      Item {
+          id: has
+          Thing { id: t }
+      }
+      """
+    And the agent has called the tool "node_arrange" with:
+      """json
+      {"action": "copy", "doc": "Has.qml", "nodes": [{"id": "t"}]}
+      """
+    When the agent calls the tool "node_arrange" with:
+      """json
+      {"action": "paste", "doc": "Plain.qml", "parent": {"id": "plain"}}
+      """
+    Then the file "Plain.qml" contains "import App.Native"
+    And the answer's "/unvouched/0/type" is "Thing"
+    And the answer's "/unvouched/0/was" is "can't tell"
+
+  Scenario: A paste within a file vouches for itself, whatever it imports
+    Given the agent has called the tool "node_arrange" with:
+      """json
+      {"action": "copy", "doc": "Main.qml", "nodes": [{"id": "thing"}]}
+      """
+    When the agent calls the tool "node_arrange" with:
+      """json
+      {"action": "paste", "doc": "Main.qml", "parent": {"id": "root"}}
+      """
+    Then the answer's "/unvouched" is absent
