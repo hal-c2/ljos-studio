@@ -110,8 +110,9 @@ pub(crate) struct Pasted {
 
 /// What a paste of `texts`, together, from `from`, whose imports are `had`, adds
 /// to `doc`: the least of the source's imports, in its order, that a name not
-/// landing where it did needs, leaving out any that moves what `doc` has. Whatever
-/// `lands` can't then show as the same is said in the answer, not refused: the
+/// landing where it did needs, leaving out any that certainly moves what `doc`
+/// has. Whatever `lands` can't then show as the same, pasted or already there, is
+/// said in the answer, not refused: the
 /// resolver is sure of less than qml6, and only qml6's refusals refuse.
 pub(crate) fn imports_for(
     store: &dyn Store,
@@ -121,11 +122,14 @@ pub(crate) fn imports_for(
     from: &str,
     had: &[Import],
 ) -> Result<Pasted, SurfaceError> {
-    let beside = texts.join("\n");
+    let pasted: Vec<Vec<Node>> = texts.iter().filter_map(|t| outline::outline(t)).collect();
     let mut names: Vec<String> = Vec::new();
-    for node in texts.iter().filter_map(|t| outline::outline(t)).flatten() {
-        if !names.contains(&node.ty) && !beside.contains(&format!("component {}", node.ty)) {
-            names.push(node.ty);
+    for node in pasted.iter().flatten() {
+        let inline = pasted
+            .iter()
+            .any(|nodes| outline::declares_component(nodes, &node.ty));
+        if !names.contains(&node.ty) && !inline {
+            names.push(node.ty.clone());
         }
     }
     let target = outline::imports(source).unwrap_or_default();
@@ -155,11 +159,13 @@ pub(crate) fn imports_for(
     let was_at = Names::at(store, from, had);
     let here = dir_of(doc);
     let there = dir_of(from);
-    let holds: Vec<String> = outline::outline(source)
-        .into_iter()
-        .flatten()
-        .map(|node| node.ty)
-        .collect();
+    let held = outline::outline(source).unwrap_or_default();
+    let mut holds: Vec<String> = Vec::new();
+    for node in &held {
+        if !holds.contains(&node.ty) && !outline::declares_component(&held, &node.ty) {
+            holds.push(node.ty.clone());
+        }
+    }
     let moves = |offer: &str| {
         Names::of(store, doc, source, &[offer.to_owned()]).is_some_and(|with| {
             holds
@@ -231,6 +237,22 @@ pub(crate) fn imports_for(
                     ty: name.clone(),
                     was: was.say(),
                     now: now.say(),
+                    held: false,
+                });
+            }
+        }
+        // An import that only may move what the file has goes in, since what
+        // needs it may not load otherwise, and the answer says so.
+        for ty in holds.iter().filter(|_| !imports.is_empty()) {
+            let (was, now) = (before.lands(ty), after.lands(ty));
+            if compare(&was, &now) != Keeps::Same
+                && !(was == Lands::Nowhere && now == Lands::Nowhere)
+            {
+                unvouched.push(Unvouched {
+                    ty: ty.clone(),
+                    was: was.say(),
+                    now: now.say(),
+                    held: true,
                 });
             }
         }

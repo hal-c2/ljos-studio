@@ -289,13 +289,16 @@ impl<'s> Names<'s> {
         if self.types.lookup(&self.scope, ty, found, 0) != Described::Not {
             return TypeIs::Known;
         }
-        let inline = format!("component {ty}");
+        let declares = |text: &str| {
+            studio_core::outline::outline(text)
+                .is_some_and(|nodes| studio_core::outline::declares_component(&nodes, ty))
+        };
         // A type the file uses already, another of changes nothing about
         // whether it loads.
         if studio_core::outline::outline(&self.source)
             .is_some_and(|nodes| nodes.iter().any(|node| node.ty == ty))
-            || self.source.contains(&inline)
-            || beside.contains(&inline)
+            || declares(&self.source)
+            || declares(beside)
         {
             return TypeIs::Known;
         }

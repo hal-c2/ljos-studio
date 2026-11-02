@@ -161,6 +161,9 @@ pub struct Unvouched {
     pub was: String,
     /// Where it is found now.
     pub now: String,
+    /// It is what the file already had, which the paste's imports may have moved.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub held: bool,
 }
 
 #[cfg(test)]

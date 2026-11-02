@@ -748,8 +748,10 @@ since an import having it would win.
 A `paste` asks one resolver where each name landed in its source and where it
 lands in the target: the same, different, or can't tell. It adds the least of the
 source's imports that keeps each name, answers `imported` with them, and leaves
-out any that would move what the file has. Whatever it still can't show as the
-same it writes anyway and lists in `unvouched`, each with `type`, `was` and `now`.
+out any that would certainly move what the file has. Whatever it still can't show
+as the same it writes anyway and lists in `unvouched`, each with `type`, `was` and
+`now`. That includes objects the file already had, with `held: true`, when an import
+went in that may have moved them because the file imports what can't be read.
 Only what qml6 would refuse is refused, which includes an object whose only import
 had to stay out (`unknown_type`). What can't be read comes along with
 `was: "can't tell"`.
