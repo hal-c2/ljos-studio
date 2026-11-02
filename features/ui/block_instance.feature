@@ -144,6 +144,34 @@ Feature: An object of the project's own type says what it takes
     When the person sets "marks" to "hi" in the inspector
     Then the inspector has no button "Write hi as text"
 
+  # A dump writes a native list as `T` with `list` set, not as `list<T>`.
+  Scenario: A list in a type's dump takes no string and offers none
+    Given the file "native/ljostypes.json":
+      """json
+      {"format": 2, "modules": [{"uri": "App.Media", "versions": ["1.0"], "types": [
+        {"name": "Player", "since": "1.0", "base": "Item", "baseModule": "QtQuick",
+         "creatable": true, "defaultProperty": null, "attached": null,
+         "properties": [
+           {"name": "title", "type": "string", "readonly": false, "final": true,
+            "required": false, "constant": false, "group": false, "notify": "titleChanged"},
+           {"name": "marks", "type": "string", "list": true, "readonly": false, "final": true,
+            "required": false, "constant": false, "group": false, "notify": "marksChanged"}],
+         "signals": [], "methods": []}]}]}
+      """
+    And the file "Plain.qml":
+      """qml
+      import App.Media
+
+      Player {
+      }
+      """
+    And the person has selected "Badge badge" in the layers panel
+    When the person sets "marks" to "hi" in the inspector
+    Then the inspector has no button "Write hi as text"
+    When the person sets "title" to "hi" in the inspector
+    And the person clicks the button "Write hi as text"
+    Then the file "Main.qml" says "title: \"hi\""
+
   Scenario: A word in a row with nothing written can be text
     Given the person has selected "Badge badge" in the layers panel
     When the person sets "label" to "hi" in the inspector
