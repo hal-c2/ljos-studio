@@ -56,6 +56,15 @@ Panel {
         case "Image":
         case "Item":
             return name + " {\n    width: 100\n    height: 100\n}"
+        // A view with nothing to see draws one colour, and a model without
+        // a material or a camera without distance shows nothing either.
+        case "View3D":
+            return "View3D {\n    width: 320\n    height: 240\n    environment: SceneEnvironment {\n        backgroundMode: SceneEnvironment.Color\n        clearColor: \"#20242c\"\n    }\n\n    PerspectiveCamera {\n        z: 300\n    }\n\n    DirectionalLight {\n        eulerRotation.x: -30\n    }\n\n    Model {\n        source: \"#Cube\"\n        eulerRotation: Qt.vector3d(30, 30, 0)\n        materials: PrincipledMaterial {\n            baseColor: \"#40c080\"\n        }\n    }\n}"
+        case "Model":
+            return "Model {\n    source: \"#Cube\"\n    materials: PrincipledMaterial {\n        baseColor: \"#40c080\"\n    }\n}"
+        case "PerspectiveCamera":
+        case "OrthographicCamera":
+            return name + " {\n    z: 300\n}"
         default:
             return name + " {\n}"
         }

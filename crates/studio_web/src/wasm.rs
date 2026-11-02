@@ -150,6 +150,12 @@ pub fn held_functions() -> usize {
         + WATCHERS.with_borrow(|all| all.values().map(Vec::len).sum::<usize>())
 }
 
+/// The native block's `literal`: the inspector asks before it writes.
+#[wasm_bindgen(js_name = isLiteral)]
+pub fn is_literal(text: &str) -> bool {
+    studio_core::is_literal_text(text)
+}
+
 const CLOSED: &str = "this Studio is closed";
 
 #[wasm_bindgen]

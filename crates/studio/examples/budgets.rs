@@ -120,10 +120,18 @@ fn main() -> anyhow::Result<()> {
             "Rectangle card1"
         };
         let row = window.layer(label)?;
+        // The clock stands still between clicks, so two on a row are a double
+        // click, which names it.
+        window.stage.drive().advance(CLICKS_APART_MS)?;
+        let before = window.selected();
         let started = Instant::now();
         window.click(&row)?;
         window.inspector_field("color")?;
         selections.push(started.elapsed());
+        // Otherwise the time is of a click that changed nothing.
+        if window.selected() == before {
+            bail!("clicking {label:?} selected nothing");
+        }
     }
     report("selection -> inspector shown", &mut selections);
 
@@ -424,6 +432,9 @@ impl Watched {
         Ok(())
     }
 }
+
+/// Longer than a double click lasts, on the driver's clock.
+const CLICKS_APART_MS: u64 = 600;
 
 /// The scene a reload shows its new root in.
 struct SceneHost<'a>(&'a mut ljos_quick::QuickScene);
@@ -744,6 +755,13 @@ impl Window {
         Ok(window)
     }
 
+    fn selected(&self) -> String {
+        format!(
+            "{:?}",
+            self.stage.engine.read_by_name(self.workspace, "selected")
+        )
+    }
+
     fn rest(&mut self) -> anyhow::Result<()> {
         let mut driver = self.stage.drive();
         driver.settle()?;
@@ -844,6 +862,7 @@ impl Window {
     /// the edit. Not timed: only the moves are the frames the budget means.
     fn drag_frames(&mut self, label: &str, moves: usize) -> anyhow::Result<Vec<Duration>> {
         let row = self.layer(label)?;
+        self.stage.drive().advance(CLICKS_APART_MS)?;
         self.click(&row)?;
         let start = self.middle_of_selected()?;
         let before = std::fs::read_to_string(&self.document)?;

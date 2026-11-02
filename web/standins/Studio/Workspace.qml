@@ -41,6 +41,10 @@ QtObject {
     function dispatch(tool: string, args: var) {
     }
 
+    function literal(text: string): bool {
+        return false
+    }
+
     function follow(tool: string, args: var) {
     }
 

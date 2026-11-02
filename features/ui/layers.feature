@@ -46,6 +46,43 @@ Feature: A person arranges the layers in the panel
     Then the file "Main.qml" says "Text { id: subtitle }"
     And the layers panel lists "Item root, Text first, Text subtitle, Text third"
 
+  Scenario: Selecting another row closes the name field and changes nothing
+    When the person double-clicks the layer "Text second"
+    And the person presses "End"
+    And the person presses "x"
+    And the person selects "Text third" in the layers panel
+    Then the layers panel names no object
+    And the layers panel has "Text third" selected
+    When the person presses "Return"
+    Then the file "Main.qml" says "Text { id: second }"
+
+  Scenario: Escape closes the name field and changes nothing
+    When the person double-clicks the layer "Text second"
+    And the person presses "End"
+    And the person presses "x"
+    And the person presses "Escape"
+    Then the layers panel names no object
+    When the person presses "Return"
+    Then the file "Main.qml" says "Text { id: second }"
+
+  Scenario: A name typed and left is not offered again
+    When the person double-clicks the layer "Text second"
+    And the person presses "x"
+    And the person selects "Text third" in the layers panel
+    And the person double-clicks the layer "Text second"
+    And the person presses "Return"
+    Then the file "Main.qml" says "Text { id: second }"
+
+  Scenario: A trip to another window leaves the name being typed
+    When the person double-clicks the layer "Text second"
+    And the person presses "End"
+    And the person presses "x"
+    And the person switches to another window
+    And the person comes back to the window
+    Then the layers panel is naming "Text second"
+    When the person presses "Return"
+    Then the file "Main.qml" says "Text { id: secondx }"
+
   Scenario: The eye and the lock are the row's and write nothing
     When the person clicks the button "Hide Text second"
     And the person clicks the button "Lock Text second"

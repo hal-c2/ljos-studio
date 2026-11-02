@@ -80,6 +80,10 @@ export const Workspace = defineType("Workspace", QtObject, {
     dispatch(tool, args) {
       this.$queue.enqueue({ tool, args: args ?? {} });
     },
+    // Whether `text` is a literal as QML reads one, as the native block says.
+    literal(text) {
+      return served?.isLiteral(text) ?? false;
+    },
     // A call that follows from what the person just did: it leaves the refusal
     // on the line, and says its own only when the line is empty.
     follow(tool, args) {

@@ -1,7 +1,7 @@
 // Studio's MCP tools for a page: `call(tool, args)` answers as an MCP
 // client's call does, once storage has what the call wrote.
 
-import init, { StudioCore } from "./pkg/studio_web.js";
+import init, { isLiteral, StudioCore } from "./pkg/studio_web.js";
 
 let started;
 
@@ -67,6 +67,11 @@ export class Studio {
     const answer = JSON.parse(this.#core.call(tool, JSON.stringify(args), client));
     await this.#store();
     return answer;
+  }
+
+  // Whether `text` is a literal as QML reads one.
+  isLiteral(text) {
+    return isLiteral(text);
   }
 
   // The tools offered, as `tools/list` gives them.

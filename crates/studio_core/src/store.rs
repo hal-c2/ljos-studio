@@ -337,10 +337,8 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let store = FsStore::new(dir.path()).unwrap();
         for bad in ["../x.qml", "/etc/passwd", "", "a/../../b.qml"] {
-            assert!(
-                matches!(store.read(bad), Err(StoreError::Outside(_))),
-                "{bad}"
-            );
+            let got = store.read(bad);
+            assert!(matches!(got, Err(StoreError::Outside(_))), "{bad}: {got:?}");
         }
     }
 
@@ -352,7 +350,7 @@ mod tests {
         std::os::unix::fs::symlink("real", dir.path().join("alias")).unwrap();
         assert_eq!(store.read("alias/One.qml").unwrap(), "Item {}");
         store.write("alias/Two.qml", "Item {}").unwrap();
-        assert!(store.exists("real/Two.qml"));
+        assert_eq!(store.read("real/Two.qml").unwrap(), "Item {}");
     }
 
     #[test]
@@ -360,7 +358,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let store = FsStore::new(dir.path()).unwrap();
         store.write("a/b/c/New.qml", "Item {}").unwrap();
-        assert!(store.exists("a/b/c/New.qml"));
+        assert_eq!(store.read("a/b/c/New.qml").unwrap(), "Item {}");
     }
 
     #[test]
@@ -381,17 +379,20 @@ mod tests {
             "File.qml",
             "Dangling.qml",
         ] {
+            let got = store.read(bad);
             assert!(
-                matches!(store.read(bad), Err(StoreError::Outside(_))),
-                "read {bad}"
+                matches!(got, Err(StoreError::Outside(_))),
+                "read {bad}: {got:?}"
             );
+            let got = store.write(bad, "mine");
             assert!(
-                matches!(store.write(bad, "mine"), Err(StoreError::Outside(_))),
-                "write {bad}"
+                matches!(got, Err(StoreError::Outside(_))),
+                "write {bad}: {got:?}"
             );
+            let got = store.remove(bad);
             assert!(
-                matches!(store.remove(bad), Err(StoreError::Outside(_))),
-                "remove {bad}"
+                matches!(got, Err(StoreError::Outside(_))),
+                "remove {bad}: {got:?}"
             );
             assert!(!store.exists(bad), "exists {bad}");
         }

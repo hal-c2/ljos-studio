@@ -4,7 +4,7 @@
 @ui
 Feature: The inspector shows colours and every declared property
   A colour has a swatch, and the swatch opens a picker; what the picker sets
-  is `property_set`, as the row's own field is. A property declared without a
+  is `binding_set`, as the row's own field's is. A property declared without a
   value has a row too, so it can be given one.
 
   Background:
@@ -29,6 +29,11 @@ Feature: The inspector shows colours and every declared property
   Scenario: A property declared without a value has a row
     When the person sets "stack" to "3" in the inspector
     Then the file "Main.qml" says "stack: 3"
+
+  Scenario: A row with nothing written still refuses an expression typed by mistake
+    When the person sets "stack" to "cube" in the inspector
+    Then the window says "cube is not a literal: bind it as an expression"
+    And the file "Main.qml" does not say "cube"
 
   Scenario: A colour has a swatch and others do not
     Then the inspector has the button "Pick color"
@@ -66,6 +71,52 @@ Feature: The inspector shows colours and every declared property
     When the person sets "count" to "null" in the inspector
     Then the window shows a refusal that says "is declared with this value"
     And the file "Main.qml" says "property int count: 1"
+
+  Scenario Outline: A row written as a literal in any of QML's forms refuses an expression
+    When the person replaces "width: 100" with "<name>: <written>" in the code view
+    And the person sets "<name>" to "cube" in the inspector
+    Then the window says "cube is not a literal: bind it as an expression"
+    And the file "Main.qml" says "<name>: <written>"
+
+    Examples:
+      | name       | written |
+      | objectName | 'hello' |
+      | opacity    | .5      |
+      | width      | 0x10    |
+      | x          | -1      |
+
+  Scenario Outline: A literal typed in any of QML's forms is written as typed
+    When the person replaces "width: 100" with "<name>: <written>" in the code view
+    And the person sets "<name>" to "<typed>" in the inspector
+    Then the file "Main.qml" says "<name>: <typed>"
+    And the window does not say "<typed> is not a literal: bind it as an expression"
+    And the window shows no refusal
+
+    Examples:
+      | name       | written | typed   |
+      | objectName | 'hello' | 'world' |
+      | opacity    | .5      | .7      |
+      | width      | 0x10    | 0x20    |
+
+  Scenario Outline: Enter on a row's own text changes nothing
+    When the person replaces "width: 100" with "<name>: <written>" in the code view
+    And the person sets "<name>" to "<written>" in the inspector
+    Then the file "Main.qml" says "<name>: <written>"
+    And the window does not say "<written> is not a literal: bind it as an expression"
+    And the window shows no refusal
+    When the person clicks the button "Undo"
+    Then the file "Main.qml" says "width: 100"
+
+    Examples:
+      | name       | written |
+      | objectName | 'hello' |
+      | opacity    | .5      |
+      | width      | 0x10    |
+
+  Scenario: A row holding an expression stays one when another is typed
+    When the person replaces "width: 100" with "width: 50 + 50" in the code view
+    And the person sets "width" to "60 + 60" in the inspector
+    Then the file "Main.qml" says "width: 60 + 60"
 
   Scenario: The picker writes nothing for what is not a colour
     When the person clicks the button "Pick color"
@@ -148,6 +199,11 @@ Feature: The inspector shows colours and every declared property
       | expression                          | property int size: 1 + 1                       | size                 | no picker |             |                                                        |
       | colour by expression                | property color shade: Qt.rgba(0, 1, 0, 1)      | shade                | a picker  |             | Worked out by Qt.rgba(0, 1, 0, 1): picking replaces it |
       | colour-named expression             | property var borderColor: Colors.text          | borderColor          | a picker  |             | Worked out by Colors.text: picking replaces it         |
+      | single-quoted colour                | property color shade: 'red'                    | shade                | a picker  | red         |                                                        |
+      | single-quoted hex text              | property string code: '#123456'                | code                 | a picker  | #123456     |                                                        |
+      | single-quoted text                  | property string label: 'red'                   | label                | no picker |             |                                                        |
+      | template colour                     | property color shade: `red`                    | shade                | a picker  | red         |                                                        |
+      | colour by name, a number            | property var borderColor: 3                    | borderColor          | a picker  |             |                                                        |
 
   @preview
   Scenario: A new picker does not keep what the last one refused
@@ -165,6 +221,13 @@ Feature: The inspector shows colours and every declared property
     And the person clicks the button "Pick color"
     Then the window does not say "Worked out by "transparent": picking replaces it"
     And the colour picker holds "transparent"
+
+  Scenario: A colour in single quotes is written, not worked out
+    When the person replaces "color: \"#ff0000\"" with "color: 'red'" in the code view
+    And the person selects "Rectangle root" in the layers panel
+    And the person clicks the button "Pick color"
+    Then the window does not say "Worked out by 'red': picking replaces it"
+    And the colour picker holds "red"
 
   Scenario: The picker's sliders leave a colour's alpha as it was written
     When the person clicks the button "Pick tint"

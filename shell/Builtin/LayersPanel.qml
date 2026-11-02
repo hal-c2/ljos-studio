@@ -112,10 +112,13 @@ Panel {
                 Accessible.name: modelData.label
                 highlighted: panel.workspace.chosen.indexOf(modelData.node) >= 0
                 opacity: modelData.hidden ? 0.5 : 1
-                onClicked: panel.workspace.dispatch("node_select", {
-                    doc: panel.workspace.doc,
-                    nodes: [{node: modelData.node}]
-                })
+                onClicked: {
+                    panel.naming = ""
+                    panel.workspace.dispatch("node_select", {
+                        doc: panel.workspace.doc,
+                        nodes: [{node: modelData.node}]
+                    })
+                }
                 onDoubleClicked: panel.naming = modelData.node
 
                 DragHandler {
@@ -134,8 +137,22 @@ Panel {
                     anchors.leftMargin: row.leftPadding
                     text: row.modelData.id
                     Accessible.name: "Name of " + row.modelData.label
-                    onVisibleChanged: if (visible) forceActiveFocus()
+                    // What was typed and left is not offered again.
+                    // Hidden, it would keep the keys, and the next Return would name the row left.
+                    onVisibleChanged: {
+                        if (visible) {
+                            text = row.modelData.id
+                            forceActiveFocus()
+                        } else {
+                            focus = false
+                        }
+                    }
+                    // Left open it covers its row, and clicks there would select nothing.
+                    // Another window taking the focus is a trip, to copy a name.
+                    onActiveFocusChanged: if (!activeFocus && Window.active && panel.naming === row.modelData.node) panel.naming = ""
                     onAccepted: {
+                        if (!visible)
+                            return
                         panel.naming = ""
                         if (text !== row.modelData.id) {
                             panel.workspace.dispatch("node_arrange", {

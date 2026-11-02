@@ -54,6 +54,8 @@ const uncompiled = (request, type) => {
 };
 export const WAITING = new Map([
   ["Waiting on the preview says when its app wakes next", refused(25)],
+  ["The picture shows the scene", { request: 27, cause: said(/0 pixels of green/) }],
+  ["An edit inside the scene reaches the picture", { request: 27, cause: said(/0 pixels of red/) }],
   // The page's outline names the objects, without their boxes or files.
   ["The outline lists every item, with its box and where it is written", { request: 26, cause: said(/`\/outline` is .*without "Rectangle#card 10,20/s) }],
 ]);
@@ -140,6 +142,27 @@ const PREVIEW_STEPS = [
       const bytes = Buffer.from(png, "base64");
       const [width, height] = [bytes.readUInt32BE(16), bytes.readUInt32BE(20)];
       if (!(width > 0 && height > 0 && Math.max(width, height) <= Number(side))) throw new Error(`the picture is ${width}x${height}`);
+    },
+  },
+  {
+    kinds: ["then"],
+    pattern: /^the answer's picture has (some|no) (red|green)$/,
+    async action(w, s, some, colour) {
+      const png = (w.ok(), JSON.stringify(w.answer)).match(/"(iVBORw0KGgo[A-Za-z0-9+/=]+)"/)?.[1];
+      if (!png) throw new Error("the answer has no PNG");
+      const found = await w.page.evaluate(async ([png, at, others]) => {
+        const bitmap = await createImageBitmap(await (await fetch(`data:image/png;base64,${png}`)).blob());
+        const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
+        const context = canvas.getContext("2d");
+        context.drawImage(bitmap, 0, 0);
+        const { data } = context.getImageData(0, 0, bitmap.width, bitmap.height);
+        let found = 0;
+        for (let i = 0; i < data.length; i += 4) {
+          if (others.every((o) => data[i + at] > data[i + o] + 24)) found += 1;
+        }
+        return found;
+      }, colour === "red" ? [png, 0, [1, 2]] : [png, 1, [0, 2]]);
+      if ((found > 0) !== (some === "some")) throw new Error(`${found} pixels of ${colour}`);
     },
   },
 ];

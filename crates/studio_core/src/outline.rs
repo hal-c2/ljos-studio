@@ -70,6 +70,11 @@ pub struct Binding {
     /// `property color`: its value is a colour whatever is written, a name too.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub colour: bool,
+    /// Written as a literal, in any of QML's forms (`'a'`, `.5`, `0x10`):
+    /// what is left is an expression, which an edit has no literal to fall
+    /// back on.
+    #[serde(skip)]
+    pub literal: bool,
 }
 
 /// A `signal` an object declares, each argument's name and type as
@@ -311,7 +316,9 @@ pub(crate) fn collect_bindings(
                 let name = format!("{prefix}{}", b.name);
                 match &b.value {
                     QmlBindingValue::Expression(e) => {
-                        out.push(binding(source, name, e.span(), false))
+                        let mut written = binding(source, name, e.span(), false);
+                        written.literal = is_literal(e);
+                        out.push(written);
                     }
                     QmlBindingValue::Statement(s) => {
                         out.push(binding(source, name, s.span(), false))
@@ -346,6 +353,10 @@ pub(crate) fn collect_bindings(
                     };
                     declared.alias = of_type("alias");
                     declared.colour = of_type("color");
+                    declared.literal = matches!(
+                        &p.value,
+                        Some(QmlBindingValue::Expression(e)) if is_literal(e)
+                    );
                     out.push(declared);
                 }
             }
@@ -364,6 +375,48 @@ fn binding(source: &str, name: String, span: qml_syntax::Span, declared: bool) -
         alias: false,
         holds_objects: false,
         colour: false,
+        literal: false,
+    }
+}
+
+/// Whether `text`, all of it, is what QML reads as a literal: the same answer
+/// a binding written that way gets.
+pub fn is_literal_text(text: &str) -> bool {
+    const BEFORE: &str = "Item { a: ";
+    let source = format!("{BEFORE}{text}\n}}");
+    let allocator = qml_syntax::Allocator::default();
+    let parsed = qml_syntax::parse(&allocator, &source);
+    if !parsed.is_ok() {
+        return false;
+    }
+    let [QmlMember::Binding(binding)] = parsed.document.root.members.as_slice() else {
+        return false;
+    };
+    let QmlBindingValue::Expression(e) = &binding.value else {
+        return false;
+    };
+    // `1\n b: 2` and `1 // why` parse too: the value has to be all there is.
+    let span = e.span();
+    is_literal(e)
+        && span.start as usize == BEFORE.len()
+        && span.end as usize == BEFORE.len() + text.len()
+}
+
+fn is_literal(e: &qml_syntax::js::Expression<'_>) -> bool {
+    use qml_syntax::js;
+    match e {
+        js::Expression::BooleanLiteral(_)
+        | js::Expression::NullLiteral(_)
+        | js::Expression::NumericLiteral(_)
+        | js::Expression::StringLiteral(_) => true,
+        js::Expression::TemplateLiteral(t) => t.expressions.is_empty(),
+        js::Expression::UnaryExpression(u) => {
+            matches!(
+                u.operator,
+                js::UnaryOperator::UnaryNegation | js::UnaryOperator::UnaryPlus
+            ) && matches!(u.argument, js::Expression::NumericLiteral(_))
+        }
+        _ => false,
     }
 }
 
@@ -387,6 +440,41 @@ pub(crate) fn literal_string(value: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_literal_in_any_of_qmls_forms_is_all_of_the_text() {
+        for good in [
+            "1",
+            ".7",
+            "0x20",
+            "-1",
+            "+1",
+            "1e3",
+            "true",
+            "null",
+            "'world'",
+            "\"world\"",
+            "`world`",
+        ] {
+            assert!(is_literal_text(good), "{good}");
+        }
+        for bad in [
+            "",
+            "cube",
+            "1 + 1",
+            "`${a}`",
+            "Qt.red",
+            "undefined",
+            "1\n b: 2",
+            "1 }\nItem {",
+            "1 // why",
+            "{ return 1 }",
+            "Item {}",
+            "[1]",
+        ] {
+            assert!(!is_literal_text(bad), "{bad}");
+        }
+    }
 
     #[test]
     fn groups_are_bindings_not_objects() {
