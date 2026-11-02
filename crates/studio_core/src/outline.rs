@@ -136,6 +136,14 @@ pub fn is_group(object: &QmlObject<'_>) -> bool {
         .is_some_and(|c| c.is_ascii_lowercase())
 }
 
+/// Whether the objects of a parsed text declare the inline component `name`.
+pub fn declares_component(nodes: &[Node], name: &str) -> bool {
+    nodes
+        .iter()
+        .flat_map(|node| &node.path.0)
+        .any(|step| matches!(step, Step::Component(c) if c == name))
+}
+
 /// The objects of `source`, root first in the order written; `None` when it
 /// does not parse.
 pub fn outline(source: &str) -> Option<Vec<Node>> {

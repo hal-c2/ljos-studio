@@ -1459,3 +1459,135 @@ Feature: A tool does not write what would not load or would not show
       {"action": "paste", "doc": "Main.qml", "parent": {"id": "root"}}
       """
     Then the answer's "/unvouched" is absent
+
+  # qml6 6.11: a file beside the document loses to a module, and any file to a
+  # folder, so an import can move what the file has even where Studio can't say
+  # what the file's name was.
+  Scenario Outline: An import that may move what the target has is said, where the target can't be read
+    Given the file "Button.qml":
+      """qml
+      import QtQuick
+
+      Item {}
+      """
+    And the file "lib/Slider.qml":
+      """qml
+      import QtQuick
+
+      Item {}
+      """
+    And the file "lib/Button.qml":
+      """qml
+      import QtQuick
+
+      Item {}
+      """
+    And the file "Nat.qml":
+      """qml
+      import QtQuick
+      import App.Native
+
+      Item {
+          id: nat
+          Button { id: mine }
+      }
+      """
+    And the file "Has.qml":
+      """qml
+      import QtQuick
+      import <import>
+
+      Item {
+          id: has
+          Slider { id: s }
+      }
+      """
+    And the agent has called the tool "node_arrange" with:
+      """json
+      {"action": "copy", "doc": "Has.qml", "nodes": [{"id": "s"}]}
+      """
+    When the agent calls the tool "node_arrange" with:
+      """json
+      {"action": "paste", "doc": "Nat.qml", "parent": {"id": "nat"}}
+      """
+    Then the answer's "/unvouched/0/type" is "Button"
+    And the answer's "/unvouched/0/held" is true
+    And the answer's "/unvouched/0/was" is "can't tell"
+    And the answer's "/unvouched/0/now" is "<now>"
+
+    Examples:
+      | import           | now              |
+      | QtQuick.Controls | QtQuick.Controls |
+      | "./lib"          | the folder lib   |
+
+  Scenario: An inline component's name doesn't hide a longer one's neighbour in a paste
+    Given the file "Has.qml":
+      """qml
+      import QtQuick
+      import QtQuick.Controls
+
+      Item {
+          id: has
+          Item {
+              id: box
+              component SliderHandle: Rectangle {}
+              Slider { id: s }
+          }
+      }
+      """
+    And the agent has called the tool "node_arrange" with:
+      """json
+      {"action": "copy", "doc": "Has.qml", "nodes": [{"id": "box"}]}
+      """
+    When the agent calls the tool "node_arrange" with:
+      """json
+      {"action": "paste", "doc": "Plain.qml", "parent": {"id": "plain"}}
+      """
+    Then the file "Plain.qml" contains "import QtQuick.Controls"
+
+  Scenario: A paste's own inline component needs no import and is vouched for
+    Given the file "Has.qml":
+      """qml
+      import QtQuick
+
+      Item {
+          id: has
+          Item {
+              id: box
+              component Handle: Rectangle {}
+              Handle { id: h }
+          }
+      }
+      """
+    And the agent has called the tool "node_arrange" with:
+      """json
+      {"action": "copy", "doc": "Has.qml", "nodes": [{"id": "box"}]}
+      """
+    When the agent calls the tool "node_arrange" with:
+      """json
+      {"action": "paste", "doc": "Plain.qml", "parent": {"id": "plain"}}
+      """
+    Then the file "Plain.qml" contains "Handle { id: h }"
+    And the answer's "/unvouched" is absent
+
+  Scenario Outline: A name is not known for an inline component whose name only starts with it, or for a word in a comment
+    Given the file "Handled.qml":
+      """qml
+      import QtQuick
+
+      Item {
+          id: handled
+          <beside>
+      }
+      """
+    When the agent calls the tool "node_insert" with:
+      """json
+      {"doc": "Handled.qml", "parent": {"id": "handled"}, "text": "Slider {}"}
+      """
+    Then the agent is refused with "not_actionable"
+    And the refusal's "/details/kind" is "unknown_type"
+
+    Examples:
+      | beside                                |
+      | component SliderHandle: Rectangle {}  |
+      | // component Slider is for later      |
