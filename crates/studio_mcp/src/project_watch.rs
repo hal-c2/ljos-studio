@@ -255,7 +255,7 @@ mod tests {
             own("Mine.qml", Some(&text));
             saved(dir.path(), "Mine.qml", &text);
         }
-        std::fs::write(dir.path().join("Theirs.qml"), "Item {}\n").unwrap();
+        saved(dir.path(), "Theirs.qml", "Item {}\n");
         waits_for("the later file", || told.load(Ordering::SeqCst) > 0);
         assert_eq!(told.load(Ordering::SeqCst), 1);
     }
@@ -270,7 +270,7 @@ mod tests {
             saved(dir.path(), "Mine.qml", text);
         }
         // Told of the session's last write, so the window has room for news.
-        std::fs::write(dir.path().join("Marker.qml"), "Item {}\n").unwrap();
+        saved(dir.path(), "Marker.qml", "Item {}\n");
         waits_for("the marker", || told.load(Ordering::SeqCst) > 0);
         saved(dir.path(), "Mine.qml", "Item { width: 1 }\n");
         waits_for("the save", || told.load(Ordering::SeqCst) > 1);
@@ -284,7 +284,7 @@ mod tests {
         std::fs::write(dir.path().join("target/Out.qml"), "Item {}\n").unwrap();
         std::fs::write(dir.path().join(".Main.qml.swp"), "x").unwrap();
         std::fs::write(dir.path().join("Main.qml.studio-tmp"), "x").unwrap();
-        std::fs::write(dir.path().join("Theirs.qml"), "Item {}\n").unwrap();
+        saved(dir.path(), "Theirs.qml", "Item {}\n");
         waits_for("the later file", || told.load(Ordering::SeqCst) > 0);
         assert_eq!(told.load(Ordering::SeqCst), 1);
     }
@@ -308,18 +308,22 @@ mod tests {
         }
         waits_for("the log", || others.load(Ordering::SeqCst) > 0);
         assert_eq!(documents.load(Ordering::SeqCst), 0);
-        std::fs::write(dir.path().join("A.qml"), "Item {}\n").unwrap();
-        waits_for("the document", || documents.load(Ordering::SeqCst) == 1);
+        // Saved whole, as every test here saves what it waits on: a write in
+        // place can be read empty and then full, two changes, and a wait for
+        // exactly one could pass between them and time out.
+        saved(dir.path(), "A.qml", "Item {}\n");
+        waits_for("the document", || documents.load(Ordering::SeqCst) > 0);
+        assert_eq!(documents.load(Ordering::SeqCst), 1, "tellings of one save");
     }
 
     #[test]
     fn a_file_saved_unchanged_tells_once() {
         let dir = tempfile::tempdir().unwrap();
         let (_watch, told) = watched(dir.path());
-        std::fs::write(dir.path().join("A.qml"), "Item {}\n").unwrap();
+        saved(dir.path(), "A.qml", "Item {}\n");
         waits_for("the first save", || told.load(Ordering::SeqCst) == 1);
-        std::fs::write(dir.path().join("A.qml"), "Item {}\n").unwrap();
-        std::fs::write(dir.path().join("B.qml"), "Item {}\n").unwrap();
+        saved(dir.path(), "A.qml", "Item {}\n");
+        saved(dir.path(), "B.qml", "Item {}\n");
         waits_for("the later file", || told.load(Ordering::SeqCst) == 2);
         assert_eq!(told.load(Ordering::SeqCst), 2);
     }
