@@ -9,73 +9,44 @@ expression: value
     "open_world": false,
     "read_only": false
   },
-  "description": "Set a property to a literal (bool, number, string) or remove it with null. Grouped and dotted forms are one property; a new one follows the file's style.",
+  "description": "Set a property to a literal (bool, number, string), or remove it with null. Grouped and dotted forms are one property; a new one follows the file's style.",
   "inputSchema": {
-    "$defs": {
-      "Address": {
-        "description": "One of: `node`, a handle the session gave out (`n7`), stable for the session; `id`, the object's `id`; `path`, as `document_tree` prints it (`root/0/contentItem:`), true of the current text only.",
-        "maxProperties": 1,
-        "minProperties": 1,
-        "properties": {
-          "id": {
-            "type": "string"
-          },
-          "node": {
-            "type": "string"
-          },
-          "path": {
-            "type": "string"
-          }
-        },
-        "type": "object"
-      },
-      "LiteralArg": {
-        "anyOf": [
-          {
-            "type": "boolean"
-          },
-          {
-            "type": "number"
-          },
-          {
-            "type": "string"
-          }
-        ],
-        "description": "A literal a property is set to."
-      }
-    },
     "properties": {
       "doc": {
         "type": "string"
       },
       "dry_run": {
-        "default": false,
         "type": "boolean"
       },
       "generation": {
-        "description": "The generation read. By handle or `id`, the edit is moved past what\nothers wrote since, or refused as a conflict; by `path`, which is true\nof one generation only, it is refused if the document moved on, so\na `path` needs it.",
-        "type": [
-          "integer",
-          "null"
-        ]
+        "description": "The generation read; a `path` needs it (handles and ids are moved past others' edits).",
+        "type": "integer"
       },
       "name": {
         "description": "`width`, `font.bold`; written grouped or dotted as the file already does.",
         "type": "string"
       },
       "node": {
-        "$ref": "#/$defs/Address"
+        "additionalProperties": {
+          "type": "string"
+        },
+        "description": "One of `node` (session handle), `id`, `path` (from `document_tree`; this text only).",
+        "type": "object"
       },
       "value": {
         "anyOf": [
           {
-            "$ref": "#/$defs/LiteralArg"
+            "type": [
+              "boolean",
+              "number",
+              "string"
+            ]
           },
           {
             "type": "null"
           }
         ],
-        "description": "`null` removes the binding. Required: left out, nothing is removed."
+        "description": "`null` removes the binding. Required."
       }
     },
     "required": [
@@ -99,30 +70,10 @@ expression: value
       "generation": {
         "type": "integer"
       },
-      "history": {
-        "type": [
-          "integer",
-          "null"
-        ]
-      },
-      "node": {
-        "type": [
-          "string",
-          "null"
-        ]
-      },
-      "rebased_from": {
-        "type": [
-          "integer",
-          "null"
-        ]
-      },
-      "text": {
-        "type": [
-          "string",
-          "null"
-        ]
-      },
+      "history": {},
+      "node": {},
+      "rebased_from": {},
+      "text": {},
       "unchanged": {
         "type": "boolean"
       }

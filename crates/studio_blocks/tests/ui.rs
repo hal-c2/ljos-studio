@@ -4,12 +4,14 @@
 //! does, by role and name, and click, type and press keys as a person does;
 //! the oracle is the file text, as for the MCP scenarios.
 
+use std::cell::Cell;
+use std::rc::Rc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, mpsc};
 use std::time::Duration;
 
 use cucumber::{World, gherkin::Step, given, then, when};
-use ljos::item::{DrawOp, MouseButtons, WheelEvent, kurbo::Point};
+use ljos::item::{DrawOp, MouseButtons, PointerEvent, WheelEvent, kurbo::Point};
 use ljos::prelude::*;
 use ljos::testing::AccessibleNode;
 use ljos_dev::{DevSession, Host, Report};
@@ -38,6 +40,10 @@ struct UiWorld {
     pointer_was: Option<Point>,
     /// A workspace a scenario expects to go.
     remembered: Option<ObjectId>,
+    /// The threads following a picture before the one a scenario starts, and
+    /// that one once it is told.
+    followers_before: Vec<String>,
+    follower: Option<String>,
     /// Where the outline was shown, bare of a ghost, in the frames of a flick.
     outlines: Vec<(f64, f64)>,
     dir: tempfile::TempDir,
@@ -51,6 +57,7 @@ struct UiWorld {
     /// The previews say nothing of where their objects are, as a web host.
     no_places: bool,
     picture_ms: Arc<AtomicU64>,
+    placed_ms: Arc<AtomicU64>,
     /// Where a step left the hand holding the canvas.
     held: Option<Point>,
 }
@@ -58,10 +65,19 @@ struct UiWorld {
 /// A preview that answers everything but `placed`, whose default refuses.
 struct NoPlaces(NativeHost);
 
-/// A preview that spends what a step says (in ms) over each picture.
-struct SlowPictures(NativeHost, Arc<AtomicU64>);
+/// A preview that spends what a step says (in ms) over each picture, and over
+/// saying where its objects are: a stand-in for a slow machine, so that what
+/// is about the order of things does not rest on how fast this build is.
+struct SlowPictures(NativeHost, Arc<AtomicU64>, Arc<AtomicU64>);
 
 impl PreviewHost for SlowPictures {
+    fn scene(
+        &mut self,
+        at: &Declared,
+    ) -> Result<Option<studio_core::scene3d::Scene>, PreviewError> {
+        self.0.scene(at)
+    }
+
     fn open(&mut self, spec: &PreviewSpec) -> Result<(), PreviewError> {
         self.0.open(spec)
     }
@@ -85,6 +101,11 @@ impl PreviewHost for SlowPictures {
 
     fn outline(&mut self) -> Result<String, PreviewError> {
         self.0.outline()
+    }
+
+    fn placed(&mut self, ids: &[String], types: &[String]) -> Result<Vec<Placed>, PreviewError> {
+        std::thread::sleep(Duration::from_millis(self.2.load(Ordering::SeqCst)));
+        self.0.placed(ids, types)
     }
 
     fn rest_watch(&self) -> Option<Box<dyn RestWatch>> {
@@ -123,16 +144,19 @@ impl PreviewHost for SlowPictures {
         self.0.calls_per_second()
     }
 
-    fn placed(&mut self, ids: &[String], types: &[String]) -> Result<Vec<Placed>, PreviewError> {
-        self.0.placed(ids, types)
-    }
-
     fn click(&mut self, at: &Click) -> Result<(), PreviewError> {
         self.0.click(at)
     }
 }
 
 impl PreviewHost for NoPlaces {
+    fn scene(
+        &mut self,
+        at: &Declared,
+    ) -> Result<Option<studio_core::scene3d::Scene>, PreviewError> {
+        self.0.scene(at)
+    }
+
     fn open(&mut self, spec: &PreviewSpec) -> Result<(), PreviewError> {
         self.0.open(spec)
     }
@@ -191,6 +215,7 @@ impl PreviewHost for NoPlaces {
 }
 
 struct Window {
+    overflowed: Rc<Cell<Option<String>>>,
     /// Dropped first: the watcher's thread ends before the engine goes.
     watch: Option<Watch>,
     stage: Stage,
@@ -227,6 +252,8 @@ impl UiWorld {
             frame_before: None,
             pointer_was: None,
             remembered: None,
+            followers_before: Vec::new(),
+            follower: None,
             outlines: Vec::new(),
             dir: tempfile::tempdir().expect("a temporary directory"),
             state: tempfile::tempdir().expect("a temporary directory"),
@@ -235,6 +262,7 @@ impl UiWorld {
             asked: 0,
             no_places: false,
             picture_ms: Arc::default(),
+            placed_ms: Arc::default(),
             held: None,
         }
     }
@@ -314,6 +342,7 @@ impl UiWorld {
         let state = self.state.path().join("preview");
         let no_places = self.no_places;
         let picture_ms = Arc::clone(&self.picture_ms);
+        let placed_ms = Arc::clone(&self.placed_ms);
         let studio = Studio::open(self.dir.path())
             .map_err(|e| e.to_string())?
             .with_previews(Arc::new(move |dir| {
@@ -321,11 +350,22 @@ impl UiWorld {
                 if no_places {
                     Box::new(NoPlaces(host))
                 } else {
-                    Box::new(SlowPictures(host, Arc::clone(&picture_ms)))
+                    Box::new(SlowPictures(
+                        host,
+                        Arc::clone(&picture_ms),
+                        Arc::clone(&placed_ms),
+                    ))
                 }
             }));
         let server = Arc::new(StudioServer::new(studio));
         let engine = ljos::engine();
+        let overflowed = Rc::new(Cell::new(None));
+        let seen = Rc::clone(&overflowed);
+        engine.set_warning_handler(move |message| {
+            if message.contains("Maximum call stack") {
+                seen.set(Some(message.to_owned()));
+            }
+        });
         studio_blocks::register(&engine);
         let mut stage = Stage::new(&engine, WIDTH, HEIGHT);
         studio_blocks::serve(&engine, Arc::clone(&server));
@@ -336,6 +376,7 @@ impl UiWorld {
             .map_err(|e| e.to_string())?;
         stage.scene.set_accessibility_active(&engine, true);
         let mut window = Window {
+            overflowed,
             watch,
             stage,
             root,
@@ -537,7 +578,13 @@ impl Window {
         let mut patience = self.patience();
         let mut driver = self.stage.drive().serving(Some(&mut patience));
         driver.settle().map_err(drive_error)?;
-        driver.finish_promised().map_err(drive_error)
+        driver.finish_promised().map_err(drive_error)?;
+        // A binding that runs out of stack keeps its old value and says so
+        // only in a warning: the window looks stale for no visible reason.
+        match self.overflowed.take() {
+            Some(warning) => Err(format!("the window ran out of JS stack: {warning}")),
+            None => Ok(()),
+        }
     }
 
     /// Lets `ms` pass on the test clock, as patient as `rest`.
@@ -890,7 +937,13 @@ fn the_file(w: &mut UiWorld, name: String, step: &Step) -> StepResult {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
-    std::fs::write(path, file_text(step)?).map_err(|e| e.to_string())
+    // Whole or not at all: `fs::write` truncates first, and the shell's watcher
+    // can wake in between and read a file with nothing in it. The new text
+    // waits outside the project, where no watcher sees it.
+    let scratch = w.dir.path().parent().ok_or("the project has no parent")?;
+    let mut text = tempfile::NamedTempFile::new_in(scratch).map_err(|e| e.to_string())?;
+    std::io::Write::write_all(&mut text, file_text(step)?.as_bytes()).map_err(|e| e.to_string())?;
+    text.persist(path).map(drop).map_err(|e| e.to_string())
 }
 
 #[given(regex = r"^(\d+) more documents$")]
@@ -973,6 +1026,28 @@ fn sets(w: &mut UiWorld, name: String, value: String) -> StepResult {
     }
 }
 
+#[when(regex = r#"^the person enters "([^"]+)" as the new property in the inspector$"#)]
+fn enters_new_property(w: &mut UiWorld, name: String) -> StepResult {
+    let window = w.window()?;
+    let field = window.node("Inspector", Some("textinput"), "New property")?;
+    window.enter(&field, &name)
+}
+
+#[then(regex = r#"^the inspector offers the field "([^"]+)"$"#)]
+fn offers_field(w: &mut UiWorld, name: String) -> StepResult {
+    w.window()?
+        .node("Inspector", Some("textinput"), &name)
+        .map(|_| ())
+}
+
+#[then(regex = r#"^the inspector does not offer the field "([^"]+)"$"#)]
+fn no_field(w: &mut UiWorld, name: String) -> StepResult {
+    match w.window()?.node("Inspector", Some("textinput"), &name) {
+        Ok(_) => Err(format!("the inspector offers {name:?}")),
+        Err(_) => Ok(()),
+    }
+}
+
 #[when(regex = r#"^the person binds "([^"]+)" to "(.*)" in the inspector$"#)]
 fn binds(w: &mut UiWorld, name: String, expression: String) -> StepResult {
     let expression = unescape(&expression);
@@ -1012,6 +1087,28 @@ fn binds(w: &mut UiWorld, name: String, expression: String) -> StepResult {
 fn places(w: &mut UiWorld, name: String) -> StepResult {
     let window = w.window()?;
     let button = window.node("Palette", None, &format!("Place {name}"))?;
+    window.click_node(&button)
+}
+
+#[when(regex = r#"^the person imports "([^"]+)" in the palette$"#)]
+fn imports_asset(w: &mut UiWorld, path: String) -> StepResult {
+    let window = w.window()?;
+    let field = window.node("Palette", Some("textinput"), "Path of a file to import")?;
+    window.click_shown(&field)?;
+    window.stage.drive().commit(&path).map_err(drive_error)?;
+    window.rest()?;
+    let button = window.node("Palette", None, "Import asset")?;
+    window.click_node(&button)
+}
+
+#[when(regex = r#"^the person makes a component "([^"]+)" of the selection$"#)]
+fn makes_component(w: &mut UiWorld, name: String) -> StepResult {
+    let window = w.window()?;
+    let field = window.node("Inspector", Some("textinput"), "Component name")?;
+    window.click_shown(&field)?;
+    window.stage.drive().commit(&name).map_err(drive_error)?;
+    window.rest()?;
+    let button = window.node("Inspector", None, "Make component")?;
     window.click_node(&button)
 }
 
@@ -1063,6 +1160,25 @@ fn clicks_button(w: &mut UiWorld, name: String) -> StepResult {
     .cloned()
     .ok_or_else(|| format!("no button {name:?}; the window holds {}", names(&tree)))?;
     window.click_node(&button)
+}
+
+#[when(regex = r#"^the pointer rests on the button "([^"]+)" until its tip has shown$"#)]
+fn rests_on_button(w: &mut UiWorld, name: String) -> StepResult {
+    let window = w.window()?;
+    let tree = window.tree();
+    let button = find(&tree, &|n| {
+        n.name == name && n.role == "button" && n.key.is_some()
+    })
+    .cloned()
+    .ok_or_else(|| format!("no button {name:?}; the window holds {}", names(&tree)))?;
+    let mut driver = window.stage.drive();
+    let at = driver
+        .aim_at_node(button.key.ok_or("the button has no key")?)
+        .map_err(|why| format!("{name:?} is not reached: {why:?}"))?;
+    driver.move_to(at).map_err(drive_error)?;
+    // Longer than the tip's delay.
+    window.advance(800)?;
+    window.rest()
 }
 
 #[given(regex = r#"^the person has added the state "([^"]+)" in the inspector$"#)]
@@ -1240,6 +1356,7 @@ fn inspector_button_disabled(w: &mut UiWorld, name: String) -> StepResult {
         .ok_or_else(|| format!("{name:?} is {:?}", button.states))
 }
 
+#[given(regex = r#"^the person has typed "(.*)" in the inspector's "([^"]+)" and left it$"#)]
 #[when(regex = r#"^the person types "(.*)" in the inspector's "([^"]+)" and leaves it$"#)]
 fn types_in_row(w: &mut UiWorld, text: String, name: String) -> StepResult {
     let text = unescape(&text);
@@ -1556,6 +1673,7 @@ fn call_as(w: &mut UiWorld, client: Option<String>, tool: &str, step: &Step) -> 
     window.rest()
 }
 
+#[given(regex = r#"^the person has chosen the target "([^"]+)"$"#)]
 #[when(regex = r#"^the person chooses the target "([^"]+)"$"#)]
 fn chooses_target(w: &mut UiWorld, target: String) -> StepResult {
     let window = w.window()?;
@@ -1589,6 +1707,51 @@ fn clicks_frame(w: &mut UiWorld, target: String, x: f64, y: f64) -> StepResult {
         .click(at, MouseButtons::LEFT, 1)
         .map_err(drive_error)?;
     window.rest()
+}
+
+/// A click with Shift held, which adds to the selection.
+fn shift_click(window: &mut Window, at: Point) -> StepResult {
+    let shift = ljos_drive::parse_modifiers("Shift")?;
+    let mut driver = window.stage.drive();
+    let t = driver.now();
+    let mut moved = PointerEvent::moved(at.x, at.y, MouseButtons::empty(), t);
+    moved.modifiers = shift;
+    let mut pressed = PointerEvent::press(at.x, at.y, t).with_button(MouseButtons::LEFT);
+    pressed.modifiers = shift;
+    let mut released = PointerEvent::release(at.x, at.y, t).with_button(MouseButtons::LEFT);
+    released.modifiers = shift;
+    driver.send_pointer(&moved);
+    driver.send_pointer(&pressed);
+    // A hand is still down when the selection's answer comes.
+    window.rest()?;
+    let mut driver = window.stage.drive();
+    driver.send_pointer(&released);
+    driver.settle().map_err(drive_error)?;
+    window.rest()
+}
+
+#[when(regex = r#"^the person clicks the frame "([^"]+)" at (\d+), (\d+) holding Shift$"#)]
+fn shift_clicks_frame(w: &mut UiWorld, target: String, x: f64, y: f64) -> StepResult {
+    let window = w.window()?;
+    let at = frame_point(window, &target, x, y)?;
+    shift_click(window, at)
+}
+
+#[when(regex = r#"^the person selects "([^"]+)" in the layers panel holding Shift$"#)]
+fn shift_selects_layer(w: &mut UiWorld, label: String) -> StepResult {
+    let window = w.window()?;
+    let row = window
+        .shown_layers()?
+        .into_iter()
+        .find(|n| n.name == label)
+        .ok_or_else(|| format!("the layers panel lists {:?}", window.layers()))?;
+    let key = row.key.ok_or("the row has no key")?;
+    let at = window
+        .stage
+        .drive()
+        .aim_at_node(key)
+        .map_err(|why| format!("{why:?}"))?;
+    shift_click(window, at)
 }
 
 /// Where a point of the frame is in the window.
@@ -1904,6 +2067,53 @@ fn outline_never_back(w: &mut UiWorld, x: f64, y: f64) -> StepResult {
     }
 }
 
+#[given(
+    regex = r#"^the person has pressed in the frame "([^"]+)" at (\d+), (\d+) and held it at (\d+), (\d+)$"#
+)]
+#[given(
+    regex = r#"^the person has dragged in the frame "([^"]+)" from (\d+), (\d+) to (\d+), (\d+) at once, leaving the read on its way$"#
+)]
+fn drags_leaving_read(
+    w: &mut UiWorld,
+    target: String,
+    x0: f64,
+    y0: f64,
+    x1: f64,
+    y1: f64,
+) -> StepResult {
+    let window = w.window()?;
+    let from = frame_point(window, &target, x0, y0)?;
+    let to = frame_point(window, &target, x1, y1)?;
+    let mut drive = window.stage.drive();
+    drive.press(from, MouseButtons::LEFT).map_err(drive_error)?;
+    drive.move_to(to).map_err(drive_error)?;
+    drive.release(to, MouseButtons::LEFT).map_err(drive_error)?;
+    Ok(())
+}
+
+/// No rest between them: the press's read is on its way when the hand moves.
+#[when(
+    regex = r#"^the person presses in the frame "([^"]+)" at (\d+), (\d+) and at once holds it at (\d+), (\d+)$"#
+)]
+fn holds_in_frame_at_once(
+    w: &mut UiWorld,
+    target: String,
+    x0: f64,
+    y0: f64,
+    x1: f64,
+    y1: f64,
+) -> StepResult {
+    let window = w.window()?;
+    let from = frame_point(window, &target, x0, y0)?;
+    let to = frame_point(window, &target, x1, y1)?;
+    let mut drive = window.stage.drive();
+    drive.press(from, MouseButtons::LEFT).map_err(drive_error)?;
+    drive.move_to(to).map_err(drive_error)?;
+    window.rest()?;
+    w.held = Some(to);
+    Ok(())
+}
+
 #[when(
     regex = r#"^the person presses in the frame "([^"]+)" at (\d+), (\d+) and holds it at (\d+), (\d+)$"#
 )]
@@ -1973,11 +2183,41 @@ fn file_says(w: &mut UiWorld, name: String, want: String) -> StepResult {
 
 #[then(regex = r#"^the canvas outlines the selection at (\d+), (\d+) sized (\d+) by (\d+)$"#)]
 fn outline_at(w: &mut UiWorld, x: f64, y: f64, width: f64, height: f64) -> StepResult {
+    outline_of(w, "Desktop", x, y, width, height)
+}
+
+#[then(
+    regex = r#"^the frame "([^"]+)" outlines the selection at (\d+), (\d+) sized (\d+) by (\d+)$"#
+)]
+fn frame_outlines(
+    w: &mut UiWorld,
+    target: String,
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
+) -> StepResult {
+    outline_of(w, &target, x, y, width, height)
+}
+
+fn outline_of(
+    w: &mut UiWorld,
+    target: &str,
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
+) -> StepResult {
     let window = w.window()?;
-    let outline = overlay_part(window, "selectionOutline")?;
+    let frame = window.frame(target)?;
+    let part = |name: &str| {
+        ljos_drive::find_below(window.engine(), frame, name)
+            .ok_or_else(|| format!("the frame has no {name}"))
+    };
+    let outline = part("selectionOutline")?;
     let zoom = window
         .engine()
-        .read_by_name(overlay_part(window, "overlay")?, "zoom")
+        .read_by_name(part("overlay")?, "zoom")
         .to_number();
     let read = |name: &str| window.engine().read_by_name(outline, name).to_number() / zoom;
     let got = (read("x"), read("y"), read("width"), read("height"));
@@ -1998,6 +2238,19 @@ fn handles_shown(w: &mut UiWorld, want: usize) -> StepResult {
     (got == want)
         .then_some(())
         .ok_or_else(|| format!("{got} handles"))
+}
+
+#[then(regex = r#"^the canvas shows (\d+) move arrows$"#)]
+fn arrows_shown(w: &mut UiWorld, want: usize) -> StepResult {
+    let window = w.window()?;
+    let overlay = overlay_part(window, "overlay")?;
+    let got = window
+        .engine()
+        .read_by_name(overlay, "arrowsShown")
+        .to_number() as usize;
+    (got == want)
+        .then_some(())
+        .ok_or_else(|| format!("{got} arrows"))
 }
 
 #[then(regex = r#"^the canvas shows a ([xy]) guide at (\d+)$"#)]
@@ -2717,6 +2970,14 @@ fn window_shows_document(w: &mut UiWorld, want: String) -> StepResult {
         .ok_or_else(|| format!("the window shows the document {doc:?}"))
 }
 
+#[then("the window shows no document")]
+fn window_shows_no_document(w: &mut UiWorld) -> StepResult {
+    let doc = w.window()?.read("doc").to_js_string().to_string();
+    doc.is_empty()
+        .then_some(())
+        .ok_or_else(|| format!("the window shows the document {doc:?}"))
+}
+
 #[then("the documents panel says why it made no document")]
 fn documents_says_why(w: &mut UiWorld) -> StepResult {
     let window = w.window()?;
@@ -3233,6 +3494,11 @@ fn slow_pictures(w: &mut UiWorld, ms: u64) {
     w.picture_ms.store(ms, Ordering::SeqCst);
 }
 
+#[given(regex = r"^the preview takes (\d+) ms to say where its objects are$")]
+fn slow_places(w: &mut UiWorld, ms: u64) {
+    w.placed_ms.store(ms, Ordering::SeqCst);
+}
+
 #[given("Studio's window runs the person's shell, a copy of its own")]
 fn runs_own_shell(w: &mut UiWorld) -> StepResult {
     studio_blocks::shell::seed(w.dir.path()).map_err(|e| e.to_string())?;
@@ -3258,13 +3524,75 @@ fn opens_again(w: &mut UiWorld) -> StepResult {
     w.open_watched()
 }
 
-#[given(regex = r"^1 thread is following the preview's picture$")]
-fn one_follower(w: &mut UiWorld) -> StepResult {
+/// The ids of the threads following a preview's picture, as the operating
+/// system lists them: what a person's task manager shows, so there is no
+/// hook the product keeps for a test. An earlier scenario's window may be
+/// ending its own, so a scenario knows its thread by being new.
+fn picture_followers() -> Result<Vec<String>, String> {
+    // A thread's name is cut to 15 bytes there.
+    const NAME: &str = "studio-picture-";
+    let tasks =
+        std::fs::read_dir("/proc/self/task").map_err(|e| format!("/proc/self/task: {e}"))?;
+    Ok(tasks
+        .filter_map(Result::ok)
+        .filter(|t| {
+            std::fs::read_to_string(t.path().join("comm")).is_ok_and(|name| name.starts_with(NAME))
+        })
+        .map(|t| t.file_name().to_string_lossy().into_owned())
+        .collect())
+}
+
+#[given("the person has listed the threads following the preview's picture")]
+fn list_followers(w: &mut UiWorld) -> StepResult {
+    w.followers_before = picture_followers()?;
+    Ok(())
+}
+
+#[given("a new thread is following the preview's picture")]
+fn new_follower(w: &mut UiWorld) -> StepResult {
+    let before = w.followers_before.clone();
     let window = w.window()?;
-    let got = studio_blocks::followers(window.engine());
-    (got == 1)
-        .then_some(())
-        .ok_or_else(|| format!("{got} threads follow the picture"))
+    let deadline = std::time::Instant::now() + Duration::from_secs(3);
+    loop {
+        let new: Vec<String> = picture_followers()?
+            .into_iter()
+            .filter(|t| !before.contains(t))
+            .collect();
+        match new.as_slice() {
+            [one] => {
+                w.follower = Some(one.clone());
+                return Ok(());
+            }
+            _ if std::time::Instant::now() >= deadline => {
+                return Err(format!("{} new threads follow the picture", new.len()));
+            }
+            _ => {}
+        }
+        std::thread::sleep(Duration::from_millis(50));
+        window.stage.drive().advance(50).map_err(drive_error)?;
+    }
+}
+
+// The seconds are real ones: a thread that sees it should stop only when its
+// wait on the preview ends, which for an app at rest is half a minute, is not
+// counted out in these.
+#[then(regex = r"^that thread has ended within (\d+) seconds?$")]
+fn follower_ended(w: &mut UiWorld, seconds: u64) -> StepResult {
+    let thread = w.follower.clone().ok_or("no thread was told")?;
+    let window = w.window()?;
+    let deadline = std::time::Instant::now() + Duration::from_secs(seconds);
+    loop {
+        if !picture_followers()?.contains(&thread) {
+            return Ok(());
+        }
+        if std::time::Instant::now() >= deadline {
+            return Err(format!(
+                "the thread following the picture is still there after {seconds} s"
+            ));
+        }
+        std::thread::sleep(Duration::from_millis(50));
+        window.stage.drive().advance(50).map_err(drive_error)?;
+    }
 }
 
 #[given("the person has remembered the window's workspace")]
@@ -3279,27 +3607,6 @@ fn remembered_is_gone(w: &mut UiWorld) -> StepResult {
     (!w.window()?.engine().is_alive(was))
         .then_some(())
         .ok_or_else(|| "the reload kept the workspace, so this says nothing".to_owned())
-}
-
-// A wait on an app that moves ends with its next rest, so this is short;
-// the thread only looks at what stops it when a wait ends.
-#[then(regex = r"^no thread is following the preview's picture$")]
-fn no_follower(w: &mut UiWorld) -> StepResult {
-    let window = w.window()?;
-    let deadline = std::time::Instant::now() + PATIENCE;
-    loop {
-        let got = studio_blocks::followers(window.engine());
-        if got == 0 {
-            return Ok(());
-        }
-        if std::time::Instant::now() >= deadline {
-            return Err(format!(
-                "{got} threads still follow the picture after {PATIENCE:?}"
-            ));
-        }
-        std::thread::sleep(std::time::Duration::from_millis(50));
-        window.advance(50)?;
-    }
 }
 
 #[given("the window has taken the change")]

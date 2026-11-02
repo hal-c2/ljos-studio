@@ -42,6 +42,8 @@ struct StudioWorld {
     /// project, which the preview watches.
     state: tempfile::TempDir,
     server: Option<StudioServer>,
+    /// The program previews run, when a scenario names one; else `LJOS`.
+    program: Option<std::path::PathBuf>,
     caps: CapSet,
     answer: Option<Result<Value, SurfaceError>>,
     /// The pictures of the last answer.
@@ -120,6 +122,7 @@ impl StudioWorld {
             outside: Vec::new(),
             state: tempfile::tempdir().expect("a temporary directory"),
             server: None,
+            program: None,
             caps: CapSet::of([Cap::Inspect, Cap::Mutate]),
             answer: None,
             images: Vec::new(),
@@ -148,10 +151,15 @@ impl StudioWorld {
             // temporary directory itself is as open as the umask leaves it.
             let state = self.state.path().join("preview");
             let clock: Arc<dyn Timer> = self.clock.clone();
+            let program = self.program.clone();
             let studio = Studio::open_with_timer(self.dir.path(), clock)
                 .map_err(|e| e.to_string())?
                 .with_previews(Arc::new(move |dir| {
-                    Box::new(NativeHost::new(dir, NativeHost::default_program(), &state))
+                    Box::new(NativeHost::new(
+                        dir,
+                        program.clone().unwrap_or_else(NativeHost::default_program),
+                        &state,
+                    ))
                 }));
             self.server = Some(StudioServer::new(studio));
         }
@@ -509,6 +517,15 @@ fn outside_holds(w: &mut StudioWorld, names: String) -> StepResult {
     Ok(())
 }
 
+#[given(regex = r#"^previews run the program "([^"]*)"$"#)]
+fn previews_run(w: &mut StudioWorld, program: String) -> StepResult {
+    // A server already made keeps the program it was made with, so the next
+    // call makes another over the same files.
+    w.server = None;
+    w.program = Some(w.dir.path().join(program));
+    Ok(())
+}
+
 #[given("the studio tools are connected")]
 fn connected(w: &mut StudioWorld) -> StepResult {
     w.server().map(|_| ())
@@ -839,6 +856,17 @@ fn file_contains(w: &mut StudioWorld, name: String, want: String) -> StepResult 
         .ok_or_else(|| format!("`{name}` does not contain {want:?}:\n{got}"))
 }
 
+#[then(regex = r#"^the file "([^"]+)" contains:$"#)]
+fn file_contains_text(w: &mut StudioWorld, name: String, step: &Step) -> StepResult {
+    let want = docstring(step)?;
+    let want = want.as_str();
+    let got =
+        std::fs::read_to_string(w.dir.path().join(&name)).map_err(|e| format!("`{name}`: {e}"))?;
+    got.contains(want)
+        .then_some(())
+        .ok_or_else(|| format!("`{name}` does not contain {want:?}:\n{got}"))
+}
+
 #[then(regex = r#"^the file "([^"]+)" does not contain "(.*)"$"#)]
 fn file_lacks(w: &mut StudioWorld, name: String, want: String) -> StepResult {
     let got =
@@ -1000,9 +1028,22 @@ fn list_within(w: &mut StudioWorld, cap: usize) -> StepResult {
         })
         .collect();
     let bytes = json!({ "tools": tools }).to_string().len();
-    (bytes <= cap)
-        .then_some(())
-        .ok_or_else(|| format!("the list is {bytes} bytes"))
+    // A list over its cap names what to cut first.
+    let mut sizes: Vec<(usize, &str)> = tools
+        .iter()
+        .map(|t| (t.to_string().len(), t["name"].as_str().unwrap_or("?")))
+        .collect();
+    sizes.sort_unstable_by(|a, b| b.cmp(a));
+    (bytes <= cap).then_some(()).ok_or_else(|| {
+        let largest: Vec<String> = sizes
+            .iter()
+            .map(|(n, name)| format!("{name} {n}"))
+            .collect();
+        format!(
+            "the list is {bytes} bytes; per tool: {}",
+            largest.join(", ")
+        )
+    })
 }
 
 /// A reload Studio reported, applied or not.

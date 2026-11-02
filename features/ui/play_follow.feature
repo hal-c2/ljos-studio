@@ -122,3 +122,12 @@ Feature: The frame follows what the app draws in play mode
     And the person has counted the pictures asked for
     When 2 seconds pass
     Then no more pictures have been asked for
+
+  Scenario: Leaving play mode ends the wait on an app at rest at once
+    Given the person has opened "Still.qml" in the documents list
+    And the person has listed the threads following the preview's picture
+    And the person has clicked the button "Play"
+    And a new thread is following the preview's picture
+    And 1 seconds have passed
+    When the person clicks the button "Play"
+    Then that thread has ended within 3 seconds

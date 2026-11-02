@@ -53,6 +53,12 @@ const uncompiled = (request, type) => {
   };
 };
 export const WAITING = new Map([
+  // The page says nothing of a View3D's scene: its camera or its models.
+  ["A point on a model selects the model, not the view", { request: 37, cause: said(/\/selection\/0\/id` is "view3D1", not "cube"/) }],
+  ["The face of the model ends where the picture shows it ending", { request: 37, cause: said(/\/selection\/0\/id` is "view3D1", not "cube"/) }],
+  ["A model is told where its axes go on the picture", { request: 37, cause: said(/this preview does not say where its objects are/) }],
+  ["A model is moved along an axis as one undo step", { request: 37, cause: said(/does not contain x: 20/) }],
+  ["A model whose axis is an expression is not moved along it", { request: 37, cause: said(/\/details\/kind` is "refused", not "bound"/) }],
   ["Waiting on the preview says when its app wakes next", refused(25)],
   ["The picture shows the scene", { request: 27, cause: said(/0 pixels of green/) }],
   ["An edit inside the scene reaches the picture", { request: 27, cause: said(/0 pixels of red/) }],
@@ -370,7 +376,8 @@ async function main([app, ...paths]) {
     const feature = parse(readFileSync(file, "utf8"), name);
     console.log(`Feature: ${feature.name}  (${name})`);
     for (const scenario of scenarios(feature)) {
-      if (!scenario.tags.includes("preview")) continue;
+      // `@native`: a native preview's own behaviour (state kept over a switch).
+      if (!scenario.tags.includes("preview") || scenario.tags.includes("native")) continue;
       const page = await chromium.page();
       const said = [];
       page.on("pageerror", (e) => said.push(`page error: ${e.message}`));

@@ -44,13 +44,9 @@ impl schemars::JsonSchema for Address {
 
     fn json_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
         schemars::json_schema!({
-            "description": "One of: `node`, a handle the session gave out (`n7`), stable for the session; `id`, the object's `id`; `path`, as `document_tree` prints it (`root/0/contentItem:`), true of the current text only.",
+            "description": "One of `node` (session handle), `id`, `path` (from `document_tree`; this text only).",
             "type": "object",
-            "properties": {
-                "node": {"type": "string"},
-                "id": {"type": "string"},
-                "path": {"type": "string"}
-            },
+            "additionalProperties": {"type": "string"},
             "minProperties": 1,
             "maxProperties": 1
         })
@@ -88,16 +84,30 @@ pub(crate) struct Tracked {
     /// text, also ones that leave it not parsing; `None` once a change
     /// touched its start or crossed its edges.
     pub span: Option<(usize, usize)>,
+    /// Where it starts, while a change cut only its end off the span (a
+    /// whole text written over it, its `id` renamed): enough to know the
+    /// object by its place when its key no longer names it.
+    pub head: Option<usize>,
 }
 
 impl Tracked {
     /// Moves [`span`](Self::span) over a change of the text.
     pub fn shift(&mut self, change: &qml_edit::Change) {
+        let delta = change.replacement.len() as isize - change.range.len() as isize;
+        let moved = |at: usize| at.saturating_add_signed(delta);
+        // An object's head holds while changes land after it.
+        self.head = self.head.and_then(|head| {
+            if change.range.end <= head {
+                Some(moved(head))
+            } else if change.range.start > head {
+                Some(head)
+            } else {
+                None
+            }
+        });
         let Some((start, end)) = self.span else {
             return;
         };
-        let delta = change.replacement.len() as isize - change.range.len() as isize;
-        let moved = |at: usize| at.saturating_add_signed(delta);
         self.span = if change.range.end <= start {
             Some((moved(start), moved(end)))
         } else if change.range.start >= end {
@@ -106,6 +116,9 @@ impl Tracked {
             // Inside it, past its type name and before its `}`.
             Some((start, moved(end)))
         } else {
+            if change.range.start > start {
+                self.head = Some(start);
+            }
             None
         };
     }

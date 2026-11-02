@@ -10,12 +10,13 @@ use ljos_mcp_core::{CallCtx, Cap, ErrorCode, SurfaceError, ToolDef, ToolRegistry
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use studio_core::place::{self, Align, Drag, Moving, Rect, Wanted};
-use studio_core::preview::Placed;
-use studio_core::{Address, Node, NodePath, Op, StateEdit, Step};
+use studio_core::place::{self, Align, Drag, Moving, Rect, Resizing, Wanted, Wrap};
+use studio_core::preview::{Declared, Placed};
+use studio_core::scene3d::Handles;
+use studio_core::{Address, Import, Node, NodePath, Op, StateEdit, Step};
 
 use crate::tools::{EditOut, MUTATE};
-use crate::{Studio, error, lock};
+use crate::{Studio, component, error, layout_tools, lock};
 
 /// Siblings told to a canvas for snapping: past this, a parent's guides are
 /// noise and reading them costs more than the frame they serve.
@@ -29,6 +30,10 @@ const DUPLICATE_OFFSET: f64 = 16.0;
 pub(crate) struct Copied {
     text: String,
     ids: Vec<String>,
+    /// The document it came from and what that imports, of which a paste into
+    /// another document brings what it needs.
+    from: String,
+    imports: Vec<Import>,
 }
 
 #[derive(Clone, Copy, Deserialize, JsonSchema)]
@@ -42,10 +47,36 @@ enum Action {
     Duplicate,
     Remove,
     Rename,
+    Relayout,
     Hide,
     Show,
     Lock,
     Unlock,
+    Wrap,
+    Unwrap,
+    #[serde(rename = "component_extract")]
+    ComponentExtract,
+    Anchor,
+}
+
+// What `anchor` does to each side: a margin pins it, null takes it off. Said
+// in `docs/MCP.md`, not here: the list of tools has a size it keeps to.
+#[derive(Default, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct Sides {
+    #[serde(default, deserialize_with = "stated")]
+    left: Option<Option<f64>>,
+    #[serde(default, deserialize_with = "stated")]
+    right: Option<Option<f64>>,
+    #[serde(default, deserialize_with = "stated")]
+    top: Option<Option<f64>>,
+    #[serde(default, deserialize_with = "stated")]
+    bottom: Option<Option<f64>>,
+}
+
+/// Serde reads null as a field left out, and here they differ.
+fn stated<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<Option<f64>>, D::Error> {
+    Option::<f64>::deserialize(d).map(Some)
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -53,36 +84,48 @@ enum Action {
 struct ArrangeArgs {
     action: Action,
     doc: String,
-    /// For all but `place` and `paste`. A path needs `generation` where the
-    /// action writes.
+    /// For all but `place` and `paste`.
     #[serde(default)]
     nodes: Vec<Address>,
-    /// Needed when a node is named by path.
+    /// For a `path`.
     generation: Option<u64>,
-    /// For `geometry`: leave the siblings out, each one being a read of the
-    /// running app. Who only shows the selection does not snap to them.
+    /// For `geometry`: leave the siblings out (each is a read of the running app).
     #[serde(default)]
     without_siblings: bool,
-    /// For `geometry`: the siblings are the first node's children instead,
-    /// which is what something drawn inside it snaps to.
+    /// For `geometry`: the siblings are the first node's children, for something drawn inside it.
     #[serde(default)]
     within: bool,
     /// For `place`.
     places: Option<Vec<PlaceOne>>,
-    /// For `place` and `align`: write into this state, not the object.
+    /// For `place`, `align`: write into this state.
     record: Option<RecordInto>,
-    /// For `align`: left, hcenter, right, top, vcenter, bottom, distribute_h,
-    /// distribute_v. One object lines up with its parent.
+    /// For `align`; one object lines up with its parent.
     align: Option<Align>,
     /// For `paste`, into any document. Ids it has are renamed.
     parent: Option<Address>,
-    /// For `rename`: the object's new `id`.
+    /// For `rename`: the object's new `id`. For `component_extract`: the new type. For `relayout`: its new kind.
     name: Option<String>,
+    /// For `wrap`.
+    #[serde(rename = "in")]
+    wrap_in: Option<Wrap>,
+    /// For `wrap`.
+    spacing: Option<f64>,
+    /// For `wrap` in a Grid.
+    columns: Option<u32>,
+    /// For `anchor`.
+    fill: Option<bool>,
+    /// For `anchor`.
+    #[serde(rename = "centerIn")]
+    center_in: Option<bool>,
+    /// For `anchor`: null unpins.
+    sides: Option<Sides>,
+    /// For `anchor`: `parent` or a sibling's id.
+    target: Option<String>,
     #[serde(default)]
     dry_run: bool,
 }
 
-/// The state a gesture is recorded into, and the object that holds it.
+// The state a gesture is recorded into, and the object that holds it.
 #[derive(Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct RecordInto {
@@ -94,21 +137,38 @@ struct RecordInto {
 struct ArrangeOut {
     #[serde(flatten, skip_serializing_if = "Option::is_none")]
     edit: Option<EditOut>,
-    /// The objects placed or put, in the order asked for.
+    /// In the order asked for.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     nodes: Vec<String>,
     /// `geometry`: each object asked for.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     boxes: Vec<NodeGeometry>,
-    /// `geometry`: the first object's parent, in window coordinates.
+    /// `geometry`: the first one's parent, in the window.
     #[serde(skip_serializing_if = "Option::is_none")]
     parent: Option<Rect>,
-    /// `geometry`: the parent's other children, for guides.
+    /// `geometry`: the parent's other children.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     siblings: Vec<Sibling>,
     /// `copy`: each object as written.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     copied: Vec<String>,
+    /// `component_extract`: the file it wrote.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    component: Option<String>,
+    /// `component_extract`: what outside reads of the inside became.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    aliases: Vec<String>,
+    /// `component_extract`: Studio cannot tell whether an import has a type of
+    /// this name. If one has, the instance is that type, and not the new file.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    name_unsure: bool,
+    /// `paste`: what it imported for what it holds.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    imported: Vec<String>,
+    /// `paste`: each name it could not show still lands where it did: written
+    /// anyway, for the agent to look at.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    unvouched: Vec<crate::signals::Unvouched>,
 }
 
 struct GeometryArgs {
@@ -128,13 +188,29 @@ struct GeometryOut {
 #[derive(Serialize, JsonSchema)]
 struct NodeGeometry {
     node: String,
-    /// In the parent's coordinates; absent when the preview has no such
-    /// object (a `Loader` not loaded, a state that hides it).
+    /// In the parent's coordinates; absent when the preview has no such object.
     #[serde(skip_serializing_if = "Option::is_none")]
     local: Option<Rect>,
     #[serde(skip_serializing_if = "Option::is_none")]
     window: Option<Rect>,
     drag: Drag,
+    /// An object of a 3D scene has no box: its axes on the view instead.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    scene: Option<Spatial>,
+}
+
+/// A model, a light or a camera on the picture of its view, for the canvas to
+/// draw arrows on and drag along.
+#[derive(Serialize, JsonSchema)]
+struct Spatial {
+    #[serde(flatten)]
+    handles: Handles,
+    /// `x`, `y` and `z` as the file has them.
+    #[schemars(with = "Vec<f64>")]
+    local: [f64; 3],
+    /// Per axis, why a drag cannot write it; empty where it can.
+    #[schemars(with = "Vec<String>")]
+    refused: [String; 3],
 }
 
 #[derive(Serialize, JsonSchema)]
@@ -150,13 +226,19 @@ struct PlaceOne {
     /// In the parent's coordinates. What is left out stays.
     x: Option<f64>,
     y: Option<f64>,
+    /// Of an object of a 3D scene.
+    z: Option<f64>,
     width: Option<f64>,
     height: Option<f64>,
 }
 
-struct ManyOut {
-    edit: EditOut,
-    nodes: Vec<String>,
+pub(crate) struct ManyOut {
+    pub(crate) edit: EditOut,
+    pub(crate) nodes: Vec<String>,
+    /// What a paste imported.
+    pub(crate) imported: Vec<String>,
+    /// What a paste could not show still lands where it did.
+    pub(crate) unvouched: Vec<crate::signals::Unvouched>,
 }
 
 struct AlignArgs {
@@ -182,22 +264,22 @@ struct PasteArgs {
     dry_run: bool,
 }
 
-fn refused(kind: &str, message: impl Into<String>) -> SurfaceError {
+pub(crate) fn refused(kind: &str, message: impl Into<String>) -> SurfaceError {
     SurfaceError::new(ErrorCode::NotActionable, message).with_details(json!({ "kind": kind }))
 }
 
-fn parent_path(path: &NodePath) -> Option<NodePath> {
+pub(crate) fn parent_path(path: &NodePath) -> Option<NodePath> {
     (!path.0.is_empty()).then(|| NodePath(path.0[..path.0.len() - 1].to_vec()))
 }
 
-fn short(ty: &str) -> &str {
+pub(crate) fn short(ty: &str) -> &str {
     ty.rsplit('.').next().unwrap_or(ty)
 }
 
 /// The objects the preview of `doc` has of `nodes`, by handle; the first copy
 /// of a delegate speaks for all, since a file has one declaration of them.
 /// `None` when no preview of it is showing.
-fn placed_of(
+pub(crate) fn placed_of(
     studio: &mut Studio,
     doc: &str,
     nodes: &[(String, Node)],
@@ -240,13 +322,16 @@ fn placed_of(
 }
 
 /// The object at `path`, with its handle.
-fn at_path(tree: &[(String, Node)], path: &NodePath) -> Option<(String, Node)> {
+pub(crate) fn at_path(tree: &[(String, Node)], path: &NodePath) -> Option<(String, Node)> {
     tree.iter().find(|(_, n)| n.path == *path).cloned()
 }
 
 /// The types of what places `node`: the file's, and the preview's too when it
 /// is known, since a component of the project can be a layout underneath.
-fn parent_types<'a>(parent: Option<&'a Node>, placed: Option<&'a Placed>) -> Vec<&'a str> {
+pub(crate) fn parent_types<'a>(
+    parent: Option<&'a Node>,
+    placed: Option<&'a Placed>,
+) -> Vec<&'a str> {
     let mut types: Vec<&str> = parent.iter().map(|p| p.ty.as_str()).collect();
     if let Some(placed) = placed {
         types.extend(placed.types.iter().map(String::as_str));
@@ -326,24 +411,34 @@ fn geometry(studio: &mut Studio, a: &GeometryArgs) -> Result<GeometryOut, Surfac
             ),
         ));
     };
-    let nodes = asked
-        .iter()
-        .map(|(handle, node)| {
-            let parent = parent_path(&node.path).and_then(|p| at_path(&tree, &p));
-            let parent_placed = parent.as_ref().and_then(|(h, _)| placed.get(h));
-            let drag = place::drag_of(
-                node,
-                &parent_types(parent.as_ref().map(|(_, n)| n), parent_placed),
-            );
-            let here = placed.get(handle);
-            NodeGeometry {
-                node: handle.clone(),
-                local: here.map(|p| as_written(node, &drag, p.local)),
-                window: here.map(|p| p.window),
-                drag,
-            }
-        })
-        .collect();
+    let mut nodes = Vec::new();
+    for (handle, node) in &asked {
+        let parent = parent_path(&node.path).and_then(|p| at_path(&tree, &p));
+        let parent_placed = parent.as_ref().and_then(|(h, _)| placed.get(h));
+        let mut drag = place::drag_of(
+            node,
+            &parent_types(parent.as_ref().map(|(_, n)| n), parent_placed),
+        );
+        let here = placed.get(handle);
+        let scene = match here {
+            None if place::is_spatial(&node.ty) => spatial(studio, &a.doc, node)?,
+            _ => None,
+        };
+        if scene.is_some() {
+            drag = Drag {
+                moving: Moving::Position,
+                resize: Resizing::None,
+                says: String::new(),
+            };
+        }
+        nodes.push(NodeGeometry {
+            node: handle.clone(),
+            local: here.map(|p| as_written(node, &drag, p.local)),
+            window: here.map(|p| p.window),
+            drag,
+            scene,
+        });
+    }
     Ok(GeometryOut {
         nodes,
         parent: first_parent
@@ -360,6 +455,45 @@ fn geometry(studio: &mut Studio, a: &GeometryArgs) -> Result<GeometryOut, Surfac
             })
             .collect(),
     })
+}
+
+/// `node` of a 3D scene on the picture of its view; `None` where the preview
+/// does not show it (a model with no mesh to see, a camera it is not looking
+/// through, a preview that cannot read a scene).
+fn spatial(studio: &mut Studio, doc: &str, node: &Node) -> Result<Option<Spatial>, SurfaceError> {
+    let (line, column) = studio.session.declared_where(doc, node).map_err(error)?;
+    let at = Declared {
+        file: doc.to_owned(),
+        line: line as u32,
+        column: column as u32,
+    };
+    let Some(scene) = crate::preview_tools::scene(studio, doc, &at)? else {
+        return Ok(None);
+    };
+    let Some(handles) = scene.body(&at).and_then(|b| scene.handles(b)) else {
+        return Ok(None);
+    };
+    let written = |name: &str| node.bindings.iter().find(|b| b.name == name);
+    let whole = written("position").is_some();
+    let mut local = [0.0; 3];
+    let mut refused = [String::new(), String::new(), String::new()];
+    for (i, name) in ["x", "y", "z"].into_iter().enumerate() {
+        match written(name).map(|b| b.value.trim()) {
+            None => {}
+            Some(v) => match v.parse() {
+                Ok(n) => local[i] = n,
+                Err(_) => refused[i] = format!("{name} is `{v}`: an expression"),
+            },
+        }
+        if whole {
+            refused[i] = "position is set whole".to_owned();
+        }
+    }
+    Ok(Some(Spatial {
+        handles,
+        local,
+        refused,
+    }))
 }
 
 /// The edits placing each of `places` asks for, all or none.
@@ -390,7 +524,18 @@ fn place_ops(
         let parent_placed = parent.as_ref().and_then(|(h, _)| placed.get(h));
         let types = parent_types(parent.as_ref().map(|(_, n)| n), parent_placed);
         let now = placed.get(&handle).map(|p| p.local);
-        let bindings = place::bindings_for(&node, &types, now, wanted).map_err(|r| {
+        let placing = if place::is_spatial(&node.ty) {
+            place::bindings_3d(&node, wanted)
+        } else if wanted.z.is_some() {
+            return Err(SurfaceError::invalid_argument(format!(
+                "`z` is for an object of a 3D scene, and `{}` is a {}",
+                node.id.as_deref().unwrap_or(&node.ty),
+                node.ty
+            )));
+        } else {
+            place::bindings_for(&node, &types, now, wanted)
+        };
+        let bindings = placing.map_err(|r| {
             let kind = if r.kind == "needs_preview" {
                 "no_preview"
             } else {
@@ -444,6 +589,8 @@ fn place_many(
     Ok(ManyOut {
         edit: outcome.into(),
         nodes,
+        imported: Vec::new(),
+        unvouched: Vec::new(),
     })
 }
 
@@ -511,6 +658,7 @@ fn copied(
 ) -> Result<Vec<(String, Node, Copied)>, SurfaceError> {
     let (tree, _) = studio.session.tree(doc).map_err(error)?;
     let text = studio.session.text(doc).map_err(error)?.0.to_owned();
+    let imports = studio_core::outline::imports(&text).unwrap_or_default();
     let mut out = Vec::new();
     for address in nodes {
         let (handle, node) = studio.session.resolve(doc, address).map_err(error)?;
@@ -522,13 +670,15 @@ fn copied(
         let copy = Copied {
             text: text[node.start..node.end].to_owned(),
             ids,
+            from: doc.to_owned(),
+            imports: imports.clone(),
         };
         out.push((handle, node, copy));
     }
     Ok(out)
 }
 
-fn taken_ids(studio: &mut Studio, doc: &str) -> Result<Vec<String>, SurfaceError> {
+pub(crate) fn taken_ids(studio: &mut Studio, doc: &str) -> Result<Vec<String>, SurfaceError> {
     let (tree, _) = studio.session.tree(doc).map_err(error)?;
     Ok(tree.into_iter().filter_map(|(_, n)| n.id).collect())
 }
@@ -554,6 +704,12 @@ fn shifted(node: &Node, text: &str) -> String {
 
 fn duplicate(studio: &mut Studio, a: &NodesArgs) -> Result<ManyOut, SurfaceError> {
     let mut items = copied(studio, &a.doc, &a.nodes)?;
+    for (_, _, copy) in &items {
+        let nodes = studio_core::outline::outline(&copy.text).unwrap_or_default();
+        if let Some(name) = studio_core::outline::components(&nodes).first() {
+            return Err(crate::loads::duplicate_component(&a.doc, name));
+        }
+    }
     let mut taken = taken_ids(studio, &a.doc)?;
     // Last in the file first: an insert only moves what comes after it, so
     // the places of those still to come stay true.
@@ -595,6 +751,8 @@ fn duplicate(studio: &mut Studio, a: &NodesArgs) -> Result<ManyOut, SurfaceError
     Ok(ManyOut {
         edit: outcome.into(),
         nodes,
+        imported: Vec::new(),
+        unvouched: Vec::new(),
     })
 }
 
@@ -606,17 +764,39 @@ fn paste(studio: &mut Studio, a: &PasteArgs) -> Result<ManyOut, SurfaceError> {
         ));
     }
     let mut taken = taken_ids(studio, &a.doc)?;
-    let ops: Vec<Op> = studio
-        .clipboard
+    let source = studio.session.text(&a.doc).map_err(error)?.0.to_owned();
+    // All at once and in the source's order: one copy is one document's, and
+    // a folder one object brings can take another object's name.
+    let texts: Vec<&str> = studio.clipboard.iter().map(|c| c.text.as_str()).collect();
+    let first = &studio.clipboard[0];
+    // Bare, even beside an import under a name: nothing has to qualify what
+    // the text holds.
+    let crate::loads::Pasted {
+        imports: imported,
+        unvouched,
+    } = crate::loads::imports_for(
+        studio.session.store(),
+        &a.doc,
+        &source,
+        &texts,
+        &first.from,
+        &first.imports,
+    )?;
+    let mut ops: Vec<Op> = imported
         .iter()
-        .map(|copy| Op::Insert {
+        .map(|module| Op::Import {
+            module: module.clone(),
+        })
+        .collect();
+    for copy in &studio.clipboard {
+        ops.push(Op::Insert {
             parent: a.parent.clone(),
             index: None,
             text: place::with_fresh_ids(&copy.text, &copy.ids, &mut taken),
             add_id: false,
             import: None,
-        })
-        .collect();
+        });
+    }
     let (outcome, nodes) = studio
         .session
         .edit_many(&a.doc, a.generation, &ops, "paste", a.dry_run)
@@ -624,6 +804,8 @@ fn paste(studio: &mut Studio, a: &PasteArgs) -> Result<ManyOut, SurfaceError> {
     Ok(ManyOut {
         edit: outcome.into(),
         nodes,
+        imported,
+        unvouched,
     })
 }
 
@@ -658,6 +840,8 @@ fn remove(studio: &mut Studio, a: &NodesArgs) -> Result<ManyOut, SurfaceError> {
     Ok(ManyOut {
         edit: outcome.into(),
         nodes,
+        imported: Vec::new(),
+        unvouched: Vec::new(),
     })
 }
 
@@ -711,7 +895,17 @@ fn needed<T>(field: Option<T>, name: &str, action: &str) -> Result<T, SurfaceErr
 
 fn arrange(studio: &mut Studio, a: ArrangeArgs) -> Result<ArrangeOut, SurfaceError> {
     check_paths(studio, &a)?;
-    if matches!(a.action, Action::Place | Action::Align | Action::Remove) {
+    if matches!(
+        a.action,
+        Action::Place
+            | Action::Align
+            | Action::Remove
+            | Action::Wrap
+            | Action::Unwrap
+            | Action::Anchor
+            | Action::Relayout
+            | Action::ComponentExtract
+    ) {
         check_unlocked(studio, &a)?;
     }
     let doc = a.doc;
@@ -720,6 +914,8 @@ fn arrange(studio: &mut Studio, a: ArrangeArgs) -> Result<ArrangeOut, SurfaceErr
     let many = |many: ManyOut| ArrangeOut {
         edit: Some(many.edit),
         nodes: many.nodes,
+        imported: many.imported,
+        unvouched: many.unvouched,
         ..ArrangeOut::default()
     };
     match a.action {
@@ -750,6 +946,7 @@ fn arrange(studio: &mut Studio, a: ArrangeArgs) -> Result<ArrangeOut, SurfaceErr
                         Wanted {
                             x: p.x,
                             y: p.y,
+                            z: p.z,
                             width: p.width,
                             height: p.height,
                         },
@@ -807,6 +1004,10 @@ fn arrange(studio: &mut Studio, a: ArrangeArgs) -> Result<ArrangeOut, SurfaceErr
             let name = needed(a.name, "name", "rename")?;
             rename(studio, &doc, generation, &nodes, &name, a.dry_run)
         }
+        Action::Relayout => {
+            let kind = needed(a.name, "name", "relayout")?;
+            relayout(studio, &doc, generation, &nodes, &kind, a.dry_run)
+        }
         Action::Hide | Action::Show => {
             let objects = objects_with_ids(studio, &doc, &nodes)?;
             if a.dry_run {
@@ -854,6 +1055,54 @@ fn arrange(studio: &mut Studio, a: ArrangeArgs) -> Result<ArrangeOut, SurfaceErr
             }
             studio.watchers.tell();
             Ok(ArrangeOut::default())
+        }
+        Action::Wrap => {
+            let how = needed(a.wrap_in, "in", "wrap")?;
+            layout_tools::wrap(
+                studio,
+                &layout_tools::WrapArgs {
+                    doc,
+                    nodes,
+                    how,
+                    spacing: a.spacing,
+                    columns: a.columns,
+                    generation,
+                    dry_run: a.dry_run,
+                },
+            )
+            .map(many)
+        }
+        Action::ComponentExtract => {
+            let name = needed(a.name, "name", "component_extract")?;
+            let [node] = nodes.as_slice() else {
+                return Err(SurfaceError::invalid_argument(
+                    "`component_extract` takes one object",
+                ));
+            };
+            let made = component::extract(studio, &doc, node, &name, generation, a.dry_run)?;
+            Ok(ArrangeOut {
+                edit: Some(made.edit),
+                component: Some(made.component),
+                aliases: made.aliases,
+                name_unsure: made.name_unsure,
+                ..ArrangeOut::default()
+            })
+        }
+        Action::Unwrap => {
+            layout_tools::unwrap(studio, &doc, &nodes, generation, a.dry_run).map(many)
+        }
+        Action::Anchor => {
+            let sides = a.sides.unwrap_or_default();
+            let pin = place::Pin {
+                fill: a.fill,
+                center_in: a.center_in,
+                left: sides.left,
+                right: sides.right,
+                top: sides.top,
+                bottom: sides.bottom,
+                target: a.target.unwrap_or_else(|| "parent".to_owned()),
+            };
+            layout_tools::anchor(studio, &doc, &nodes, &pin, generation, a.dry_run).map(many)
         }
         Action::Duplicate | Action::Remove => {
             let args = NodesArgs {
@@ -913,6 +1162,94 @@ fn objects_with_ids(
     Ok(objects)
 }
 
+/// The kinds a layout can turn into: what places a child by its own numbers
+/// never turns into what places it by `Layout.*`, which would move it.
+const LAYOUT_FAMILIES: [&[&str]; 2] = [
+    &["Row", "Column", "Grid", "Flow"],
+    &["RowLayout", "ColumnLayout", "GridLayout"],
+];
+
+fn relayout(
+    studio: &mut Studio,
+    doc: &str,
+    generation: Option<u64>,
+    nodes: &[Address],
+    kind: &str,
+    dry_run: bool,
+) -> Result<ArrangeOut, SurfaceError> {
+    let [address] = nodes else {
+        return Err(refused("one_object", "`relayout` turns one object"));
+    };
+    let (handle, node) = studio.session.resolve(doc, address).map_err(error)?;
+    let family = |ty: &str| LAYOUT_FAMILIES.iter().find(|f| f.contains(&ty));
+    let (Some(from), Some(to)) = (family(&node.ty), family(kind)) else {
+        return Err(refused(
+            "not_a_layout",
+            format!(
+                "`relayout` turns a Row, Column, Grid, Flow or `*Layout` into another: not `{}` into `{kind}`",
+                node.ty
+            ),
+        ));
+    };
+    if from != to {
+        return Err(refused(
+            "other_family",
+            format!(
+                "a `{}` places its children by their numbers or `Layout.*`, a `{kind}` by the other: wrap them anew instead",
+                node.ty
+            ),
+        ));
+    }
+    let source = studio.session.text(doc).map_err(error)?.0.to_owned();
+    let others: Vec<&str> = crate::signals::Names::of(studio.session.store(), doc, &source, &[])
+        .map(|names| {
+            node.bindings
+                .iter()
+                .filter(|b| names.lacks(kind, Some(&node), &b.name))
+                .map(|b| b.name.as_str())
+                .collect()
+        })
+        .unwrap_or_default();
+    if !others.is_empty() {
+        return Err(refused(
+            "says_other",
+            format!(
+                "a `{kind}` has no `{}`: take it away first",
+                others.join("`, `")
+            ),
+        ));
+    }
+    let text = studio.session.text(doc).map_err(error)?.0.to_owned();
+    let text = format!(
+        "{}{kind}{}",
+        &text[..node.start],
+        &text[node.start + node.ty.len()..]
+    );
+    let selected = studio
+        .session
+        .selection()
+        .contains(&(doc.to_owned(), handle.clone()));
+    let outcome = studio
+        .session
+        .replace_text(doc, generation, None, &text, dry_run)
+        .map_err(error)?;
+    if dry_run {
+        return Ok(ArrangeOut {
+            edit: Some(outcome.into()),
+            nodes: vec![handle],
+            ..ArrangeOut::default()
+        });
+    }
+    // Its place in the file is all that hasn't changed.
+    let at = Address::Path(node.path.to_string());
+    let now = rehandled(studio, doc, &handle, selected, at)?;
+    Ok(ArrangeOut {
+        edit: Some(outcome.into()),
+        nodes: vec![now],
+        ..ArrangeOut::default()
+    })
+}
+
 fn rename(
     studio: &mut Studio,
     doc: &str,
@@ -932,6 +1269,12 @@ fn rename(
         return Err(refused(
             "not_an_id",
             format!("`{name}` is not an id: an id is one word and starts lowercase"),
+        ));
+    }
+    if crate::signals::not_an_id(name) {
+        return Err(refused(
+            "not_an_id",
+            format!("`{name}` is not an id: QML keeps the word for itself"),
         ));
     }
     if taken_ids(studio, doc)?.iter().any(|id| id == name) {
@@ -954,16 +1297,15 @@ fn rename(
                 .session
                 .replace_text(doc, generation, None, &text, dry_run)
         }
-        None => studio.session.edit(
-            doc,
-            generation,
-            &Op::SetBinding {
-                node: Address::Node(handle.clone()),
-                name: "id".to_owned(),
-                value: name.to_owned(),
-            },
-            dry_run,
-        ),
+        None => {
+            let text = studio.session.text(doc).map_err(error)?.0.to_owned();
+            let object =
+                studio_core::with_first_id(&text[node.start..node.end], name).map_err(error)?;
+            let text = format!("{}{object}{}", &text[..node.start], &text[node.end..]);
+            studio
+                .session
+                .replace_text(doc, generation, None, &text, dry_run)
+        }
     }
     .map_err(error)?;
     if dry_run {
@@ -973,32 +1315,7 @@ fn rename(
             ..ArrangeOut::default()
         });
     }
-    // Written as a new text, the object comes back with a new handle: what
-    // Studio holds of the old one goes with it.
-    let renamed = Address::Id(name.to_owned());
-    let (now, _) = studio.session.resolve(doc, &renamed).map_err(error)?;
-    if studio.locked.contains(&handle) {
-        studio.locked.insert(now.clone());
-    }
-    studio.rehandled.push((handle.clone(), now.clone()));
-    if selected {
-        let others: Vec<Address> = studio
-            .session
-            .selection()
-            .into_iter()
-            .filter(|(_, h)| *h != handle)
-            .map(|(_, h)| Address::Node(h))
-            .chain([renamed])
-            .collect();
-        studio.session.select(doc, &others).map_err(error)?;
-    }
-    // The call's end writes it under its new id (`hidden_now`).
-    {
-        let mut previews = crate::preview::lock(&studio.previews);
-        if previews.is_hidden(doc, &handle) {
-            previews.hidden.insert((doc.to_owned(), now.clone()));
-        }
-    }
+    let now = rehandled(studio, doc, &handle, selected, Address::Id(name.to_owned()))?;
     Ok(ArrangeOut {
         edit: Some(outcome.into()),
         nodes: vec![now],
@@ -1006,15 +1323,46 @@ fn rename(
     })
 }
 
+/// Written as a new text, an object comes back with a new handle: what Studio
+/// holds of the old one goes with it. Gives the new one.
+fn rehandled(
+    studio: &mut Studio,
+    doc: &str,
+    handle: &str,
+    selected: bool,
+    address: Address,
+) -> Result<String, SurfaceError> {
+    let (now, _) = studio.session.resolve(doc, &address).map_err(error)?;
+    if studio.locked.contains(handle) {
+        studio.locked.insert(now.clone());
+    }
+    studio.rehandled.push((handle.to_owned(), now.clone()));
+    if selected {
+        let others: Vec<Address> = studio
+            .session
+            .selection()
+            .into_iter()
+            .filter(|(_, h)| h != handle)
+            .map(|(_, h)| Address::Node(h))
+            .chain([address])
+            .collect();
+        studio.session.select(doc, &others).map_err(error)?;
+    }
+    // The call's end writes it under its new id (`hidden_now`).
+    let mut previews = crate::preview::lock(&studio.previews);
+    if previews.is_hidden(doc, handle) {
+        previews.hidden.insert((doc.to_owned(), now.clone()));
+    }
+    drop(previews);
+    Ok(now)
+}
+
 pub(crate) fn add(registry: ToolRegistry, studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
     let studio = studio.clone();
     registry.with(
         ToolDef::new::<ArrangeArgs>(
             "node_arrange",
-            "A canvas gesture; each edit one undo step. `geometry`: boxes, drag rules, siblings. \
-             `place`: x/y/size, writing what governs each object; refused `arranged`/`anchored` \
-             where overridden. `align`, `copy`, `paste`, `duplicate`, `remove`, `rename`. `hide`, \
-             `show`, `lock`, `unlock` leave the file alone.",
+            "A canvas gesture, one undo step. `geometry`: boxes, drag rules, siblings. `place`: x/y/size, writing what governs each object. `component_extract`: one object to `name`.qml. `hide`, `show`, `lock`, `unlock` leave the file alone.",
         )
         .answers::<ArrangeOut>()
         .requires(Cap::Inspect)

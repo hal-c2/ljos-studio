@@ -9,10 +9,29 @@ expression: value
     "open_world": false,
     "read_only": false
   },
-  "description": "Read the tokens of Ljos.Design, the module's value beside the theme file's; or set one (`null` gives it back) in the theme file Ljós reads, the project's made when none, the rest kept byte for byte. A theme Ljós would refuse is refused with its message.",
+  "description": "Read the tokens of Ljos.Design, the module's value beside the theme file's; or set one (`null` gives it back) in the theme file (made if none), the rest kept byte for byte. A theme Ljós would refuse is refused.",
   "inputSchema": {
-    "$defs": {
-      "Variant": {
+    "properties": {
+      "doc": {
+        "description": "Whose theme: the nearest `theme.json` up from it; left out, the preview's, else the project's.",
+        "type": "string"
+      },
+      "dry_run": {
+        "type": "boolean"
+      },
+      "generation": {
+        "description": "The theme file's generation the edit was read at; 0 while it does not exist.",
+        "type": "integer"
+      },
+      "token": {
+        "description": "`Colors.accent`; a singleton (`Spacing`) reads its roles. Every role when left out.",
+        "type": "string"
+      },
+      "value": {
+        "description": "What the token becomes; `null` gives it back to the module. Left out, the tokens are read."
+      },
+      "variant": {
+        "description": "One variant of a colour; a colour string sets light and dark.",
         "enum": [
           "light",
           "dark",
@@ -22,108 +41,26 @@ expression: value
         "type": "string"
       }
     },
-    "properties": {
-      "doc": {
-        "description": "A document whose theme it is: the nearest `theme.json` up from it.\nThe open preview's when left out, else the project's own.",
-        "type": [
-          "string",
-          "null"
-        ]
-      },
-      "dry_run": {
-        "default": false,
-        "type": "boolean"
-      },
-      "generation": {
-        "description": "The theme file's generation the edit was read at; 0 while it does\nnot exist.",
-        "type": [
-          "integer",
-          "null"
-        ]
-      },
-      "token": {
-        "description": "`Colors.accent`; a singleton (`Spacing`) reads its roles. Every role\nwhen left out.",
-        "type": [
-          "string",
-          "null"
-        ]
-      },
-      "value": {
-        "default": null,
-        "description": "What the token becomes; `null` gives it back to the module. Left\nout, the tokens are read."
-      },
-      "variant": {
-        "anyOf": [
-          {
-            "$ref": "#/$defs/Variant"
-          },
-          {
-            "type": "null"
-          }
-        ],
-        "description": "One variant of a colour; a colour string sets light and dark."
-      }
-    },
     "type": "object"
   },
   "max_result_bytes": 40960,
   "name": "theme_set",
   "outputSchema": {
     "properties": {
-      "changes": {
-        "type": [
-          "array",
-          "null"
-        ]
-      },
-      "doc": {
-        "type": [
-          "string",
-          "null"
-        ]
-      },
-      "exists": {
-        "type": [
-          "boolean",
-          "null"
-        ]
-      },
+      "changes": {},
+      "doc": {},
+      "exists": {},
       "file": {
         "type": "string"
       },
       "generation": {
         "type": "integer"
       },
-      "history": {
-        "type": [
-          "integer",
-          "null"
-        ]
-      },
-      "problem": {
-        "type": [
-          "string",
-          "null"
-        ]
-      },
-      "text": {
-        "type": [
-          "string",
-          "null"
-        ]
-      },
-      "tokens": {
-        "type": [
-          "array",
-          "null"
-        ]
-      },
-      "unchanged": {
-        "type": [
-          "boolean",
-          "null"
-        ]
-      }
+      "history": {},
+      "problem": {},
+      "text": {},
+      "tokens": {},
+      "unchanged": {}
     },
     "required": [
       "file",

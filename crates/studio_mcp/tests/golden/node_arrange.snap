@@ -9,10 +9,19 @@ expression: value
     "open_world": false,
     "read_only": false
   },
-  "description": "A canvas gesture; each edit one undo step. `geometry`: boxes, drag rules, siblings. `place`: x/y/size, writing what governs each object; refused `arranged`/`anchored` where overridden. `align`, `copy`, `paste`, `duplicate`, `remove`, `rename`. `hide`, `show`, `lock`, `unlock` leave the file alone.",
+  "description": "A canvas gesture, one undo step. `geometry`: boxes, drag rules, siblings. `place`: x/y/size, writing what governs each object. `component_extract`: one object to `name`.qml. `hide`, `show`, `lock`, `unlock` leave the file alone.",
   "inputSchema": {
     "$defs": {
-      "Action": {
+      "Address": {
+        "additionalProperties": {
+          "type": "string"
+        },
+        "description": "One of `node` (session handle), `id`, `path` (from `document_tree`; this text only).",
+        "type": "object"
+      }
+    },
+    "properties": {
+      "action": {
         "enum": [
           "geometry",
           "place",
@@ -22,32 +31,20 @@ expression: value
           "duplicate",
           "remove",
           "rename",
+          "relayout",
           "hide",
           "show",
           "lock",
-          "unlock"
+          "unlock",
+          "wrap",
+          "unwrap",
+          "component_extract",
+          "anchor"
         ],
         "type": "string"
       },
-      "Address": {
-        "description": "One of: `node`, a handle the session gave out (`n7`), stable for the session; `id`, the object's `id`; `path`, as `document_tree` prints it (`root/0/contentItem:`), true of the current text only.",
-        "maxProperties": 1,
-        "minProperties": 1,
-        "properties": {
-          "id": {
-            "type": "string"
-          },
-          "node": {
-            "type": "string"
-          },
-          "path": {
-            "type": "string"
-          }
-        },
-        "type": "object"
-      },
-      "Align": {
-        "description": "How `node_arrange` `align` lines objects up.",
+      "align": {
+        "description": "For `align`; one object lines up with its parent.",
         "enum": [
           "left",
           "hcenter",
@@ -60,44 +57,87 @@ expression: value
         ],
         "type": "string"
       },
-      "PlaceOne": {
-        "properties": {
-          "height": {
-            "type": [
-              "number",
-              "null"
-            ]
-          },
-          "node": {
-            "$ref": "#/$defs/Address"
-          },
-          "width": {
-            "type": [
-              "number",
-              "null"
-            ]
-          },
-          "x": {
-            "description": "In the parent's coordinates. What is left out stays.",
-            "type": [
-              "number",
-              "null"
-            ]
-          },
-          "y": {
-            "type": [
-              "number",
-              "null"
-            ]
-          }
-        },
-        "required": [
-          "node"
-        ],
-        "type": "object"
+      "centerIn": {
+        "description": "For `anchor`.",
+        "type": "boolean"
       },
-      "RecordInto": {
-        "description": "The state a gesture is recorded into, and the object that holds it.",
+      "columns": {
+        "description": "For `wrap` in a Grid.",
+        "type": "integer"
+      },
+      "doc": {
+        "type": "string"
+      },
+      "dry_run": {
+        "type": "boolean"
+      },
+      "fill": {
+        "description": "For `anchor`.",
+        "type": "boolean"
+      },
+      "generation": {
+        "description": "For a `path`.",
+        "type": "integer"
+      },
+      "in": {
+        "description": "For `wrap`.",
+        "enum": [
+          "Row",
+          "Column",
+          "Grid",
+          "Item"
+        ],
+        "type": "string"
+      },
+      "name": {
+        "description": "For `rename`: the object's new `id`. For `component_extract`: the new type. For `relayout`: its new kind.",
+        "type": "string"
+      },
+      "nodes": {
+        "description": "For all but `place` and `paste`.",
+        "items": {
+          "$ref": "#/$defs/Address"
+        },
+        "type": "array"
+      },
+      "parent": {
+        "$ref": "#/$defs/Address",
+        "description": "For `paste`, into any document. Ids it has are renamed."
+      },
+      "places": {
+        "description": "For `place`.",
+        "items": {
+          "properties": {
+            "height": {
+              "type": "number"
+            },
+            "node": {
+              "$ref": "#/$defs/Address"
+            },
+            "width": {
+              "type": "number"
+            },
+            "x": {
+              "description": "In the parent's coordinates. What is left out stays.",
+              "type": "number"
+            },
+            "y": {
+              "type": "number"
+            },
+            "z": {
+              "description": "Of an object of a 3D scene.",
+              "type": "number"
+            }
+          },
+          "required": [
+            "node"
+          ],
+          "type": "object"
+        },
+        "type": "array"
+      },
+      "record": {
+        "description": "For `place`, `align`: write into this state.",
         "properties": {
           "on": {
             "$ref": "#/$defs/Address"
@@ -111,92 +151,39 @@ expression: value
           "on"
         ],
         "type": "object"
-      }
-    },
-    "properties": {
-      "action": {
-        "$ref": "#/$defs/Action"
       },
-      "align": {
-        "anyOf": [
-          {
-            "$ref": "#/$defs/Align"
+      "sides": {
+        "description": "For `anchor`: null unpins.",
+        "properties": {
+          "bottom": {
+            "type": "number"
           },
-          {
-            "type": "null"
+          "left": {
+            "type": "number"
+          },
+          "right": {
+            "type": "number"
+          },
+          "top": {
+            "type": "number"
           }
-        ],
-        "description": "For `align`: left, hcenter, right, top, vcenter, bottom, distribute_h,\ndistribute_v. One object lines up with its parent."
+        },
+        "type": "object"
       },
-      "doc": {
+      "spacing": {
+        "description": "For `wrap`.",
+        "type": "number"
+      },
+      "target": {
+        "description": "For `anchor`: `parent` or a sibling's id.",
         "type": "string"
       },
-      "dry_run": {
-        "default": false,
-        "type": "boolean"
-      },
-      "generation": {
-        "description": "Needed when a node is named by path.",
-        "type": [
-          "integer",
-          "null"
-        ]
-      },
-      "name": {
-        "description": "For `rename`: the object's new `id`.",
-        "type": [
-          "string",
-          "null"
-        ]
-      },
-      "nodes": {
-        "default": [],
-        "description": "For all but `place` and `paste`. A path needs `generation` where the\naction writes.",
-        "items": {
-          "$ref": "#/$defs/Address"
-        },
-        "type": "array"
-      },
-      "parent": {
-        "anyOf": [
-          {
-            "$ref": "#/$defs/Address"
-          },
-          {
-            "type": "null"
-          }
-        ],
-        "description": "For `paste`, into any document. Ids it has are renamed."
-      },
-      "places": {
-        "description": "For `place`.",
-        "items": {
-          "$ref": "#/$defs/PlaceOne"
-        },
-        "type": [
-          "array",
-          "null"
-        ]
-      },
-      "record": {
-        "anyOf": [
-          {
-            "$ref": "#/$defs/RecordInto"
-          },
-          {
-            "type": "null"
-          }
-        ],
-        "description": "For `place` and `align`: write into this state, not the object."
-      },
       "within": {
-        "default": false,
-        "description": "For `geometry`: the siblings are the first node's children instead,\nwhich is what something drawn inside it snaps to.",
+        "description": "For `geometry`: the siblings are the first node's children, for something drawn inside it.",
         "type": "boolean"
       },
       "without_siblings": {
-        "default": false,
-        "description": "For `geometry`: leave the siblings out, each one being a read of the\nrunning app. Who only shows the selection does not snap to them.",
+        "description": "For `geometry`: leave the siblings out (each is a read of the running app).",
         "type": "boolean"
       }
     },
@@ -210,55 +197,24 @@ expression: value
   "name": "node_arrange",
   "outputSchema": {
     "properties": {
-      "boxes": {
-        "type": "array"
-      },
-      "changes": {
-        "type": "array"
-      },
-      "copied": {
-        "type": "array"
-      },
-      "doc": {
-        "type": "string"
-      },
-      "generation": {
-        "type": "integer"
-      },
-      "history": {
-        "type": [
-          "integer",
-          "null"
-        ]
-      },
-      "node": {
-        "type": [
-          "string",
-          "null"
-        ]
-      },
-      "nodes": {
-        "type": "array"
-      },
+      "aliases": {},
+      "boxes": {},
+      "changes": {},
+      "component": {},
+      "copied": {},
+      "doc": {},
+      "generation": {},
+      "history": {},
+      "imported": {},
+      "name_unsure": {},
+      "node": {},
+      "nodes": {},
       "parent": {},
-      "rebased_from": {
-        "type": [
-          "integer",
-          "null"
-        ]
-      },
-      "siblings": {
-        "type": "array"
-      },
-      "text": {
-        "type": [
-          "string",
-          "null"
-        ]
-      },
-      "unchanged": {
-        "type": "boolean"
-      }
+      "rebased_from": {},
+      "siblings": {},
+      "text": {},
+      "unchanged": {},
+      "unvouched": {}
     },
     "type": "object"
   },

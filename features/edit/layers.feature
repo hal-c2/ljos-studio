@@ -43,12 +43,59 @@ Feature: An object is renamed, hidden and locked through `node_arrange`
       }
       """
 
+  # A string written as an id leaves an object nothing can name, and what
+  # reads the old id reading nothing.
+  Scenario Outline: An id is not set as a value: <tool>
+    When the agent calls the tool "<tool>" with:
+      """json
+      {"doc": "Main.qml", "node": {"id": "footer"}, "name": "id", "value": "credit"}
+      """
+    Then the agent is refused with "invalid_argument"
+    And the refusal's message matches "rename"
+    And the file "Main.qml" contains "id: footer"
+
+    Examples:
+      | tool         |
+      | property_set |
+      | binding_set  |
+
   Scenario: An object with no id gets the one it is named
     When the agent calls the tool "node_arrange" with:
       """json
       {"action": "rename", "doc": "Main.qml", "nodes": [{"path": "root/2"}], "name": "line", "generation": 1}
       """
     Then the file "Main.qml" contains "id: line"
+
+  Scenario: An object's new id goes first, where a reader looks for it
+    Given the file "Page.qml":
+      """qml
+      import QtQuick
+
+      Item {
+          width: 300
+          states: [
+              State { name: "open" }
+          ]
+          Text { text: "Hi" }
+      }
+      """
+    When the agent calls the tool "node_arrange" with:
+      """json
+      {"action": "rename", "doc": "Page.qml", "nodes": [{"path": "root"}], "name": "page", "generation": 1}
+      """
+    Then the file "Page.qml" is:
+      """qml
+      import QtQuick
+
+      Item {
+          id: page
+          width: 300
+          states: [
+              State { name: "open" }
+          ]
+          Text { text: "Hi" }
+      }
+      """
 
   Scenario Outline: A name that cannot be an id is refused
     When the agent calls the tool "node_arrange" with:
@@ -63,6 +110,16 @@ Feature: An object is renamed, hidden and locked through `node_arrange`
       | backdrop | id_taken |
       | Credit   | not_an_id |
       | two word | not_an_id |
+      | function | not_an_id |
+      | if       | not_an_id |
+      | pragma   | not_an_id |
+      | console  | not_an_id |
+      | print    | not_an_id |
+      | gc       | not_an_id |
+      | eval     | not_an_id |
+      | undefined | not_an_id |
+      | parseInt | not_an_id |
+      | qsTr     | not_an_id |
 
   Scenario: A locked object stays where it is, and the file does not change
     Given the agent has called the tool "node_arrange" with:
@@ -534,6 +591,42 @@ Feature: An object is renamed, hidden and locked through `node_arrange`
       {"format": "outline"}
       """
     Then the answer's "/outline" contains "Text#footer"
+
+  @preview
+  Scenario: A hidden object stays hidden when an edit of the whole text renames it
+    Given the agent has called the tool "preview_open" with:
+      """json
+      {"doc": "Main.qml"}
+      """
+    And the agent has called the tool "node_arrange" with:
+      """json
+      {"action": "hide", "doc": "Main.qml", "nodes": [{"id": "footer"}]}
+      """
+    When the agent calls the tool "document_edit" with:
+      """json
+      {"doc": "Main.qml", "generation": 1, "text": "import QtQuick\n\nItem {\n    id: root\n    width: 300\n    height: 200\n    Rectangle { id: backdrop; x: 0; width: 300; height: 200 }\n    Text { id: credit; text: \"Footer\" }\n    Text { text: credit.text + \" footer: \" + root.width }\n}\n"}
+      """
+    And the agent calls the tool "preview_screenshot" with:
+      """json
+      {"format": "outline"}
+      """
+    Then the answer's "/outline" does not contain "Text#credit"
+
+  Scenario: A locked object stays locked when an edit of the whole text renames it
+    Given the agent has called the tool "node_arrange" with:
+      """json
+      {"action": "lock", "doc": "Main.qml", "nodes": [{"id": "footer"}]}
+      """
+    When the agent calls the tool "document_edit" with:
+      """json
+      {"doc": "Main.qml", "generation": 1, "text": "import QtQuick\n\nItem {\n    id: root\n    width: 300\n    height: 200\n    Rectangle { id: backdrop; x: 0; width: 300; height: 200 }\n    Text { id: credit; text: \"Footer\" }\n    Text { text: credit.text + \" footer: \" + root.width }\n}\n"}
+      """
+    And the agent calls the tool "node_arrange" with:
+      """json
+      {"action": "remove", "doc": "Main.qml", "nodes": [{"id": "credit"}]}
+      """
+    Then the agent is refused with "not_actionable"
+    And the refusal's "/details/kind" is "locked"
 
   Scenario: A value replaces a property's block
     Given the file "Worked.qml":

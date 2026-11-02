@@ -4,20 +4,38 @@ expression: value
 ---
 {
   "annotations": {
-    "destructive": false,
-    "idempotent": true,
+    "destructive": true,
+    "idempotent": false,
     "open_world": false,
-    "read_only": true
+    "read_only": false
   },
-  "description": "Open a project directory below the workspace (relative or absolute path), or describe the open one. Opening starts a new session: earlier handles and history end.",
+  "description": "Open a project directory below the workspace, or describe the open one. Opening starts a new session: handles and history end. `asset` lists, imports or removes the project's pictures and fonts.",
   "inputSchema": {
     "properties": {
+      "asset": {
+        "description": "On the project's `assets/`: `list` it, `import` a picture or font (`fs`), `remove` one no document uses (`fs`).",
+        "enum": [
+          "import",
+          "list",
+          "remove"
+        ],
+        "type": "string"
+      },
+      "data": {
+        "description": "`import`: the file's bytes in base64, for a client with no file here; needs `name`.",
+        "type": "string"
+      },
+      "file": {
+        "description": "`import`: a file below the workspace.",
+        "type": "string"
+      },
+      "name": {
+        "description": "`import`: the name to give it. `remove`: the asset's name.",
+        "type": "string"
+      },
       "path": {
-        "description": "A directory below the workspace, from it or absolute; `.` for the\nworkspace itself. Left\nout, the open project is described without reopening it.",
-        "type": [
-          "string",
-          "null"
-        ]
+        "description": "A directory below the workspace, relative or absolute (`.` is the workspace). Left out, describes the open project.",
+        "type": "string"
       }
     },
     "type": "object"
@@ -26,12 +44,15 @@ expression: value
   "name": "project_open",
   "outputSchema": {
     "properties": {
+      "asset": {},
+      "assets": {},
       "documents": {
         "type": "array"
       },
       "project": {
         "type": "string"
-      }
+      },
+      "removed": {}
     },
     "required": [
       "project",

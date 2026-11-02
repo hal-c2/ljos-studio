@@ -9,11 +9,15 @@ expression: value
     "open_world": false,
     "read_only": false
   },
-  "description": "Run a document (a shell) in a preview for a target (desktop, tablet, phone) with live blocks or the project's mock modules. On the open preview it changes size or state in place, keeping the app's state. Edits show in it at once.",
+  "description": "Run a document (a shell) in a preview for a target (desktop, tablet, phone) with live blocks or the mock modules. On the open preview it changes size or state in place; `state_kept` says whether the app's state survived.",
   "inputSchema": {
-    "$defs": {
-      "Size": {
-        "description": "Logical pixels, 1 to 8192 on each side.",
+    "properties": {
+      "doc": {
+        "description": "The document to run, usually a shell (`Shell.qml`).",
+        "type": "string"
+      },
+      "size": {
+        "description": "A size in logical pixels instead of a target's.",
         "properties": {
           "height": {
             "maximum": 8192,
@@ -30,61 +34,22 @@ expression: value
         ],
         "type": "object"
       },
-      "State": {
-        "description": "Whether the blocks are the app's own or its mock modules'.",
+      "state": {
+        "description": "`live` runs the app's blocks; `mocked` the mock modules (`mocks/`) in their place. Default: the open preview's, else `live`.",
         "enum": [
           "live",
           "mocked"
         ],
         "type": "string"
       },
-      "Target": {
-        "description": "The shape of screen a preview is laid out for.",
+      "target": {
+        "description": "The screen to lay it out for (default: the open preview's, else `desktop`).",
         "enum": [
           "desktop",
           "tablet",
           "phone"
         ],
         "type": "string"
-      }
-    },
-    "properties": {
-      "doc": {
-        "description": "The document to run, usually a shell (`Shell.qml`).",
-        "type": "string"
-      },
-      "size": {
-        "anyOf": [
-          {
-            "$ref": "#/$defs/Size"
-          },
-          {
-            "type": "null"
-          }
-        ],
-        "description": "A size in logical pixels instead of a target's."
-      },
-      "state": {
-        "anyOf": [
-          {
-            "$ref": "#/$defs/State"
-          },
-          {
-            "type": "null"
-          }
-        ],
-        "description": "`live` runs the app's own blocks; `mocked` the project's mock\nmodules (`mocks/`) in their place. Default: the open preview's, else\n`live`."
-      },
-      "target": {
-        "anyOf": [
-          {
-            "$ref": "#/$defs/Target"
-          },
-          {
-            "type": "null"
-          }
-        ],
-        "description": "The screen to lay it out for (default: the open preview's, else\n`desktop`)."
       }
     },
     "required": [
@@ -110,6 +75,9 @@ expression: value
         "type": "boolean"
       },
       "state": {},
+      "state_kept": {
+        "type": "boolean"
+      },
       "target": {}
     },
     "required": [
@@ -118,6 +86,7 @@ expression: value
       "state",
       "mocked",
       "started",
+      "state_kept",
       "ms"
     ],
     "type": "object"

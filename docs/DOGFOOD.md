@@ -389,6 +389,36 @@ Studio, `budgets` and the preview's `ljos` are all release builds, taken
 | Idle for 5 s | 0 % CPU | 0 ms CPU, 0 wakes, 0 frames | | | within |
 | Drag, engine work per pointer move, p50 / p95 / max | | 34 / 45 / 418 us | | | no paint in it |
 
+**Re-measured 2026-11-01 on the Ljós pin f5266a91** (release `studio`, `budgets` and
+`ljos`; times of day 13:06-13:13, the machine's load average beside each run,
+because other builds shared it). Stock project, p50 / p95 / max:
+
+| Path | Load about 7 | Load about 18 |
+|---|---|---|
+| Cold start (200 files) | 61.8 / 86.3 / 86.3 ms | 79.0 / 93.0 / 93.0 ms |
+| Selection to inspector | 10.2 / 14.1 / 16.2 ms | 16.2 / 19.5 / 19.9 ms |
+| Edit to picture, one per 250 ms | 21.1 / 24.4 / 24.9 ms | 20.8 / 26.6 / 27.1 ms |
+| Theme-set to picture | not taken | 14.1 / 15.6 / 17.5 ms |
+| Drag, engine work per move | 37 / 55 / 721 us | 34 / 57 / 440 us |
+| Watched window left alone 5 s | 0 ms CPU, 0 wakes, 0 frames | same |
+
+`samples/site` at load 16: cold start 79.9 / 93.1 ms; edit to picture 31.6 / 46.5 / 58.1 ms.
+`samples/notes` at load 18: cold start 64.0 / 77.6 ms; edit to picture 29.0 / 735 / 1523 ms.
+The notes tail is three saves whose rename into place took 708, 1451 and 744 ms on
+the data drive, while the same edit's text write, reload and picture took 6 to
+25 ms: the file system, not Studio. One more run (load 9) read slower in every row
+(selection 30.6 / 48.8 ms) with the same code, so a single run under load says
+little; the load-7 and load-18 runs bracket it.
+
+Two harness faults surfaced and are fixed: the tokens step never opened the
+Tokens tab (the sidebar is tabbed now), and `budgets sample` clicked a Documents
+row the list had clipped, which landed below it; it scrolls to the row first.
+
+**A focused TextField in a headless preview** wakes the main thread about twice
+a second (46 and 40 wakes in 20 s, with and without `--watch`) for the cursor's
+blink, against none for the same program unfocused; CPU time was 1 tick in 20 s.
+It is Ljós's, not Studio's (`ljos-requests.md`, p6c-gaps 2).
+
 **The drag.** Dragging `card0` 150 moves across a release window, in the
 desktop:cua sandbox with software GL (llvmpipe, a headless sway output). The
 figure is the wall-clock time between frames, read by a `FrameAnimation` in a
@@ -426,9 +456,20 @@ hit that limit.
 - **Fixed:** the canvas says the object has no box and offers no alignment; a
   row holding an expression stays one when edited; a literal row still refuses
   (`features/ui/quick3d.feature`). Driven in a real window off-screen.
-- **Open:** a click on the picture selects the `View3D`, not the model under
-  the pointer, and there are no 3D handles or orbit: a 3D object is chosen in
-  Layers and edited in the inspector.
+- **Then (phase 6):** a click on the picture selects the `Model` under the
+  pointer (Studio casts the ray itself from the scene the preview can read,
+  as Ljós's own `pick` is not usable from outside), and a selected `Model`
+  has move arrows for `x`, `y`, `z`. A drag writes one axis as one undo step
+  and shows the arrow and its value live; an axis an expression sets is
+  refused. Driven in a real window off-screen; pictures in
+  `$S/studio/p6/shots` (`03-picked`, `04-dragging`, `05-dropped`,
+  `06-undone`, `08-hand-after`).
+- **Open:** no orbit and no rotate gizmo (`eulerRotation` is edited in the
+  inspector). The Hand tool over a `View3D` pans the canvas and writes
+  nothing. With the camera looking down z the z axis is a point, so only the
+  x and y arrows show there. A file mesh is not picked (its size is unknown
+  from outside) and an orthographic camera falls back to selecting the
+  view. The web host reads no scene, so there a click still selects the view.
 
 **Phase 5, measured before the review fixes** (machine load 10 to 17 from other
 builds). Selection to inspector, driver's clock advanced between clicks: p50 /
@@ -438,6 +479,46 @@ project on tmpfs 23.0 / 27.3 / 32.1. `samples/notes` on tmpfs 26.8 / 43.0 / 46.5
 on the drive 35.8 / 1121.2 / 3262.2. `samples/site` on the drive 34.2 / 41.9 /
 47.1; on tmpfs 41.0 / 57.7 / 130.8. Idle 0 ms CPU, 0 wakes, 0 frames. `tools/list` is 40 324 bytes
 against the scenario's 40 960: little room left.
+
+**Phase 6, built from an empty project.** Four things, each opened and judged
+by eye: a timer app by hand and through MCP only, its block skinned through a
+shell; a coffee app by hand with a QML block, skinned a second way through MCP;
+a marketing site through MCP only (581 877 bytes exported) and by hand (555 695
+bytes, Row turned into Flow in the inspector, a phone width as a State).
+
+Budgets, release, base `n4-export` against this head on the same Ljós, quiet
+rounds, p95 in ms: selection to inspector 25.6 / 39.3 against 19.6 / 34.4;
+inspector edit to picture 35.5 / 37.3 against 40.1 / 51.6, p50 31 to 32 against
+29 to 31; state edit to picture 38.4 / 40.3 against 24.5 / 24.4; `theme_set`
+30.3 / 31.5 against 22.6 / 23.7; back-to-back edits about 1030 / 872 against
+25.8 / 39.5. Idle 0 ms CPU and 0 wakes in all. At load 45 selection reaches
+220 ms against 20.7 at load 10, so the slower numbers seen on a busy machine are
+load. Selection misses the 16 ms budget on both base and head on this machine.
+A shell that throws now takes about 157 to 175 ms to show the built-in one,
+against about 105, since the built-in shell doubled to 5971 lines.
+
+**Phase 6, still not good enough.**
+
+- A Text drawn on a dark fill is black, so it cannot be seen until recoloured.
+- A placed object lands at 0, 0 of its parent; a placed picture can overflow it.
+- The inspector edits the first of several and says so, rather than all.
+- A non-visual block shows position pads and handles.
+- The light or dark look follows the system at start, and a choice in the
+  toolbar is not kept for the next launch.
+- A member `node_insert` adds goes after child objects; `id: true` cannot name
+  the id at insert.
+- The default Button is tiny; Layout's spacing repeats under Properties; rows
+  named `Layout.pref...` elide to the same text; an alias on an instance reads
+  "no value".
+- The Assets panel does not see a file added from outside until the next publish.
+- An export ships files nothing uses (`dusk-src.png`, twice).
+- The canvas's align bar can cover a tall frame's "Edit layout" button, and a
+  tooltip can linger.
+- Shutting the window logs `CanvasOverlay.qml:84: TypeError: Cannot read property
+  'chosen' of null`.
+- A window already on a document ran out of JS stack in the test build when the
+  palette rebuilt inside a publish. The palette now reads later, and the 512 KiB
+  limit stays Ljós's.
 
 ## Not done
 

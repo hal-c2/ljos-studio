@@ -283,6 +283,12 @@ pub trait PreviewHost: Send {
         DEFAULT_CALLS_PER_SECOND
     }
 
+    /// Whether switching a module's mock starts the program over, losing the
+    /// state it had, rather than reloading it in place (`alias`).
+    fn restarts_on_switch(&self) -> bool {
+        false
+    }
+
     /// Starts the preview of `spec`, ending one that runs.
     fn open(&mut self, spec: &PreviewSpec) -> Result<(), PreviewError>;
 
@@ -326,6 +332,15 @@ pub trait PreviewHost: Send {
     /// is declared: the topmost object there that has a declaration.
     /// `None` when nothing is there.
     fn pick(&mut self, x: f64, y: f64) -> Result<Option<Declared>, PreviewError>;
+
+    /// The 3D scene the object declared at `at` is, or is in: its camera and
+    /// models, as the running preview places them. `None` for an object that
+    /// is in no `View3D`. A host that cannot read a scene says `None` too, so
+    /// a click on the picture of a view selects the view.
+    fn scene(&mut self, at: &Declared) -> Result<Option<crate::scene3d::Scene>, PreviewError> {
+        let _ = at;
+        Ok(None)
+    }
 
     /// The objects with one of `ids` and, among objects without an id, those
     /// of one of `types`, in scene order. Copies of a delegate are each

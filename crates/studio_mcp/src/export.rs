@@ -138,8 +138,7 @@ struct ExportArgs {
     /// `native` (default) or `web`.
     #[serde(default)]
     target: Target,
-    /// Where, relative to the project and below its `build/`; default
-    /// `build/<target>`. A previous bundle there is replaced.
+    /// Below the project's `build/`; default `build/<target>`. A bundle there is replaced.
     out: Option<String>,
     /// Say what the bundle would hold; write nothing.
     #[serde(default)]
@@ -1041,10 +1040,7 @@ pub(crate) fn add(registry: ToolRegistry, studio: &Arc<Mutex<Studio>>) -> ToolRe
     registry.with(
         ToolDef::new::<ExportArgs>(
             "export",
-            "Write a bundle of the project that runs without Studio: its QML, theme, assets and \
-             own modules, never mocks or `.studio/`. `native`: `ljos-bundle.json` says how \
-             `ljos run` starts it. `web`: `ljos-site.json` says what ljos-web builds a site \
-             from. `dry_run` writes nothing.",
+            "Write a bundle that runs without Studio: QML, theme, assets and own modules, never mocks or `.studio/`. `native`: `ljos-bundle.json` says how `ljos run` starts it. `web`: `ljos-site.json` is what ljos-web builds from. `dry_run` writes nothing.",
         )
         .answers::<ExportOut>()
         .requires(Cap::Fs)

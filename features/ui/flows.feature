@@ -175,6 +175,41 @@ Feature: A person wires and plays a prototype's flow in Studio's window
     Then the flow panel lists the flows "flipped card to details"
     And the history lists "flipped card to details"
 
+  Scenario: A state animates when it is reached
+    Given the person has opened the "Flow tab"
+    When the person clicks the button "Animate to details"
+    Then the flow panel lists the flows "* to details"
+    And the file "Main.qml" says "duration: 300"
+    When the person clicks the button "Remove flow * to details"
+    Then the flow panel lists the flows ""
+    And the file "Main.qml" does not say "NumberAnimation"
+
+  @preview
+  Scenario: A state is shown on the canvas from its name
+    Given the person has opened the "Flow tab"
+    And the person has looked at the frame "Desktop"
+    When the person clicks the button "Show details"
+    Then the frame "Desktop" has drawn a different picture since
+
+  # The panel read any answer of `preview_state`, and a frame showing a state
+  # is one: it said the app was playing when nobody had pressed Play.
+  @preview
+  Scenario: A state shown on the canvas is not said to be played
+    Given the person has opened the "Flow tab"
+    When the person clicks the button "Show details"
+    Then the window does not say "Playing details"
+
+  @preview
+  Scenario: What was played is not said to be playing once Play is off
+    Given the person has selected "Rectangle card" in the layers panel
+    And the person has opened the "Flow tab"
+    And the person has clicked the button "Tap selection to go to details"
+    And the person has clicked the button "Play"
+    When the person clicks the frame "Desktop" at 50, 150
+    Then the flow panel says the app is in the state "details"
+    When the person clicks the button "Play"
+    Then the window does not say "Playing details"
+
   Scenario: A wire is taken out
     Given the person has selected "Rectangle card" in the layers panel
     And the person has opened the "Flow tab"

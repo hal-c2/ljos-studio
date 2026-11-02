@@ -157,9 +157,22 @@ pub struct Edge {
     pub signal: String,
 }
 
+/// What a panel shows of an asset; `project_open` answers more, after reading
+/// each file, which a publish after every edit should not.
+#[derive(Clone, Debug, Default, PartialEq, Serialize)]
+pub struct AssetTile {
+    pub name: String,
+    /// From the project's root.
+    pub url: String,
+    /// Where a thumbnail loads it from; empty when it is on no disk.
+    pub file: String,
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Serialize)]
 pub struct View {
     pub documents: Vec<String>,
+    /// The pictures in `assets/`, for the Insert tab.
+    pub assets: Vec<AssetTile>,
     /// The project's directory has nothing in it a walk would list.
     pub blank: bool,
     pub doc: String,
@@ -184,6 +197,8 @@ pub struct View {
     pub roles: Vec<String>,
     /// The selected object's signals, as `node_inspect` lists them.
     pub signals: Vec<crate::signals::Signal>,
+    /// What the selected object can be given, as `node_inspect` lists it.
+    pub offers: Vec<crate::signals::Offer>,
     pub flow: Flow,
     pub palette: Vec<Offered>,
     /// The toolkit types the document can place, by module.
@@ -217,12 +232,32 @@ pub struct Held {
 }
 
 impl Studio {
+    fn asset_tiles(&self) -> Vec<AssetTile> {
+        let dir = self.dir();
+        crate::assets::names(self.session.store())
+            .into_iter()
+            .filter(|(_, kind)| *kind == "image")
+            .map(|(name, _)| {
+                let url = format!("assets/{name}");
+                AssetTile {
+                    file: dir
+                        .as_ref()
+                        .map(|d| file_url(&d.join(&url)))
+                        .unwrap_or_default(),
+                    url,
+                    name,
+                }
+            })
+            .collect()
+    }
+
     /// The session as a window showing `doc` sees it now.
     pub fn view(&mut self, doc: &str) -> View {
         let documents = self.session.documents();
         let mut view = View {
             blank: documents.is_empty() && self.session.blank(),
             documents,
+            assets: self.asset_tiles(),
             previews: self
                 .hosts
                 .as_ref()
@@ -435,8 +470,8 @@ impl Studio {
                     });
                 }
             }
-            // What its type takes, which the person placing it has not read.
             let says = crate::signals::described(self.session.store(), doc, &view.text, &node);
+            // What its type takes, which the person placing it has not read.
             for name in says.takes {
                 if !view.inspector.iter().any(|row| row.name == name) {
                     view.inspector.push(Shown {
@@ -455,6 +490,7 @@ impl Studio {
                 view.roles = model.roles;
             }
             view.signals = says.signals.unwrap_or_default();
+            view.offers = says.offers;
             view.selected = handle;
         }
         view
@@ -523,7 +559,7 @@ impl Studio {
     /// its breakpoint. Only the condition `state_edit` writes for a
     /// breakpoint is read as one: any other `when` is the app's own logic,
     /// which only running it can answer.
-    fn variant(&mut self, doc: &str, width: u32) -> Option<String> {
+    pub(crate) fn variant(&mut self, doc: &str, width: u32) -> Option<String> {
         let root = Address::Path("root".to_owned());
         let (_, node) = self.session.resolve(doc, &root).ok()?;
         let condition = Target::of_width(width).condition(&node.id?);
@@ -616,4 +652,47 @@ fn utf16(text: &str, byte: usize) -> usize {
         end -= 1;
     }
     text[..end].encode_utf16().count()
+}
+
+/// A path as a `file:` URL: what a path may hold and a URL may not is escaped,
+/// and a drive's path starts with one more slash.
+fn file_url(path: &std::path::Path) -> String {
+    let path = path.to_string_lossy();
+    // Only Windows's paths are divided by it; elsewhere a name may hold one.
+    let path = if cfg!(windows) {
+        path.replace('\\', "/")
+    } else {
+        path.into_owned()
+    };
+    let mut url = String::from("file://");
+    if !path.starts_with('/') {
+        url.push('/');
+    }
+    for byte in path.bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' | b'/' | b':' => {
+                url.push(byte as char);
+            }
+            _ => url.push_str(&format!("%{byte:02X}")),
+        }
+    }
+    url
+}
+
+#[cfg(test)]
+mod tests {
+    use super::file_url;
+    use std::path::Path;
+
+    #[test]
+    fn a_path_is_written_as_a_url() {
+        assert_eq!(
+            file_url(Path::new("/a b/c#d?e.png")),
+            "file:///a%20b/c%23d%3Fe.png"
+        );
+        #[cfg(windows)]
+        assert_eq!(file_url(Path::new("C:\\p\\a.png")), "file:///C:/p/a.png");
+        #[cfg(not(windows))]
+        assert_eq!(file_url(Path::new("/a\\b.png")), "file:///a%5Cb.png");
+    }
 }

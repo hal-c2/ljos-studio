@@ -118,3 +118,44 @@ Feature: A breakpoint is a state the root's width turns on
       {"doc": "Main.qml", "target": "desktop"}
       """
     Then the preview shows "wide"
+
+  @preview
+  Scenario: A preview already on a phone shows the state written for it
+    When the agent calls the tool "preview_open" with:
+      """json
+      {"doc": "Main.qml", "target": "phone"}
+      """
+    Then the preview shows "wide"
+    When the agent calls the tool "state_edit" with:
+      """json
+      {"doc": "Main.qml", "action": "add", "state": "compact", "breakpoint": "phone"}
+      """
+    And the agent calls the tool "state_edit" with:
+      """json
+      {"doc": "Main.qml", "action": "change", "state": "compact", "target": {"id": "label"}, "name": "text", "value": "narrow"}
+      """
+    Then the preview shows "narrow"
+    When the agent calls the tool "state_edit" with:
+      """json
+      {"doc": "Main.qml", "action": "change", "state": "compact", "target": {"id": "label"}, "name": "text", "value": "tiny"}
+      """
+    Then the preview shows "tiny"
+    When the agent calls the tool "preview_state" with:
+      """json
+      {"node": {"id": "root"}, "show": ""}
+      """
+    Then the preview shows "tiny"
+    When the agent calls the tool "preview_open" with:
+      """json
+      {"doc": "Main.qml", "target": "desktop"}
+      """
+    Then the preview shows "wide"
+    When the agent calls the tool "state_edit" with:
+      """json
+      {"doc": "Main.qml", "action": "remove", "state": "compact"}
+      """
+    And the agent calls the tool "preview_open" with:
+      """json
+      {"doc": "Main.qml", "target": "phone"}
+      """
+    Then the preview shows "wide"

@@ -6,10 +6,14 @@
 //! across everyone's later edits. Tool order is wire order and never
 //! changes between versions without a golden-file diff (DESIGN.md, MCP.md).
 
+mod assets;
 mod blocks;
+mod component;
 #[cfg(feature = "http")]
 pub mod endpoint;
 pub mod export;
+mod layout_tools;
+mod loads;
 mod place_tools;
 pub mod preview;
 mod preview_tools;
@@ -209,6 +213,26 @@ impl Studio {
     pub fn file_changed(&self) {
         let (previews, watchers, timer) = self.written();
         told_of_write(&previews, &watchers, &timer);
+    }
+
+    /// Keeps the open preview in the state its width turns on, after a call
+    /// that may have written that state or changed the width.
+    fn breakpoint_now(&mut self) {
+        let open = preview::lock(&self.previews)
+            .open
+            .as_ref()
+            .map(|o| (o.doc.clone(), o.size.width));
+        let Some((doc, width)) = open else {
+            return;
+        };
+        let now = self.variant(&doc, width).and_then(|state| {
+            let root = Address::Path("root".to_owned());
+            let (_, node) = self.session.resolve(&doc, &root).ok()?;
+            Some((node.id?, state))
+        });
+        if preview::lock(&self.previews).hold_breakpoint(now) {
+            self.watchers.tell();
+        }
     }
 
     /// Keeps the ids of the hidden objects to what the text says now, after a
@@ -463,6 +487,7 @@ impl StudioServer {
         }
         let out = self.tools.call(name, ctx, args).0.map(ToolReply::from);
         lock(&self.studio).hidden_now();
+        lock(&self.studio).breakpoint_now();
         // Writes tell the watchers as they happen (`follow`); these change
         // what a window shows without writing.
         if out.is_ok() && SHOWN_WITHOUT_WRITING.contains(&name) {

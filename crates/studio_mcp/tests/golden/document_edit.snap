@@ -9,21 +9,17 @@ expression: value
     "open_world": false,
     "read_only": false
   },
-  "description": "Replace a byte range of a document's text, as the code view does. The result may not parse; structural edits then wait and handles hold. Needs the generation read.",
+  "description": "Replace a byte range of a document's text, as the code view does. It may leave the text unparsed; structural edits then wait and handles hold. Needs the generation read.",
   "inputSchema": {
     "properties": {
       "doc": {
         "type": "string"
       },
       "dry_run": {
-        "default": false,
         "type": "boolean"
       },
       "end": {
-        "type": [
-          "integer",
-          "null"
-        ]
+        "type": "integer"
       },
       "generation": {
         "description": "The generation the offsets were read at.",
@@ -31,17 +27,13 @@ expression: value
       },
       "start": {
         "description": "Byte range to replace; the whole text when both are left out.",
-        "type": [
-          "integer",
-          "null"
-        ]
+        "type": "integer"
       },
       "text": {
         "type": "string"
       },
       "typing": {
-        "default": false,
-        "description": "A person's typing: a character joins the last one in one undo step,\nuntil a pause of a second or a new word.",
+        "description": "A person's typing: joins the last in one undo step until a pause of a second or a new word.",
         "type": "boolean"
       }
     },
@@ -65,30 +57,10 @@ expression: value
       "generation": {
         "type": "integer"
       },
-      "history": {
-        "type": [
-          "integer",
-          "null"
-        ]
-      },
-      "node": {
-        "type": [
-          "string",
-          "null"
-        ]
-      },
-      "rebased_from": {
-        "type": [
-          "integer",
-          "null"
-        ]
-      },
-      "text": {
-        "type": [
-          "string",
-          "null"
-        ]
-      },
+      "history": {},
+      "node": {},
+      "rebased_from": {},
+      "text": {},
       "unchanged": {
         "type": "boolean"
       }

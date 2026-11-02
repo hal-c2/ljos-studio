@@ -38,13 +38,127 @@ Panel {
             rowEditing = false
     }
 
+    readonly property var selectedLayer: {
+        const all = workspace.layers
+        for (let i = 0; i < all.length; i++) {
+            if (all[i].node === workspace.selected)
+                return {at: i, layer: all[i]}
+        }
+        return null
+    }
+    readonly property string selectedType: selectedLayer !== null ? selectedLayer.layer.type : ""
+    readonly property bool isRoot: selectedLayer !== null && selectedLayer.at === 0
+    readonly property bool isLayout: ["Row", "Column", "Grid", "Flow", "RowLayout", "ColumnLayout", "GridLayout"]
+        .indexOf(selectedType) >= 0
+    // The nearest layer above in the list, one less deep, is its parent.
+    readonly property string placedBy: {
+        if (selectedLayer === null)
+            return ""
+        const all = workspace.layers
+        for (let i = selectedLayer.at - 1; i >= 0; i--) {
+            if (all[i].depth < selectedLayer.layer.depth) {
+                const type = all[i].type
+                return ["Row", "Column", "Grid", "Flow", "RowLayout", "ColumnLayout", "GridLayout", "StackLayout"]
+                    .indexOf(type) >= 0 ? type : ""
+            }
+        }
+        return ""
+    }
+    function written(name) {
+        const row = workspace.inspector.find(r => r.name === name)
+        return row !== undefined ? row.value : ""
+    }
+    function isPinned(side) {
+        return written("anchors." + side) !== ""
+    }
+    // The newest boxes the canvas asked for: a new pin keeps the distance the
+    // object has, where one is known.
+    property var seenBox: null
+    property var seenParent: null
+    function margin(side) {
+        const box = seenBox
+        const outer = seenParent
+        if (box === null || outer === null || box.window === undefined)
+            return 0
+        const at = box.window
+        const away = side === "left" ? at.x - outer.x
+            : side === "top" ? at.y - outer.y
+            : side === "right" ? outer.x + outer.width - at.x - at.width
+            : outer.y + outer.height - at.y - at.height
+        return Math.round(away)
+    }
+    // Where the running app has it, for what the file does not say: only what
+    // is on the canvas has a place, and only where no layout or anchor says it.
+    readonly property var placeRows: {
+        const box = seenBox
+        if (box === null || box.local === undefined || box.scene !== undefined || placedBy !== "" || isRoot)
+            return []
+        const pinned = workspace.inspector.some(r => r.name.startsWith("anchors."))
+        return pinned ? [] : [
+            {name: "x", at: box.local.x},
+            {name: "y", at: box.local.y},
+            {name: "width", at: box.local.width},
+            {name: "height", at: box.local.height}
+        ].filter(p => !workspace.inspector.some(r => r.name === p.name))
+    }
+    function togglePin(side) {
+        const args = {
+            action: "anchor",
+            doc: workspace.doc,
+            nodes: workspace.chosen.map(h => ({node: h}))
+        }
+        if (side === "centerIn") {
+            args.centerIn = !isPinned(side)
+        } else if (side === "fill") {
+            args.fill = !isPinned(side)
+        } else {
+            args.sides = {}
+            args.sides[side] = isPinned(side) ? null : margin(side)
+        }
+        workspace.dispatch("node_arrange", args)
+    }
+
+    function offer(name) {
+        const found = workspace.offers.find(o => o.name === name)
+        return found !== undefined ? found : null
+    }
+    function choices(name) {
+        const found = offer(name)
+        return found !== null && found.values !== undefined ? found.values : []
+    }
+    // The properties the name typed so far could be, not those already
+    // written: the first few, since this is a nudge and not a reference.
+    function namesOffered(typed, focused) {
+        const word = typed.toLowerCase()
+        if (word === "" && !focused)
+            return []
+        if (offer(typed) !== null)
+            return []
+        const rows = workspace.inspector
+        return workspace.offers
+            .filter(o => o.name.toLowerCase().indexOf(word) >= 0
+                         && !rows.some(r => r.name === o.name))
+            .slice(0, 6)
+    }
+
     signal reseed()
+    // What was begun on the object selected before: a write reads the selection
+    // when it is sent, and would land on this one.
+    signal selectionMoved()
+    onSelectionMoved: {
+        newName.text = ""
+        newValue.text = ""
+        componentName.text = ""
+        newComment.text = ""
+    }
     Connections {
         target: panel.workspace
         function onSelectedChanged() {
             panel.reseed()
+            panel.selectionMoved()
             // The selection is shared, and what is open was opened on another.
             picker.close()
+            choiceList.close()
             // An object removed under an open picker empties the selection,
             // and what the picker says of that is still to be read. Any other
             // refusal was about what is gone.
@@ -52,6 +166,10 @@ Panel {
                 panel.forgetRefused()
             else
                 panel.offered = null
+            // Those boxes were another object's, and a pin or a place offered
+            // from them would be wrong for this one.
+            panel.seenBox = null
+            panel.seenParent = null
         }
         function onRefused(tool, error) {
             if (["property_set", "binding_set", "state_edit", "node_arrange"].includes(tool))
@@ -62,6 +180,10 @@ Panel {
             }
         }
         function onAnswered(tool, answer) {
+            if (tool === "node_arrange" && answer.boxes !== undefined) {
+                panel.seenBox = answer.boxes.length === 1 ? answer.boxes[0] : null
+                panel.seenParent = answer.parent !== undefined ? answer.parent : null
+            }
             if (tool === "state_edit")
                 panel.renamedPicked = ""
         }
@@ -145,7 +267,8 @@ Panel {
         // Only a colour starts with `#`: no expression does, so it needs no asking.
         const trimmed = text.trim()
         const typed = /^#[0-9a-fA-F]+$/.test(trimmed) ? '"' + trimmed + '"' : trimmed
-        if (!workspace.literal(typed)) {
+        // One of the property's own values needs no asking either.
+        if (!workspace.literal(typed) && choices(name).indexOf(typed) < 0) {
             // The field goes back to what the file says; what was typed is
             // kept for the button under the refusal, which is what it asks for.
             offered = {name: name, value: typed, asText: heldText}
@@ -222,6 +345,38 @@ Panel {
             show(on, name, follows)
         else if (had)
             show(was, "", follows)
+    }
+    // Starts recording into the root's state for a width, making it when it is
+    // not there. A breakpoint compares the root by its id, so a root drawn
+    // without one is named first.
+    function editLayout(target, state) {
+        const root = workspace.layers.length > 0 ? workspace.layers[0] : null
+        if (root === null)
+            return
+        if (state !== "") {
+            pick(state, root.node)
+            return
+        }
+        forgetRefused()
+        if (root.id === "") {
+            let name = "root"
+            const taken = workspace.layers.map(l => l.id)
+            for (let n = 2; taken.indexOf(name) >= 0; n++)
+                name = "root" + n
+            workspace.dispatch("node_arrange", {
+                action: "rename",
+                doc: workspace.doc,
+                nodes: [{node: root.node}],
+                name: name
+            })
+        }
+        picked = target
+        pickedOn = root.node
+        editState({
+            action: workspace.rootStates.some(s => s.name === target) ? "when" : "add",
+            state: target,
+            breakpoint: target
+        })
     }
     function show(on, state, follows) {
         const object = layer(on)
@@ -341,6 +496,45 @@ Panel {
             name: name,
             value: text
         })
+    }
+
+    // The values of an enum, for the row that opened it.
+    Popup {
+        id: choiceList
+        property string name: ""
+        property var values: []
+        width: 200
+        padding: Spacing.xxs
+        Accessible.role: Accessible.List
+        Accessible.name: "Choices"
+
+        function show(name, at) {
+            choiceList.name = name
+            values = panel.choices(name)
+            const place = at.mapToItem(panel, 0, at.height)
+            x = Math.max(0, Math.min(place.x, panel.width - width))
+            y = place.y
+            open()
+        }
+
+        contentItem: ColumnLayout {
+            spacing: 0
+
+            Repeater {
+                model: choiceList.values
+                delegate: TextButton {
+                    required property string modelData
+                    Layout.fillWidth: true
+                    text: modelData.split(".").pop()
+                    Accessible.name: "Choose " + modelData + " for " + choiceList.name
+                    onClicked: {
+                        choiceList.close()
+                        panel.fromRow(() => panel.set(choiceList.name, modelData))
+                        newName.text = newName.text === choiceList.name ? "" : newName.text
+                    }
+                }
+            }
+        }
     }
 
     // Hue, saturation and value, or the hex a person has from elsewhere.
@@ -514,6 +708,17 @@ Panel {
         }
 
         Label {
+            visible: panel.workspace.chosen.length > 1
+            text: visible ? panel.workspace.chosen.length + " selected. This edits the first." : ""
+            color: Colors.textMuted
+            font.pixelSize: Typography.captionSize
+            padding: Spacing.xs
+            Layout.fillWidth: true
+            Accessible.role: Accessible.StaticText
+            Accessible.name: text
+        }
+
+        Label {
             id: refusal
             objectName: "inspectorRefusal"
             color: Colors.danger
@@ -534,6 +739,192 @@ Panel {
             Layout.leftMargin: Spacing.xs
             text: visible ? "Write " + panel.offered.value + " as text" : ""
             onClicked: panel.set(panel.offered.name, JSON.stringify(panel.offered.value))
+        }
+
+        Section {
+            title: "Layout"
+            visible: panel.workspace.selected !== ""
+            Layout.fillWidth: true
+
+            Label {
+                visible: panel.placedBy !== ""
+                text: "It is placed by its " + panel.placedBy
+                color: Colors.textMuted
+                font.pixelSize: Typography.captionSize
+                wrapMode: Text.Wrap
+                Layout.fillWidth: true
+            }
+
+            // Where it sits in the pad is which side it pins.
+            Item {
+                visible: panel.placedBy === "" && !panel.isRoot
+                implicitWidth: 3 * 28
+                implicitHeight: 3 * 28
+                Layout.alignment: Qt.AlignHCenter
+
+                Repeater {
+                    model: [
+                        {side: "top", label: "Pin top", icon: "pinTop", column: 1, row: 0},
+                        {side: "left", label: "Pin left", icon: "pinLeft", column: 0, row: 1},
+                        {side: "centerIn", label: "Pin centre", icon: "pinCentre", column: 1, row: 1},
+                        {side: "right", label: "Pin right", icon: "pinRight", column: 2, row: 1},
+                        {side: "bottom", label: "Pin bottom", icon: "pinBottom", column: 1, row: 2},
+                        {side: "fill", label: "Fill parent", icon: "frame", column: 2, row: 2}
+                    ]
+                    delegate: IconButton {
+                        required property var modelData
+                        x: modelData.column * 28
+                        y: modelData.row * 28
+                        icon_: modelData.icon
+                        text: modelData.label
+                        checked: panel.isPinned(modelData.side)
+                        onClicked: panel.togglePin(modelData.side)
+                    }
+                }
+            }
+
+            Repeater {
+                model: panel.placeRows
+                delegate: RowLayout {
+                    id: placeRow
+                    required property var modelData
+                    Layout.fillWidth: true
+                    spacing: Spacing.xxs
+
+                    Label {
+                        text: placeRow.modelData.name
+                        color: Colors.textMuted
+                        font.pixelSize: Typography.captionSize
+                        Layout.preferredWidth: 72
+                    }
+                    Field {
+                        id: placeValue
+                        placeholderText: Math.round(placeRow.modelData.at)
+                        Accessible.name: placeRow.modelData.name
+                        Layout.fillWidth: true
+                        onAccepted: if (text.trim() !== "") panel.set(placeRow.modelData.name, text)
+                        Connections {
+                            target: panel
+                            function onSelectionMoved() { placeValue.text = "" }
+                        }
+                    }
+                    IconButton {
+                        icon_: "link"
+                        text: "Bind " + placeRow.modelData.name
+                        enabled: placeValue.text.trim() !== ""
+                        onClicked: panel.bind(placeRow.modelData.name, placeValue.text)
+                    }
+                }
+            }
+
+            RowLayout {
+                visible: panel.isLayout
+                spacing: Spacing.xxs
+                Layout.fillWidth: true
+                Repeater {
+                    model: panel.isLayout ? ["spacing", "columns"].filter(n => n === "spacing" || panel.selectedType.startsWith("Grid")) : []
+                    delegate: RowLayout {
+                        required property string modelData
+                        spacing: Spacing.xxs
+                        Label {
+                            text: modelData
+                            color: Colors.textMuted
+                            font.pixelSize: Typography.captionSize
+                        }
+                        Field {
+                            text: panel.written(modelData)
+                            Accessible.name: "Layout " + modelData
+                            Layout.preferredWidth: 56
+                            onAccepted: panel.workspace.dispatch("binding_set", {
+                                doc: panel.workspace.doc,
+                                node: {node: panel.workspace.selected},
+                                name: modelData,
+                                value: text === "" ? null : text
+                            })
+                        }
+                    }
+                }
+            }
+
+            // Its family only: a Row's children are placed by their numbers,
+            // a RowLayout's by what they say of `Layout`.
+            Flow {
+                visible: panel.isLayout
+                spacing: Spacing.xxs
+                Layout.fillWidth: true
+                Repeater {
+                    model: {
+                        const kinds = panel.selectedType.endsWith("Layout")
+                            ? ["RowLayout", "ColumnLayout", "GridLayout"]
+                            : ["Row", "Column", "Grid", "Flow"]
+                        return kinds.filter(k => k !== panel.selectedType)
+                    }
+                    delegate: TextButton {
+                        required property string modelData
+                        text: modelData
+                        Accessible.name: "Turn into " + modelData
+                        onClicked: panel.workspace.dispatch("node_arrange", {
+                            action: "relayout",
+                            doc: panel.workspace.doc,
+                            nodes: [{node: panel.workspace.selected}],
+                            name: modelData
+                        })
+                    }
+                }
+            }
+
+            Row {
+                visible: !panel.isRoot
+                spacing: Spacing.xxs
+                Repeater {
+                    model: [
+                        {kind: "Row", icon: "row"},
+                        {kind: "Column", icon: "column"},
+                        {kind: "Grid", icon: "grid"},
+                        {kind: "Item", icon: "frame"}
+                    ]
+                    delegate: IconButton {
+                        required property var modelData
+                        icon_: modelData.icon
+                        text: "Wrap in " + modelData.kind
+                        onClicked: panel.workspace.dispatch("node_arrange", {
+                            action: "wrap",
+                            doc: panel.workspace.doc,
+                            nodes: panel.workspace.chosen.map(h => ({node: h})),
+                            in: modelData.kind
+                        })
+                    }
+                }
+            }
+
+            RowLayout {
+                visible: !panel.isRoot && panel.workspace.chosen.length === 1
+                Layout.fillWidth: true
+                spacing: Spacing.xxs
+
+                Field {
+                    id: componentName
+                    placeholderText: "Component name"
+                    Accessible.name: "Component name"
+                    Layout.fillWidth: true
+                    onAccepted: extract.clicked()
+                }
+                IconButton {
+                    id: extract
+                    icon_: "component"
+                    text: "Make component"
+                    enabled: componentName.text !== ""
+                    onClicked: {
+                        panel.workspace.dispatch("node_arrange", {
+                            action: "component_extract",
+                            doc: panel.workspace.doc,
+                            nodes: [{node: panel.workspace.selected}],
+                            name: componentName.text
+                        })
+                        componentName.text = ""
+                    }
+                }
+            }
         }
 
         Section {
@@ -590,9 +981,35 @@ Panel {
                         }
                     }
                     IconButton {
+                        visible: panel.choices(row.modelData.name).length > 0
+                        icon_: "chevronDown"
+                        text: "Choices for " + row.modelData.name
+                        onClicked: choiceList.show(row.modelData.name, this)
+                    }
+                    IconButton {
                         icon_: "link"
                         text: "Bind " + row.modelData.name
                         onClicked: panel.bind(row.modelData.name, value.text)
+                    }
+                }
+            }
+
+            Flow {
+                Layout.fillWidth: true
+                spacing: Spacing.xxs
+                visible: offeredRows.count > 0
+
+                Repeater {
+                    id: offeredRows
+                    model: panel.namesOffered(newName.text, newName.activeFocus)
+                    delegate: TextButton {
+                        required property var modelData
+                        text: modelData.name
+                        Accessible.name: "Offer " + modelData.name
+                        onClicked: {
+                            newName.text = modelData.name
+                            newValue.forceActiveFocus()
+                        }
                     }
                 }
             }
@@ -614,6 +1031,12 @@ Panel {
                     Accessible.name: "New value"
                     Layout.fillWidth: true
                     onAccepted: add.clicked()
+                }
+                IconButton {
+                    visible: panel.choices(newName.text).length > 0
+                    icon_: "chevronDown"
+                    text: "Choices for new property"
+                    onClicked: choiceList.show(newName.text, this)
                 }
             }
             RowLayout {
@@ -847,15 +1270,40 @@ Panel {
             Repeater {
                 id: signalList
                 model: panel.workspace.signals.filter(s => !s.change)
-                delegate: Label {
+                delegate: ColumnLayout {
+                    id: signalRow
                     required property var modelData
-                    text: modelData.name + "(" + modelData.arguments
-                        .map(a => a.type === "" ? a.name : a.name + ": " + a.type).join(", ") + ")"
-                    color: Colors.text
-                    elide: Text.ElideRight
+                    readonly property string handler: "on" + modelData.name[0].toUpperCase() + modelData.name.slice(1)
                     Layout.fillWidth: true
-                    Accessible.role: Accessible.StaticText
-                    Accessible.name: "Signal " + modelData.name
+                    spacing: Spacing.xxs
+
+                    Label {
+                        text: signalRow.modelData.name + "(" + signalRow.modelData.arguments
+                            .map(a => a.type === "" ? a.name : a.name + ": " + a.type).join(", ") + ")"
+                        color: Colors.text
+                        elide: Text.ElideRight
+                        Layout.fillWidth: true
+                        Accessible.role: Accessible.StaticText
+                        Accessible.name: "Signal " + signalRow.modelData.name
+                    }
+                    // Once written the handler is a row of Properties, like
+                    // anything else the file says.
+                    Field {
+                        id: handlerText
+                        visible: !panel.workspace.inspector.some(r => r.name === signalRow.handler)
+                        placeholderText: "what it does"
+                        Accessible.name: "Handle " + signalRow.modelData.name
+                        Layout.fillWidth: true
+                        onAccepted: {
+                            if (text.trim() !== "")
+                                panel.bind(signalRow.handler, text)
+                            text = ""
+                        }
+                        Connections {
+                            target: panel
+                            function onSelectionMoved() { handlerText.text = "" }
+                        }
+                    }
                 }
             }
         }
@@ -882,6 +1330,7 @@ Panel {
                         Accessible.name: "Role " + roleRow.modelData
                     }
                     Field {
+                        id: roleName
                         placeholderText: "property"
                         Accessible.name: "Bind role " + roleRow.modelData + " to"
                         Layout.fillWidth: true
@@ -890,6 +1339,10 @@ Panel {
                                 return
                             panel.bind(text, "model." + roleRow.modelData)
                             text = ""
+                        }
+                        Connections {
+                            target: panel
+                            function onSelectionMoved() { roleName.text = "" }
                         }
                     }
                 }

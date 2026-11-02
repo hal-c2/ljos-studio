@@ -1,0 +1,43 @@
+# Where qml6 finds a name. mise run measure-lookup writes the last column; each
+# row is: case | document | imports | files | name | answer. A folder's answer is
+# the folder, a module's is `module`, and `none` means qml6 refused the name.
+# Rows naming App.Native, /opt or Zzz hold what qml6 can't load here: their answer
+# is the resolver's stated one, and the task leaves it alone.
+module alone | Doc.qml | QtQuick.Controls |  | Slider | module
+two modules, one has it | Doc.qml | QtQuick;QtQuick.Controls |  | Slider | module
+module lacks it | Doc.qml | QtQuick |  | Slider | none
+folder alone | Doc.qml | ./a | a/Slider | Slider | a
+folder lacks it | Doc.qml | ./a | a/Foo | Slider | none
+folder then module | Doc.qml | ./a;QtQuick.Controls | a/Slider | Slider | a
+module then folder | Doc.qml | QtQuick.Controls;./a | a/Slider | Slider | a
+two folders, last has both | Doc.qml | ./a;./b | a/Slider b/Slider | Slider | b
+two folders, swapped | Doc.qml | ./b;./a | a/Slider b/Slider | Slider | a
+two folders, first alone has it | Doc.qml | ./a;./b | a/Slider b/Foo | Slider | a
+beside alone | Doc.qml |  | Slider | Slider | .
+beside lost to a module | Doc.qml | QtQuick.Controls | Slider | Slider | module
+beside lost to a folder | Doc.qml | ./a | Slider a/Slider | Slider | a
+beside lost to its own folder named | Doc.qml | . | Slider | Slider | .
+module beats a folder without it | Doc.qml | ./a;QtQuick.Controls | a/Foo | Slider | module
+in a sub folder, beside | sub/Doc.qml |  | sub/Slider | Slider | sub
+in a sub folder, up and across | sub/Doc.qml | ../a | a/Slider | Slider | a
+in a sub folder, root not beside | sub/Doc.qml |  | Slider | Slider | none
+aliased module, qualified | Doc.qml | QtQuick.Controls as N |  | N.Slider | module
+aliased module, bare | Doc.qml | QtQuick.Controls as N |  | Slider | none
+aliased module lacks it | Doc.qml | QtQuick as N |  | N.Slider | none
+aliased folder, qualified | Doc.qml | ./a as N | a/Slider | N.Slider | a
+aliased folder, bare | Doc.qml | ./a as N | a/Slider | Slider | none
+aliased folder, bare, beside has it | Doc.qml | ./a as N | a/Slider Slider | Slider | .
+aliased folder beside the bare module | Doc.qml | ./a as N;QtQuick.Controls | a/Slider | Slider | module
+inner of the file beside | Doc.qml |  | Other | Other.Inner | .
+inner of a folder's file | Doc.qml | ./a | a/Far | Far.Inner | a
+inner of nothing | Doc.qml |  |  | Nothing.Inner | none
+inner of a toolkit type | Doc.qml | QtQuick |  | Rectangle.Inner | none
+module named as a qualifier | Doc.qml | QtQuick |  | QtQuick.Rectangle | none
+unread module, name found nowhere | Doc.qml | App.Native |  | Slider | can't tell
+unread module beside a module that has it | Doc.qml | App.Native;QtQuick.Controls |  | Slider | module
+unread module, beside has it | Doc.qml | App.Native | Slider | Slider | can't tell
+unread module loses to a folder | Doc.qml | App.Native;./a | a/Slider | Slider | a
+unread module under an alias changes nothing | Doc.qml | App.Native as N;QtQuick.Controls |  | Slider | module
+unread folder after a folder | Doc.qml | ./a;/opt/x | a/Slider | Slider | can't tell
+unread folder before a folder | Doc.qml | /opt/x;./a | a/Slider | Slider | a
+a name nothing tried, in a module | Doc.qml | QtQuick |  | Zzz | can't tell

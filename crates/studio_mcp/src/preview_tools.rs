@@ -41,9 +41,7 @@ struct OpenArgs {
     target: Option<Target>,
     /// A size in logical pixels instead of a target's.
     size: Option<Size>,
-    /// `live` runs the app's own blocks; `mocked` the project's mock
-    /// modules (`mocks/`) in their place. Default: the open preview's, else
-    /// `live`.
+    /// `live` runs the app's blocks; `mocked` the mock modules (`mocks/`) in their place. Default: the open preview's, else `live`.
     state: Option<State>,
 }
 
@@ -58,28 +56,25 @@ struct OpenOut {
     mocked: Vec<String>,
     /// A new process was started; false when the open one was changed.
     started: bool,
+    /// False when a mock switch started the app over on a host that cannot keep its state.
+    state_kept: bool,
     ms: f64,
 }
 
 #[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct StateArgs {
-    /// The object to read; it needs an `id`. In the previewed document
-    /// unless `doc` names another. Left out, the call only clicks: a
-    /// prototype plays without an `id` on the object whose state it reads.
+    /// The object to read, with an `id`; in the previewed document unless `doc` names another. Left out, the call only clicks.
     node: Option<Address>,
     doc: Option<String>,
-    /// Put `node` in this QML state of its own for the preview, through
-    /// reloads, until `""`; the file does not change.
+    /// Show `node` in this QML state through reloads, until `""`.
     show: Option<String>,
-    /// Properties of `node` to read into `state`, as the running app has
-    /// them: what an expression works out to.
+    /// Properties of `node` to read into `state`, as the running app has them.
     #[serde(default)]
     read: Vec<String>,
     /// Values to assign to a block's state (mocked previews only).
     set: Option<Map<String, Value>>,
-    /// An object (with an `id`) to click first, after `set`, as a person
-    /// does: the app's own handlers answer, so a flow plays.
+    /// An object (with an `id`) to click first, after `set`, as a person does; its handlers answer.
     click: Option<Address>,
     /// A point to click instead, exactly there: whatever is on top gets it.
     click_at: Option<ClickAt>,
@@ -113,8 +108,7 @@ struct StateOut {
 #[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct ScreenshotArgs {
-    /// `png` (default) or `outline`: what the preview shows as text, one
-    /// line per item, for reading rather than looking.
+    /// `png` (default) or `outline`: one text line per item.
     #[serde(default)]
     format: Format,
     /// Longest side of a PNG in pixels (default 800, at most 1280).
@@ -146,8 +140,7 @@ struct ScreenshotOut {
 struct EventsArgs {
     /// The `next` of an earlier answer; 0 or left out: from the start.
     since: Option<usize>,
-    /// Instead of events, wait until the preview's app rests saying something
-    /// new: at most this long (up to 3 600 000), past `rests`.
+    /// Instead of events, wait up to this long (3 600 000 at most) for the app to rest past `rests`.
     wait_ms: Option<u64>,
     /// The `rests` of an earlier answer; left out, the answer comes at once.
     rests: Option<u64>,
@@ -295,6 +288,7 @@ fn open(studio: &Mutex<Studio>, a: OpenArgs) -> Result<OpenOut, SurfaceError> {
         }
     }
     let reuse = previews.open.as_ref().is_some_and(|o| o.doc == a.doc);
+    let mut state_kept = true;
     if reuse {
         let open = previews.open.as_mut().expect("checked");
         let mut reloads = Vec::new();
@@ -303,6 +297,7 @@ fn open(studio: &Mutex<Studio>, a: OpenArgs) -> Result<OpenOut, SurfaceError> {
         let restarted = reloads
             .iter()
             .any(|reload| matches!(reload, Reload::Applied { .. }));
+        state_kept = !(restarted && open.host.restarts_on_switch());
         for reload in reloads {
             previews.record(reload, started_at);
         }
@@ -341,6 +336,7 @@ fn open(studio: &Mutex<Studio>, a: OpenArgs) -> Result<OpenOut, SurfaceError> {
             behind: false,
             clicks: 0,
             shown: None,
+            breakpoint: None,
         });
         previews.write_hidden();
     }
@@ -351,6 +347,7 @@ fn open(studio: &Mutex<Studio>, a: OpenArgs) -> Result<OpenOut, SurfaceError> {
         state,
         mocked: aliases.into_iter().map(|m| m.module).collect(),
         started: !reuse,
+        state_kept,
         ms: elapsed(),
     })
 }
@@ -467,6 +464,13 @@ fn state(studio: &Mutex<Studio>, a: StateArgs) -> Result<StateOut, SurfaceError>
             );
         }
         if let Err(e) = open.host.write(&id, "state", Value::String(show.clone())) {
+            return Err(preview_error(previews.failed(e)));
+        }
+        // Nothing asked for any more: back to what the width turns on.
+        if show.is_empty()
+            && let Some((root, state)) = &open.breakpoint
+            && let Err(e) = open.host.write(root, "state", Value::String(state.clone()))
+        {
             return Err(preview_error(previews.failed(e)));
         }
         open.shown = (!show.is_empty()).then(|| (id.clone(), show));
@@ -600,9 +604,28 @@ pub(crate) fn pick(
         .with_details(json!({ "kind": "preview_behind" })));
     }
     let open = previews.open.as_mut().ok_or_else(not_shown)?;
-    let Some(declared) = open.host.pick(x, y).map_err(preview_error)? else {
+    let Some(mut declared) = open.host.pick(x, y).map_err(preview_error)? else {
         return Ok(None);
     };
+    let mut scene = None;
+    if studio.session.store().exists(&declared.file) {
+        let (_, node) = studio
+            .session
+            .declared_at(
+                &declared.file,
+                declared.line as usize,
+                declared.column as usize,
+            )
+            .map_err(error)?;
+        // The picture of a 3D view is one object to the preview; the model
+        // under the point is found from the scene it reads.
+        if node.ty.rsplit('.').next() == Some("View3D") {
+            scene = open.host.scene(&declared).map_err(preview_error)?;
+        }
+    }
+    if let Some(body) = scene.as_ref().and_then(|s| s.pick(x, y).ok().flatten()) {
+        declared = body.declared.clone();
+    }
     drop(previews);
     if !studio.session.store().exists(&declared.file) {
         return Err(SurfaceError::not_found(format!(
@@ -625,6 +648,30 @@ pub(crate) fn pick(
         return Ok(None);
     }
     Ok(Some((declared.file, handle)))
+}
+
+/// The 3D scene around the object declared at `at` of `doc`: `None` when no
+/// preview of it is open, it runs older text than the session's, or the
+/// object is in no view.
+pub(crate) fn scene(
+    studio: &mut Studio,
+    doc: &str,
+    at: &studio_core::preview::Declared,
+) -> Result<Option<studio_core::scene3d::Scene>, SurfaceError> {
+    let previews = studio.previews.clone();
+    let mut previews = preview::caught_up(&previews);
+    let behind = previews.events.iter().rev().find_map(|e| match e {
+        PreviewEvent::Opened { .. } | PreviewEvent::Reloaded { .. } => Some(false),
+        PreviewEvent::ReloadFailed { .. } => Some(true),
+        _ => None,
+    });
+    if behind == Some(true) {
+        return Ok(None);
+    }
+    match previews.open.as_mut().filter(|o| o.doc == doc) {
+        Some(open) => open.host.scene(at).map_err(preview_error),
+        None => Ok(None),
+    }
 }
 
 /// What the host says of the objects with `ids` and of unnamed ones of
@@ -741,9 +788,7 @@ pub(crate) fn add(registry: ToolRegistry, studio: &Arc<Mutex<Studio>>) -> ToolRe
         .with(
             ToolDef::new::<OpenArgs>(
                 "preview_open",
-                "Run a document (a shell) in a preview for a target (desktop, tablet, phone) with \
-                 live blocks or the project's mock modules. On the open preview it changes size or \
-                 state in place, keeping the app's state. Edits show in it at once.",
+                "Run a document (a shell) in a preview for a target (desktop, tablet, phone) with live blocks or the mock modules. On the open preview it changes size or state in place; `state_kept` says whether the app's state survived.",
             )
             .answers::<OpenOut>()
             .requires(Cap::Run)
@@ -756,10 +801,7 @@ pub(crate) fn add(registry: ToolRegistry, studio: &Arc<Mutex<Studio>>) -> ToolRe
         .with(
             ToolDef::new::<StateArgs>(
                 "preview_state",
-                "Read an object in the preview: its QML state (`variant`), a block's published \
-                 state, which `set` assigns when the block is mocked, and any property named in \
-                 `read`. `click` or `click_at` clicks first, as a person does, so a flow plays. \
-                 Objects are found by `id`.",
+                "Read an object in the preview: its QML state (`variant`), a block's published state (`set` assigns it when mocked), and the properties in `read`. `click` or `click_at` clicks first, as a person does, so a flow plays. Objects are found by `id`.",
             )
             .answers::<StateOut>()
             .requires(Cap::Run)
@@ -786,9 +828,7 @@ pub(crate) fn add(registry: ToolRegistry, studio: &Arc<Mutex<Studio>>) -> ToolRe
         .with(
             ToolDef::new::<EventsArgs>(
                 "preview_events",
-                "What happened to the preview since a cursor: opened, reloaded (with ms), \
-                 reload_failed (the last good one stays), log lines, ended. `wait_ms` instead waits \
-                 for it to rest past `rests`, and says `wake_in_ms`.",
+                "The preview's events since a cursor: opened, reloaded (ms), reload_failed (the last good one stays), log lines, ended. `wait_ms` waits instead for it to rest past `rests`, saying `wake_in_ms`.",
             )
             .answers::<EventsOut>()
             .requires(Cap::Inspect)

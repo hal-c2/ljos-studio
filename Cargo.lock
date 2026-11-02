@@ -5463,6 +5463,7 @@ dependencies = [
 name = "studio_mcp"
 version = "0.0.0"
 dependencies = [
+ "base64",
  "cucumber",
  "insta",
  "ljos_blocks",

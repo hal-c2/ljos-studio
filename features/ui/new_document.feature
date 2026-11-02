@@ -22,6 +22,18 @@ Feature: A person starts a document in Studio's window
     And the history lists "create"
     And the window shows the document "Page.qml"
 
+  Scenario: The panel makes a functional block and opens it
+    Given the file "Main.qml":
+      """qml
+      import QtQuick
+      Item {}
+      """
+    And Studio's window shows the project
+    When the person enters "Hero" as the new document's name
+    And the person clicks the button "New block"
+    Then the file "Blocks/qmldir" says "Hero 1.0 Hero.qml"
+    And the window shows the document "Blocks/Hero.qml"
+
   Scenario: A name already taken is refused where the person typed it
     Given the file "Main.qml":
       """qml
@@ -38,6 +50,34 @@ Feature: A person starts a document in Studio's window
     Given Studio's window shows the project
     Then the file "Main.qml" says "import QtQuick"
     And the window shows the document "Main.qml"
+
+  Scenario: A project of one document opens on it
+    Given the file "Main.qml":
+      """qml
+      import QtQuick
+
+      Rectangle {
+          id: root
+      }
+      """
+    And Studio's window shows the project
+    Then the window shows the document "Main.qml"
+
+  Scenario: A project of several documents waits to be told which
+    Given the file "Main.qml":
+      """qml
+      import QtQuick
+
+      Item {}
+      """
+    And the file "Other.qml":
+      """qml
+      import QtQuick
+
+      Item {}
+      """
+    And Studio's window shows the project
+    Then the window shows no document
 
   Scenario: A directory with other files is left as it is
     Given the file "notes.txt":

@@ -30,7 +30,7 @@ documents: export), `run` (start previews). They are granted at launch with
 
 | # | Tool | Does | Needs |
 |---|---|---|---|
-| 1 | `project_open` | Open a project directory below the workspace, or describe the open one: documents, blocks, targets | inspect |
+| 1 | `project_open` | Open a project directory below the workspace, or describe the open one: documents, blocks, targets; `asset` lists, imports or removes its pictures and fonts | inspect; fs to import or remove |
 | 2 | `document_tree` | A document's objects in order: handle, path, type, `id`, bindings; paginated | inspect |
 | 3 | `document_text` | A document's text or a byte range of it, with its generation and whether it parses | inspect |
 | 4 | `document_new` | Create a QML document, or one keeping a project JSON file's records (`data`): a `JsonListModel` of the file, or a `ListModel` copy; undo removes it | mutate |
@@ -54,7 +54,7 @@ documents: export), `run` (start previews). They are granted at launch with
 | 22 | `preview_events` | Since a cursor: opened, reloaded (with ms), reload failed, logs, ended; or wait until its app rests saying something new (`wait_ms`, past `rests`), answering when it wakes next (`wake_in_ms`) and asking the app nothing meanwhile | inspect |
 | 23 | `export` | Write a bundle that `ljos run` starts (`native`) or that ljos-web builds a site from (`web`): the project's QML, theme, assets and own modules with a manifest, never mocks or `.studio/` | fs |
 | 24 | `review` | Add, reply to, resolve, reopen or list design review comments on objects, kept in `.studio/` | inspect (writing: mutate) |
-| 25 | `node_arrange` | What a canvas gesture does: `geometry` (boxes, what a drag does, siblings), `place` (`record` writes into a state), `align`, `copy`, `paste`, `duplicate`, `remove`; each edit is one undo step, all or none | inspect; mutate to edit |
+| 25 | `node_arrange` | What a canvas gesture does: `geometry` (boxes, what a drag does, siblings), `place` (`record` writes into a state), `align`, `copy`, `paste`, `duplicate`, `remove`, `component_extract` (below), `wrap`, `unwrap`, `relayout`, `anchor`; each edit is one undo step, all or none | inspect; mutate to edit |
 
 A document is a `.qml` file or a `theme.json` of the project outside the
 directories a walk leaves out, judged where its links lead; anything else is
@@ -68,8 +68,7 @@ name an edit uses.
   theme file, and `document_text` reads that with `inspect`.
 - DECISION: `project_info` and `node_wrap` from the first plan are not
   tools. `project_open` with no path describes the open project, and a
-  wrap is `node_insert` of the container followed by `node_move` of each
-  node, two undo steps.
+  wrap is `node_arrange`'s `wrap`, one undo step.
 
 Every `mutate` tool:
 
@@ -198,6 +197,19 @@ are used.
 
 - DECISION: no new tool. A point is another way to name what `node_select`
   selects, and the list stays within 25.
+
+A point on a `View3D` selects the `Model` under it when the host can read
+the scene (the native preview): Studio casts a ray through the camera's
+view against each model's box (`#Cube`, `#Rectangle`, `#Cylinder`, `#Cone`)
+or sphere, and the nearest wins. A file mesh, an orthographic camera or a
+host that reads no scene leave the `View3D` selected.
+
+`node_arrange` `geometry` on a spatial object (a `Model`, a light or a
+camera) has no box; it answers `scene` instead: the view's window box, the
+camera (`eye`), the object's `origin`, `axes` (the scene's vector for one
+unit of `x`, `y`, `z`), `local` as written and `refused` per axis (empty
+where a drag may write). `place` takes `z` as well; it refuses with kind
+`bound` an axis an expression sets, and a `position` set whole.
 - DECISION: the selected object may be in another document (a block's own
   file); the answer's `doc` says which. A place outside the project's
   documents is refused (`not_found`, `details.kind: "not_a_document"`).
@@ -509,6 +521,10 @@ comment is not made and the sidecar on disk is what Studio holds now.
 
 What changed, for an agent: no tool was added (24 of the 25 budgeted).
 
+- `document_new` with `block: true` also declares the document in the
+  `qmldir` beside it, `# block Name 1.0 File.qml`, making that `qmldir` with the
+  directory as its module if there is none. One undo takes back the file and
+  that line, leaving what else was written to the `qmldir`.
 - `document_new` with `data` writes a `JsonListModel` by default; `model:
   "list"` writes the `ListModel` copy it wrote before.
 - `node_inspect` answers `signals`, and a model's `source` for a
@@ -601,6 +617,101 @@ since (refused `conflict` when someone changed the same thing); `all:
 true` takes the newest anyone made, as before. The window's Undo takes the
 person's own. `list` lists every writer's entries.
 
+## Layout tools: wrap, unwrap, anchor
+
+`node_arrange` `wrap` {nodes, in: Row|Column|Grid|Item, spacing?, columns?}
+puts siblings in a new object at their joint box, in reading order. A layout's
+children lose their written x/y; an Item's are counted from its corner and keep
+document order, which is what is drawn over what. `spacing` defaults to the
+gap they had, `columns` to the widest row. Refused: `not_siblings`, `root`,
+`anchored`, `anchored_to` (a sibling that stays anchors to one of them),
+`reads_parent`, `locked`.
+
+`unwrap` {nodes: [one]} takes a Row, Column, Grid, Flow, Item or layout away
+from around its children: they get their place on the preview, or for an Item
+its numbers added to theirs, or none. Refused: `not_a_layout`, `holds_more`
+(anything of its own but a place: a property, function, handler, enum, `visible`,
+`states`, an object acting on a property such as `Behavior on x`), `referenced` (something reads its id), `reads_parent` (a child's value
+or anchor reads `parent`), `needs_preview` (its anchors or an expression put it
+where only a run knows, and no preview is showing), `root`, `locked`.
+
+`relayout` {nodes: [one], name} turns a Row, Column, Grid or Flow into another
+of them, or a `*Layout` into another `*Layout`, writing only the type's name.
+Refused: `not_a_layout`, `other_family`, `says_other` (it says something the new
+kind has no member for, such as a Grid's `columns`), `locked`.
+
+`anchor` {nodes, fill?, centerIn?, sides?: {left, right, top, bottom}, target?}
+writes `anchors.*` and takes away the x, y, width and height that now disagree.
+A side's value is its margin, null takes it off; `fill` and `centerIn` take
+true or false. An axis let go of keeps its place from the preview when one is
+running. `target` is `parent` (the default) or a sibling's id. Refused:
+`arranged` in a Row, Column, Grid, Flow or `*Layout`, saying what to use
+instead; `not_a_sibling`, `root`, `locked`.
+
+Each is one undo step. The bar above the canvas has wrap and unwrap; the
+inspector's Layout section has the pin pad, a layout's spacing and columns,
+turning it into another kind, and wrap.
+
+## Components from a selection
+
+`node_arrange` `component_extract` {nodes: [one], name} writes `Name.qml` beside
+the document, holding what the document imports and the object's text with its
+own id, and leaves `Name { }` in its place with the id and the x, y and anchors,
+which say where it sits rather than what it is. Both files are one undo step:
+undo and redo take both, and an undo that would take away what another writer
+put in the new file is refused with both left as they are. If the new file was
+deleted outside Studio, undo gives back the document alone.
+
+`inner.prop` read from outside becomes `property alias innerProp: inner.prop` on
+the component and `instance.innerProp` where it was read, giving the instance an
+id if it had none; the answer's `aliases` names them. `id` of the object itself
+goes on working as it did. Refused, naming the line and word:
+
+- `reference_out`: an inner id used as a whole (`target: inner`), called or gone
+  through (`inner.f()`, `inner.font.bold`), or read by the place that stays.
+- `reference_in`: the object reads an id or a root property left in the document,
+  an inline component of the document, or its own `parent`.
+- `root`, `exists` (the file is there), `in_component` (inside an inline
+  component), `locked`, and `invalid_argument` for a name that is no type.
+
+Words are told apart by how they are written, without types: a property named
+like an inner id reads as a use and is refused, never rewritten silently. The
+Layout section of the inspector has a name field and the button; the palette's
+project list then offers the new file.
+
+## Assets
+
+`project_open` with `asset` works on the project's `assets/`, by the same call
+the Insert tab's Assets section makes. An action here and not a tool of its
+own because the list stays at 25 tools.
+
+| `asset` | Takes | Answers | Needs |
+|---|---|---|---|
+| `list` | | `assets`: `name`, `url` (from the project's root), `kind` (`image`, `font`), `bytes`, and `width`, `height` of a picture that says them | inspect |
+| `import` | `file` or `data` (base64) with `name`; `name` is optional with `file` | `asset`, as above | fs |
+| `remove` | `name` | `removed`, the url | fs |
+
+- `import` takes png, jpg, webp, svg, gif, ttf, otf and woff2, by the name's
+  extension and by what the file begins with; anything else is refused
+  `not_actionable`, kind `asset_kind`, listing them. 64 MiB at most (kind
+  `asset_size`).
+- The name becomes letters, digits, `.`, `_` and `-`, leads nowhere, and takes
+  a number if a name differing at most by case is there: `LOGO-1.svg`.
+- `file` is judged where it really is, relative to the project: below the
+  workspace and a regular file, or `path_denied` (what is missing answers the
+  same, so a refusal does not tell what exists outside). A file elsewhere goes
+  as `data`.
+- `remove` is refused `not_actionable`, kind `asset_in_use`, with `documents`,
+  while a document says the asset's url. A url a document builds at run time
+  from parts is not seen.
+- DECISION: assets have no undo. They are not documents; an import writes a
+  name nothing uses and a removal happens only when nothing does.
+- A picture is placed by `node_insert` with `text: "Image { source:
+  \"assets/x.png\" }"`, and `export` carries `assets/` in both bundles, bytes
+  as they are.
+- On the web a file that is not text is held in browser storage as a data
+  URL's text; `list`, `import` and `remove` work the same.
+
 ## Prompts
 
 - **compose-shell:** `blocks_list` → `node_insert` per block →
@@ -620,3 +731,56 @@ person's own. `list` lists every writer's entries.
 - **ship:** `export` with `dry_run` → mend what it refuses → `export` →
   start the bundle with its manifest's `run`; for the web, `export` with
   `target: "web"` and build the site from `build/web`.
+
+## What a write refuses because the file would not load
+
+`property_set`, `binding_set`, `node_insert`, `node_arrange`'s `paste`,
+`relayout`, `rename` and `component_extract`, `state_edit`'s `change` and the
+delegate of `contribute` refuse, with `not_actionable`, what `qml6` would not
+load: `details.kind` is `no_such_member`, `unknown_type`, `not_an_id`,
+`name_taken`. Only what qml6 was seen to refuse is refused, since blocking a
+valid write is worse than missing a bad one, whose load error the preview still
+says. A misspelt type goes through, as does anything in a module Studio has not
+measured, and what a file says already is not held against a write beside it.
+`component_extract` to a name Studio can't vouch for answers `name_unsure: true`,
+since an import having it would win.
+
+A `paste` asks one resolver where each name landed in its source and where it
+lands in the target: the same, different, or can't tell. It adds the least of the
+source's imports that keeps each name, answers `imported` with them, and leaves
+out any that would certainly move what the file has. Whatever it still can't show
+as the same it writes anyway and lists in `unvouched`, each with `type`, `was` and
+`now`. That includes objects the file already had, with `held: true`, when an import
+went in that may have moved them because the file imports what can't be read. An
+inline component takes its name across the whole file, so a name one takes is listed
+too, with `now: "an inline component in this file"`: objects the file had when the
+paste declares it (`held: true`), pasted objects when the file declares it. Such a
+paste is written even if an object taken this way sets a member the component lacks,
+which qml6 then won't load (known limit; the preview shows the load error). It also
+takes the head of `Name.Inner`, unless that head is an import's alias, and qml6 never
+loads that, so an insert or paste that would put the two in one file is refused,
+`component_takes_name`. An inline
+component the file already declares is refused, `duplicate_component`, on every
+insert, `paste` and `duplicate`, since qml6 won't load a file with two of one name.
+Only what qml6 would refuse is refused, which includes an object whose only import
+had to stay out (`unknown_type`). What can't be read comes along with
+`was: "can't tell"`.
+
+The resolver covers modules, folders, aliases, the file beside and `File.Inner`.
+Known limits, each of which lands in `unvouched` or goes unnoticed as noted:
+
+- Two modules both having a name are taken as the same type if they share one, and
+  their order isn't measured. A module that can be read and has the name is the
+  answer even beside one that can't be read, which might have it too, since
+  otherwise every `Rectangle` in an app with its own module would be flagged.
+  Goes unnoticed.
+- A folder's `qmldir` naming a type other than its file isn't read: the name
+  counts as not in that folder. Lands in `unvouched`, or goes unnoticed if a
+  module also has it.
+- A project file with a name the measured table never tried is taken not to
+  be in the measured modules. Goes unnoticed.
+- Import versions and singletons aren't considered, and an alias isn't carried:
+  a qualified name needs the alias in the target, or qml6's refusal applies.
+
+`crates/studio_mcp/src/measured_*.txt` is what qml6 6.11 said: `mise run
+measure-members` and `mise run measure-lookup` write them.

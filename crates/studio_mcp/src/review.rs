@@ -38,7 +38,7 @@ struct ReviewArgs {
     comment: Option<String>,
     /// What the comment or reply says.
     text: Option<String>,
-    /// Who says it.
+    /// Who says it; the caller's own name if absent.
     author: Option<String>,
 }
 
@@ -127,7 +127,9 @@ fn review(studio: &Mutex<Studio>, ctx: &CallCtx, a: ReviewArgs) -> Result<Review
     let mut studio = lock(studio);
     let at = u64::try_from(studio.timer.wall().as_millis()).unwrap_or(u64::MAX);
     let session = &mut studio.session;
-    let author = a.author.as_deref();
+    // A comment says who made it as the history does, by the client's name.
+    let caller = crate::author(ctx);
+    let author = Some(a.author.as_deref().unwrap_or(&caller));
     let changed = match a.action {
         Action::List => {
             let node = match (&a.doc, &a.node) {
@@ -176,9 +178,7 @@ pub(crate) fn add(registry: ToolRegistry, studio: &Arc<Mutex<Studio>>) -> ToolRe
     registry.with(
         ToolDef::new::<ReviewArgs>(
             NAME,
-            "Design review comments on objects, kept in Studio's sidecar (`.studio/`), never in \
-             the QML: add, reply, resolve, reopen, or list by doc and node. A comment follows its \
-             object through edits; one whose object is removed stays, orphaned, at its last place.",
+            "Design review comments on objects, kept in `.studio/`, never in the QML: add, reply, resolve, reopen, or list by doc and node. A comment follows its object through edits; if it is removed the comment stays, orphaned.",
         )
         .answers::<ReviewOut>()
         .requires(Cap::Inspect)

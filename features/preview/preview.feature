@@ -78,6 +78,21 @@ Feature: A shell under edit runs in a preview
       And the answer's "/state" is "live"
       And the preview shows "Stopped"
 
+    @native
+    Scenario: A program that cannot start is a refusal and the session lives on
+      Given previews run the program "no-such-ljos"
+      When the agent calls the tool "preview_open" with:
+        """json
+        {"doc": "Shell.qml"}
+        """
+      Then the agent is refused with "not_actionable"
+      And the refusal's "/details/kind" is "start"
+      When the agent calls the tool "document_tree" with:
+        """json
+        {"doc": "Shell.qml"}
+        """
+      Then the answer's "/doc" is "Shell.qml"
+
     Scenario: A document that is not there has no preview
       When the agent calls the tool "preview_open" with:
         """json

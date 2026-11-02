@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+#MISE description="Measure where qml6 finds a name for each kind of import, which Studio's lookup is held to"
+set -euo pipefail
+
+out="${TMPDIR:?}/studio-lookup"
+mkdir -p "$out"
+python3 -I mise-tasks/measure-lookup.py "$out" crates/studio_mcp/src/measured_lookup.txt

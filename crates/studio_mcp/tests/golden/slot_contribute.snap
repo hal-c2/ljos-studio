@@ -9,110 +9,59 @@ expression: value
     "open_world": false,
     "read_only": false
   },
-  "description": "Write a Contribution to a block's slot, showing QML `text` or a `block`, importing Ljos.Blocks and the block's module once; or `remove` one. Refuses a slot no block offers (`blocks_list`).",
+  "description": "Write a Contribution to a block's slot, showing QML `text` or a `block` (imports added once); or `remove` one. Refuses a slot no block offers (`blocks_list`).",
   "inputSchema": {
     "$defs": {
       "Address": {
-        "description": "One of: `node`, a handle the session gave out (`n7`), stable for the session; `id`, the object's `id`; `path`, as `document_tree` prints it (`root/0/contentItem:`), true of the current text only.",
-        "maxProperties": 1,
-        "minProperties": 1,
-        "properties": {
-          "id": {
-            "type": "string"
-          },
-          "node": {
-            "type": "string"
-          },
-          "path": {
-            "type": "string"
-          }
+        "additionalProperties": {
+          "type": "string"
         },
+        "description": "One of `node` (session handle), `id`, `path` (from `document_tree`; this text only).",
         "type": "object"
+      }
+    },
+    "properties": {
+      "block": {
+        "description": "Or a block from `blocks_list`, `Module.Name`, shown bare.",
+        "type": "string"
       },
-      "Mode": {
-        "description": "How a contribution joins what the slot already holds.",
+      "doc": {
+        "type": "string"
+      },
+      "dry_run": {
+        "type": "boolean"
+      },
+      "generation": {
+        "type": "integer"
+      },
+      "mode": {
+        "description": "How it joins what the slot holds; the runtime's default when left out.",
         "enum": [
           "append",
           "prepend",
           "replace"
         ],
         "type": "string"
-      }
-    },
-    "properties": {
-      "block": {
-        "description": "Or a block from `blocks_list`, `Module.Name`, shown bare.",
-        "type": [
-          "string",
-          "null"
-        ]
-      },
-      "doc": {
-        "type": "string"
-      },
-      "dry_run": {
-        "default": false,
-        "type": "boolean"
-      },
-      "generation": {
-        "type": [
-          "integer",
-          "null"
-        ]
-      },
-      "mode": {
-        "anyOf": [
-          {
-            "$ref": "#/$defs/Mode"
-          },
-          {
-            "type": "null"
-          }
-        ],
-        "description": "How it joins what the slot holds; the runtime's default when left out."
       },
       "order": {
         "description": "Its place among the slot's contributions.",
-        "type": [
-          "integer",
-          "null"
-        ]
+        "type": "integer"
       },
       "parent": {
-        "anyOf": [
-          {
-            "$ref": "#/$defs/Address"
-          },
-          {
-            "type": "null"
-          }
-        ],
+        "$ref": "#/$defs/Address",
         "description": "Where the `Contribution` goes; the root when left out."
       },
       "remove": {
-        "anyOf": [
-          {
-            "$ref": "#/$defs/Address"
-          },
-          {
-            "type": "null"
-          }
-        ],
+        "$ref": "#/$defs/Address",
         "description": "Take this `Contribution` out instead."
       },
       "slot": {
         "description": "The slot, as `blocks_list` lists it (`controls`).",
-        "type": [
-          "string",
-          "null"
-        ]
+        "type": "string"
       },
       "text": {
         "description": "What it shows: one object in QML.",
-        "type": [
-          "string",
-          "null"
-        ]
+        "type": "string"
       }
     },
     "required": [
@@ -133,30 +82,10 @@ expression: value
       "generation": {
         "type": "integer"
       },
-      "history": {
-        "type": [
-          "integer",
-          "null"
-        ]
-      },
-      "node": {
-        "type": [
-          "string",
-          "null"
-        ]
-      },
-      "rebased_from": {
-        "type": [
-          "integer",
-          "null"
-        ]
-      },
-      "text": {
-        "type": [
-          "string",
-          "null"
-        ]
-      },
+      "history": {},
+      "node": {},
+      "rebased_from": {},
+      "text": {},
       "unchanged": {
         "type": "boolean"
       }

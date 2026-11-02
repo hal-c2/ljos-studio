@@ -22,6 +22,7 @@ pub mod outline;
 pub mod place;
 pub mod preview;
 pub mod review;
+pub mod scene3d;
 pub mod slots;
 pub mod states;
 mod store;
@@ -49,6 +50,74 @@ pub use log::{LEASE_LIFE_MS, LEASE_TTL_MS, LeaseView};
 
 /// Who wrote a change found in the file: nobody Studio knows.
 pub const OUTSIDE: &str = "outside Studio";
+
+/// A block's line in its module's `qmldir`: what undo takes back and redo
+/// puts back, around whatever else was written to the file since.
+#[derive(Clone, Debug)]
+pub(crate) struct Declared {
+    qmldir: String,
+    module: String,
+    line: String,
+}
+
+impl Declared {
+    fn of(path: &str) -> Result<Self, Error> {
+        let (dir, file) = path.rsplit_once('/').ok_or_else(|| {
+            Error::Invalid(format!(
+                "a block is in a module's directory, and `{path}` is in none"
+            ))
+        })?;
+        let name = file.strip_suffix(".qml").unwrap_or(file);
+        if !name.starts_with(|c: char| c.is_ascii_uppercase())
+            || !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+        {
+            return Err(Error::Invalid(format!(
+                "`{name}` is no type's name: start it with a capital"
+            )));
+        }
+        if !dir.split('/').all(|part| {
+            part.starts_with(|c: char| c.is_ascii_alphabetic())
+                && part.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+        }) {
+            return Err(Error::Invalid(format!("`{dir}` is no module's name")));
+        }
+        Ok(Self {
+            qmldir: format!("{dir}/qmldir"),
+            module: format!("module {}", dir.replace('/', ".")),
+            line: format!("# block {name} 1.0 {file}"),
+        })
+    }
+
+    fn write(&self, store: &dyn Store) -> Result<(), Error> {
+        let text = match store.exists(&self.qmldir) {
+            true => store.read(&self.qmldir)?,
+            false => format!("{}\n", self.module),
+        };
+        let gap = if text.is_empty() || text.ends_with('\n') {
+            ""
+        } else {
+            "\n"
+        };
+        store.write(&self.qmldir, &format!("{text}{gap}{}\n", self.line))?;
+        Ok(())
+    }
+
+    /// A `qmldir` left with only the module line it would be made with goes,
+    /// a module with nothing in it being nobody's.
+    fn take_back(&self, store: &dyn Store) -> Result<(), Error> {
+        if !store.exists(&self.qmldir) {
+            return Ok(());
+        }
+        let text = store.read(&self.qmldir)?;
+        let kept: Vec<&str> = text.lines().filter(|l| *l != self.line).collect();
+        if kept == [self.module.as_str()] {
+            store.remove(&self.qmldir)?;
+        } else {
+            store.write(&self.qmldir, &format!("{}\n", kept.join("\n")))?;
+        }
+        Ok(())
+    }
+}
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -207,6 +276,10 @@ pub enum Op {
         add_id: bool,
         import: Option<String>,
     },
+    /// `module`, or a folder if it has a `/`, imported bare unless it is already.
+    Import {
+        module: String,
+    },
     Move {
         node: Address,
         parent: Address,
@@ -260,6 +333,7 @@ pub enum Op {
 impl Op {
     fn addresses(&self) -> Vec<&Address> {
         match self {
+            Op::Import { .. } => Vec::new(),
             Op::Insert { parent, .. } => vec![parent],
             Op::Move { node, parent, .. } => vec![node, parent],
             Op::Remove { node }
@@ -284,6 +358,7 @@ impl Op {
                     text.split(['{', ' ']).next().unwrap_or("object").trim()
                 )
             }
+            Op::Import { module } => format!("import {module}"),
             Op::Move { .. } => "move".to_owned(),
             Op::Remove { .. } => "remove".to_owned(),
             Op::SetBinding { name, .. } => format!("set {name}"),
@@ -698,6 +773,7 @@ impl Session {
                         key: node.key.clone(),
                         ty: node.ty.clone(),
                         span: Some((node.start, node.end)),
+                        head: None,
                     };
                     given.push(t.clone());
                     doc.tracked.push(t);
@@ -781,7 +857,18 @@ impl Session {
         })
     }
 
-    /// The object whose type name starts at `line`, `column` (one-based,
+    /// Where `node` is declared in `path`: its line and column, one-based, as
+    /// the running preview names an object.
+    ///
+    /// # Errors
+    /// A document that is not held.
+    pub fn declared_where(&mut self, path: &str, node: &Node) -> Result<(usize, usize), Error> {
+        let text = &self.doc(path)?.text;
+        let start = u32::try_from(node.start).unwrap_or(u32::MAX);
+        Ok(qml_syntax::position(text, start))
+    }
+
+    /// The object declared at `line` and `column` (one-based; `column` counted
     /// in characters, as [`qml_syntax::position`] counts) of `path`: the
     /// one declared there, never one enclosing it. A `column` of 0 means
     /// only the line is known, and then the line must hold one object.
@@ -920,6 +1007,7 @@ impl Session {
             }
         };
         Ok(match op {
+            Op::Import { .. } => Vec::new(),
             Op::Insert { parent, .. } | Op::Contribute { parent, .. } => {
                 vec![(handle(self, parent)?, Some(CHILDREN.to_owned()))]
             }
@@ -1305,6 +1393,8 @@ impl Session {
             forward: changes.clone(),
             inverse: diff(&after, &before),
             created: false,
+            group: None,
+            declares: None,
             handles_before: saved.tracked,
             handles_after,
             change: None,
@@ -1452,6 +1542,13 @@ impl Session {
                     },
                     Some(parent_node.path.child(index)),
                 ))
+            }
+            Op::Import { module } => {
+                let out = match imported(before, module) {
+                    Imported::Bare => before.to_owned(),
+                    _ => with_import(before, module)?,
+                };
+                Ok((out, PathChange::Same, None))
             }
             Op::Move {
                 node,
@@ -1794,6 +1891,101 @@ impl Session {
         Ok(change.range)
     }
 
+    /// A new document `new_path` holding `new_text`, and `doc`'s text replaced
+    /// by `text`, as one undo step labelled `label`. Nothing stays of either
+    /// if the other can't be written.
+    pub fn create_with_edit(
+        &mut self,
+        new_path: &str,
+        new_text: &str,
+        doc: &str,
+        text: &str,
+        label: &str,
+        dry_run: bool,
+    ) -> Result<Outcome, Error> {
+        let edit = self.replace_text(doc, None, None, text, true)?;
+        let made = self.create(new_path, new_text, dry_run)?;
+        if dry_run {
+            return Ok(edit);
+        }
+        let outcome = match self.replace_text(doc, None, None, text, false) {
+            Ok(outcome) => outcome,
+            Err(e) => {
+                let entry = self
+                    .history
+                    .peek_undo(None)
+                    .filter(|e| e.doc == made.doc && e.created)
+                    .cloned();
+                if let Some(entry) = entry {
+                    self.replay(&entry, false)?;
+                    self.history.pop_and_top();
+                    self.wrote(&entry.doc);
+                }
+                return Err(e);
+            }
+        };
+        self.history.group_newest();
+        for path in [&made.doc, &outcome.doc] {
+            if let Some(entry) = self.history.latest_mut(path) {
+                entry.label = label.to_owned();
+            }
+        }
+        Ok(outcome)
+    }
+
+    /// Creates `path` as [`Session::create`] does and declares it a block in
+    /// the `qmldir` beside it, as one undo step. The directory is the module
+    /// of a `qmldir` that does not say, the file's name the block's.
+    pub fn create_block(
+        &mut self,
+        path: &str,
+        text: &str,
+        dry_run: bool,
+    ) -> Result<Outcome, Error> {
+        let declared = Declared::of(path)?;
+        let qmldir = match self.store.exists(&declared.qmldir) {
+            true => Some(self.store.read(&declared.qmldir)?),
+            false => None,
+        };
+        if qmldir
+            .as_deref()
+            .is_some_and(|t| t.lines().any(|l| l == declared.line))
+        {
+            return Err(Error::Invalid(format!(
+                "`{}` already declares `{}`",
+                declared.qmldir, declared.line
+            )));
+        }
+        let outcome = self.create(path, text, dry_run)?;
+        if dry_run {
+            return Ok(outcome);
+        }
+        if let Err(e) = declared.write(self.store.as_ref()) {
+            self.replay_new_away(&outcome.doc)?;
+            return Err(e);
+        }
+        if let Some(entry) = self.history.latest_mut(&outcome.doc) {
+            entry.declares = Some(declared);
+            entry.label = "create block".to_owned();
+        }
+        Ok(outcome)
+    }
+
+    /// Takes back the document just created, whose entry is on top.
+    fn replay_new_away(&mut self, doc: &str) -> Result<(), Error> {
+        let entry = self
+            .history
+            .peek_undo(None)
+            .filter(|e| e.doc == doc && e.created)
+            .cloned();
+        if let Some(entry) = entry {
+            self.replay(&entry, false)?;
+            self.history.pop_and_top();
+            self.wrote(&entry.doc);
+        }
+        Ok(())
+    }
+
     /// A new document with `text`.
     pub fn create(&mut self, path: &str, text: &str, dry_run: bool) -> Result<Outcome, Error> {
         let path = &self.canonical(path)?;
@@ -1841,6 +2033,8 @@ impl Session {
                 replacement: String::new(),
             }],
             created: true,
+            group: None,
+            declares: None,
             handles_before: Vec::new(),
             handles_after: Vec::new(),
             change: None,
@@ -1996,6 +2190,8 @@ impl Session {
                     replacement: String::new(),
                 }],
                 created: true,
+                group: None,
+                declares: None,
                 handles_before: Vec::new(),
                 handles_after: Vec::new(),
                 change: None,
@@ -2140,6 +2336,8 @@ impl Session {
             forward,
             inverse: diff(&after, &before),
             created: false,
+            group: None,
+            declares: None,
             handles_before,
             handles_after: next.tracked.clone(),
             change,
@@ -2180,10 +2378,22 @@ impl Session {
     fn undo_by(&mut self, author: Option<&str>) -> Result<EntrySummary, Error> {
         // A change made outside Studio goes on top here and is what is
         // undone: the entry below it has offsets on a text the file left.
-        while let Some(doc) = self.history.peek_undo(author).map(|e| e.doc.clone()) {
-            match self.sync(&doc) {
+        while let Some(top) = self.history.peek_undo(author) {
+            let doc = top.doc.clone();
+            let partner = top
+                .group
+                .and_then(|id| self.history.done_entry(id))
+                .map(|e| e.doc.clone());
+            match self.sync(&doc).and_then(|()| match &partner {
+                Some(other) => self.sync(other).map_err(|e| match e {
+                    Error::Store(StoreError::Missing(_)) => Error::Exists(other.clone()),
+                    e => e,
+                }),
+                None => Ok(()),
+            }) {
                 Ok(()) => break,
                 Err(Error::Store(StoreError::Missing(_))) => self.history.forget(&doc),
+                Err(Error::Exists(gone)) => self.history.forget(&gone),
                 Err(e) => return Err(e),
             }
         }
@@ -2192,12 +2402,42 @@ impl Session {
             .peek_undo(author)
             .cloned()
             .ok_or(Error::NothingTo("undo"))?;
+        let partner = entry
+            .group
+            .and_then(|id| self.history.done_entry(id))
+            .cloned();
+        if let Some(partner) = partner.as_ref().filter(|p| p.created) {
+            // Before anything moves: this is the usual reason it can't.
+            self.check_unmakeable(partner)?;
+        }
         // It moves only once it has happened: a write that failed leaves it
         // to be tried again, and the lists still say where the file is.
         let (generation, side, rebased) = self.replay(&entry, false)?;
         self.history
             .commit_undo(entry.id, generation, side, rebased);
         self.wrote(&entry.doc);
+        if let Some(partner) = partner {
+            match self.replay(&partner, false) {
+                Ok((generation, side, rebased)) => {
+                    self.history
+                        .commit_undo(partner.id, generation, side, rebased);
+                    self.wrote(&partner.doc);
+                }
+                Err(e) => {
+                    // One step happens whole, so the first goes back.
+                    let moved = self
+                        .history
+                        .undone_entry(entry.id)
+                        .cloned()
+                        .expect("just undone");
+                    let (generation, side, rebased) = self.replay(&moved, true)?;
+                    self.history
+                        .commit_redo(entry.id, generation, side, rebased);
+                    self.wrote(&entry.doc);
+                    return Err(e);
+                }
+            }
+        }
         Ok(entry.summary())
     }
 
@@ -2233,11 +2473,53 @@ impl Session {
             .peek_redo(author)
             .cloned()
             .ok_or(Error::NothingTo("redo"))?;
+        let partner = entry
+            .group
+            .and_then(|id| self.history.undone_entry(id))
+            .cloned();
+        if let Some(partner) = partner.as_ref().filter(|p| !p.created) {
+            self.sync(&partner.doc)?;
+        }
         let (generation, side, rebased) = self.replay(&entry, true)?;
         self.history
             .commit_redo(entry.id, generation, side, rebased);
         self.wrote(&entry.doc);
+        if let Some(partner) = partner {
+            match self.replay(&partner, true) {
+                Ok((generation, side, rebased)) => {
+                    self.history
+                        .commit_redo(partner.id, generation, side, rebased);
+                    self.wrote(&partner.doc);
+                }
+                Err(e) => {
+                    // One step happens whole, so the first goes back.
+                    let moved = self
+                        .history
+                        .done_entry(entry.id)
+                        .cloned()
+                        .expect("just redone");
+                    let (generation, side, rebased) = self.replay(&moved, false)?;
+                    self.history
+                        .commit_undo(entry.id, generation, side, rebased);
+                    self.wrote(&entry.doc);
+                    return Err(e);
+                }
+            }
+        }
         Ok(entry.summary())
+    }
+
+    /// Taking the document `entry` made away takes what others wrote with it.
+    fn check_unmakeable(&mut self, entry: &Entry) -> Result<(), Error> {
+        let path = &entry.doc;
+        if side(&self.doc(path)?.text) == entry.side {
+            return Ok(());
+        }
+        let latest = self.logs.get(path).and_then(|l| l.latest()).cloned();
+        Err(match latest {
+            Some(e) => conflict(path, &e, None),
+            None => Error::Invalid(format!("`{path}` changed since it was made")),
+        })
     }
 
     /// Brings the file and the document to that side of `entry`, for the
@@ -2256,14 +2538,7 @@ impl Session {
         if entry.created && !forward {
             let doc = self.doc(&path)?;
             let (generation, len) = (doc.generation, doc.text.len());
-            if side(&doc.text) != entry.side {
-                // Taking the document away takes what others wrote with it.
-                let latest = self.logs.get(&path).and_then(|l| l.latest()).cloned();
-                return Err(match latest {
-                    Some(e) => conflict(&path, &e, None),
-                    None => Error::Invalid(format!("`{path}` changed since it was made")),
-                });
-            }
+            self.check_unmakeable(entry)?;
             self.check_leased_ranges(
                 &path,
                 &[Change {
@@ -2272,6 +2547,9 @@ impl Session {
                 }],
             )?;
             self.store.remove(&path)?;
+            if let Some(declared) = &entry.declares {
+                declared.take_back(self.store.as_ref())?;
+            }
             self.retire(&path);
             let on_it: Vec<String> = self.review.as_ref().map_or_else(Vec::new, |r| {
                 r.comments
@@ -2291,6 +2569,9 @@ impl Session {
             doc.tracked = entry.handles_after.clone();
             let generation = doc.generation;
             self.store.write(&path, &text)?;
+            if let Some(declared) = &entry.declares {
+                declared.write(self.store.as_ref())?;
+            }
             self.docs.insert(path.clone(), doc);
             self.remade(&path);
             return Ok((generation, side(&text), None));
@@ -3173,10 +3454,29 @@ fn place(doc: &mut Document, mut leads: Vec<Lead>) {
         let found = find_by_key(nodes, &t.key)
             .and_then(|n| nodes.iter().position(|m| m.path == n.path))
             .filter(|&at| !taken[at]);
-        placed[i] = Some(found.map(|at| {
+        if let Some(at) = found {
             taken[at] = true;
-            nodes[at].path.clone()
-        }));
+            placed[i] = Some(Some(nodes[at].path.clone()));
+        }
+    }
+    // An object no key names, its `id` renamed by a text written over it, is
+    // where its start was.
+    for (i, t) in doc.tracked.iter().enumerate() {
+        if placed[i].is_some() {
+            continue;
+        }
+        let Some(head) = t.head else { continue };
+        if let Some(at) = nodes
+            .iter()
+            .position(|n| n.start == head && n.ty == t.ty)
+            .filter(|&at| !taken[at])
+        {
+            taken[at] = true;
+            placed[i] = Some(Some(nodes[at].path.clone()));
+        }
+    }
+    for p in &mut placed {
+        p.get_or_insert(None);
     }
     for (t, path) in doc.tracked.iter_mut().zip(placed) {
         t.path = path.flatten();
@@ -3195,8 +3495,12 @@ fn refresh(t: &mut Tracked, nodes: &[Node]) {
             t.key = node.key.clone();
             t.ty = node.ty.clone();
             t.span = Some((node.start, node.end));
+            t.head = None;
         }
-        None => t.span = None,
+        None => {
+            t.span = None;
+            t.head = None;
+        }
     }
 }
 
@@ -3325,6 +3629,14 @@ fn with_id(text: &str, taken: &[String]) -> Result<String, Error> {
         .map(|n| format!("{stem}{n}"))
         .find(|name| !taken.contains(name))
         .expect("an unused name");
+    with_first_id(text, &name)
+}
+
+/// `text` (an object with no `id`) with `id: <name>` as its first member.
+pub fn with_first_id(text: &str, name: &str) -> Result<String, Error> {
+    let nodes = outline::outline(text)
+        .ok_or_else(|| Error::Invalid("the text to insert is not one QML object".to_owned()))?;
+    let root = &nodes[0];
     // The id goes first, where a reader looks for it: on the brace's line
     // for an object written on one line, else on a line of its own indented
     // like the first member.
