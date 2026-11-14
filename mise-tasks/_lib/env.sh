@@ -444,25 +444,35 @@ ljos_web_dir() {
 # mise.toml sets tool options, so mise wants it trusted: trusted for these
 # commands only, through the environment, so nothing in mise's state changes.
 clone_ljos_web() {
-  local dir
+  local dir partial
   dir="$(ljos_web_dir)"
   [ ! -e "$dir" ] || die "$dir is already there: setup does not change a checkout it did not make"
+  # Made under another name and moved into place only when whole, so a run
+  # that fails leaves no half checkout that the next run would take as
+  # somebody's; a partial one is setup's own, and goes.
+  partial="$dir.setup-partial"
+  rm -rf "$partial"
   echo "git clone https://github.com/hal-c2/ljos-web $dir"
-  git clone -q https://github.com/hal-c2/ljos-web "$dir"
+  git clone -q https://github.com/hal-c2/ljos-web "$partial"
+  # The pin need not be on a branch a clone fetches (CI's checkout fetches it
+  # by its hash too), so it is fetched by name.
+  echo "git -C $dir fetch origin $ljos_web_pin"
+  git -C "$partial" fetch -q origin "$ljos_web_pin"
   echo "git -C $dir checkout $ljos_web_pin"
-  git -C "$dir" -c advice.detachedHead=false checkout -q "$ljos_web_pin"
-  setup_ljos_web_packages "$dir"
+  git -C "$partial" -c advice.detachedHead=false checkout -q "$ljos_web_pin"
+  setup_ljos_web_packages "$partial"
+  mv "$partial" "$dir"
 }
 
 setup_ljos_web_packages() {
   local dir="$1"
-  echo "(cd $dir && mise install && pnpm install --frozen-lockfile)"
+  echo "(cd ${dir%.setup-partial} && mise install && pnpm install --frozen-lockfile)"
   (
     cd "$dir"
     export MISE_TRUSTED_CONFIG_PATHS="$(physical "$dir")"
     mise install
     mise exec -- pnpm install --frozen-lockfile
-    echo "(cd $dir && pnpm --filter ljos-web-example-web exec playwright install chromium)"
+    echo "(cd ${dir%.setup-partial} && pnpm --filter ljos-web-example-web exec playwright install chromium)"
     mise exec -- pnpm --filter ljos-web-example-web exec playwright install chromium
   )
 }
