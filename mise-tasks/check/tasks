@@ -261,6 +261,15 @@ call 'decode_args "a '"'"'b c'"'"' --x"; printf "<%s>" "${decoded[@]}"; decode_a
 says "a variadic argument's quoting is undone, a word with spaces kept whole" "<a><b c><--x> n=0"
 call 'decode_args "{x,y} p"; printf "<%s>" "${decoded[@]}"'
 says "and braces are kept as they are" "<{x,y}><p>"
+# The studio task itself, with no ljos installed, none beside it and no LJOS:
+# a --ljos it is given is the one used, not refused for want of another.
+cp "$root/mise-tasks/studio" "$co/mise-tasks/"
+mkdir -p "$scratch/asked/project"
+rm -rf "$co/target/tools"
+stub cargo 'echo "cargo $* LJOS=${LJOS:-}"'
+ENVS="MISE_ORIGINAL_CWD=$scratch/asked usage_ljos=bin/ljos usage_dir=project" call 'bash mise-tasks/studio'
+says "studio --ljos is taken as LJOS, from where the person asked" "LJOS=$scratch/asked/bin/ljos"
+says "and the window opens on DIR" "cargo run --release -q -p studio --bin studio -- $(cd "$scratch/asked/project" && pwd -P)"
 call 'run_studio --ljos'
 refuses "a flag is not taken as DIR" "--ljos is a flag, not a DIR"
 ENVS="MISE_ORIGINAL_CWD=$scratch/asked" call 'absolute nowhere'
