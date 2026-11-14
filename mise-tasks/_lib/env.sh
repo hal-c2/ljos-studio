@@ -452,7 +452,7 @@ flag_not_dir() {
   esac
   decoded=("$dir" ${decoded[@]+"${decoded[@]}"})
   dir=""
-  local word value=false before=""
+  local word value=false project="" rest=""
   for word in "${decoded[@]}"; do
     if [ "$value" = true ]; then
       value=false
@@ -460,11 +460,18 @@ flag_not_dir() {
       case "$word" in
         --caps | --ljos | --shell | --theme) value=true ;;
         -*) ;;
-        *) die "$word looks like the project: DIR goes before --, as in mise run ${MISE_TASK_NAME:-studio} $word --$before" ;;
+        *)
+          if [ -z "$project" ]; then
+            project="$word"
+            continue
+          fi
+          ;;
       esac
     fi
-    before="$before $word"
+    rest="$rest $word"
   done
+  [ -z "$project" ] ||
+    die "$project looks like the project: DIR goes before --, as in mise run ${MISE_TASK_NAME:-studio} $project --$rest"
 }
 
 # mise hands a variadic argument over as one shell-quoted string; this sets

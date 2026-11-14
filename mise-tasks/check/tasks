@@ -291,7 +291,7 @@ refuses "a project typed after the flags names where DIR goes" "project looks li
 ENVS="LJOS=ljos MISE_ORIGINAL_CWD=$scratch/asked usage_dir=--shell usage_studio_args=project" call 'bash mise-tasks/studio'
 says "but a directory --shell takes is its value" "-- --shell project $co/target/studio-sample"
 ENVS="MISE_TASK_NAME=studio LJOS=ljos usage_dir=--mcp" call 'usage_studio_args="new-proj --no-agents" bash mise-tasks/studio'
-refuses "so is one not made yet, with flags after it" "new-proj looks like the project: DIR goes before --, as in mise run studio new-proj -- --mcp"
+refuses "so is one not made yet, with flags after it" "new-proj looks like the project: DIR goes before --, as in mise run studio new-proj -- --mcp --no-agents"
 ENVS="LJOS=ljos usage_dir=--caps" call 'usage_studio_args="inspect --theme t.json" bash mise-tasks/studio'
 says "values of studio's flags are not projects" "-- --caps inspect --theme t.json $co/target/studio-sample"
 cp "$root/mise-tasks/dev" "$co/mise-tasks/"
