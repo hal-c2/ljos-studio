@@ -259,6 +259,8 @@ says "a path that need not exist yet is taken from where the person asked" "$scr
 says "and an absolute one as it is" "/x.png"
 call 'decode_args "a '"'"'b c'"'"' --x"; printf "<%s>" "${decoded[@]}"; decode_args ""; echo " n=${#decoded[@]}"'
 says "a variadic argument's quoting is undone, a word with spaces kept whole" "<a><b c><--x> n=0"
+call 'decode_args "{x,y} p"; printf "<%s>" "${decoded[@]}"'
+says "and braces are kept as they are" "<{x,y}><p>"
 call 'run_studio --ljos'
 refuses "a flag is not taken as DIR" "--ljos is a flag, not a DIR"
 ENVS="MISE_ORIGINAL_CWD=$scratch/asked" call 'absolute nowhere'

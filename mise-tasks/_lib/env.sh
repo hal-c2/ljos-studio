@@ -413,10 +413,14 @@ from_asked() {
 # mise hands a variadic argument over as one shell-quoted string; this sets
 # `decoded` to its words, quoting undone, so a path with spaces stays one.
 # The string is mise's quoting of what the person typed, so eval only undoes
-# that quoting.
+# that quoting. mise leaves braces unquoted, so brace expansion is off for it.
 decode_args() {
   decoded=()
-  [ -z "$1" ] || eval "decoded=($1)"
+  [ -z "$1" ] || {
+    set +B
+    eval "decoded=($1)"
+    set -B
+  }
 }
 
 # What `setup` and `dev` share with `studio`: the window on DIR (a copy of
