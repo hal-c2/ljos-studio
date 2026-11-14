@@ -7,6 +7,7 @@
 #USAGE flag "--mcp" help="Serve Studio's tools on stdin and stdout, with no window"
 #USAGE flag "--shell <dir>" help="A shell of your own: a directory of QML whose Shell.qml the window shows"
 #USAGE flag "--theme <file>" help="The theme file Studio's own window is drawn with"
+#USAGE flag "--ljos <file>" help="The ljos program previews run (default LJOS, else the one setup installed)"
 set -euo pipefail
 . "$(dirname "$0")/_lib/env.sh"
 set --
@@ -15,8 +16,7 @@ set --
 [ "${usage_mcp:-false}" != true ] || set -- "$@" --mcp
 [ -z "${usage_shell:-}" ] || set -- "$@" --shell "$(from_asked "$usage_shell")"
 [ -z "${usage_theme:-}" ] || set -- "$@" --theme "$(from_asked "$usage_theme")"
-# The variadic arg is one string in the environment; studio's own flags take
-# no spaces, so splitting it on them is what the person typed.
-# shellcheck disable=SC2086
-[ -z "${usage_studio_args:-}" ] || set -- "$@" $usage_studio_args
+[ -z "${usage_ljos:-}" ] || set -- "$@" --ljos "$(from_asked "$usage_ljos")"
+decode_args "${usage_studio_args:-}"
+[ ${#decoded[@]} -eq 0 ] || set -- "$@" "${decoded[@]}"
 run_studio "${usage_dir:-}" "$@"

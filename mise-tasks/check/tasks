@@ -64,6 +64,14 @@ call 'report_ljos_web'
 refuses "setup's report on a missing checkout names setup --web" "SKIPPED ljos-web: no checkout at ../ljos-web; the native window does not need it. For the browser tasks run mise run setup --web"
 stub git 'echo "ran git $*"; if [ "$1" = clone ]; then mkdir -p "$4"; fi'
 stub mise 'echo "ran mise $* trusting $MISE_TRUSTED_CONFIG_PATHS"'
+mkdir -p "$co/../ljos-web.setup-partial"
+call 'clone_ljos_web'
+refuses "a partial clone setup did not make is left alone" "is there and setup did not make it"
+touch "$co/../ljos-web.setup-partial.by-setup"
+call 'clone_ljos_web'
+says "one an earlier setup left is removed" "removing the partial clone an earlier setup left"
+if [ -e "$co/../ljos-web.setup-partial.by-setup" ]; then bad "and its marker goes once the clone is in place"; else ok "and its marker goes once the clone is in place"; fi
+rm -rf "$web"
 call 'clone_ljos_web'
 says "setup --web clones ljos-web beside this checkout" "ran git clone -q https://github.com/hal-c2/ljos-web $co/../ljos-web.setup-partial"
 says "fetching the pin, which need not be on a branch" "ran git -C $co/../ljos-web.setup-partial fetch -q origin $pin"
@@ -249,6 +257,10 @@ says "and a file" "$(cd "$scratch/asked" && pwd -P)/file.feature"
 ENVS="MISE_ORIGINAL_CWD=$scratch/asked" call 'from_asked later.png; from_asked /x.png'
 says "a path that need not exist yet is taken from where the person asked" "$scratch/asked/later.png"
 says "and an absolute one as it is" "/x.png"
+call 'decode_args "a '"'"'b c'"'"' --x"; printf "<%s>" "${decoded[@]}"; decode_args ""; echo " n=${#decoded[@]}"'
+says "a variadic argument's quoting is undone, a word with spaces kept whole" "<a><b c><--x> n=0"
+call 'run_studio --ljos'
+refuses "a flag is not taken as DIR" "--ljos is a flag, not a DIR"
 ENVS="MISE_ORIGINAL_CWD=$scratch/asked" call 'absolute nowhere'
 refuses "and what is not there is said" "no such file or directory: $scratch/asked/nowhere"
 

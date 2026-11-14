@@ -410,11 +410,23 @@ from_asked() {
   esac
 }
 
+# mise hands a variadic argument over as one shell-quoted string; this sets
+# `decoded` to its words, quoting undone, so a path with spaces stays one.
+# The string is mise's quoting of what the person typed, so eval only undoes
+# that quoting.
+decode_args() {
+  decoded=()
+  [ -z "$1" ] || eval "decoded=($1)"
+}
+
 # What `setup` and `dev` share with `studio`: the window on DIR (a copy of
 # samples/hello when empty), the rest of the arguments going to studio.
 run_studio() {
   local dir="$1"
   shift
+  case "$dir" in
+    -*) die "$dir is a flag, not a DIR: studio's flags go after DIR and --, or name the flag the task's --help lists" ;;
+  esac
   find_ljos
   if [ -n "$dir" ]; then
     dir="$(absolute "$dir")"
@@ -444,14 +456,22 @@ ljos_web_dir() {
 # mise.toml sets tool options, so mise wants it trusted: trusted for these
 # commands only, through the environment, so nothing in mise's state changes.
 clone_ljos_web() {
-  local dir partial
+  local dir partial owned
   dir="$(ljos_web_dir)"
   [ ! -e "$dir" ] || die "$dir is already there: setup does not change a checkout it did not make"
   # Made under another name and moved into place only when whole, so a run
   # that fails leaves no half checkout that the next run would take as
-  # somebody's; a partial one is setup's own, and goes.
+  # somebody's. The marker beside it, written before the clone starts, is how
+  # a later run knows a partial one is setup's own to remove; one without it
+  # is somebody's, and stays.
   partial="$dir.setup-partial"
-  rm -rf "$partial"
+  owned="$partial.by-setup"
+  if [ -e "$partial" ]; then
+    [ -f "$owned" ] || die "$partial is there and setup did not make it: move it away, then run setup --web again"
+    echo "removing the partial clone an earlier setup left: $partial"
+    rm -rf "$partial"
+  fi
+  : >"$owned"
   echo "git clone https://github.com/hal-c2/ljos-web $dir"
   git clone -q https://github.com/hal-c2/ljos-web "$partial"
   # The pin need not be on a branch a clone fetches (CI's checkout fetches it
@@ -460,19 +480,22 @@ clone_ljos_web() {
   git -C "$partial" fetch -q origin "$ljos_web_pin"
   echo "git -C $dir checkout $ljos_web_pin"
   git -C "$partial" -c advice.detachedHead=false checkout -q "$ljos_web_pin"
-  setup_ljos_web_packages "$partial"
+  setup_ljos_web_packages "$partial" "$dir"
   mv "$partial" "$dir"
+  rm -f "$owned"
 }
 
+# $1: the checkout to install into; $2: how messages name it.
 setup_ljos_web_packages() {
-  local dir="$1"
-  echo "(cd ${dir%.setup-partial} && mise install && pnpm install --frozen-lockfile)"
+  local dir shown="$2"
+  dir="$(physical "$1")"
+  echo "(cd $shown && mise install && pnpm install --frozen-lockfile)"
   (
     cd "$dir"
-    export MISE_TRUSTED_CONFIG_PATHS="$(physical "$dir")"
+    export MISE_TRUSTED_CONFIG_PATHS="$dir"
     mise install
     mise exec -- pnpm install --frozen-lockfile
-    echo "(cd ${dir%.setup-partial} && pnpm --filter ljos-web-example-web exec playwright install chromium)"
+    echo "(cd $shown && pnpm --filter ljos-web-example-web exec playwright install chromium)"
     mise exec -- pnpm --filter ljos-web-example-web exec playwright install chromium
   )
 }
