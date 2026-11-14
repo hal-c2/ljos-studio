@@ -60,6 +60,19 @@ refuses() { # what, text
 call find_ljos_web
 refuses "a missing checkout says how to get it" "git clone https://github.com/hal-c2/ljos-web ../ljos-web"
 says "and at which commit" "git checkout $pin"
+call 'report_ljos_web'
+refuses "setup's report on a missing checkout names setup --web" "SKIPPED ljos-web: no checkout at ../ljos-web; the native window does not need it. For the browser tasks run mise run setup --web"
+stub git 'echo "ran git $*"; if [ "$1" = clone ]; then mkdir -p "$4"; fi'
+stub mise 'echo "ran mise $* trusting $MISE_TRUSTED_CONFIG_PATHS"'
+call 'clone_ljos_web'
+says "setup --web clones ljos-web beside this checkout" "ran git clone -q https://github.com/hal-c2/ljos-web $co/../ljos-web"
+says "at the pin" "checkout -q $pin"
+says "and installs its packages, trusting it for that command only" "ran mise exec -- pnpm install --frozen-lockfile trusting $(cd "$web" && pwd -P)"
+says "and Playwright's Chromium" "ran mise exec -- pnpm --filter ljos-web-example-web exec playwright install chromium"
+call 'clone_ljos_web'
+refuses "a checkout that is there is never changed" "is already there: setup does not change a checkout it did not make"
+unstub git
+unstub mise
 mkdir -p "$web"
 call find_ljos_web
 refuses "a checkout without packages says the command" "ljos-web has no packages installed: run (cd ../ljos-web && pnpm install --frozen-lockfile)"
@@ -74,6 +87,8 @@ for m in ljos-web solid-js vite @solidjs/web; do
 done
 call 'find_ljos_web; echo "$LJOS_WEB"'
 says "a checkout beside this one is found with nothing set" "$(cd "$web" && pwd -P)"
+call 'report_ljos_web'
+says "setup reports the checkout it found" "found ljos-web at $(cd "$web" && pwd -P)"
 ENVS="LJOS_WEB=$scratch/nowhere" call find_ljos_web
 refuses "LJOS_WEB overrides the place" "no ljos-web checkout at $scratch/nowhere"
 
@@ -228,6 +243,9 @@ touch "$scratch/asked/file.feature"
 ENVS="MISE_ORIGINAL_CWD=$scratch/asked" call 'absolute project; absolute file.feature; absolute /'
 says "a directory is taken from where the person asked" "$(cd "$scratch/asked/project" && pwd -P)"
 says "and a file" "$(cd "$scratch/asked" && pwd -P)/file.feature"
+ENVS="MISE_ORIGINAL_CWD=$scratch/asked" call 'from_asked later.png; from_asked /x.png'
+says "a path that need not exist yet is taken from where the person asked" "$scratch/asked/later.png"
+says "and an absolute one as it is" "/x.png"
 ENVS="MISE_ORIGINAL_CWD=$scratch/asked" call 'absolute nowhere'
 refuses "and what is not there is said" "no such file or directory: $scratch/asked/nowhere"
 

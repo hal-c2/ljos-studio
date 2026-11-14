@@ -400,3 +400,103 @@ build_served_page() {
   assemble_page web-serve serve
   (cd "$app" && VITE_CONFIG_NATIVE_IGNORE_WARNING=true node_modules/vite/bin/vite.js build --logLevel warn)
 }
+
+# A path the person typed, absolute from where they asked; unlike `absolute`
+# it need not exist yet.
+from_asked() {
+  case "$1" in
+    /*) printf '%s\n' "$1" ;;
+    *) printf '%s/%s\n' "${MISE_ORIGINAL_CWD:-$PWD}" "$1" ;;
+  esac
+}
+
+# What `setup` and `dev` share with `studio`: the window on DIR (a copy of
+# samples/hello when empty), the rest of the arguments going to studio.
+run_studio() {
+  local dir="$1"
+  shift
+  find_ljos
+  if [ -n "$dir" ]; then
+    dir="$(absolute "$dir")"
+  else
+    # A copy: a person trying Studio edits it, and the sample stays as it is.
+    dir="$(own_target)/studio-sample"
+    if [ ! -d "$dir" ]; then
+      mkdir -p "$(dirname "$dir")"
+      cp -R "$studio_root/samples/hello" "$dir"
+    fi
+    echo "No DIR given: opening a copy of samples/hello in $dir" >&2
+  fi
+  exec cargo run --release -q -p studio --bin studio -- "$@" "$dir"
+}
+
+# --- ljos-web, for `mise run setup` -------------------------------------------
+# Setup clones ljos-web only when asked (`--web`) and only when nothing is
+# there: a checkout that exists is somebody's, so it is read and reported on,
+# never changed.
+
+ljos_web_dir() {
+  printf '%s\n' "${LJOS_WEB:-$studio_root/../ljos-web}"
+}
+
+# Clones ljos-web at the pin beside this checkout, and installs its packages
+# and Playwright's Chromium with its own pinned node and pnpm. ljos-web's
+# mise.toml sets tool options, so mise wants it trusted: trusted for these
+# commands only, through the environment, so nothing in mise's state changes.
+clone_ljos_web() {
+  local dir
+  dir="$(ljos_web_dir)"
+  [ ! -e "$dir" ] || die "$dir is already there: setup does not change a checkout it did not make"
+  echo "git clone https://github.com/hal-c2/ljos-web $dir"
+  git clone -q https://github.com/hal-c2/ljos-web "$dir"
+  echo "git -C $dir checkout $ljos_web_pin"
+  git -C "$dir" -c advice.detachedHead=false checkout -q "$ljos_web_pin"
+  setup_ljos_web_packages "$dir"
+}
+
+setup_ljos_web_packages() {
+  local dir="$1"
+  echo "(cd $dir && mise install && pnpm install --frozen-lockfile)"
+  (
+    cd "$dir"
+    export MISE_TRUSTED_CONFIG_PATHS="$(physical "$dir")"
+    mise install
+    mise exec -- pnpm install --frozen-lockfile
+    echo "(cd $dir && pnpm --filter ljos-web-example-web exec playwright install chromium)"
+    mise exec -- pnpm --filter ljos-web-example-web exec playwright install chromium
+  )
+}
+
+# One line per thing the web tasks need from ljos-web, each with the command
+# that gets it; prints to stdout, returns 1 when something is missing.
+report_ljos_web() {
+  local dir missing=0 said
+  dir="$(ljos_web_dir)"
+  if [ ! -d "$dir" ]; then
+    echo "SKIPPED ljos-web: no checkout at ${LJOS_WEB:-../ljos-web}; the native window does not need it. For the browser tasks run mise run setup --web (it clones it at $ljos_web_pin and installs its packages), or name one with LJOS_WEB=/path/to/ljos-web"
+    return 1
+  fi
+  if said="$(find_ljos_web 2>&1)"; then
+    echo "found ljos-web at $(physical "$dir")${said:+ ($said)}"
+  else
+    echo "SKIPPED ljos-web's packages: $said"
+    return 1
+  fi
+  if said="$( (find_playwright) 2>&1)"; then
+    echo "found Playwright's Chromium"
+  else
+    echo "SKIPPED Playwright: $said (web:browser, web:shell, web:serve:check and features:browser need it)"
+    missing=1
+  fi
+  return $missing
+}
+
+report_qt() {
+  local said
+  if said="$( (find_qt && echo "$QT_INSTALL_QML") 2>&1)"; then
+    echo "found Qt 6's QML at $said"
+  else
+    echo "SKIPPED Qt 6: web:serve and web:shell read Controls from it. $said"
+    return 1
+  fi
+}
