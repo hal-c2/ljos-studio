@@ -6,7 +6,7 @@
 #USAGE flag "--no-agents" help="Native: serve no tools to agents while the window is open"
 #USAGE flag "--ljos <file>" help="Native: the ljos program previews run (default LJOS, else the one setup installed)"
 #USAGE arg "[dir]" help="Native: the project to open; default a copy of samples/hello in the target"
-#USAGE arg "[studio_args]" var=#true help="Native: more arguments for studio, after --"
+#USAGE arg "[studio_args]" var=#true help="Native: more arguments for studio, after -- and after DIR (mise run dev DIR -- --mcp)"
 set -euo pipefail
 . "$(dirname "$0")/_lib/env.sh"
 web="${usage_web:-false}"

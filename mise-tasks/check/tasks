@@ -286,6 +286,10 @@ says "studio --ljos with a bare name keeps it for PATH" "LJOS=ljos"
 mkdir -p "$co/samples/hello"
 ENVS="LJOS=ljos usage_dir=--mcp usage_studio_args=--no-agents" call 'bash mise-tasks/studio'
 says "studio -- --mcp …: what mise took as DIR is studio's flag, in order" "cargo run --release -q -p studio --bin studio -- --mcp --no-agents $co/target/studio-sample"
+ENVS="MISE_TASK_NAME=studio LJOS=ljos MISE_ORIGINAL_CWD=$scratch/asked usage_dir=--mcp usage_studio_args=project" call 'bash mise-tasks/studio'
+refuses "a project typed after the flags names where DIR goes" "project looks like the project: DIR goes before --, as in mise run studio project -- --mcp"
+ENVS="LJOS=ljos MISE_ORIGINAL_CWD=$scratch/asked usage_dir=--shell usage_studio_args=project" call 'bash mise-tasks/studio'
+says "but a directory --shell takes is its value" "-- --shell project $co/target/studio-sample"
 cp "$root/mise-tasks/dev" "$co/mise-tasks/"
 stub mise 'echo "mise $*"'
 ENVS="usage_dir=--mcp" call 'bash mise-tasks/dev'

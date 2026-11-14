@@ -441,11 +441,20 @@ program_asked() {
 # mise strips `--` and hands the first word after it to [dir]: in
 # `mise run dev -- --mcp` that is studio's flag, not a project. Moves a `dir`
 # that starts with `-` to the front of `decoded`, the arguments for studio.
+# A project typed after them would reach studio as a second DIR, which it
+# refuses only after a release build; said here instead. Only --shell takes
+# a directory as its value.
 flag_not_dir() {
   case "$dir" in
     -*)
       decoded=("$dir" ${decoded[@]+"${decoded[@]}"})
       dir=""
+      local n=${#decoded[@]} last before=""
+      last="${decoded[$((n - 1))]}"
+      [ "$n" -lt 2 ] || before="${decoded[$((n - 2))]}"
+      if [ "$n" -ge 2 ] && [ "$before" != --shell ] && [ -d "$(from_asked "$last")" ]; then
+        die "$last looks like the project: DIR goes before --, as in mise run ${MISE_TASK_NAME:-studio} $last -- ${decoded[*]:0:$((n - 1))}"
+      fi
       ;;
   esac
 }

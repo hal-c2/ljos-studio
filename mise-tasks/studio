@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #MISE description="Studio's window on the project in DIR (a copy of samples/hello when left out); anything after -- goes to studio"
 #USAGE arg "[dir]" help="The project to open; default a copy of samples/hello in the target"
-#USAGE arg "[studio_args]" var=#true help="More arguments for studio, after -- (see cargo run -p studio -- --help)"
+#USAGE arg "[studio_args]" var=#true help="More arguments for studio, after -- and after DIR (mise run studio DIR -- …; see cargo run -p studio -- --help)"
 #USAGE flag "--caps <caps>" help="What an agent may do: a comma-separated list of inspect, mutate, fs and run (default inspect)"
 #USAGE flag "--no-agents" help="Serve no tools to agents while the window is open"
 #USAGE flag "--mcp" help="Serve Studio's tools on stdin and stdout, with no window"
