@@ -335,8 +335,12 @@ wrong_rustc() {
   case "$have" in
     "rustc $channel" | "rustc $channel "*) return 0 ;;
   esac
-  at="$(command -v rustc || echo none)"
-  echo "the rustc on PATH ($at) is ${have:-missing}, not $channel: rustup's proxies (~/.cargo/bin) must come before $(dirname "$at") on PATH"
+  at="$(command -v rustc || true)"
+  if [ -z "$at" ]; then
+    echo "no rustc is on PATH: rustup's proxies (~/.cargo/bin) must be on it"
+    return 0
+  fi
+  echo "the rustc on PATH ($at) is ${have:-not working}, not $channel: rustup's proxies (~/.cargo/bin) must come before $(dirname "$at") on PATH"
 }
 
 # rust-toolchain.toml's components and targets for the toolchain in use:

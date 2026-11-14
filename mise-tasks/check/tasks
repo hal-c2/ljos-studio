@@ -240,6 +240,10 @@ stub rustc 'echo "rustc 9.9.9 (Distro rust)"'
 call 'wrong_rustc'
 says "another rustc ahead of rustup's says where it is" "the rustc on PATH ($stubs/rustc) is rustc 9.9.9 (Distro rust), not 1.0.0: rustup's proxies (~/.cargo/bin) must come before $stubs on PATH"
 unstub rustc
+mkdir -p "$scratch/only-sed"
+ln -sf "$(command -v sed)" "$scratch/only-sed/sed"
+call "PATH=$scratch/only-sed wrong_rustc"
+says "no rustc at all is said plainly" "no rustc is on PATH: rustup's proxies (~/.cargo/bin) must be on it"
 stub rustup 'case "$1 $2" in "component list") printf "cargo-x86_64-unknown-linux-gnu\\nclippy-x86_64-unknown-linux-gnu\\n" ;; "target list") printf "x86_64-unknown-linux-gnu\\n" ;; esac'
 call 'need_rust_parts components'
 refuses "a missing component names setup" "no rustfmt for this Rust: run mise run setup (it runs rustup component add rustfmt)"
