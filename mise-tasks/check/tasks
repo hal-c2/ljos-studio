@@ -233,6 +233,13 @@ stub rustup 'echo "ran rustup $*"'
 call 'install_rust_parts'
 says "setup adds rust-toolchain.toml's components" "ran rustup component add rustfmt clippy"
 says "and its targets" "ran rustup target add wasm32-unknown-unknown"
+stub rustc 'echo "rustc 1.0.0 (abc 2026-01-01)"'
+call 'wrong_rustc; echo "[$?]"'
+says "the pinned rustc on PATH is fine" "[0]"
+stub rustc 'echo "rustc 9.9.9 (Distro rust)"'
+call 'wrong_rustc'
+says "another rustc ahead of rustup's says where it is" "the rustc on PATH ($stubs/rustc) is rustc 9.9.9 (Distro rust), not 1.0.0: rustup's proxies (~/.cargo/bin) must come before $stubs on PATH"
+unstub rustc
 stub rustup 'case "$1 $2" in "component list") printf "cargo-x86_64-unknown-linux-gnu\\nclippy-x86_64-unknown-linux-gnu\\n" ;; "target list") printf "x86_64-unknown-linux-gnu\\n" ;; esac'
 call 'need_rust_parts components'
 refuses "a missing component names setup" "no rustfmt for this Rust: run mise run setup (it runs rustup component add rustfmt)"

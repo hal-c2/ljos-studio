@@ -17,6 +17,10 @@ mise install
 did "mise's tools (mise.toml)"
 install_rust_parts
 did "Rust's components and targets (rust-toolchain.toml)"
+if why="$(wrong_rustc)" && [ -n "$why" ]; then
+  echo "$why" >&2
+  skip "Rust: $why, or builds use that Rust, without setup's components and targets"
+fi
 if [ -n "${LJOS:-}" ]; then
   echo "LJOS is set ($LJOS): no ljos to install"
   skip "ljos: LJOS is set ($LJOS)"

@@ -324,6 +324,21 @@ toolchain_list() {
   sed -n "s/^$1 *= *\\[\\(.*\\)\\]/\\1/p" "$studio_root/rust-toolchain.toml" | tr -d '"' | tr ',' ' '
 }
 
+# Empty when the rustc on PATH is rust-toolchain.toml's channel; otherwise
+# why not. rustup's parts land in its toolchain, so a distro Rust ahead of
+# rustup's proxies on PATH (mise puts its rust's bin nowhere: it leans on
+# those proxies) builds with none of them, whatever setup added.
+wrong_rustc() {
+  local channel have at
+  channel="$(sed -n 's/^channel *= *"\(.*\)"/\1/p' "$studio_root/rust-toolchain.toml")"
+  have="$(rustc --version 2>/dev/null || true)"
+  case "$have" in
+    "rustc $channel" | "rustc $channel "*) return 0 ;;
+  esac
+  at="$(command -v rustc || echo none)"
+  echo "the rustc on PATH ($at) is ${have:-missing}, not $channel: rustup's proxies (~/.cargo/bin) must come before $(dirname "$at") on PATH"
+}
+
 # rust-toolchain.toml's components and targets for the toolchain in use:
 # under mise, RUSTUP_TOOLCHAIN overrides that file, so rustup installs none
 # of them. rustup skips what is there.
