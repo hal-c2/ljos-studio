@@ -8,10 +8,9 @@ set -euo pipefail
 # nothing: it needs an ljos-web checkout with its packages installed, its
 # qmlc, and Qt 6's QML only when the site imports the controls.
 . "$(dirname "$0")/../../_lib/env.sh"
-[ $# -ge 1 ] || die "usage: mise run export:web:build <bundle> [out]"
-bundle="$(absolute "$1")"
+bundle="$(absolute "${usage_bundle:?}")"
 [ -f "$bundle/ljos-site.json" ] || die "$bundle holds no ljos-site.json: export with \"target\": \"web\" first"
-out="${2:-$bundle-site}"
+out="${usage_out:-$bundle-site}"
 case "$out" in
   /*) ;;
   *) out="${MISE_ORIGINAL_CWD:-$PWD}/$out" ;;

@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+#MISE description="Put the studio program on your PATH: cargo install from this checkout (into ~/.cargo/bin, or --root)"
+#USAGE flag "--root <dir>" help="Install into DIR/bin instead of cargo's default (~/.cargo/bin)"
+#USAGE flag "--with-ljos" help="Also install the ljos program previews run, at the ljos-ui commit Cargo.toml pins"
+#USAGE flag "--dry-run" help="Print the commands and run nothing"
+set -euo pipefail
+. "$(dirname "$0")/_lib/env.sh"
+set --
+[ -z "${usage_root:-}" ] || set -- --root "$(from_asked "$usage_root")"
+run() {
+  echo "$*"
+  [ "${usage_dry_run:-false}" = true ] || "$@"
+}
+run cargo install --path "$studio_root/crates/studio" --locked "$@"
+if [ "${usage_with_ljos:-false}" = true ]; then
+  run cargo install --git https://github.com/hal-c2/ljos-ui --rev "$(ljos_ui_rev)" --locked ljos_cli "$@"
+else
+  echo "Previews run ljos: put one on your PATH, set LJOS, pass --ljos to studio, or rerun with --with-ljos" >&2
+fi

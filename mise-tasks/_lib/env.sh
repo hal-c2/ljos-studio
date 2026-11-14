@@ -324,6 +324,25 @@ toolchain_list() {
   sed -n "s/^$1 *= *\\[\\(.*\\)\\]/\\1/p" "$studio_root/rust-toolchain.toml" | tr -d '"' | tr ',' ' '
 }
 
+# Empty when the rustc on PATH is rust-toolchain.toml's channel; otherwise
+# why not. rustup's parts land in its toolchain, so a distro Rust ahead of
+# rustup's proxies on PATH (mise puts its rust's bin nowhere: it leans on
+# those proxies) builds with none of them, whatever setup added.
+wrong_rustc() {
+  local channel have at
+  channel="$(sed -n 's/^channel *= *"\(.*\)"/\1/p' "$studio_root/rust-toolchain.toml")"
+  have="$(rustc --version 2>/dev/null || true)"
+  case "$have" in
+    "rustc $channel" | "rustc $channel "*) return 0 ;;
+  esac
+  at="$(command -v rustc || true)"
+  if [ -z "$at" ]; then
+    echo "no rustc is on PATH: rustup's proxies (~/.cargo/bin) must be on it"
+    return 0
+  fi
+  echo "the rustc on PATH ($at) is ${have:-not working}, not $channel: rustup's proxies (~/.cargo/bin) must come before $(dirname "$at") on PATH"
+}
+
 # rust-toolchain.toml's components and targets for the toolchain in use:
 # under mise, RUSTUP_TOOLCHAIN overrides that file, so rustup installs none
 # of them. rustup skips what is there.
@@ -399,4 +418,186 @@ build_served_page() {
   find_design_qml
   assemble_page web-serve serve
   (cd "$app" && VITE_CONFIG_NATIVE_IGNORE_WARNING=true node_modules/vite/bin/vite.js build --logLevel warn)
+}
+
+# A path the person typed, absolute from where they asked; unlike `absolute`
+# it need not exist yet.
+from_asked() {
+  case "$1" in
+    /*) printf '%s\n' "$1" ;;
+    *) printf '%s/%s\n' "${MISE_ORIGINAL_CWD:-$PWD}" "$1" ;;
+  esac
+}
+
+# A program as a person names it: with a slash it is a path, from where they
+# asked; a bare name like `ljos` is looked up on PATH when it runs, as a shell would.
+program_asked() {
+  case "$1" in
+    */*) from_asked "$1" ;;
+    *) printf '%s\n' "$1" ;;
+  esac
+}
+
+# mise strips `--` and hands the first word after it to [dir]: in
+# `mise run dev -- --mcp` that is studio's flag, not a project. Moves a `dir`
+# that starts with `-` to the front of `decoded`, the arguments for studio.
+# A project typed among them would reach studio as a second DIR, which it
+# refuses only after a release build; said here instead. Any word that is
+# neither a flag nor the value of one of studio's flags that take a value
+# (crates/studio/src/main.rs) is that project.
+flag_not_dir() {
+  case "$dir" in
+    -*) ;;
+    *) return 0 ;;
+  esac
+  decoded=("$dir" ${decoded[@]+"${decoded[@]}"})
+  dir=""
+  local word value=false project="" rest=""
+  for word in "${decoded[@]}"; do
+    if [ "$value" = true ]; then
+      value=false
+    else
+      case "$word" in
+        --caps | --ljos | --shell | --theme) value=true ;;
+        -*) ;;
+        *)
+          if [ -z "$project" ]; then
+            project="$word"
+            continue
+          fi
+          ;;
+      esac
+    fi
+    rest="$rest $word"
+  done
+  [ -z "$project" ] ||
+    die "$project looks like the project: DIR goes before --, as in mise run ${MISE_TASK_NAME:-studio} $project --$rest"
+}
+
+# mise hands a variadic argument over as one shell-quoted string; this sets
+# `decoded` to its words, quoting undone, so a path with spaces stays one.
+# The string is mise's quoting of what the person typed, so eval only undoes
+# that quoting. mise leaves braces unquoted, so brace expansion is off for it.
+decode_args() {
+  decoded=()
+  [ -z "$1" ] || {
+    set +B
+    eval "decoded=($1)"
+    set -B
+  }
+}
+
+# What `setup` and `dev` share with `studio`: the window on DIR (a copy of
+# samples/hello when empty), the rest of the arguments going to studio.
+run_studio() {
+  local dir="$1"
+  shift
+  case "$dir" in
+    -*) die "$dir is a flag, not a DIR: studio's flags go after DIR and --, or name the flag the task's --help lists" ;;
+  esac
+  find_ljos
+  if [ -n "$dir" ]; then
+    dir="$(absolute "$dir")"
+  else
+    # A copy: a person trying Studio edits it, and the sample stays as it is.
+    dir="$(own_target)/studio-sample"
+    if [ ! -d "$dir" ]; then
+      mkdir -p "$(dirname "$dir")"
+      cp -R "$studio_root/samples/hello" "$dir"
+    fi
+    echo "No DIR given: opening a copy of samples/hello in $dir" >&2
+  fi
+  exec cargo run --release -q -p studio --bin studio -- "$@" "$dir"
+}
+
+# --- ljos-web, for `mise run setup` -------------------------------------------
+# Setup clones ljos-web only when asked (`--web`) and only when nothing is
+# there: a checkout that exists is somebody's, so it is read and reported on,
+# never changed.
+
+ljos_web_dir() {
+  printf '%s\n' "${LJOS_WEB:-$studio_root/../ljos-web}"
+}
+
+# Clones ljos-web at the pin beside this checkout, and installs its packages
+# and Playwright's Chromium with its own pinned node and pnpm. ljos-web's
+# mise.toml sets tool options, so mise wants it trusted: trusted for these
+# commands only, through the environment, so nothing in mise's state changes.
+clone_ljos_web() {
+  local dir partial owned
+  dir="$(ljos_web_dir)"
+  [ ! -e "$dir" ] || die "$dir is already there: setup does not change a checkout it did not make"
+  # Made under another name and moved into place only when whole, so a run
+  # that fails leaves no half checkout that the next run would take as
+  # somebody's. The marker beside it, written before the clone starts, is how
+  # a later run knows a partial one is setup's own to remove; one without it
+  # is somebody's, and stays.
+  partial="$dir.setup-partial"
+  owned="$partial.by-setup"
+  if [ -e "$partial" ]; then
+    [ -f "$owned" ] || die "$partial is there and setup did not make it: move it away, then run setup --web again"
+    echo "removing the partial clone an earlier setup left: $partial"
+    rm -rf "$partial"
+  fi
+  : >"$owned"
+  echo "git clone https://github.com/hal-c2/ljos-web $dir"
+  git clone -q https://github.com/hal-c2/ljos-web "$partial"
+  # The pin need not be on a branch a clone fetches (CI's checkout fetches it
+  # by its hash too), so it is fetched by name.
+  echo "git -C $dir fetch origin $ljos_web_pin"
+  git -C "$partial" fetch -q origin "$ljos_web_pin"
+  echo "git -C $dir checkout $ljos_web_pin"
+  git -C "$partial" -c advice.detachedHead=false checkout -q "$ljos_web_pin"
+  setup_ljos_web_packages "$partial" "$dir"
+  mv "$partial" "$dir"
+  rm -f "$owned"
+}
+
+# $1: the checkout to install into; $2: how messages name it.
+setup_ljos_web_packages() {
+  local dir shown="$2"
+  dir="$(physical "$1")"
+  echo "(cd $shown && mise install && pnpm install --frozen-lockfile)"
+  (
+    cd "$dir"
+    export MISE_TRUSTED_CONFIG_PATHS="$dir"
+    mise install
+    mise exec -- pnpm install --frozen-lockfile
+    echo "(cd $shown && pnpm --filter ljos-web-example-web exec playwright install chromium)"
+    mise exec -- pnpm --filter ljos-web-example-web exec playwright install chromium
+  )
+}
+
+# One line per thing the web tasks need from ljos-web, each with the command
+# that gets it; prints to stdout, returns 1 when something is missing.
+report_ljos_web() {
+  local dir missing=0 said
+  dir="$(ljos_web_dir)"
+  if [ ! -d "$dir" ]; then
+    echo "SKIPPED ljos-web: no checkout at ${LJOS_WEB:-../ljos-web}; the native window does not need it. For the browser tasks run mise run setup --web (it clones it at $ljos_web_pin and installs its packages), or name one with LJOS_WEB=/path/to/ljos-web"
+    return 1
+  fi
+  if said="$(find_ljos_web 2>&1)"; then
+    echo "found ljos-web at $(physical "$dir")${said:+ ($said)}"
+  else
+    echo "SKIPPED ljos-web's packages: $said"
+    return 1
+  fi
+  if said="$( (find_playwright) 2>&1)"; then
+    echo "found Playwright's Chromium"
+  else
+    echo "SKIPPED Playwright: $said (web:browser, web:shell, web:serve:check and features:browser need it)"
+    missing=1
+  fi
+  return $missing
+}
+
+report_qt() {
+  local said
+  if said="$( (find_qt && echo "$QT_INSTALL_QML") 2>&1)"; then
+    echo "found Qt 6's QML at $said"
+  else
+    echo "SKIPPED Qt 6: web:serve and web:shell read Controls from it. $said"
+    return 1
+  fi
 }

@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 #MISE description="Studio on the web for you to open: builds the page and serves it on the loopback interface (PORT, default 5199)"
+#USAGE flag "--port <port>" env="PORT" default="5199" help="The port to serve on"
 #MISE depends=["web:build"]
 set -euo pipefail
 . "$(dirname "$0")/../../_lib/env.sh"
 build_served_page
-exec node "$studio_root/web/serve.mjs" "$app" "${PORT:-5199}"
+exec node "$studio_root/web/serve.mjs" "$app" "${usage_port:-${PORT:-5199}}"

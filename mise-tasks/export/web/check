@@ -15,5 +15,6 @@ cp -R "$studio_root/web/site/project/." "$project/"
 # And it is exported with the tool "export" and the target "web"
 cargo run --quiet -p studio_mcp --example export -- "$project" Shell.qml web >/dev/null
 # And the site is built from "build/web" with `mise run export:web:build`
-"$studio_root/mise-tasks/export/web/build" "$project/build/web"
+# Run as a script, not through mise: its argument is the variable mise sets.
+usage_bundle="$project/build/web" "$studio_root/mise-tasks/export/web/build"
 node "$studio_root/web/site.mjs" "$project/build/web-site" "$project"

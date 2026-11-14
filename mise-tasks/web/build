@@ -3,7 +3,9 @@
 set -euo pipefail
 . "$(dirname "$0")/../_lib/env.sh"
 if ! [ -d "$(rustc --print sysroot)/lib/rustlib/wasm32-unknown-unknown" ]; then
-  die "This Rust has no wasm32 target: run rustup target add wasm32-unknown-unknown"
+  why="$(wrong_rustc)"
+  [ -z "$why" ] || die "This Rust has no wasm32 target, as $why"
+  die "This Rust has no wasm32 target: run mise run setup (it runs rustup target add wasm32-unknown-unknown)"
 fi
 # The glue must come from the CLI of the version the crate links; found
 # before the build, so a missing one costs no compile.

@@ -60,6 +60,30 @@ refuses() { # what, text
 call find_ljos_web
 refuses "a missing checkout says how to get it" "git clone https://github.com/hal-c2/ljos-web ../ljos-web"
 says "and at which commit" "git checkout $pin"
+call 'report_ljos_web'
+refuses "setup's report on a missing checkout names setup --web" "SKIPPED ljos-web: no checkout at ../ljos-web; the native window does not need it. For the browser tasks run mise run setup --web"
+stub git 'echo "ran git $*"; if [ "$1" = clone ]; then mkdir -p "$4"; fi'
+stub mise 'echo "ran mise $* trusting $MISE_TRUSTED_CONFIG_PATHS"'
+mkdir -p "$co/../ljos-web.setup-partial"
+call 'clone_ljos_web'
+refuses "a partial clone setup did not make is left alone" "is there and setup did not make it"
+touch "$co/../ljos-web.setup-partial.by-setup"
+call 'clone_ljos_web'
+says "one an earlier setup left is removed" "removing the partial clone an earlier setup left"
+if [ -e "$co/../ljos-web.setup-partial.by-setup" ]; then bad "and its marker goes once the clone is in place"; else ok "and its marker goes once the clone is in place"; fi
+rm -rf "$web"
+call 'clone_ljos_web'
+says "setup --web clones ljos-web beside this checkout" "ran git clone -q https://github.com/hal-c2/ljos-web $co/../ljos-web.setup-partial"
+says "fetching the pin, which need not be on a branch" "ran git -C $co/../ljos-web.setup-partial fetch -q origin $pin"
+says "at the pin" "checkout -q $pin"
+says "and installs its packages, trusting it for that command only" "ran mise exec -- pnpm install --frozen-lockfile trusting /"
+says "the clone it is making" "frozen-lockfile trusting $(cd "$scratch/layout" && pwd -P)/ljos-web.setup-partial"
+if [ -d "$web" ] && [ ! -e "$web.setup-partial" ]; then ok "and moves it into place once whole"; else bad "and moves it into place once whole"; fi
+says "and Playwright's Chromium" "ran mise exec -- pnpm --filter ljos-web-example-web exec playwright install chromium"
+call 'clone_ljos_web'
+refuses "a checkout that is there is never changed" "is already there: setup does not change a checkout it did not make"
+unstub git
+unstub mise
 mkdir -p "$web"
 call find_ljos_web
 refuses "a checkout without packages says the command" "ljos-web has no packages installed: run (cd ../ljos-web && pnpm install --frozen-lockfile)"
@@ -74,6 +98,8 @@ for m in ljos-web solid-js vite @solidjs/web; do
 done
 call 'find_ljos_web; echo "$LJOS_WEB"'
 says "a checkout beside this one is found with nothing set" "$(cd "$web" && pwd -P)"
+call 'report_ljos_web'
+says "setup reports the checkout it found" "found ljos-web at $(cd "$web" && pwd -P)"
 ENVS="LJOS_WEB=$scratch/nowhere" call find_ljos_web
 refuses "LJOS_WEB overrides the place" "no ljos-web checkout at $scratch/nowhere"
 
@@ -207,6 +233,17 @@ stub rustup 'echo "ran rustup $*"'
 call 'install_rust_parts'
 says "setup adds rust-toolchain.toml's components" "ran rustup component add rustfmt clippy"
 says "and its targets" "ran rustup target add wasm32-unknown-unknown"
+stub rustc 'echo "rustc 1.0.0 (abc 2026-01-01)"'
+call 'wrong_rustc; echo "[$?]"'
+says "the pinned rustc on PATH is fine" "[0]"
+stub rustc 'echo "rustc 9.9.9 (Distro rust)"'
+call 'wrong_rustc'
+says "another rustc ahead of rustup's says where it is" "the rustc on PATH ($stubs/rustc) is rustc 9.9.9 (Distro rust), not 1.0.0: rustup's proxies (~/.cargo/bin) must come before $stubs on PATH"
+unstub rustc
+mkdir -p "$scratch/only-sed"
+ln -sf "$(command -v sed)" "$scratch/only-sed/sed"
+call "PATH=$scratch/only-sed wrong_rustc"
+says "no rustc at all is said plainly" "no rustc is on PATH: rustup's proxies (~/.cargo/bin) must be on it"
 stub rustup 'case "$1 $2" in "component list") printf "cargo-x86_64-unknown-linux-gnu\\nclippy-x86_64-unknown-linux-gnu\\n" ;; "target list") printf "x86_64-unknown-linux-gnu\\n" ;; esac'
 call 'need_rust_parts components'
 refuses "a missing component names setup" "no rustfmt for this Rust: run mise run setup (it runs rustup component add rustfmt)"
@@ -228,6 +265,42 @@ touch "$scratch/asked/file.feature"
 ENVS="MISE_ORIGINAL_CWD=$scratch/asked" call 'absolute project; absolute file.feature; absolute /'
 says "a directory is taken from where the person asked" "$(cd "$scratch/asked/project" && pwd -P)"
 says "and a file" "$(cd "$scratch/asked" && pwd -P)/file.feature"
+ENVS="MISE_ORIGINAL_CWD=$scratch/asked" call 'from_asked later.png; from_asked /x.png'
+says "a path that need not exist yet is taken from where the person asked" "$scratch/asked/later.png"
+says "and an absolute one as it is" "/x.png"
+call 'decode_args "a '"'"'b c'"'"' --x"; printf "<%s>" "${decoded[@]}"; decode_args ""; echo " n=${#decoded[@]}"'
+says "a variadic argument's quoting is undone, a word with spaces kept whole" "<a><b c><--x> n=0"
+call 'decode_args "{x,y} p"; printf "<%s>" "${decoded[@]}"'
+says "and braces are kept as they are" "<{x,y}><p>"
+# The studio task itself, with no ljos installed, none beside it and no LJOS:
+# a --ljos it is given is the one used, not refused for want of another.
+cp "$root/mise-tasks/studio" "$co/mise-tasks/"
+mkdir -p "$scratch/asked/project"
+rm -rf "$co/target/tools"
+stub cargo 'echo "cargo $* LJOS=${LJOS:-}"'
+ENVS="MISE_ORIGINAL_CWD=$scratch/asked usage_ljos=bin/ljos usage_dir=project" call 'bash mise-tasks/studio'
+says "studio --ljos is taken as LJOS, from where the person asked" "LJOS=$scratch/asked/bin/ljos"
+says "and the window opens on DIR" "cargo run --release -q -p studio --bin studio -- $(cd "$scratch/asked/project" && pwd -P)"
+ENVS="MISE_ORIGINAL_CWD=$scratch/asked usage_ljos=ljos usage_dir=project" call 'bash mise-tasks/studio'
+says "studio --ljos with a bare name keeps it for PATH" "LJOS=ljos"
+mkdir -p "$co/samples/hello"
+ENVS="LJOS=ljos usage_dir=--mcp usage_studio_args=--no-agents" call 'bash mise-tasks/studio'
+says "studio -- --mcp …: what mise took as DIR is studio's flag, in order" "cargo run --release -q -p studio --bin studio -- --mcp --no-agents $co/target/studio-sample"
+ENVS="MISE_TASK_NAME=studio LJOS=ljos MISE_ORIGINAL_CWD=$scratch/asked usage_dir=--mcp usage_studio_args=project" call 'bash mise-tasks/studio'
+refuses "a project typed after the flags names where DIR goes" "project looks like the project: DIR goes before --, as in mise run studio project -- --mcp"
+ENVS="LJOS=ljos MISE_ORIGINAL_CWD=$scratch/asked usage_dir=--shell usage_studio_args=project" call 'bash mise-tasks/studio'
+says "but a directory --shell takes is its value" "-- --shell project $co/target/studio-sample"
+ENVS="MISE_TASK_NAME=studio LJOS=ljos usage_dir=--mcp" call 'usage_studio_args="new-proj --no-agents" bash mise-tasks/studio'
+refuses "so is one not made yet, with flags after it" "new-proj looks like the project: DIR goes before --, as in mise run studio new-proj -- --mcp --no-agents"
+ENVS="LJOS=ljos usage_dir=--caps" call 'usage_studio_args="inspect --theme t.json" bash mise-tasks/studio'
+says "values of studio's flags are not projects" "-- --caps inspect --theme t.json $co/target/studio-sample"
+cp "$root/mise-tasks/dev" "$co/mise-tasks/"
+stub mise 'echo "mise $*"'
+ENVS="usage_dir=--mcp" call 'bash mise-tasks/dev'
+says "dev -- --mcp hands --mcp to studio, not as DIR" "mise run studio -- --mcp"
+unstub mise
+call 'run_studio --ljos'
+refuses "a flag is not taken as DIR" "--ljos is a flag, not a DIR"
 ENVS="MISE_ORIGINAL_CWD=$scratch/asked" call 'absolute nowhere'
 refuses "and what is not there is said" "no such file or directory: $scratch/asked/nowhere"
 

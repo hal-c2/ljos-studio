@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+#MISE description="Run Studio: its native window on DIR (mise run studio), or with --web in a browser (mise run web:serve)"
+#USAGE flag "--web" help="Studio in a browser instead of the native window: serves it on localhost (needs ljos-web beside this checkout: mise run setup --web)"
+#USAGE flag "--port <port>" env="PORT" default="5199" help="With --web, the port to serve on"
+#USAGE flag "--caps <caps>" help="Native: what an agent may do, a comma-separated list of inspect, mutate, fs and run"
+#USAGE flag "--no-agents" help="Native: serve no tools to agents while the window is open"
+#USAGE flag "--ljos <file>" help="Native: the ljos program previews run (default LJOS, else the one setup installed)"
+#USAGE arg "[dir]" help="Native: the project to open; default a copy of samples/hello in the target"
+#USAGE arg "[studio_args]" var=#true help="Native: more arguments for studio, after -- and after DIR (mise run dev DIR -- --mcp)"
+set -euo pipefail
+. "$(dirname "$0")/_lib/env.sh"
+web="${usage_web:-false}"
+port="${usage_port:-5199}"
+dir="${usage_dir:-}"
+caps="${usage_caps:-}"
+no_agents="${usage_no_agents:-false}"
+ljos="${usage_ljos:-}"
+rest="${usage_studio_args:-}"
+# The task called next reads its own usage_ variables; none of these leak in.
+for var in ${!usage_@}; do unset "$var"; done
+if [ "$web" = true ]; then
+  if [ -n "$dir$caps$ljos$rest" ] || [ "$no_agents" = true ]; then
+    echo "dev --web takes no DIR, --caps, --ljos or --no-agents: projects live in the browser's storage" >&2
+    exit 2
+  fi
+  PORT="$port" exec mise run web:serve
+fi
+decode_args "$rest"
+flag_not_dir
+set --
+[ -z "$dir" ] || set -- "$@" "$(from_asked "$dir")"
+[ -z "$caps" ] || set -- "$@" --caps "$caps"
+[ "$no_agents" != true ] || set -- "$@" --no-agents
+[ -z "$ljos" ] || set -- "$@" --ljos "$(program_asked "$ljos")"
+[ ${#decoded[@]} -eq 0 ] || set -- "$@" -- "${decoded[@]}"
+exec mise run studio "$@"

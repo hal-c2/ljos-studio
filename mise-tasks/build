@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+#MISE description="Build the studio program, release (what mise run studio runs); with --web also the wasm build into web/pkg"
+#USAGE flag "--web" help="Also build Studio for the web (mise run web:build)"
+set -euo pipefail
+. "$(dirname "$0")/_lib/env.sh"
+cargo build --release -p studio --bin studio
+echo "studio: $(own_target)/release/studio"
+if [ "${usage_web:-false}" = true ]; then
+  unset usage_web
+  mise run web:build
+fi

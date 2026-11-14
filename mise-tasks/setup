@@ -1,15 +1,69 @@
 #!/usr/bin/env bash
-#MISE description="Install what the tasks use that cargo does not build here: Rust's components and the wasm target, ljos at the pinned ljos-ui (when no ../ljos-ui is beside this checkout) and the pinned wasm-bindgen CLI, into the target's tools"
+#MISE description="First run, and again whenever: mise's tools, Rust's components and the wasm target, ljos at the pinned ljos-ui and the pinned wasm-bindgen CLI into the target's tools; with --web, ljos-web beside this checkout. Ends with what it did and what it skipped"
+#USAGE flag "--web" help="Also clone ljos-web at web/ljos-web.rev beside this checkout (when none is there) and install its packages and Playwright's Chromium, for `mise run dev --web` and the browser tasks. An existing checkout is only reported on, never changed"
 set -euo pipefail
 . "$(dirname "$0")/_lib/env.sh"
 # The only task that downloads; every other one says to run this instead.
 # Each step prints the command it runs, and skips what is already there.
+done_list=""
+skipped=""
+did() { done_list="$done_list
+  - $1"; }
+skip() { skipped="$skipped
+  - $1"; }
+
+echo "mise install"
+mise install
+did "mise's tools (mise.toml)"
 install_rust_parts
+did "Rust's components and targets (rust-toolchain.toml)"
+if why="$(wrong_rustc)" && [ -n "$why" ]; then
+  echo "$why" >&2
+  skip "Rust: $why, or builds use that Rust, without setup's components and targets"
+fi
 if [ -n "${LJOS:-}" ]; then
   echo "LJOS is set ($LJOS): no ljos to install"
+  skip "ljos: LJOS is set ($LJOS)"
 elif [ -f "${LJOS_UI:-$studio_root/../ljos-ui}/Cargo.toml" ]; then
   echo "a ljos-ui checkout is beside this one: the tasks build ljos from it"
+  skip "ljos: the tasks build it from ${LJOS_UI:-../ljos-ui}"
 else
   install_ljos
+  did "ljos for ljos-ui $(ljos_ui_rev), in $(own_target)/tools"
 fi
 install_bindgen
+did "wasm-bindgen $(bindgen_version), in $(own_target)/tools"
+
+if [ "${usage_web:-false}" = true ] && [ ! -e "$(ljos_web_dir)" ]; then
+  clone_ljos_web
+  did "ljos-web at $ljos_web_pin in $(physical "$(ljos_web_dir)"), with its packages and Playwright's Chromium"
+fi
+# A report's first line says found or SKIPPED; the lines after it (Qt's
+# ways to point at an install) belong to the same item.
+last=""
+while IFS= read -r line; do
+  case "$line" in
+    SKIPPED\ *) skip "${line#SKIPPED }"; last=skip ;;
+    found\ *) did "$line"; last=did ;;
+    "") ;;
+    *)
+      if [ "$last" = did ]; then
+        done_list="$done_list
+      $line"
+      else
+        skipped="$skipped
+      $line"
+      fi
+      ;;
+  esac
+done <<EOF2
+$(report_ljos_web || true)
+$(if [ -d "$(ljos_web_dir)" ]; then report_qt || true; fi)
+EOF2
+
+printf '\nsetup did:%s\n' "$done_list"
+if [ -n "$skipped" ]; then
+  printf 'setup skipped:%s\n' "$skipped"
+fi
+echo
+echo "Next: mise run dev (the native window), or mise run dev --web (in a browser)"
