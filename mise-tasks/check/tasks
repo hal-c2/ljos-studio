@@ -283,6 +283,14 @@ says "studio --ljos is taken as LJOS, from where the person asked" "LJOS=$scratc
 says "and the window opens on DIR" "cargo run --release -q -p studio --bin studio -- $(cd "$scratch/asked/project" && pwd -P)"
 ENVS="MISE_ORIGINAL_CWD=$scratch/asked usage_ljos=ljos usage_dir=project" call 'bash mise-tasks/studio'
 says "studio --ljos with a bare name keeps it for PATH" "LJOS=ljos"
+mkdir -p "$co/samples/hello"
+ENVS="LJOS=ljos usage_dir=--mcp usage_studio_args=--no-agents" call 'bash mise-tasks/studio'
+says "studio -- --mcp …: what mise took as DIR is studio's flag, in order" "cargo run --release -q -p studio --bin studio -- --mcp --no-agents $co/target/studio-sample"
+cp "$root/mise-tasks/dev" "$co/mise-tasks/"
+stub mise 'echo "mise $*"'
+ENVS="usage_dir=--mcp" call 'bash mise-tasks/dev'
+says "dev -- --mcp hands --mcp to studio, not as DIR" "mise run studio -- --mcp"
+unstub mise
 call 'run_studio --ljos'
 refuses "a flag is not taken as DIR" "--ljos is a flag, not a DIR"
 ENVS="MISE_ORIGINAL_CWD=$scratch/asked" call 'absolute nowhere'

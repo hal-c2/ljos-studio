@@ -22,6 +22,8 @@ if [ -n "${usage_ljos:-}" ]; then
   LJOS="$(program_asked "$usage_ljos")"
   export LJOS
 fi
+dir="${usage_dir:-}"
 decode_args "${usage_studio_args:-}"
+flag_not_dir
 [ ${#decoded[@]} -eq 0 ] || set -- "$@" "${decoded[@]}"
-run_studio "${usage_dir:-}" "$@"
+run_studio "$dir" "$@"

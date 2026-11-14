@@ -438,6 +438,18 @@ program_asked() {
   esac
 }
 
+# mise strips `--` and hands the first word after it to [dir]: in
+# `mise run dev -- --mcp` that is studio's flag, not a project. Moves a `dir`
+# that starts with `-` to the front of `decoded`, the arguments for studio.
+flag_not_dir() {
+  case "$dir" in
+    -*)
+      decoded=("$dir" ${decoded[@]+"${decoded[@]}"})
+      dir=""
+      ;;
+  esac
+}
+
 # mise hands a variadic argument over as one shell-quoted string; this sets
 # `decoded` to its words, quoting undone, so a path with spaces stays one.
 # The string is mise's quoting of what the person typed, so eval only undoes

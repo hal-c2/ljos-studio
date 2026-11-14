@@ -25,11 +25,12 @@ if [ "$web" = true ]; then
   fi
   PORT="$port" exec mise run web:serve
 fi
+decode_args "$rest"
+flag_not_dir
 set --
 [ -z "$dir" ] || set -- "$@" "$(from_asked "$dir")"
 [ -z "$caps" ] || set -- "$@" --caps "$caps"
 [ "$no_agents" != true ] || set -- "$@" --no-agents
 [ -z "$ljos" ] || set -- "$@" --ljos "$(program_asked "$ljos")"
-decode_args "$rest"
 [ ${#decoded[@]} -eq 0 ] || set -- "$@" -- "${decoded[@]}"
 exec mise run studio "$@"
