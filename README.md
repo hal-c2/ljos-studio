@@ -4,12 +4,34 @@ A visual designer for Ljós applications and ljos-web sites, where the
 design is the application's own QML. People and agents drive it alike:
 every capability is an MCP tool.
 
-## Run it
+## Getting started
+
+1. [Install mise](https://mise.jdx.dev/getting-started.html).
+2. `mise run setup`: mise's tools, Rust's components and the wasm target,
+   and the `ljos` and `wasm-bindgen` programs at the versions Cargo.toml pins.
+   It ends with what it did and what it skipped. Add `--web` to also clone
+   ljos-web beside this checkout (at `web/ljos-web.rev`) with its packages
+   and Playwright's Chromium, for the browser.
+3. `mise run dev [DIR]` opens the native window; `mise run dev --web` serves
+   Studio in a browser and prints the URL.
+
+| Verb | Command | Notes |
+|---|---|---|
+| Set up | `mise run setup [--web]` | Idempotent; the only task that downloads |
+| Run | `mise run dev [DIR] [--caps …] [--no-agents]`, `mise run dev --web [--port N]` | Wraps `mise run studio` and `mise run web:serve`, which still work |
+| Test | `mise run test` | Unit, golden and the whole Gherkin ledger; `mise run features [paths…]` for some |
+| Check | `mise run check` | fmt and clippy; also `check:tasks`, `check:wasm`, `check:web-modules` |
+| Build | `mise run build [--web]` | The release `studio`; `--web` adds the wasm build |
+| Install | `mise run install [--root DIR] [--with-ljos] [--dry-run]` | `cargo install --path crates/studio --locked`; previews also need `ljos` |
+
+There is nothing to deploy: a site exported from Studio is built with
+`mise run export:web:build <bundle> [out]` and hosted where you choose.
+Every task that takes arguments explains them: `mise run <task> --help`.
 
 | | Command | Needs |
 |---|---|---|
-| Native window | `mise run studio [DIR]` | Rust only (mise installs the pinned one) |
-| In a browser | `mise run web:serve`, then open the URL it prints | ljos-web beside this checkout, with its packages; Qt 6 for Controls; Node (mise installs it) |
+| Native window | `mise run dev [DIR]` (or `mise run studio [DIR]`) | Rust only (mise installs the pinned one) |
+| In a browser | `mise run dev --web` (or `mise run web:serve`), then open the URL it prints | ljos-web beside this checkout, with its packages (`mise run setup --web`); Qt 6 for Controls; Node (mise installs it) |
 
 `mise run studio` opens `DIR`, or with none a copy of `samples/hello` in the
 target directory, so your edits leave the sample alone. It builds release:
@@ -20,21 +42,24 @@ While the window is open, agents reach Studio's tools on a loopback endpoint;
 it prints the URL and the file that holds the token. That endpoint only reads
 (`inspect`) unless you grant more at launch: `--caps` takes a comma-separated
 list of `inspect`, `mutate`, `fs` and `run`, so
-`mise run studio DIR --caps inspect,mutate` lets an agent edit. `--no-agents`
+`mise run dev DIR --caps inspect,mutate` lets an agent edit. `--no-agents`
 serves no endpoint. `studio --mcp` serves the tools on stdin and stdout
 instead, with no window, and there the default is `inspect,mutate`.
 
-`mise run web:serve` serves on `localhost` only (`PORT`, default 5199).
+`mise run dev --web` serves on `localhost` only (`--port` or `PORT`, default 5199).
 Projects live in your browser's storage; *New* starts one and *Import* reads a
 folder of text files. Your edits compile on that local server, which draws the
 preview, because ljos-web has no QML compiler that runs in a page.
 
-For the browser, once:
+For the browser, `mise run setup --web` does once what you could also do by
+hand (it leaves a checkout that is already there alone, and only reports on
+it):
 
 ```sh
 git clone https://github.com/hal-c2/ljos-web ../ljos-web
 git -C ../ljos-web checkout "$(cat web/ljos-web.rev)"
 (cd ../ljos-web && mise trust && mise install && pnpm install --frozen-lockfile)
+(cd ../ljos-web && pnpm --filter ljos-web-example-web exec playwright install chromium)
 ```
 
 and Qt 6's QML, which the page reads Controls from. It is found with
