@@ -441,22 +441,30 @@ program_asked() {
 # mise strips `--` and hands the first word after it to [dir]: in
 # `mise run dev -- --mcp` that is studio's flag, not a project. Moves a `dir`
 # that starts with `-` to the front of `decoded`, the arguments for studio.
-# A project typed after them would reach studio as a second DIR, which it
-# refuses only after a release build; said here instead. Only --shell takes
-# a directory as its value.
+# A project typed among them would reach studio as a second DIR, which it
+# refuses only after a release build; said here instead. Any word that is
+# neither a flag nor the value of one of studio's flags that take a value
+# (crates/studio/src/main.rs) is that project.
 flag_not_dir() {
   case "$dir" in
-    -*)
-      decoded=("$dir" ${decoded[@]+"${decoded[@]}"})
-      dir=""
-      local n=${#decoded[@]} last before=""
-      last="${decoded[$((n - 1))]}"
-      [ "$n" -lt 2 ] || before="${decoded[$((n - 2))]}"
-      if [ "$n" -ge 2 ] && [ "$before" != --shell ] && [ -d "$(from_asked "$last")" ]; then
-        die "$last looks like the project: DIR goes before --, as in mise run ${MISE_TASK_NAME:-studio} $last -- ${decoded[*]:0:$((n - 1))}"
-      fi
-      ;;
+    -*) ;;
+    *) return 0 ;;
   esac
+  decoded=("$dir" ${decoded[@]+"${decoded[@]}"})
+  dir=""
+  local word value=false before=""
+  for word in "${decoded[@]}"; do
+    if [ "$value" = true ]; then
+      value=false
+    else
+      case "$word" in
+        --caps | --ljos | --shell | --theme) value=true ;;
+        -*) ;;
+        *) die "$word looks like the project: DIR goes before --, as in mise run ${MISE_TASK_NAME:-studio} $word --$before" ;;
+      esac
+    fi
+    before="$before $word"
+  done
 }
 
 # mise hands a variadic argument over as one shell-quoted string; this sets
