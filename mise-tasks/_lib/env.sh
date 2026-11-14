@@ -410,6 +410,15 @@ from_asked() {
   esac
 }
 
+# A program as a person names it: with a slash it is a path, from where they
+# asked; a bare name like `ljos` is looked up on PATH when it runs, as a shell would.
+program_asked() {
+  case "$1" in
+    */*) from_asked "$1" ;;
+    *) printf '%s\n' "$1" ;;
+  esac
+}
+
 # mise hands a variadic argument over as one shell-quoted string; this sets
 # `decoded` to its words, quoting undone, so a path with spaces stays one.
 # The string is mise's quoting of what the person typed, so eval only undoes
