@@ -16,7 +16,12 @@ set --
 [ "${usage_mcp:-false}" != true ] || set -- "$@" --mcp
 [ -z "${usage_shell:-}" ] || set -- "$@" --shell "$(from_asked "$usage_shell")"
 [ -z "${usage_theme:-}" ] || set -- "$@" --theme "$(from_asked "$usage_theme")"
-[ -z "${usage_ljos:-}" ] || set -- "$@" --ljos "$(from_asked "$usage_ljos")"
+# As LJOS, which studio reads too: so run_studio's search for one takes it
+# and does not refuse for want of an installed one.
+if [ -n "${usage_ljos:-}" ]; then
+  LJOS="$(from_asked "$usage_ljos")"
+  export LJOS
+fi
 decode_args "${usage_studio_args:-}"
 [ ${#decoded[@]} -eq 0 ] || set -- "$@" "${decoded[@]}"
 run_studio "${usage_dir:-}" "$@"
