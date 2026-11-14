@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 #MISE description="Studio's scenarios that need no preview, against the wasm build in node"
 #MISE depends=["web:build"]
+#USAGE arg "[paths]" var=#true help="Feature files or directories; default the ones the wasm build runs"
 set -euo pipefail
 # What the scenarios cannot set up by hand: two Studios in one wasm
 # instance, a preview's late answer racing the next request, and OPFS's

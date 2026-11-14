@@ -2,4 +2,5 @@
 #MISE description="Time opening a project and one edit in its largest file (on a copy)"
 #USAGE arg "<dir>" help="A directory of QML documents"
 set -euo pipefail
-cargo run --release -q -p studio_mcp --example perf -- "$1"
+. "$(dirname "$0")/_lib/env.sh"
+cargo run --release -q -p studio_mcp --example perf -- "$(absolute "${usage_dir:?}")"

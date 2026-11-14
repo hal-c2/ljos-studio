@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
 #MISE description="What a person does at web:serve, in headless Chromium against the served URL: load, edit, see the change"
 #MISE depends=["web:build"]
+#USAGE arg "[shot]" help="Also save a screenshot of the edited page to this PNG"
 set -euo pipefail
 . "$(dirname "$0")/../../_lib/env.sh"
 build_served_page
 find_playwright
-node "$studio_root/web/serve.check.mjs" "$app" "$@"
+set -- "$app"
+[ -z "${usage_shot:-}" ] || set -- "$app" "$(from_asked "$usage_shot")"
+node "$studio_root/web/serve.check.mjs" "$@"
