@@ -401,6 +401,18 @@ stub wasm-bindgen 'echo "wasm-bindgen 0.0.1"'
 ENVS="SETUP_LOG=$log LJOS=$stubs/ljos usage_check=true" call 'bash mise-tasks/setup'
 refuses "setup --check with something missing fails, naming it" "no wasm-bindgen 9.9.9"
 if [ -s "$log" ]; then status=1 said="$(cat "$log")" bad "and still installs nothing"; else ok "and still installs nothing"; fi
+stub wasm-bindgen 'echo "wasm-bindgen 9.9.9"'
+# rustup's proxy installs a missing toolchain when asked, unless told not to.
+stub rustc 'if [ "${RUSTUP_AUTO_INSTALL:-1}" = 0 ]; then echo "error: toolchain is not installed" >&2; exit 1; fi; echo "rustc installed a toolchain" >>"$SETUP_LOG"; echo "rustc 1.0.0 (abc 2026-01-01)"'
+rm -f "$log"
+ENVS="SETUP_LOG=$log LJOS=$stubs/ljos usage_check=true" call 'bash mise-tasks/setup'
+refuses "setup --check with the pinned Rust not installed says so" "Rust 1.0.0 (rust-toolchain.toml) is not installed: mise run setup installs it"
+if [ -s "$log" ]; then status=1 said="$(cat "$log")" bad "and asks rustup with its auto-install off"; else ok "and asks rustup with its auto-install off"; fi
+stub rustc 'echo "rustc 1.0.0 (abc 2026-01-01)"'
+stub rustup 'case "$1 $2" in "component list") echo "error: cannot list" >&2; exit 1 ;; "target list") printf "wasm32-unknown-unknown\\n" ;; *) echo "rustup $*" >>"$SETUP_LOG" ;; esac'
+ENVS="SETUP_LOG=$log LJOS=$stubs/ljos usage_check=true" call 'bash mise-tasks/setup'
+refuses "components rustup cannot list are not taken as found" "Rust's components: rustup cannot list them for this Rust"
+case "$said" in *"found Rust's"*) bad "and are not said to be found" ;; *) ok "and are not said to be found" ;; esac
 for tool in mise rustup rustc cargo git pnpm wasm-bindgen; do unstub "$tool"; done
 
 # --- Portable to macOS: bash 3.2 and BSD tools. Each pattern is a thing that

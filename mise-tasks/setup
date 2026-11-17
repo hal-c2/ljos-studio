@@ -27,13 +27,27 @@ rust_report() {
     lack "$(no_rustup)"
     return 0
   fi
-  local why parts
+  local why parts="" kind got listed=true
+  # Asked with rustup's auto-install off (setup --check sets it), a
+  # toolchain that is not there fails here rather than downloading.
+  if [ "$(command -v rustc 2>/dev/null)" = "$(dirname "$(command -v rustup)")/rustc" ] && ! rustc --version >/dev/null 2>&1; then
+    lack "Rust $(rust_channel) (rust-toolchain.toml) is not installed: mise run setup installs it (mise install, through rustup)"
+    return 0
+  fi
   if why="$(wrong_rustc)" && [ -n "$why" ]; then
     lack "Rust: $why, or builds use that Rust, without setup's components and targets"
   else
     did "found $(rustc --version)"
   fi
-  parts="$(missing_rust_parts components) $(missing_rust_parts targets)"
+  for kind in components targets; do
+    if got="$(missing_rust_parts "$kind")"; then
+      parts="$parts $got"
+    else
+      lack "Rust's $kind: rustup cannot list them for this Rust; mise run setup installs it and adds them"
+      listed=false
+    fi
+  done
+  [ "$listed" = true ] || return 0
   parts="$(printf '%s' "$parts" | tr -s ' ' | sed 's/^ //; s/ $//')"
   if [ -n "$parts" ]; then
     lack "Rust's $parts (rust-toolchain.toml): mise run setup adds them with rustup"
@@ -111,6 +125,8 @@ summary() {
 }
 
 if [ "$check" = true ]; then
+  # rustup's proxies install a missing toolchain when asked its version.
+  export RUSTUP_AUTO_INSTALL=0
   for tool in rust node; do
     if at="$(mise where "$tool" 2>/dev/null)"; then
       did "found mise's $tool ($at)"

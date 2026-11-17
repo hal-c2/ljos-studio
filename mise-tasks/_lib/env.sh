@@ -392,9 +392,13 @@ toolchain_list() {
 # why not. rustup's parts land in its toolchain, so a distro Rust ahead of
 # rustup's proxies on PATH (mise puts its rust's bin nowhere: it leans on
 # those proxies) builds with none of them, whatever setup added.
+rust_channel() {
+  sed -n 's/^channel *= *"\(.*\)"/\1/p' "$studio_root/rust-toolchain.toml"
+}
+
 wrong_rustc() {
   local channel have at
-  channel="$(sed -n 's/^channel *= *"\(.*\)"/\1/p' "$studio_root/rust-toolchain.toml")"
+  channel="$(rust_channel)"
   have="$(rustc --version 2>/dev/null || true)"
   case "$have" in
     "rustc $channel" | "rustc $channel "*) return 0 ;;
@@ -412,13 +416,14 @@ no_rustup() {
 }
 
 # rust-toolchain.toml's `$1` (components or targets) that the toolchain in
-# use lacks, spaced; empty when all are there or rustup cannot say.
+# use lacks, spaced; empty when all are there. Fails when rustup cannot
+# list them, so that is never taken for nothing missing.
 missing_rust_parts() {
   local installed part missing=""
   if [ "$1" = components ]; then
-    installed="$(rustup component list --installed 2>/dev/null)" || return 0
+    installed="$(rustup component list --installed 2>/dev/null)" || return 1
   else
-    installed="$(rustup target list --installed 2>/dev/null)" || return 0
+    installed="$(rustup target list --installed 2>/dev/null)" || return 1
   fi
   for part in $(toolchain_list "$1"); do
     case "
