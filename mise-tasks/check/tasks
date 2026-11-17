@@ -6,6 +6,9 @@ set -euo pipefail
 root="$(cd "$(dirname "$0")/../.." && pwd)"
 scratch="$(mktemp -d "${TMPDIR:-/tmp}/studio-tasks.XXXXXX")"
 trap 'rm -rf "$scratch"' EXIT
+# Spelled the way the tasks see it after a cd and `pwd -P`: macOS's TMPDIR
+# ends in a slash and lives under a link (/var is /private/var).
+scratch="$(cd "$scratch" && pwd -P)"
 home="$scratch/home"
 co="$scratch/layout/studio"
 web="$scratch/layout/ljos-web"
