@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #MISE description="First run, and again whenever: mise's tools, Rust's components and the wasm target, ljos at the pinned ljos-ui and the pinned wasm-bindgen CLI into the target's tools; with --web, ljos-web beside this checkout. Ends with what it did and what it skipped, and fails when something is still missing"
 #USAGE flag "--web" help="Also clone ljos-web at web/ljos-web.rev beside this checkout (when none is there) and install its packages and Playwright's Chromium, for `mise run dev --web` and the browser tasks. An existing checkout is only reported on, never changed"
-#USAGE flag "--check" help="Install, clone and build nothing: say what is there and what setup would get, and fail when something is missing (with --web, the browser's needs too)"
+#USAGE flag "--check" help="Install, clone and build nothing: say what is there and what setup would get, and fail when something is missing (with --web, the browser's needs too). Ask it as `mise run --skip-tools setup --check`, or mise first installs mise.toml's tools that are missing"
 set -euo pipefail
 # shellcheck source-path=SCRIPTDIR source=_lib/env.sh
 . "$(dirname "$0")/_lib/env.sh"
@@ -122,6 +122,8 @@ if [ "$check" = true ]; then
   ljos_report
   web_report
   summary found
+  # Only a report: what a full run would do is in the report already.
+  exit 0
 fi
 
 echo "mise install"

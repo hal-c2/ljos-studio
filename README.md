@@ -12,8 +12,9 @@ every capability is an MCP tool.
    and the wasm target, and the `ljos` and `wasm-bindgen` programs at the
    versions Cargo.toml pins, into `target/tools`. Building `ljos` the first
    time takes many minutes. It ends with what it did and what it skipped, and
-   fails when something is still missing; `mise run setup --check` only
-   reports. Add `--web` to also clone ljos-web beside this checkout (at
+   fails when something is still missing. `mise run --skip-tools setup --check`
+   only reports, and installs, clones and builds nothing (without
+   `--skip-tools`, mise first installs its own tools that are missing). Add `--web` to also clone ljos-web beside this checkout (at
    `web/ljos-web.rev`) with its packages and Playwright's Chromium, for the
    browser.
 3. `mise run check` and `mise run test`: the gates.
@@ -25,7 +26,7 @@ Every task that takes arguments explains them: `mise run <task> --help`.
 
 | Verb | Command | Notes |
 |---|---|---|
-| Set up | `mise run setup [--web] [--check]` | Idempotent; the only task that downloads |
+| Set up | `mise run setup [--web] [--check]` | Idempotent; the only task that downloads. `--check` only reports (ask it with `mise run --skip-tools`) |
 | Run | `mise run dev [DIR] [--caps …] [--no-agents] [--mcp] [--shell DIR] [--theme FILE] [--ljos FILE] [-- ARGS…]`, `mise run dev --web [--port N]` | `mise run studio` is the same task; `--web` runs `web:serve` |
 | Test | `mise run test` | Unit, golden and the whole Gherkin ledger; previews need `ljos` (setup installs it) |
 | Features | `mise run features [paths…]` | Some feature files; `features:web` in node, `features:browser` in Chromium |

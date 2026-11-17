@@ -351,6 +351,31 @@ refuses "a flag is not taken as DIR" "--ljos is a flag, not a DIR"
 ENVS="MISE_ORIGINAL_CWD=$scratch/asked" call 'absolute nowhere'
 refuses "and what is not there is said" "no such file or directory: $scratch/asked/nowhere"
 
+# --- setup --check ------------------------------------------------------------
+# Everything setup would install, clone or build is a stand-in that writes
+# down that it ran; --check must leave that log empty.
+cp "$root/mise-tasks/setup" "$co/mise-tasks/"
+log="$scratch/setup-ran.log"
+stub mise 'case "$1" in where) echo "/mise/installs/$2" ;; *) echo "mise $*" >>"$SETUP_LOG" ;; esac'
+stub rustup 'case "$1 $2" in "component list") printf "clippy-x86_64-unknown-linux-gnu\\nrustfmt-x86_64-unknown-linux-gnu\\n" ;; "target list") printf "wasm32-unknown-unknown\\n" ;; *) echo "rustup $*" >>"$SETUP_LOG" ;; esac'
+stub rustc 'echo "rustc 1.0.0 (abc 2026-01-01)"'
+stub cargo 'echo "cargo $*" >>"$SETUP_LOG"'
+# Asking a checkout its commit is a report; only what changes one counts.
+stub git 'case " $* " in *" clone "* | *" fetch "* | *" checkout "* | *" pull "*) echo "git $*" >>"$SETUP_LOG" ;; esac'
+stub pnpm 'echo "pnpm $*" >>"$SETUP_LOG"'
+stub wasm-bindgen 'echo "wasm-bindgen 9.9.9"'
+ENVS="SETUP_LOG=$log LJOS=$stubs/ljos usage_check=true" call 'bash mise-tasks/setup'
+if [ "$status" -eq 0 ]; then ok "setup --check with everything there passes"; else bad "setup --check with everything there passes"; fi
+says "and says what it found" "setup found:"
+if [ -s "$log" ]; then status=1 said="$(cat "$log")" bad "and installs, clones and builds nothing"; else ok "and installs, clones and builds nothing"; fi
+case "$said" in *"setup did:"* | *"mise install"*) bad "and stops after its report" ;; *) ok "and stops after its report" ;; esac
+rm -f "$log"
+stub wasm-bindgen 'echo "wasm-bindgen 0.0.1"'
+ENVS="SETUP_LOG=$log LJOS=$stubs/ljos usage_check=true" call 'bash mise-tasks/setup'
+refuses "setup --check with something missing fails, naming it" "no wasm-bindgen 9.9.9"
+if [ -s "$log" ]; then status=1 said="$(cat "$log")" bad "and still installs nothing"; else ok "and still installs nothing"; fi
+for tool in mise rustup rustc cargo git pnpm wasm-bindgen; do unstub "$tool"; done
+
 # --- Portable to macOS: bash 3.2 and BSD tools. Each pattern is a thing that
 # does not run there; `\(^\|[^-_a-z]\)` so a word in a comment's middle is not
 # one. --------------------------------------------------------------------

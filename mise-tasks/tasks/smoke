@@ -10,6 +10,8 @@ cd "$root"
 # task | mode | arguments | why it is only a dry run
 #   run: a real, quick, non-interactive run of `mise run <task> <arguments>`
 #   dry: `mise run -n <task> <arguments>` (usage and depends resolve) and bash -n
+# Both with --skip-tools: mise's tools come from setup, so a missing one is
+# the task's failure to say so, not a download mise does on its behalf.
 # @tmp@ in the arguments is a scratch directory removed at the end. Adding
 # or removing a task without changing this table fails the smoke test.
 # tasks:smoke tests only its own --list, so it never recurses. In CI it runs
@@ -155,8 +157,8 @@ while IFS='|' read -r task mode args why; do
   result=ok
   # shellcheck disable=SC2086 # the arguments column is a word list
   case "$mode" in
-    run) mise run "$task" $args </dev/null || result=FAIL ;;
-    dry) { mise run -n "$task" $args </dev/null && bash -n "$source"; } || result=FAIL ;;
+    run) mise run --skip-tools "$task" $args </dev/null || result=FAIL ;;
+    dry) { mise run --skip-tools -n "$task" $args </dev/null && bash -n "$source"; } || result=FAIL ;;
     *) echo "tasks:smoke: '$task' has unknown mode '$mode'" >&2; result=FAIL ;;
   esac
   record "$task" "$mode" "$result" "$(($(date +%s) - start))" "$note"
