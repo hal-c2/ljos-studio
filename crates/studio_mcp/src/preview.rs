@@ -8,10 +8,10 @@
 //! A preview's inspector answers a bounded number of calls a second (Ljós
 //! ARCHITECTURE.md 19.7), and one that asks too often waits a second for its
 //! answer. So a burst of writes (typing in the code view) reloads at most
-//! [`reloads_per_second`] times a second, whoever asks; the writes in between
+//! `reloads_per_second` times a second, whoever asks; the writes in between
 //! are shown by the preview's own file watcher a moment later, and the reload
-//! they missed is asked for once the budget allows ([`Previews::catch_up`]).
-//! A reader that must see the last write waits for that ([`caught_up`]).
+//! they missed is asked for once the budget allows (`Previews::catch_up`).
+//! A reader that must see the last write waits for that (`caught_up`).
 
 use std::{
     collections::{BTreeSet, VecDeque},
