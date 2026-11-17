@@ -79,7 +79,8 @@ ljos_report() {
 
 # A report's first line says found or SKIPPED; the lines after it (Qt's
 # ways to point at an install) belong to the same item. With --web asked,
-# what the browser needs and lacks is missing, not skipped.
+# what the browser needs and lacks is missing, not skipped. A MISMATCH (a
+# Qt that is not the pinned minor) is missing either way.
 web_report() {
   local last="" line
   while IFS= read -r line; do
@@ -87,6 +88,7 @@ web_report() {
       SKIPPED\ *)
         if [ "$web" = true ]; then lack "${line#SKIPPED }"; last=lack; else skip "${line#SKIPPED }"; last=skip; fi
         ;;
+      MISMATCH\ *) lack "${line#MISMATCH }"; last=lack ;;
       found\ *) did "$line"; last=did ;;
       "") ;;
       *)
