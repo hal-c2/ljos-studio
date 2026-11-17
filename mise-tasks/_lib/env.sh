@@ -1,3 +1,4 @@
+# shellcheck shell=bash
 # What the tasks find on a person's machine, with nothing set. Sourced, not a
 # task (not executable, so mise does not list it). Each environment variable
 # named here stays an override. Nothing is downloaded or installed unasked:
@@ -106,26 +107,39 @@ find_playwright() {
   esac
 }
 
-# Sets QMLC. Built when the checkout has none: that writes only in ljos-web's
-# own target, whatever CARGO_TARGET_DIR says for ours.
+# Sets QMLC. Built when there is none: in ljos-web's own target, or in a
+# directory of its own under CARGO_TARGET_DIR when that is set, so the two
+# workspaces never share one target and a checkout gains no target/ of ours.
+qmlc_target() {
+  if [ -n "${CARGO_TARGET_DIR:-}" ]; then
+    printf '%s\n' "$CARGO_TARGET_DIR/ljos-web"
+  else
+    printf '%s\n' "$LJOS_WEB/target"
+  fi
+}
+
 find_qmlc() {
+  local built
+  built="$(qmlc_target)"
   if [ -z "${QMLC:-}" ]; then
-    local profile
-    for profile in release debug; do
-      if [ -x "$LJOS_WEB/target/$profile/qmlc" ]; then
-        QMLC="$LJOS_WEB/target/$profile/qmlc"
-        break
-      fi
+    local profile dir
+    # A qmlc the person built in the checkout counts too.
+    for dir in "$built" "$LJOS_WEB/target"; do
+      for profile in release debug; do
+        if [ -z "${QMLC:-}" ] && [ -x "$dir/$profile/qmlc" ]; then
+          QMLC="$dir/$profile/qmlc"
+        fi
+      done
     done
   fi
   if [ -z "${QMLC:-}" ]; then
-    echo "ljos-web has no qmlc yet; building it: (cd $ljos_web_shown && cargo build --bin qmlc)" >&2
+    echo "ljos-web has no qmlc yet; building it into $built, which takes minutes the first time: (cd $ljos_web_shown && cargo build --bin qmlc)" >&2
     (
-      unset CARGO_TARGET_DIR
-      cd "$LJOS_WEB"
+      export CARGO_TARGET_DIR="$built"
+      cd "$LJOS_WEB" || exit
       LJOS_QT_TYPES="$LJOS_WEB/crates/ljos_web/types.txt" cargo build --bin qmlc
     ) || die "building qmlc failed: run (cd $ljos_web_shown && cargo build --bin qmlc) and see what it says, or name one with QMLC=/path/to/qmlc"
-    QMLC="$LJOS_WEB/target/debug/qmlc"
+    QMLC="$built/debug/qmlc"
   fi
   [ -x "$QMLC" ] || die "QMLC names $QMLC, which is not a program"
   export QMLC
@@ -243,8 +257,14 @@ find_ljos() {
   fi
   local sibling="${LJOS_UI:-$studio_root/../ljos-ui}"
   if [ -f "$sibling/Cargo.toml" ]; then
-    cargo build --manifest-path "$sibling/Cargo.toml" -p ljos_cli --bin ljos
-    LJOS="${CARGO_TARGET_DIR:-$sibling/target}/debug/ljos"
+    # Ljós's own workspace, so its own target: under CARGO_TARGET_DIR, a
+    # directory of its own, or the two workspaces would rebuild each other's
+    # dependencies with different features on every switch.
+    local built="$sibling/target"
+    [ -z "${CARGO_TARGET_DIR:-}" ] || built="$CARGO_TARGET_DIR/ljos-ui"
+    echo "building ljos (ljos-ui's ljos_cli, debug) from ${LJOS_UI:-../ljos-ui} into $built: the first build compiles all of Ljós and takes many minutes; later ones only what changed. LJOS=/path/to/ljos skips it" >&2
+    CARGO_TARGET_DIR="$built" cargo build --manifest-path "$sibling/Cargo.toml" -p ljos_cli --bin ljos
+    LJOS="$built/debug/ljos"
     export LJOS
     return 0
   fi
@@ -343,11 +363,38 @@ wrong_rustc() {
   echo "the rustc on PATH ($at) is ${have:-not working}, not $channel: rustup's proxies (~/.cargo/bin) must come before $(dirname "$at") on PATH"
 }
 
+no_rustup() {
+  echo "no rustup on PATH: Studio's Rust (rust-toolchain.toml) and its wasm target come through rustup. Install it (https://rustup.rs: curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh), open a new shell, then run mise run setup again"
+}
+
+# rust-toolchain.toml's `$1` (components or targets) that the toolchain in
+# use lacks, spaced; empty when all are there or rustup cannot say.
+missing_rust_parts() {
+  local installed part missing=""
+  if [ "$1" = components ]; then
+    installed="$(rustup component list --installed 2>/dev/null)" || return 0
+  else
+    installed="$(rustup target list --installed 2>/dev/null)" || return 0
+  fi
+  for part in $(toolchain_list "$1"); do
+    case "
+$installed
+" in
+      *"
+$part
+"* | *"
+$part-"*) ;;
+      *) missing="$missing $part" ;;
+    esac
+  done
+  printf '%s\n' "${missing# }"
+}
+
 # rust-toolchain.toml's components and targets for the toolchain in use:
 # under mise, RUSTUP_TOOLCHAIN overrides that file, so rustup installs none
 # of them. rustup skips what is there.
 install_rust_parts() {
-  command -v rustup >/dev/null || die "no rustup: Studio's Rust (rust-toolchain.toml) is installed through rustup"
+  command -v rustup >/dev/null || die "$(no_rustup)"
   local components targets
   components="$(toolchain_list components)"
   targets="$(toolchain_list targets)"
@@ -559,7 +606,7 @@ setup_ljos_web_packages() {
   dir="$(physical "$1")"
   echo "(cd $shown && mise install && pnpm install --frozen-lockfile)"
   (
-    cd "$dir"
+    cd "$dir" || exit
     export MISE_TRUSTED_CONFIG_PATHS="$dir"
     mise install
     mise exec -- pnpm install --frozen-lockfile
@@ -599,5 +646,50 @@ report_qt() {
   else
     echo "SKIPPED Qt 6: web:serve and web:shell read Controls from it. $said"
     return 1
+  fi
+}
+
+# --- measure-lookup and measure-members ----------------------------------------
+
+# Both ask Qt's own runtime and write what it says into tracked tables, so
+# each needs qml6 and python3 before anything starts.
+need_measure_tools() {
+  command -v python3 >/dev/null 2>&1 ||
+    die "python3 is not on PATH: install Python 3 (the measuring scripts in mise-tasks/ are Python)"
+  command -v qml6 >/dev/null 2>&1 ||
+    die "qml6, Qt 6's QML runtime, is not on PATH: install Qt 6's declarative tools (Arch: pacman -S qt6-declarative; Debian, Ubuntu: apt install qml6-module-qtquick qt6-declarative-dev-tools), or put a link named qml6 to Qt's bin/qml on PATH"
+  # Off-screen: no window opens, and a platform theme set for the desktop
+  # (gtk3) would still try to open a display and kill qml6 without one.
+  export QT_QPA_PLATFORM=offscreen
+  unset QT_QPA_PLATFORMTHEME
+}
+
+# `measured <check> <scratch> <tracked file>…`, after a measuring script
+# wrote each tracked file's new text to <scratch>/new/<name>: without
+# --check the tracked files are replaced and each one is named, with whether
+# it changed; with --check nothing is written, and a difference fails.
+measured() {
+  local check="$1" scratch="$2" file new drift=0
+  shift 2
+  for file in "$@"; do
+    new="$scratch/new/$(basename "$file")"
+    [ -s "$new" ] || die "the measuring script wrote nothing for $file"
+    if [ "$check" = true ]; then
+      if ! diff -u "$file" "$new"; then
+        echo "$file is not what qml6 says now (the difference is above)" >&2
+        drift=1
+      fi
+    elif cmp -s "$file" "$new"; then
+      echo "wrote $file (unchanged)"
+    else
+      cp "$new" "$file"
+      echo "wrote $file (changed: see git diff $file)"
+    fi
+  done
+  if [ "$drift" -ne 0 ]; then
+    die "${MISE_TASK_NAME:-measure} --check: run mise run ${MISE_TASK_NAME:-measure} to write what qml6 says, and commit it"
+  fi
+  if [ "$check" = true ]; then
+    echo "$* match what qml6 $(qml6 --version 2>&1 | sed -n 's/^Qml Runtime //p' | head -n 1) says"
   fi
 }

@@ -1,10 +1,17 @@
 #!/usr/bin/env bash
-#MISE description="Measure what qml6 says the toolkit's types have, beyond the table Studio is built with, and which types and ids it refuses"
+#MISE description="Measure what qml6 says the toolkit's types have, beyond the table Studio is built with, and which types and ids it refuses; writes crates/studio_mcp/src/measured_{members,types,ids}.txt, or with --check only compares"
+#USAGE flag "--check" help="Write nothing: fail, showing the difference, when what qml6 says is not what the tracked tables hold"
 set -euo pipefail
-
+# shellcheck source-path=SCRIPTDIR source=_lib/env.sh
+. "$(dirname "$0")/_lib/env.sh"
+need_measure_tools
+cd "$studio_root"
+src=crates/studio_mcp/src
+scratch="$(mktemp -d)"
+trap 'rm -rf "$scratch"' EXIT
+mkdir -p "$scratch/work" "$scratch/new"
 # Refusing a member on the table's word would refuse real ones: it lacks some.
-out="${TMPDIR:?}/studio-members"
-mkdir -p "$out"
-TOOLKIT_TABLE="$out/table.tsv" cargo test -p studio_mcp --lib a_table_to_measure -- --ignored
-python3 -I mise-tasks/measure-members.py "$out" crates/studio_mcp/src/measured_members.txt \
-    crates/studio_mcp/src/measured_types.txt crates/studio_mcp/src/measured_ids.txt
+TOOLKIT_TABLE="$scratch/work/table.tsv" cargo test -p studio_mcp --lib a_table_to_measure -- --ignored
+python3 -I mise-tasks/measure-members.py "$scratch/work" "$scratch/new/measured_members.txt" \
+  "$scratch/new/measured_types.txt" "$scratch/new/measured_ids.txt"
+measured "${usage_check:-false}" "$scratch" "$src/measured_members.txt" "$src/measured_types.txt" "$src/measured_ids.txt"
