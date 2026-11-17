@@ -7,7 +7,7 @@
 //! (`Controls.Button`) in the imports of that name, a bare one in each
 //! import without one in the order written, then in the document's
 //! directory. In a module, a dump comes first (a Rust type wins over a QML
-//! one of the same name, as in [`crate::blocks`]), then a project `qmldir`,
+//! one of the same name, as in `crate::blocks`), then a project `qmldir`,
 //! then the table.
 
 use std::collections::{HashMap, HashSet};

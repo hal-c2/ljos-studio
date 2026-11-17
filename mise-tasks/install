@@ -4,6 +4,7 @@
 #USAGE flag "--with-ljos" help="Also install the ljos program previews run, at the ljos-ui commit Cargo.toml pins"
 #USAGE flag "--dry-run" help="Print the commands and run nothing"
 set -euo pipefail
+# shellcheck source-path=SCRIPTDIR source=_lib/env.sh
 . "$(dirname "$0")/_lib/env.sh"
 set --
 [ -z "${usage_root:-}" ] || set -- --root "$(from_asked "$usage_root")"

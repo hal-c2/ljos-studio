@@ -1,7 +1,9 @@
-# Tooling for Ljós Studio; tasks live in mise-tasks/. Only plain versions:
+# Tooling for Ljós Studio; tasks live in mise-tasks/. A fresh checkout needs
+# no `mise trust`: plain versions are all this file has. `[settings]`,
 # `[env]`, hooks and tool options (a `rust` with `components` or `targets`)
-# make mise refuse this file, shims included, until someone runs
-# `mise trust`, and a fresh checkout must build without that.
+# would make mise refuse it, shims and `mise env` included, until someone
+# trusts it. The tasks put rustup's Rust ahead of a system one themselves
+# (mise-tasks/_lib/env.sh).
 [tools]
 # mise exports RUSTUP_TOOLCHAIN, which overrides rust-toolchain.toml, so
 # rustup never installs that file's components and target here:

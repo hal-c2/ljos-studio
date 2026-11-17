@@ -6,34 +6,60 @@ every capability is an MCP tool.
 
 ## Getting started
 
-1. [Install mise](https://mise.jdx.dev/getting-started.html).
-2. `mise run setup`: mise's tools, Rust's components and the wasm target,
-   and the `ljos` and `wasm-bindgen` programs at the versions Cargo.toml pins.
-   It ends with what it did and what it skipped. Add `--web` to also clone
-   ljos-web beside this checkout (at `web/ljos-web.rev`) with its packages
-   and Playwright's Chromium, for the browser.
-3. `mise run dev [DIR]` opens the native window; `mise run dev --web` serves
+1. [Install mise](https://mise.jdx.dev/getting-started.html) and
+   [rustup](https://rustup.rs). A fresh checkout needs no `mise trust`.
+2. `mise run setup`: mise's tools (Rust 1.98.1 and Node), Rust's components
+   and the wasm target, and the `ljos` and `wasm-bindgen` programs at the
+   versions Cargo.toml pins, into `target/tools`. Building `ljos` the first
+   time takes many minutes. It ends with what it did and what it skipped, and
+   fails when something is still missing. `mise run --skip-tools setup --check`
+   only reports, and installs, clones and builds nothing (without
+   `--skip-tools`, mise first installs its own tools that are missing). Add `--web` to also clone ljos-web beside this checkout (at
+   `web/ljos-web.rev`) with its packages and Playwright's Chromium, for the
+   browser.
+3. `mise run check` and `mise run test`: the gates.
+4. `mise run dev [DIR]` opens the native window; `mise run dev --web` serves
    Studio in a browser and prints the URL.
+
+Every task that takes arguments explains them: `mise run <task> --help`.
+`mise tasks` lists them all.
 
 | Verb | Command | Notes |
 |---|---|---|
-| Set up | `mise run setup [--web]` | Idempotent; the only task that downloads |
-| Run | `mise run dev [DIR] [--caps …] [--no-agents]`, `mise run dev --web [--port N]` | Wraps `mise run studio` and `mise run web:serve`, which still work |
-| Test | `mise run test` | Unit, golden and the whole Gherkin ledger; `mise run features [paths…]` for some |
-| Check | `mise run check` | fmt and clippy; also `check:tasks`, `check:wasm`, `check:web-modules` |
+| Set up | `mise run setup [--web] [--check]` | Idempotent; the only task that downloads. `--check` only reports (ask it with `mise run --skip-tools`) |
+| Run | `mise run dev [DIR] [--caps …] [--no-agents] [--mcp] [--shell DIR] [--theme FILE] [--ljos FILE] [-- ARGS…]`, `mise run dev --web [--port N]` | `mise run studio` is the same task; `--web` runs `web:serve` |
+| Test | `mise run test` | Unit, golden and the whole Gherkin ledger; previews need `ljos` (setup installs it) |
+| Features | `mise run features [paths…]` | Some feature files; `features:web` in node, `features:browser` in Chromium |
+| Check | `mise run check` | fmt, clippy, `check:tasks` and `check:wasm`; `check:web-modules` needs ljos-web |
+| Format | `mise run fmt [--check]` | `cargo fmt --all` |
+| Docs | `mise run docs [--open]` | The API docs of Studio's crates (warnings denied); the design notes are `docs/*.md` |
 | Build | `mise run build [--web]` | The release `studio`; `--web` adds the wasm build |
 | Install | `mise run install [--root DIR] [--with-ljos] [--dry-run]` | `cargo install --path crates/studio --locked`; previews also need `ljos` |
+| Smoke | `mise run tasks:smoke [--list] [--only TASK] [--dry]` | Every task, quickly: CI runs it |
+
+The rest are for one part of Studio:
+
+| Task | What it does | Needs |
+|---|---|---|
+| `web:build` | studio_web as wasm and its glue, into `web/pkg` | setup's `wasm-bindgen` |
+| `web:serve [--port N]` | Builds the page and serves it on localhost | ljos-web (`setup --web`), Qt 6's QML |
+| `web:serve:test` | The served page's pieces, in node | Node |
+| `web:serve:check [shot]`, `web:browser`, `web:shell` | Studio for the web in headless Chromium | ljos-web, its Playwright |
+| `web:bench` | A tool call's latency in node, and the wasm's size | Node |
+| `export:web:build <bundle> [out]` | A site from a web export | ljos-web |
+| `export:web:check` | `features/web/site.feature`: export, build and check a site | ljos-web, its Playwright |
+| `perf <dir>` | Time opening a project and one edit (on a copy) | |
+| `measure-lookup [--check]`, `measure-members [--check]` | Rewrite the tables of what Qt's own runtime says (`--check`: compare, write nothing) | `qml6`, `python3` |
 
 There is nothing to deploy: a site exported from Studio is built with
 `mise run export:web:build <bundle> [out]` and hosted where you choose.
-Every task that takes arguments explains them: `mise run <task> --help`.
 
 | | Command | Needs |
 |---|---|---|
-| Native window | `mise run dev [DIR]` (or `mise run studio [DIR]`) | Rust only (mise installs the pinned one) |
+| Native window | `mise run dev [DIR]` (or `mise run studio [DIR]`) | Rust and `ljos` (`mise run setup`) |
 | In a browser | `mise run dev --web` (or `mise run web:serve`), then open the URL it prints | ljos-web beside this checkout, with its packages (`mise run setup --web`); Qt 6 for Controls; Node (mise installs it) |
 
-`mise run studio` opens `DIR`, or with none a copy of `samples/hello` in the
+`mise run dev` opens `DIR`, or with none a copy of `samples/hello` in the
 target directory, so your edits leave the sample alone. It builds release:
 opening a shell and following a selection are several times faster than in a
 debug build, and the first build is the only cost.
@@ -64,8 +90,10 @@ git -C ../ljos-web checkout "$(cat web/ljos-web.rev)"
 
 and Qt 6's QML, which the page reads Controls from. It is found with
 `qtpaths6`, then `qtpaths`, then Homebrew's `qt` and `~/Qt/6.x/`; if yours is
-elsewhere, set `QT_INSTALL_QML`. qmlc is built in ljos-web's own target the
-first time it is wanted. A task that lacks something says the exact command.
+elsewhere, set `QT_INSTALL_QML`. qmlc is built the first time it is wanted,
+in ljos-web's own target, or in `$CARGO_TARGET_DIR/ljos-web` when
+`CARGO_TARGET_DIR` is set (the `ljos` built from a `../ljos-ui` checkout goes
+to `$CARGO_TARGET_DIR/ljos-ui` the same way). A task that lacks something says the exact command.
 
 Everything found has an override: `LJOS_WEB`, `PLAYWRIGHT`, `QMLC`,
 `QT_INSTALL_QML`, `LJOS_UI`, `LJOS`, `WASM_BINDGEN`. None is needed in this
@@ -109,15 +137,17 @@ as general pieces any tool can use.
 
 ## Building
 
-A checkout builds on its own: `cargo test --workspace`. Ljós comes from
-[ljos-ui](https://github.com/hal-c2/ljos-ui) as a git dependency pinned to
-one commit of its main branch (`rev` in `Cargo.toml`); cargo fetches it with
-the git command line (`.cargo/config.toml`). `mise.toml` only names tool
-versions, so mise runs here without `mise trust`; `mise run setup` adds
-Rust's components and the wasm target with rustup; `mise run check` and
-`mise run test` (the unit tests and the whole Gherkin ledger, whose previews
-run `ljos`) are the gates, and `mise run features` runs the feature files it
-is given.
+`cargo build --workspace` and `cargo test --workspace` build on their own.
+Ljós comes from [ljos-ui](https://github.com/hal-c2/ljos-ui) as a git
+dependency pinned to one commit of its main branch (`rev` in `Cargo.toml`);
+cargo fetches it with the git command line (`.cargo/config.toml`). The
+Gherkin scenarios among those tests open previews, which run the `ljos`
+program: `mise run setup` installs it, and `mise run test` and
+`mise run features` say so when it is missing rather than failing every
+scenario that opens one. `mise.toml` only has tool versions, so mise, its
+shims and `mise env` work here without `mise trust`. The tasks put rustup's
+pinned Rust ahead of a system one (a distro's `/usr/bin/cargo`) themselves.
+`mise run setup` adds Rust's components and the wasm target with rustup.
 
 ### Building against a local ljos-ui
 

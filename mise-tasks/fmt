@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+#MISE description="Format the Rust code with rustfmt; --check only says what would change"
+#USAGE flag "--check" help="Change nothing; fail and show the difference when a file isn't formatted"
+set -euo pipefail
+# shellcheck source-path=SCRIPTDIR source=_lib/env.sh
+. "$(dirname "$0")/_lib/env.sh"
+need_rust_parts components
+if [ "${usage_check:-false}" = true ]; then
+  cargo fmt --all -- --check
+else
+  cargo fmt --all
+fi

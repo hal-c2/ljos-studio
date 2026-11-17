@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 #MISE description="Build Studio for the web: studio_web as wasm and its JavaScript glue, into web/pkg"
 set -euo pipefail
+# shellcheck source-path=SCRIPTDIR source=../_lib/env.sh
 . "$(dirname "$0")/../_lib/env.sh"
 if ! [ -d "$(rustc --print sysroot)/lib/rustlib/wasm32-unknown-unknown" ]; then
   why="$(wrong_rustc)"

@@ -1,7 +1,17 @@
 #!/usr/bin/env bash
-#MISE description="Measure where qml6 finds a name for each kind of import, which Studio's lookup is held to"
+#MISE description="Measure where qml6 finds a name for each kind of import, which Studio's lookup is held to; writes crates/studio_mcp/src/measured_lookup.txt, or with --check only compares"
+#USAGE flag "--check" help="Write nothing: fail, showing the difference, when what qml6 says is not what the tracked table holds"
 set -euo pipefail
-
-out="${TMPDIR:?}/studio-lookup"
-mkdir -p "$out"
-python3 -I mise-tasks/measure-lookup.py "$out" crates/studio_mcp/src/measured_lookup.txt
+# shellcheck source-path=SCRIPTDIR source=_lib/env.sh
+. "$(dirname "$0")/_lib/env.sh"
+need_measure_tools
+cd "$studio_root"
+table=crates/studio_mcp/src/measured_lookup.txt
+scratch="$(mktemp -d)"
+trap 'rm -rf "$scratch"' EXIT
+# The script reads the rows from the table and writes them back measured, so
+# it works on a copy and the tracked file changes only below.
+mkdir -p "$scratch/new"
+cp "$table" "$scratch/new/"
+python3 -I mise-tasks/measure-lookup.py "$scratch/work" "$scratch/new/$(basename "$table")"
+measured "${usage_check:-false}" "$scratch" "$table"

@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+#MISE description="Build the API docs of Studio's crates (cargo doc, warnings denied) and print where they are; --open opens them. The design notes are docs/*.md"
+#USAGE flag "--open" help="Open them in a browser when built"
+set -euo pipefail
+# shellcheck source-path=SCRIPTDIR source=_lib/env.sh
+. "$(dirname "$0")/_lib/env.sh"
+cd "$studio_root"
+# Only Studio's own crates: the dependencies' docs are on docs.rs, and Ljós
+# documents its own. Warnings fail, so a broken intra-doc link is found here.
+set --
+for manifest in crates/*/Cargo.toml; do
+  set -- "$@" -p "$(basename "$(dirname "$manifest")")"
+done
+[ "${usage_open:-false}" != true ] || set -- "$@" --open
+# Where it wrote them, as cargo says: under CARGO_TARGET_DIR or a
+# build.target-dir, and in a directory of the triple's own when a build
+# target is set. Said again when nothing needed building.
+index="$(RUSTDOCFLAGS="${RUSTDOCFLAGS:-} -D warnings" cargo doc --no-deps --message-format json-render-diagnostics "$@" | node -e '
+  let text = "";
+  process.stdin.on("data", (d) => (text += d)).on("end", () => {
+    let found = "";
+    for (const line of text.split("\n")) {
+      let m;
+      try { m = JSON.parse(line); } catch { continue; }
+      if (m.reason !== "compiler-artifact" || m.target.name !== "studio") continue;
+      for (const f of m.filenames) if (f.endsWith("/studio/index.html")) found = f;
+    }
+    console.log(found);
+  });
+')"
+[ -n "$index" ] && [ -f "$index" ] ||
+  die "docs: cargo doc finished but named no studio/index.html it made${index:+ (it named $index)}"
+echo "docs: $(cd "$(dirname "$index")/.." && pwd)/<crate>/index.html, studio's at $(cd "$(dirname "$index")" && pwd)/index.html"
+notes=""
+for note in docs/*.md; do notes="$notes $note"; done
+echo "and the design notes:$notes"
