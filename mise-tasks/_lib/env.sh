@@ -16,21 +16,23 @@ ljos_web_pin="$(cat "$studio_root/web/ljos-web.rev")"
 # /usr/bin/cargo) ahead of it keeps that order under `mise run`: mise does
 # not move paths already on PATH. So rustup's proxies, which build with
 # rust-toolchain.toml's toolchain, go in just ahead of that other Rust's
-# directory, and whatever came before it still does. mise's own way to do
-# this (`activate_aggressive` in `[settings]`) would make mise refuse an
-# untrusted checkout, shims and `mise env` included.
+# directory, and whatever came before it still does. Directories are
+# compared resolved, so `/usr/bin/`, `/usr//bin` or a link to it is the
+# same one. mise's own way to do this (`activate_aggressive` in
+# `[settings]`) would make mise refuse an untrusted checkout, shims and
+# `mise env` included.
 rust_first() {
   local proxies other rest entry path="" moved=false
   proxies="$(command -v rustup 2>/dev/null)" || return 0
   other="$(command -v rustc 2>/dev/null)" || return 0
-  proxies="$(dirname "$proxies")"
-  other="$(dirname "$other")"
+  proxies="$(cd "$(dirname "$proxies")" 2>/dev/null && pwd -P)" || return 0
+  other="$(cd "$(dirname "$other")" 2>/dev/null && pwd -P)" || return 0
   [ "$other" != "$proxies" ] || return 0
   rest="$PATH:"
   while [ -n "$rest" ]; do
     entry="${rest%%:*}"
     rest="${rest#*:}"
-    if [ "$moved" = false ] && [ "$entry" = "$other" ]; then
+    if [ "$moved" = false ] && [ -n "$entry" ] && [ "$(cd "$entry" 2>/dev/null && pwd -P)" = "$other" ]; then
       path="$path:$proxies"
       moved=true
     fi
