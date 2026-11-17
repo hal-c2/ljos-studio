@@ -295,7 +295,9 @@ unstub rustup
 
 # --- measure-lookup and measure-members' tools --------------------------------
 mkdir -p "$scratch/no-qml" "$scratch/no-python"
-ln -sf "$(command -v python3)" "$scratch/no-qml/python3"
+# Found is all need_measure_tools asks of python3, so a stand-in will do.
+printf '#!/bin/sh\nexit 0\n' >"$scratch/no-qml/python3"
+chmod +x "$scratch/no-qml/python3"
 call "PATH=$scratch/no-python need_measure_tools"
 refuses "measuring without python3 says so before anything runs" "python3 is not on PATH"
 call "PATH=$scratch/no-qml need_measure_tools"
