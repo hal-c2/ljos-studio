@@ -141,6 +141,14 @@ while IFS='|' read -r task mode args why; do
   found_only=1
   source="$(printf '%s\n' "$tasks" | awk -F'\t' -v t="$task" '$1 == t { print $2 }')"
   [ -n "$source" ] || continue
+  # Split as words first, then @tmp@ filled in each, so a scratch path
+  # with a space stays one argument.
+  raw=()
+  words=()
+  read -r -a raw <<<"$args" || true
+  for word in ${raw[@]+"${raw[@]}"}; do
+    words+=("${word//@tmp@/$scratch}")
+  done
   args="${args//@tmp@/$scratch}"
   note=""
   if [ "$mode" = dry ] && [ -z "$why" ]; then
@@ -155,10 +163,10 @@ while IFS='|' read -r task mode args why; do
   echo "== tasks:smoke: $mode $task $args${note:+ ($note)}"
   start="$(date +%s)"
   result=ok
-  # shellcheck disable=SC2086 # the arguments column is a word list
+  # ${words[@]+…}: bash 3.2 calls an empty array unset under set -u.
   case "$mode" in
-    run) mise run --skip-tools "$task" $args </dev/null || result=FAIL ;;
-    dry) { mise run --skip-tools -n "$task" $args </dev/null && bash -n "$source"; } || result=FAIL ;;
+    run) mise run --skip-tools "$task" ${words[@]+"${words[@]}"} </dev/null || result=FAIL ;;
+    dry) { mise run --skip-tools -n "$task" ${words[@]+"${words[@]}"} </dev/null && bash -n "$source"; } || result=FAIL ;;
     *) echo "tasks:smoke: '$task' has unknown mode '$mode'" >&2; result=FAIL ;;
   esac
   record "$task" "$mode" "$result" "$(($(date +%s) - start))" "$note"
