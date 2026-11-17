@@ -205,6 +205,7 @@ rm -rf "$home/Qt"
 mkdir -p "$co/.github/workflows"
 printf '      - uses: jurplel/install-qt-action@v4\n        with:\n          version: "6.11.2"\n' >"$co/.github/workflows/ci.yml"
 stub qmake6 'exit 1'
+stub qmake 'exit 1'
 stub qml6 'exit 1'
 qt_bin() { # qt dir, tool, what it answers
   qt6 "$1/qml"
@@ -224,10 +225,34 @@ omits "and is no mismatch" "MISMATCH"
 qt_bin "$scratch/qt-five" qtpaths 5.15.19
 ENVS="QT_INSTALL_QML=$scratch/qt-five/qml" call report_qt
 omits "a Qt 5 tool's answer is not taken for the Qt found" "MISMATCH"
+# A QML tree with no bin beside it: a Qt on PATH counts only when it names
+# that tree as its own.
+qt6 "$scratch/qt-bare/qml"
+stub qtpaths6 'case "$1" in --query) echo "'"$scratch"'/qt-new/qml" ;; *) echo 6.12.1 ;; esac'
+ENVS="QT_INSTALL_QML=$scratch/qt-bare/qml" call report_qt
+omits "another Qt on PATH is not taken for a Qt with no bin" "MISMATCH"
+stub qtpaths 'case "$1" in --query) echo "'"$scratch"'/qt-bare/qml" ;; *) echo 6.12.1 ;; esac'
+ENVS="QT_INSTALL_QML=$scratch/qt-bare/qml" call report_qt
+says "the qtpaths on PATH that names it is, unsuffixed too" "MISMATCH Qt 6.12.1 ($stubs/qtpaths) is not the pinned Qt 6.11"
+stub qtpaths6 'exit 1'
+stub qtpaths 'echo "qtpaths: Unknown option '"'"'query'"'"'." >&2; exit 1'
+# setup itself, without --web: a mismatch is missing, so --check fails on it.
+cp "$root/mise-tasks/setup" "$co/mise-tasks/"
+mkdir -p "$scratch/web-for-qt"
+ENVS="LJOS_WEB=$scratch/web-for-qt QT_INSTALL_QML=$scratch/qt-new/qml" call 'usage_check=true bash mise-tasks/setup'
+missing_part="${said#*setup is missing:}"
+case "$missing_part" in
+  "$said") bad "setup --check lists a mismatched Qt as missing: nothing was missing" ;;
+  *"Qt 6.12.1 ($scratch/qt-new/bin/qtpaths6) is not the pinned Qt 6.11"*)
+    if [ "$status" -ne 0 ]; then ok "setup --check lists a mismatched Qt as missing, and fails"; else bad "setup --check lists a mismatched Qt as missing, and fails"; fi
+    ;;
+  *) bad "setup --check lists a mismatched Qt as missing: it is not under setup is missing" ;;
+esac
 rm "$co/.github/workflows/ci.yml"
 ENVS="QT_INSTALL_QML=$scratch/qt-new/qml" call report_qt
 omits "with no pin to compare with, nothing is a mismatch" "MISMATCH"
 unstub qmake6
+unstub qmake
 unstub qml6
 
 # --- Ljós's design module ---------------------------------------------------

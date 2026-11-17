@@ -697,20 +697,37 @@ qt_pin() {
     "$studio_root/.github/workflows/ci.yml" 2>/dev/null || true
 }
 
-# `qt_version <bin>`: "<version> <tool>" for the Qt whose bin directory is
-# <bin> (or none, when empty), else for Qt 6's tools on the path, or nothing. Qt 5's unsuffixed
-# qtpaths, qmake and qml answer too, so an answer counts only when it is 6.
+# `qt_version <qml dir>`: "<version> <tool>" for the Qt that owns <qml dir>,
+# or nothing. The tools in its own bin directory are asked first. A tool on
+# PATH counts only when it names <qml dir> as its QT_INSTALL_QML: a QML tree
+# with no bin beside it (a QML-only copy, a share/qt/qml) says nothing of
+# whichever Qt PATH holds. Qt 5's unsuffixed tools answer too, so an answer
+# counts only when it is 6.
 qt_version() {
-  local tool out tools=(qtpaths6 qmake6 qml6)
-  if [ -n "$1" ]; then
-    tools=("$1/qtpaths6" "$1/qtpaths" "$1/qmake6" "$1/qmake" "$1/qml6" "$1/qml" "${tools[@]}")
+  local qml bin tool out owner tools=()
+  qml="$(physical "$1" 2>/dev/null)" || return 0
+  if bin="$(physical "$qml/../bin" 2>/dev/null)"; then
+    tools=("$bin/qtpaths6" "$bin/qtpaths" "$bin/qmake6" "$bin/qmake" "$bin/qml6" "$bin/qml")
   fi
+  tools+=(qtpaths6 qtpaths qmake6 qmake)
   for tool in "${tools[@]}"; do
     command -v "$tool" >/dev/null 2>&1 || continue
+    case "$tool" in
+      */*) ;;
+      qtpaths*)
+        owner="$("$tool" --query QT_INSTALL_QML 2>/dev/null)" || continue
+        [ "$(physical "$owner" 2>/dev/null)" = "$qml" ] || continue
+        ;;
+      *)
+        owner="$("$tool" -query QT_INSTALL_QML 2>/dev/null)" || continue
+        [ "$(physical "$owner" 2>/dev/null)" = "$qml" ] || continue
+        ;;
+    esac
     case "${tool##*/}" in
       qtpaths*) out="$("$tool" --qt-version 2>/dev/null)" || continue ;;
       qmake*) out="$("$tool" -query QT_VERSION 2>/dev/null)" || continue ;;
-      *) out="$("$tool" --version 2>/dev/null)" || continue ;;
+      # qml makes its GUI application before it reads --version.
+      *) out="$(QT_QPA_PLATFORM=offscreen "$tool" --version 2>/dev/null)" || continue ;;
     esac
     [[ "$out" =~ ([0-9]+\.[0-9]+\.[0-9]+) ]] || continue
     case "${BASH_REMATCH[1]}" in
@@ -736,7 +753,7 @@ report_qt() {
   fi
   pin="$(qt_pin)"
   [ -n "$pin" ] || return 0
-  found="$(qt_version "$(physical "$said/../bin" 2>/dev/null || true)")"
+  found="$(qt_version "$said")"
   [ -n "$found" ] || return 0
   version="${found%% *}"
   tool="${found#* }"
