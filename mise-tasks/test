@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 #MISE description="Unit, golden and Gherkin tests, the whole ledger with the stdio server's"
 set -euo pipefail
+# shellcheck source-path=SCRIPTDIR source=_lib/env.sh
 . "$(dirname "$0")/_lib/env.sh"
 # The Gherkin runners are tests too, and their previews run `ljos`: found as
 # `mise run features` finds it, so a missing one is named here, not read as

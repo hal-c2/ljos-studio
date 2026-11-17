@@ -115,11 +115,21 @@ ENVS="PLAYWRIGHT=$scratch/other.mjs" call find_playwright
 refuses "PLAYWRIGHT overrides it, and another failure is said as it is" "no libnss3"
 
 # --- qmlc -------------------------------------------------------------------
-stub cargo 'echo "cargo in $PWD target=${CARGO_TARGET_DIR:-none} $*"; mkdir -p target/debug; printf "#!/bin/sh\n" >target/debug/qmlc; chmod +x target/debug/qmlc'
+webp="$(cd "$web" && pwd -P)"
+stub cargo 'echo "cargo in $PWD target=${CARGO_TARGET_DIR:-none} $*"; mkdir -p "$CARGO_TARGET_DIR/debug"; printf "#!/bin/sh\n" >"$CARGO_TARGET_DIR/debug/qmlc"; chmod +x "$CARGO_TARGET_DIR/debug/qmlc"'
 ENVS="CARGO_TARGET_DIR=$scratch/ours" call 'find_ljos_web; find_qmlc; echo "QMLC=$QMLC"'
-says "a missing qmlc is built, saying so" "ljos-web has no qmlc yet; building it: (cd ../ljos-web && cargo build --bin qmlc)"
-says "in ljos-web's own target, not ours" "cargo in $(cd "$web" && pwd -P) target=none build --bin qmlc"
-says "and used" "QMLC=$(cd "$web" && pwd -P)/target/debug/qmlc"
+says "a missing qmlc is built, saying where and that it takes a while" "ljos-web has no qmlc yet; building it into $scratch/ours/ljos-web, which takes minutes the first time: (cd ../ljos-web && cargo build --bin qmlc)"
+says "under CARGO_TARGET_DIR, in a directory of its own" "cargo in $webp target=$scratch/ours/ljos-web build --bin qmlc"
+says "and used" "QMLC=$scratch/ours/ljos-web/debug/qmlc"
+if [ -e "$web/target" ]; then bad "and the checkout gains no target/"; else ok "and the checkout gains no target/"; fi
+stub cargo 'echo "cargo should not run"; exit 1'
+ENVS="CARGO_TARGET_DIR=$scratch/ours" call 'find_ljos_web; find_qmlc; echo "QMLC=$QMLC"'
+says "once built there it is found again, with nothing built" "QMLC=$scratch/ours/ljos-web/debug/qmlc"
+stub cargo 'echo "cargo in $PWD target=${CARGO_TARGET_DIR:-none} $*"; mkdir -p "$CARGO_TARGET_DIR/debug"; printf "#!/bin/sh\n" >"$CARGO_TARGET_DIR/debug/qmlc"; chmod +x "$CARGO_TARGET_DIR/debug/qmlc"'
+call 'find_ljos_web; find_qmlc; echo "QMLC=$QMLC"'
+says "with no CARGO_TARGET_DIR, in ljos-web's own target" "cargo in $webp target=$webp/target build --bin qmlc"
+says "and used from there" "QMLC=$webp/target/debug/qmlc"
+rm -rf "$web/target"
 mkdir -p "$web/target/release"
 printf '#!/bin/sh\n' >"$web/target/release/qmlc"
 chmod +x "$web/target/release/qmlc"
@@ -141,6 +151,7 @@ qt6() { mkdir -p "$1/QtQuick/Controls/Basic"; }
 call find_qt
 refuses "no Qt says where to point QT_INSTALL_QML, for Homebrew" '$(brew --prefix qt)/share/qt/qml'
 says "both of Homebrew's layouts" '$(brew --prefix qt)/qml'
+# shellcheck disable=SC2088 # the text the task prints, not a path
 says "and the installer's" "~/Qt/6.x/macos/qml"
 says "and what was asked" "neither qtpaths6 nor qtpaths"
 mkdir -p "$scratch/qt5/QtQuick/Controls"
@@ -201,10 +212,14 @@ call 'install_ljos'
 says "setup does not install the same pin twice" "already in $co/target/tools"
 mkdir -p "$scratch/layout/ljos-ui"
 touch "$scratch/layout/ljos-ui/Cargo.toml"
-stub cargo 'echo "cargo $*"'
+stub cargo 'echo "cargo target=${CARGO_TARGET_DIR:-none} $*"'
 call 'find_ljos; echo "L=$LJOS"'
 says "a ljos-ui beside this one is built instead" "-p ljos_cli --bin ljos"
-says "and its program used" "ljos-ui/target/debug/ljos"
+says "saying what it builds and that the first build is long" "building ljos (ljos-ui's ljos_cli, debug) from ../ljos-ui into $co/../ljos-ui/target: the first build compiles all of Ljós and takes many minutes"
+says "and its program used" "L=$co/../ljos-ui/target/debug/ljos"
+ENVS="CARGO_TARGET_DIR=$scratch/ours" call 'find_ljos; echo "L=$LJOS"'
+says "under CARGO_TARGET_DIR it gets a directory of its own" "cargo target=$scratch/ours/ljos-ui build"
+says "and its program is used from there" "L=$scratch/ours/ljos-ui/debug/ljos"
 rm -rf "$scratch/layout/ljos-ui"
 
 # --- wasm-bindgen ------------------------------------------------------------
@@ -259,6 +274,35 @@ call 'need_rust_parts targets'
 refuses "and so for its targets" "rustup cannot list this Rust's targets: run mise run setup"
 unstub rustup
 
+# --- measure-lookup and measure-members' tools --------------------------------
+mkdir -p "$scratch/no-qml" "$scratch/no-python"
+ln -sf "$(command -v python3)" "$scratch/no-qml/python3"
+call "PATH=$scratch/no-python need_measure_tools"
+refuses "measuring without python3 says so before anything runs" "python3 is not on PATH"
+call "PATH=$scratch/no-qml need_measure_tools"
+refuses "and without qml6, how to get it" "qml6, Qt 6's QML runtime, is not on PATH: install Qt 6's declarative tools"
+stub qml6 'echo "Qml Runtime 6.0.0"; echo "QPA=$QT_QPA_PLATFORM theme=${QT_QPA_PLATFORMTHEME:-unset}" >&2'
+ENVS="QT_QPA_PLATFORMTHEME=gtk3" call 'need_measure_tools; qml6 --version'
+says "qml6 runs off-screen, with no desktop theme" "QPA=offscreen theme=unset"
+mkdir -p "$scratch/m/new"
+echo a >"$scratch/m/t.txt"
+echo a >"$scratch/m/new/t.txt"
+call "measured true $scratch/m $scratch/m/t.txt"
+says "--check with nothing changed says which Qt agreed" "$scratch/m/t.txt match what qml6 6.0.0 says"
+echo b >"$scratch/m/new/t.txt"
+ENVS="MISE_TASK_NAME=measure-lookup" call "measured true $scratch/m $scratch/m/t.txt"
+refuses "--check fails on a difference, naming the task that writes it" "run mise run measure-lookup to write what qml6 says"
+says "and shows the difference" "+b"
+if [ "$(cat "$scratch/m/t.txt")" = a ]; then ok "and writes nothing"; else bad "and writes nothing"; fi
+call "measured false $scratch/m $scratch/m/t.txt"
+says "without --check it writes, saying so" "wrote $scratch/m/t.txt (changed: see git diff"
+call "measured false $scratch/m $scratch/m/t.txt"
+says "and says when nothing changed" "wrote $scratch/m/t.txt (unchanged)"
+: >"$scratch/m/new/t.txt"
+call "measured false $scratch/m $scratch/m/t.txt"
+refuses "an empty measurement is refused, not written" "the measuring script wrote nothing for $scratch/m/t.txt"
+unstub qml6
+
 # --- Paths from where the person asked ---------------------------------------
 mkdir -p "$scratch/asked/project"
 touch "$scratch/asked/file.feature"
@@ -272,32 +316,35 @@ call 'decode_args "a '"'"'b c'"'"' --x"; printf "<%s>" "${decoded[@]}"; decode_a
 says "a variadic argument's quoting is undone, a word with spaces kept whole" "<a><b c><--x> n=0"
 call 'decode_args "{x,y} p"; printf "<%s>" "${decoded[@]}"'
 says "and braces are kept as they are" "<{x,y}><p>"
-# The studio task itself, with no ljos installed, none beside it and no LJOS:
+# The dev task (also mise run studio) itself, with no ljos installed, none beside it and no LJOS:
 # a --ljos it is given is the one used, not refused for want of another.
-cp "$root/mise-tasks/studio" "$co/mise-tasks/"
+cp "$root/mise-tasks/dev" "$co/mise-tasks/"
 mkdir -p "$scratch/asked/project"
 rm -rf "$co/target/tools"
 stub cargo 'echo "cargo $* LJOS=${LJOS:-}"'
-ENVS="MISE_ORIGINAL_CWD=$scratch/asked usage_ljos=bin/ljos usage_dir=project" call 'bash mise-tasks/studio'
+ENVS="MISE_ORIGINAL_CWD=$scratch/asked usage_ljos=bin/ljos usage_dir=project" call 'bash mise-tasks/dev'
 says "studio --ljos is taken as LJOS, from where the person asked" "LJOS=$scratch/asked/bin/ljos"
 says "and the window opens on DIR" "cargo run --release -q -p studio --bin studio -- $(cd "$scratch/asked/project" && pwd -P)"
-ENVS="MISE_ORIGINAL_CWD=$scratch/asked usage_ljos=ljos usage_dir=project" call 'bash mise-tasks/studio'
+ENVS="MISE_ORIGINAL_CWD=$scratch/asked usage_ljos=ljos usage_dir=project" call 'bash mise-tasks/dev'
 says "studio --ljos with a bare name keeps it for PATH" "LJOS=ljos"
 mkdir -p "$co/samples/hello"
-ENVS="LJOS=ljos usage_dir=--mcp usage_studio_args=--no-agents" call 'bash mise-tasks/studio'
+ENVS="LJOS=ljos usage_dir=--mcp usage_studio_args=--no-agents" call 'bash mise-tasks/dev'
 says "studio -- --mcp …: what mise took as DIR is studio's flag, in order" "cargo run --release -q -p studio --bin studio -- --mcp --no-agents $co/target/studio-sample"
-ENVS="MISE_TASK_NAME=studio LJOS=ljos MISE_ORIGINAL_CWD=$scratch/asked usage_dir=--mcp usage_studio_args=project" call 'bash mise-tasks/studio'
+ENVS="MISE_TASK_NAME=studio LJOS=ljos MISE_ORIGINAL_CWD=$scratch/asked usage_dir=--mcp usage_studio_args=project" call 'bash mise-tasks/dev'
 refuses "a project typed after the flags names where DIR goes" "project looks like the project: DIR goes before --, as in mise run studio project -- --mcp"
-ENVS="LJOS=ljos MISE_ORIGINAL_CWD=$scratch/asked usage_dir=--shell usage_studio_args=project" call 'bash mise-tasks/studio'
+ENVS="LJOS=ljos MISE_ORIGINAL_CWD=$scratch/asked usage_dir=--shell usage_studio_args=project" call 'bash mise-tasks/dev'
 says "but a directory --shell takes is its value" "-- --shell project $co/target/studio-sample"
-ENVS="MISE_TASK_NAME=studio LJOS=ljos usage_dir=--mcp" call 'usage_studio_args="new-proj --no-agents" bash mise-tasks/studio'
+ENVS="MISE_TASK_NAME=studio LJOS=ljos usage_dir=--mcp" call 'usage_studio_args="new-proj --no-agents" bash mise-tasks/dev'
 refuses "so is one not made yet, with flags after it" "new-proj looks like the project: DIR goes before --, as in mise run studio new-proj -- --mcp --no-agents"
-ENVS="LJOS=ljos usage_dir=--caps" call 'usage_studio_args="inspect --theme t.json" bash mise-tasks/studio'
+ENVS="LJOS=ljos usage_dir=--caps" call 'usage_studio_args="inspect --theme t.json" bash mise-tasks/dev'
 says "values of studio's flags are not projects" "-- --caps inspect --theme t.json $co/target/studio-sample"
-cp "$root/mise-tasks/dev" "$co/mise-tasks/"
-stub mise 'echo "mise $*"'
-ENVS="usage_dir=--mcp" call 'bash mise-tasks/dev'
-says "dev -- --mcp hands --mcp to studio, not as DIR" "mise run studio -- --mcp"
+stub mise 'echo "mise $* PORT=$PORT"; env | grep -c "^usage_" || true'
+ENVS="usage_web=true usage_port=6001 usage_caps=inspect" call 'bash mise-tasks/dev'
+refuses "dev --web refuses the native window's flags" "dev --web takes no DIR, --caps"
+ENVS="usage_web=true usage_port=6001 usage_no_agents=false usage_mcp=false" call 'bash mise-tasks/dev'
+says "dev --web serves the page on its port" "mise run web:serve PORT=6001"
+says "and none of its own usage_ variables reach web:serve" "PORT=6001
+0"
 unstub mise
 call 'run_studio --ljos'
 refuses "a flag is not taken as DIR" "--ljos is a flag, not a DIR"

@@ -2,6 +2,7 @@
 #MISE description="Build the studio program, release (what mise run studio runs); with --web also the wasm build into web/pkg"
 #USAGE flag "--web" help="Also build Studio for the web (mise run web:build)"
 set -euo pipefail
+# shellcheck source-path=SCRIPTDIR source=_lib/env.sh
 . "$(dirname "$0")/_lib/env.sh"
 cargo build --release -p studio --bin studio
 echo "studio: $(own_target)/release/studio"

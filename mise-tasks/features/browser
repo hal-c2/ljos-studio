@@ -3,6 +3,7 @@
 #MISE depends=["web:build"]
 #USAGE arg "[paths]" var=#true help="Feature files or directories"
 set -euo pipefail
+# shellcheck source-path=SCRIPTDIR source=../_lib/env.sh
 . "$(dirname "$0")/../_lib/env.sh"
 build_served_page
 find_playwright

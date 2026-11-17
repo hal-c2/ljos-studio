@@ -4,6 +4,7 @@ set -euo pipefail
 # Needs what export:web:build needs (an ljos-web checkout with its packages
 # installed, its qmlc) and Playwright's Chromium from that checkout. It
 # downloads nothing.
+# shellcheck source-path=SCRIPTDIR source=../../_lib/env.sh
 . "$(dirname "$0")/../../_lib/env.sh"
 find_ljos_web
 find_playwright

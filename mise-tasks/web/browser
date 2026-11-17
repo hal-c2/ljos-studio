@@ -4,6 +4,7 @@
 set -euo pipefail
 # Playwright and its Chromium as a checkout of ljos-web installs them, found
 # beside this one (`LJOS_WEB`, `PLAYWRIGHT`); this task downloads nothing.
+# shellcheck source-path=SCRIPTDIR source=../_lib/env.sh
 . "$(dirname "$0")/../_lib/env.sh"
 find_playwright
 node "$studio_root/web/browser.mjs"

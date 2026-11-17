@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 #MISE description="Studio's session, tools and web crate build for wasm32 with nothing native in them; clippy, warnings denied"
 set -euo pipefail
+# shellcheck source-path=SCRIPTDIR source=../_lib/env.sh
 . "$(dirname "$0")/../_lib/env.sh"
 need_rust_parts components
 need_rust_parts targets

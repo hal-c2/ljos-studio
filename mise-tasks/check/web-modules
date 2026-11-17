@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 #MISE description="Studio's list of what ljos-web provides against the runtime package at web/ljos-web.rev; a pin bump that changes it fails here, not at a site's build"
 set -euo pipefail
+# shellcheck source-path=SCRIPTDIR source=../_lib/env.sh
 . "$(dirname "$0")/../_lib/env.sh"
 find_ljos_web
 export LJOS_WEB

@@ -2,6 +2,7 @@
 #MISE description="Studio's Gherkin scenarios, or only the given feature files or directories"
 #USAGE arg "[paths]" var=#true help="Feature files or directories; default all of features/"
 set -euo pipefail
+# shellcheck source-path=SCRIPTDIR source=../_lib/env.sh
 . "$(dirname "$0")/../_lib/env.sh"
 # Previews run `ljos`: LJOS, else one built from a ljos-ui checkout beside
 # this one, else one installed from the commit Cargo.toml pins.

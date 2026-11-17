@@ -7,6 +7,7 @@ set -euo pipefail
 # bundles; this only hands it the files the manifest lists. It downloads
 # nothing: it needs an ljos-web checkout with its packages installed, its
 # qmlc, and Qt 6's QML only when the site imports the controls.
+# shellcheck source-path=SCRIPTDIR source=../../_lib/env.sh
 . "$(dirname "$0")/../../_lib/env.sh"
 bundle="$(absolute "${usage_bundle:?}")"
 [ -f "$bundle/ljos-site.json" ] || die "$bundle holds no ljos-site.json: export with \"target\": \"web\" first"
