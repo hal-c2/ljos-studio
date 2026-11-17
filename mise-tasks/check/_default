@@ -1,7 +1,12 @@
 #!/usr/bin/env bash
-#MISE description="Format check and clippy, warnings denied"
+#MISE description="Every static gate: format check, clippy (warnings denied), the tasks' self-test (check:tasks) and the wasm build's clippy (check:wasm)"
 set -euo pipefail
+# shellcheck source-path=SCRIPTDIR source=../_lib/env.sh
 . "$(dirname "$0")/../_lib/env.sh"
 need_rust_parts components
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
+# One after the other, not as depends: two clippy runs at once only wait on
+# each other's target lock, and a failure reads in order.
+mise run check:tasks
+mise run check:wasm
