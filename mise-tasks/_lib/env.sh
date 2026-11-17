@@ -39,8 +39,21 @@ absolute() {
   fi
 }
 
+# CARGO_TARGET_DIR as an absolute path, empty when it is unset. Relative,
+# it is from here, as cargo takes it for the tasks' own builds; absolute, it
+# still names the same place after a build changes directory.
+target_root() {
+  case "${CARGO_TARGET_DIR:-}" in
+    "") ;;
+    /*) printf '%s\n' "$CARGO_TARGET_DIR" ;;
+    *) printf '%s\n' "$PWD/$CARGO_TARGET_DIR" ;;
+  esac
+}
+
 own_target() {
-  printf '%s\n' "${CARGO_TARGET_DIR:-$studio_root/target}"
+  local root
+  root="$(target_root)"
+  printf '%s\n' "${root:-$studio_root/target}"
 }
 
 # The `rev` every ljos-ui crate in Cargo.toml names.
@@ -112,7 +125,7 @@ find_playwright() {
 # workspaces never share one target and a checkout gains no target/ of ours.
 qmlc_target() {
   if [ -n "${CARGO_TARGET_DIR:-}" ]; then
-    printf '%s\n' "$CARGO_TARGET_DIR/ljos-web"
+    printf '%s\n' "$(target_root)/ljos-web"
   else
     printf '%s\n' "$LJOS_WEB/target"
   fi
@@ -261,7 +274,7 @@ find_ljos() {
     # directory of its own, or the two workspaces would rebuild each other's
     # dependencies with different features on every switch.
     local built="$sibling/target"
-    [ -z "${CARGO_TARGET_DIR:-}" ] || built="$CARGO_TARGET_DIR/ljos-ui"
+    [ -z "${CARGO_TARGET_DIR:-}" ] || built="$(target_root)/ljos-ui"
     echo "building ljos (ljos-ui's ljos_cli, debug) from ${LJOS_UI:-../ljos-ui} into $built: the first build compiles all of Ljós and takes many minutes; later ones only what changed. LJOS=/path/to/ljos skips it" >&2
     CARGO_TARGET_DIR="$built" cargo build --manifest-path "$sibling/Cargo.toml" -p ljos_cli --bin ljos
     LJOS="$built/debug/ljos"

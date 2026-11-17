@@ -126,6 +126,10 @@ stub cargo 'echo "cargo should not run"; exit 1'
 ENVS="CARGO_TARGET_DIR=$scratch/ours" call 'find_ljos_web; find_qmlc; echo "QMLC=$QMLC"'
 says "once built there it is found again, with nothing built" "QMLC=$scratch/ours/ljos-web/debug/qmlc"
 stub cargo 'echo "cargo in $PWD target=${CARGO_TARGET_DIR:-none} $*"; mkdir -p "$CARGO_TARGET_DIR/debug"; printf "#!/bin/sh\n" >"$CARGO_TARGET_DIR/debug/qmlc"; chmod +x "$CARGO_TARGET_DIR/debug/qmlc"'
+ENVS="CARGO_TARGET_DIR=rel" call 'find_ljos_web; find_qmlc; echo "QMLC=$QMLC"'
+says "a relative CARGO_TARGET_DIR is taken from where the task runs, not from ljos-web" "cargo in $webp target=$co/rel/ljos-web build --bin qmlc"
+says "and the qmlc built there is used" "QMLC=$co/rel/ljos-web/debug/qmlc"
+rm -rf "$co/rel"
 call 'find_ljos_web; find_qmlc; echo "QMLC=$QMLC"'
 says "with no CARGO_TARGET_DIR, in ljos-web's own target" "cargo in $webp target=$webp/target build --bin qmlc"
 says "and used from there" "QMLC=$webp/target/debug/qmlc"
@@ -220,6 +224,10 @@ says "and its program used" "L=$co/../ljos-ui/target/debug/ljos"
 ENVS="CARGO_TARGET_DIR=$scratch/ours" call 'find_ljos; echo "L=$LJOS"'
 says "under CARGO_TARGET_DIR it gets a directory of its own" "cargo target=$scratch/ours/ljos-ui build"
 says "and its program is used from there" "L=$scratch/ours/ljos-ui/debug/ljos"
+ENVS="CARGO_TARGET_DIR=rel" call 'find_ljos; echo "L=$LJOS"; echo "T=$(own_target)"'
+says "a relative CARGO_TARGET_DIR is made absolute for it" "cargo target=$co/rel/ljos-ui build"
+says "so its program is found from anywhere" "L=$co/rel/ljos-ui/debug/ljos"
+says "and so are setup's tools" "T=$co/rel"
 rm -rf "$scratch/layout/ljos-ui"
 
 # --- wasm-bindgen ------------------------------------------------------------
