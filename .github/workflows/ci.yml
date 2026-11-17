@@ -50,8 +50,9 @@ jobs:
           # tool's version and builds only the one whose pin moved.
           restore-keys: tools-${{ runner.os }}-
       # The render tests need a wgpu adapter (lavapipe is a software Vulkan);
-      # Ljós links fontconfig and ALSA on Linux.
-      - run: sudo apt-get update && sudo apt-get install -y mesa-vulkan-drivers libfontconfig1-dev libasound2-dev pkg-config
+      # Ljós links fontconfig and ALSA on Linux; tasks:smoke lints the tasks
+      # with shellcheck.
+      - run: sudo apt-get update && sudo apt-get install -y mesa-vulkan-drivers libfontconfig1-dev libasound2-dev pkg-config shellcheck
       # rustup's components and target for the gates, then ljos at the rev
       # Cargo.toml pins and the pinned wasm-bindgen, unless the cache above has
       # them: the only step that installs anything.
@@ -62,14 +63,20 @@ jobs:
         with:
           path: target/tools
           key: ${{ steps.tools.outputs.cache-primary-key }}
+      # fmt, clippy, check:tasks and check:wasm.
       - run: mise run check
-      - run: mise run check:tasks
-      - run: mise run check:wasm
       # The whole ledger with the unit tests, and the stdio server's test: the
       # Gherkin runners are cargo tests, so `mise run features` would run them
       # again.
       - run: mise run test
       - run: mise run features:web
+      # Every other task, quickly, reusing what the steps above built; the
+      # table in mise-tasks/tasks/smoke says what runs here and what only
+      # dry-runs, and why.
+      - run: mise run tasks:smoke
+      # No task may leave the checkout changed: a table rewritten, a
+      # Cargo.lock updated, a file left behind.
+      - run: git status --porcelain && test -z "$(git status --porcelain)"
       - if: always()
         run: df -h /
 
@@ -156,6 +163,22 @@ jobs:
       # The @preview scenarios, compiled by ljos-web's qmlc and mounted in a
       # frame; those waiting on ljos-web must be refused naming the request.
       - run: mise run features:browser
+      # features/web/site.feature: a project exported for the web, built into a
+      # site by ljos-web and checked in Chromium (export:web:build with it).
+      - run: mise run export:web:check
       - if: always()
         run: df -h /
         working-directory: .
+
+  # The tasks on macOS's bash 3.2 and BSD tools. It builds nothing (ljos alone
+  # is half an hour): check:tasks runs the tasks' shared code against
+  # stand-ins, and tasks:smoke --dry resolves every task's usage and depends
+  # and lints them all.
+  macos:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: jdx/mise-action@v3
+      - run: brew install shellcheck
+      - run: mise run check:tasks
+      - run: mise run tasks:smoke --dry
