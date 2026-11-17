@@ -144,11 +144,10 @@ cargo fetches it with the git command line (`.cargo/config.toml`). The
 Gherkin scenarios among those tests open previews, which run the `ljos`
 program: `mise run setup` installs it, and `mise run test` and
 `mise run features` say so when it is missing rather than failing every
-scenario that opens one. `mise.toml` only has settings and tool versions, so
-mise runs here without `mise trust`; its `activate_aggressive` puts the
-pinned Rust ahead of a system one (a distro's `/usr/bin/cargo`) under
-`mise run`. `mise run setup` adds Rust's components and the wasm target with
-rustup.
+scenario that opens one. `mise.toml` only has tool versions, so mise, its
+shims and `mise env` work here without `mise trust`. The tasks put rustup's
+pinned Rust ahead of a system one (a distro's `/usr/bin/cargo`) themselves.
+`mise run setup` adds Rust's components and the wasm target with rustup.
 
 ### Building against a local ljos-ui
 

@@ -18,10 +18,10 @@ lack() { missing="$missing$(item "$1")"; }
 web="${usage_web:-false}"
 check="${usage_check:-false}"
 
-# What the tasks build with. Under `mise run`, activate_aggressive (mise.toml)
-# puts the pinned toolchain ahead of a distro Rust; when the rustc found is
-# still another one, every build would lack setup's components and target,
-# so that is a failure with the fix, not a note.
+# What the tasks build with. _lib/env.sh puts rustup's proxies ahead of a
+# distro Rust; when the rustc found is still another one, every build would
+# lack setup's components and target, so that is a failure with the fix,
+# not a note.
 rust_report() {
   if ! command -v rustup >/dev/null; then
     lack "$(no_rustup)"

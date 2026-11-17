@@ -267,6 +267,17 @@ mkdir -p "$scratch/only-sed"
 ln -sf "$(command -v sed)" "$scratch/only-sed/sed"
 call "PATH=$scratch/only-sed wrong_rustc"
 says "no rustc at all is said plainly" "no rustc is on PATH: rustup's proxies (~/.cargo/bin) must be on it"
+mkdir -p "$scratch/first" "$scratch/distro" "$scratch/rustup-bin"
+printf '#!/bin/sh\necho "rustc 9.9.9 (Distro rust)"\n' >"$scratch/distro/rustc"
+printf '#!/bin/sh\necho "rustc 1.0.0 (abc 2026-01-01)"\n' >"$scratch/rustup-bin/rustc"
+printf '#!/bin/sh\nexit 0\n' >"$scratch/rustup-bin/rustup"
+chmod +x "$scratch/distro/rustc" "$scratch/rustup-bin/rustc" "$scratch/rustup-bin/rustup"
+ENVS="PATH=$scratch/first:$scratch/distro:$scratch/rustup-bin:/usr/bin:/bin" call 'command -v rustc; wrong_rustc; echo "[$?]"; echo "P=$PATH"'
+says "a system Rust ahead of rustup's goes behind it" "$scratch/rustup-bin/rustc"
+says "so the pinned one builds" "[0]"
+says "and what came before the system Rust still does" "P=$scratch/first:$scratch/rustup-bin:$scratch/distro:$scratch/rustup-bin:/usr/bin:/bin"
+ENVS="PATH=$scratch/rustup-bin:$scratch/distro:/usr/bin:/bin" call 'echo "P=$PATH"'
+says "with rustup's already first, PATH is left as it is" "P=$scratch/rustup-bin:$scratch/distro:/usr/bin:/bin"
 stub rustup 'case "$1 $2" in "component list") printf "cargo-x86_64-unknown-linux-gnu\\nclippy-x86_64-unknown-linux-gnu\\n" ;; "target list") printf "x86_64-unknown-linux-gnu\\n" ;; esac'
 call 'need_rust_parts components'
 refuses "a missing component names setup" "no rustfmt for this Rust: run mise run setup (it runs rustup component add rustfmt)"
