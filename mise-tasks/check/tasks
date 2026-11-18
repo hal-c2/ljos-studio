@@ -58,6 +58,12 @@ says() { # what, text
 refuses() { # what, text
   if [ "$status" -eq 0 ]; then bad "$1: should have failed"; else says "$1" "$2"; fi
 }
+omits() { # what, text
+  case "$said" in
+    *"$2"*) bad "$1: did not want \"$2\"" ;;
+    *) ok "$1" ;;
+  esac
+}
 
 # --- ljos-web ---------------------------------------------------------------
 call find_ljos_web
@@ -193,6 +199,61 @@ mkdir -p "$scratch/qt-c-bin"
 ENVS="QT_INSTALL_QML=$scratch/qt-c" call 'find_qt; echo "QML=$QT_INSTALL_QML"'
 says "QT_INSTALL_QML overrides them all" "QML=$scratch/qt-c"
 rm -rf "$home/Qt"
+
+# The pin is install-qt-action's version in ci.yml; the Qt found is asked
+# through its own bin directory's tools.
+mkdir -p "$co/.github/workflows"
+printf '      - uses: jurplel/install-qt-action@v4\n        with:\n          version: "6.11.2"\n' >"$co/.github/workflows/ci.yml"
+stub qmake6 'exit 1'
+stub qmake 'exit 1'
+stub qml6 'exit 1'
+qt_bin() { # qt dir, tool, what it answers
+  qt6 "$1/qml"
+  mkdir -p "$1/bin"
+  printf '#!/bin/sh\necho "%s"\n' "$3" >"$1/bin/$2"
+  chmod +x "$1/bin/$2"
+}
+qt_bin "$scratch/qt-new" qtpaths6 6.12.1
+ENVS="QT_INSTALL_QML=$scratch/qt-new/qml" call report_qt
+says "a Qt of another minor than ci.yml's is a mismatch" "MISMATCH Qt 6.12.1 ($scratch/qt-new/bin/qtpaths6) is not the pinned Qt 6.11 (.github/workflows/ci.yml installs 6.11.2)"
+# shellcheck disable=SC2088 # the text the task prints, not a path
+says "with where to point QT_INSTALL_QML once that is installed" "export QT_INSTALL_QML=~/Qt/6.11.2/"
+qt_bin "$scratch/qt-pinned" qml "Qml Runtime 6.11.2"
+ENVS="QT_INSTALL_QML=$scratch/qt-pinned/qml" call report_qt
+says "the pinned minor is found" "found Qt 6's QML at $scratch/qt-pinned/qml"
+omits "and is no mismatch" "MISMATCH"
+qt_bin "$scratch/qt-five" qtpaths 5.15.19
+ENVS="QT_INSTALL_QML=$scratch/qt-five/qml" call report_qt
+omits "a Qt 5 tool's answer is not taken for the Qt found" "MISMATCH"
+# A QML tree with no bin beside it: a Qt on PATH counts only when it names
+# that tree as its own.
+qt6 "$scratch/qt-bare/qml"
+stub qtpaths6 'case "$1" in --query) echo "'"$scratch"'/qt-new/qml" ;; *) echo 6.12.1 ;; esac'
+ENVS="QT_INSTALL_QML=$scratch/qt-bare/qml" call report_qt
+omits "another Qt on PATH is not taken for a Qt with no bin" "MISMATCH"
+stub qtpaths 'case "$1" in --query) echo "'"$scratch"'/qt-bare/qml" ;; *) echo 6.12.1 ;; esac'
+ENVS="QT_INSTALL_QML=$scratch/qt-bare/qml" call report_qt
+says "the qtpaths on PATH that names it is, unsuffixed too" "MISMATCH Qt 6.12.1 ($stubs/qtpaths) is not the pinned Qt 6.11"
+stub qtpaths6 'exit 1'
+stub qtpaths 'echo "qtpaths: Unknown option '"'"'query'"'"'." >&2; exit 1'
+# setup itself, without --web: a mismatch is missing, so --check fails on it.
+cp "$root/mise-tasks/setup" "$co/mise-tasks/"
+mkdir -p "$scratch/web-for-qt"
+ENVS="LJOS_WEB=$scratch/web-for-qt QT_INSTALL_QML=$scratch/qt-new/qml" call 'usage_check=true bash mise-tasks/setup'
+missing_part="${said#*setup is missing:}"
+case "$missing_part" in
+  "$said") bad "setup --check lists a mismatched Qt as missing: nothing was missing" ;;
+  *"Qt 6.12.1 ($scratch/qt-new/bin/qtpaths6) is not the pinned Qt 6.11"*)
+    if [ "$status" -ne 0 ]; then ok "setup --check lists a mismatched Qt as missing, and fails"; else bad "setup --check lists a mismatched Qt as missing, and fails"; fi
+    ;;
+  *) bad "setup --check lists a mismatched Qt as missing: it is not under setup is missing" ;;
+esac
+rm "$co/.github/workflows/ci.yml"
+ENVS="QT_INSTALL_QML=$scratch/qt-new/qml" call report_qt
+omits "with no pin to compare with, nothing is a mismatch" "MISMATCH"
+unstub qmake6
+unstub qmake
+unstub qml6
 
 # --- Ljós's design module ---------------------------------------------------
 mkdir -p "$scratch/ui/crates/ljos_design_qml/qml" "$scratch/git/crates/ljos_design_qml/qml"
