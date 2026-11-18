@@ -10,11 +10,13 @@ set -euo pipefail
 done_list=""
 skipped=""
 missing=""
+notes=""
 # An item's later lines (a command to run, another way) stay under it.
 item() { printf '\n  - %s' "$1" | sed '3,$s/^/    /'; }
 did() { done_list="$done_list$(item "$1")"; }
 skip() { skipped="$skipped$(item "$1")"; }
 lack() { missing="$missing$(item "$1")"; }
+note() { notes="$notes$(item "$1")"; }
 web="${usage_web:-false}"
 check="${usage_check:-false}"
 
@@ -79,8 +81,8 @@ ljos_report() {
 
 # A report's first line says found or SKIPPED; the lines after it (Qt's
 # ways to point at an install) belong to the same item. With --web asked,
-# what the browser needs and lacks is missing, not skipped. A MISMATCH (a
-# Qt that is not the pinned minor) is missing either way.
+# what the browser needs and lacks is missing, not skipped. A NOTE (a Qt
+# that is not CI's minor) is neither: it is a working setup, said apart.
 web_report() {
   local last="" line
   while IFS= read -r line; do
@@ -88,7 +90,7 @@ web_report() {
       SKIPPED\ *)
         if [ "$web" = true ]; then lack "${line#SKIPPED }"; last=lack; else skip "${line#SKIPPED }"; last=skip; fi
         ;;
-      MISMATCH\ *) lack "${line#MISMATCH }"; last=lack ;;
+      NOTE\ *) note "${line#NOTE }"; last=note ;;
       found\ *) did "$line"; last=did ;;
       "") ;;
       *)
@@ -96,6 +98,8 @@ web_report() {
           did) done_list="$done_list
       $line" ;;
           lack) missing="$missing
+      $line" ;;
+          note) notes="$notes
       $line" ;;
           *) skipped="$skipped
       $line" ;;
@@ -114,6 +118,9 @@ summary() {
   - nothing}"
   if [ -n "$skipped" ]; then
     printf 'setup skipped:%s\n' "$skipped"
+  fi
+  if [ -n "$notes" ]; then
+    printf 'setup notes:%s\n' "$notes"
   fi
   if [ -n "$missing" ]; then
     printf 'setup is missing:%s\n' "$missing" >&2

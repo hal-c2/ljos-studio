@@ -739,10 +739,10 @@ qt_version() {
   done
 }
 
-# A Qt of another minor than the pin is reported as MISMATCH, which setup
-# counts as missing with or without --web: unlike a Qt that is not there,
-# it is taken without a word, and web:serve and web:shell then show another
-# Qt's Controls.
+# A Qt of another minor than the pin is reported as a NOTE: Qt is only the
+# reference, so it is a legitimate setup and setup passes. It is still said,
+# because it is taken without a word otherwise, and web:serve and web:shell
+# then show that Qt's Controls rather than CI's.
 report_qt() {
   local said pin found version tool
   if said="$( (find_qt && echo "$QT_INSTALL_QML") 2>&1)"; then
@@ -760,7 +760,9 @@ report_qt() {
   case "$version" in "${pin%.*}".*) return 0 ;; esac
   local host=gcc_64
   [ "$(uname -s)" != Darwin ] || host=macos
-  echo "MISMATCH Qt $version ($tool) is not the pinned Qt ${pin%.*} (.github/workflows/ci.yml installs $pin), so web:serve and web:shell would read another Qt's Controls: install Qt $pin (Qt's online installer, or aqt install-qt), then export QT_INSTALL_QML=~/Qt/$pin/$host/qml"
+  echo "NOTE Qt $version found ($tool), another minor than CI's: web:serve and web:shell show its Controls"
+  echo "CI pins Qt $pin (.github/workflows/ci.yml)"
+  echo "for CI's: install Qt $pin (Qt's online installer, or aqt install-qt), then export QT_INSTALL_QML=~/Qt/$pin/$host/qml"
 }
 
 # --- measure-lookup and measure-members ----------------------------------------

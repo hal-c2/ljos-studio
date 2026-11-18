@@ -215,42 +215,35 @@ qt_bin() { # qt dir, tool, what it answers
 }
 qt_bin "$scratch/qt-new" qtpaths6 6.12.1
 ENVS="QT_INSTALL_QML=$scratch/qt-new/qml" call report_qt
-says "a Qt of another minor than ci.yml's is a mismatch" "MISMATCH Qt 6.12.1 ($scratch/qt-new/bin/qtpaths6) is not the pinned Qt 6.11 (.github/workflows/ci.yml installs 6.11.2)"
+# Qt is only the reference: another minor than CI's is a legitimate setup,
+# so it is a note naming the Qt found, what CI pins and how to get that.
+says "a Qt of another minor than ci.yml's is a note" "NOTE Qt 6.12.1 found ($scratch/qt-new/bin/qtpaths6), another minor than CI's"
+says "which says what CI pins, read from ci.yml" "CI pins Qt 6.11.2 (.github/workflows/ci.yml)"
+omits "and is not a mismatch to fail on" "MISMATCH"
 # shellcheck disable=SC2088 # the text the task prints, not a path
 says "with where to point QT_INSTALL_QML once that is installed" "export QT_INSTALL_QML=~/Qt/6.11.2/"
 qt_bin "$scratch/qt-pinned" qml "Qml Runtime 6.11.2"
 ENVS="QT_INSTALL_QML=$scratch/qt-pinned/qml" call report_qt
 says "the pinned minor is found" "found Qt 6's QML at $scratch/qt-pinned/qml"
-omits "and is no mismatch" "MISMATCH"
+omits "and is no note" "NOTE"
 qt_bin "$scratch/qt-five" qtpaths 5.15.19
 ENVS="QT_INSTALL_QML=$scratch/qt-five/qml" call report_qt
-omits "a Qt 5 tool's answer is not taken for the Qt found" "MISMATCH"
+omits "a Qt 5 tool's answer is not taken for the Qt found" "NOTE"
 # A QML tree with no bin beside it: a Qt on PATH counts only when it names
 # that tree as its own.
 qt6 "$scratch/qt-bare/qml"
 stub qtpaths6 'case "$1" in --query) echo "'"$scratch"'/qt-new/qml" ;; *) echo 6.12.1 ;; esac'
 ENVS="QT_INSTALL_QML=$scratch/qt-bare/qml" call report_qt
-omits "another Qt on PATH is not taken for a Qt with no bin" "MISMATCH"
+omits "another Qt on PATH is not taken for a Qt with no bin" "NOTE"
 stub qtpaths 'case "$1" in --query) echo "'"$scratch"'/qt-bare/qml" ;; *) echo 6.12.1 ;; esac'
 ENVS="QT_INSTALL_QML=$scratch/qt-bare/qml" call report_qt
-says "the qtpaths on PATH that names it is, unsuffixed too" "MISMATCH Qt 6.12.1 ($stubs/qtpaths) is not the pinned Qt 6.11"
+says "the qtpaths on PATH that names it is, unsuffixed too" "NOTE Qt 6.12.1 found ($stubs/qtpaths)"
 stub qtpaths6 'exit 1'
 stub qtpaths 'echo "qtpaths: Unknown option '"'"'query'"'"'." >&2; exit 1'
-# setup itself, without --web: a mismatch is missing, so --check fails on it.
-cp "$root/mise-tasks/setup" "$co/mise-tasks/"
 mkdir -p "$scratch/web-for-qt"
-ENVS="LJOS_WEB=$scratch/web-for-qt QT_INSTALL_QML=$scratch/qt-new/qml" call 'usage_check=true bash mise-tasks/setup'
-missing_part="${said#*setup is missing:}"
-case "$missing_part" in
-  "$said") bad "setup --check lists a mismatched Qt as missing: nothing was missing" ;;
-  *"Qt 6.12.1 ($scratch/qt-new/bin/qtpaths6) is not the pinned Qt 6.11"*)
-    if [ "$status" -ne 0 ]; then ok "setup --check lists a mismatched Qt as missing, and fails"; else bad "setup --check lists a mismatched Qt as missing, and fails"; fi
-    ;;
-  *) bad "setup --check lists a mismatched Qt as missing: it is not under setup is missing" ;;
-esac
 rm "$co/.github/workflows/ci.yml"
 ENVS="QT_INSTALL_QML=$scratch/qt-new/qml" call report_qt
-omits "with no pin to compare with, nothing is a mismatch" "MISMATCH"
+omits "with no pin to compare with, nothing is a note" "NOTE"
 unstub qmake6
 unstub qmake
 unstub qml6
@@ -460,6 +453,25 @@ if [ "$status" -eq 0 ]; then ok "setup --check with everything there passes"; el
 says "and says what it found" "setup found:"
 if [ -s "$log" ]; then status=1 said="$(cat "$log")" bad "and installs, clones and builds nothing"; else ok "and installs, clones and builds nothing"; fi
 case "$said" in *"setup did:"* | *"mise install"*) bad "and stops after its report" ;; *) ok "and stops after its report" ;; esac
+# A Qt of another minor than ci.yml's: setup and setup --check both pass,
+# with the Qt found and CI's pin in a note of its own, not under missing.
+printf '      - uses: jurplel/install-qt-action@v4\n        with:\n          version: "6.11.2"\n' >"$co/.github/workflows/ci.yml"
+for asked in "usage_check=true" "usage_check=false"; do
+  rm -f "$log"
+  ENVS="SETUP_LOG=$log LJOS=$stubs/ljos LJOS_WEB=$scratch/web-for-qt QT_INSTALL_QML=$scratch/qt-new/qml $asked" call 'bash mise-tasks/setup'
+  noted="${said#*setup notes:}"
+  noted="${noted%%setup is missing:*}"
+  case "$noted" in
+    "$said") bad "setup ($asked) with another Qt minor has a notes section" ;;
+    *"Qt 6.12.1 found ($scratch/qt-new/bin/qtpaths6)"*"CI pins Qt 6.11.2 (.github/workflows/ci.yml)"*"aqt install-qt"*)
+      ok "setup ($asked) notes the Qt found, CI's pin and how to install it"
+      ;;
+    *) bad "setup ($asked) notes the Qt found, CI's pin and how to install it" ;;
+  esac
+  case "$said" in *"setup is missing:"*) bad "setup ($asked) lists nothing as missing for another Qt minor" ;; *) ok "setup ($asked) lists nothing as missing for another Qt minor" ;; esac
+  if [ "$status" -eq 0 ]; then ok "setup ($asked) with another Qt minor passes"; else bad "setup ($asked) with another Qt minor passes"; fi
+done
+rm -f "$log" "$co/.github/workflows/ci.yml"
 rm -f "$log"
 stub wasm-bindgen 'echo "wasm-bindgen 0.0.1"'
 ENVS="SETUP_LOG=$log LJOS=$stubs/ljos usage_check=true" call 'bash mise-tasks/setup'
