@@ -471,8 +471,23 @@ for asked in "usage_check=true" "usage_check=false"; do
   case "$said" in *"setup is missing:"*) bad "setup ($asked) lists nothing as missing for another Qt minor" ;; *) ok "setup ($asked) lists nothing as missing for another Qt minor" ;; esac
   if [ "$status" -eq 0 ]; then ok "setup ($asked) with another Qt minor passes"; else bad "setup ($asked) with another Qt minor passes"; fi
 done
-rm -f "$log" "$co/.github/workflows/ci.yml"
+# A note never covers what is missing: beside the same Qt, a wasm-bindgen
+# of another version still fails setup --check, under missing.
 rm -f "$log"
+stub wasm-bindgen 'echo "wasm-bindgen 0.0.1"'
+ENVS="SETUP_LOG=$log LJOS=$stubs/ljos LJOS_WEB=$scratch/web-for-qt QT_INSTALL_QML=$scratch/qt-new/qml usage_check=true" call 'bash mise-tasks/setup'
+noted="${said#*setup notes:}"
+missing="${noted#*setup is missing:}"
+noted="${noted%%setup is missing:*}"
+case "$noted" in *"Qt 6.12.1 found ($scratch/qt-new/bin/qtpaths6)"*) ok "setup --check with another Qt minor and a tool missing still notes the Qt" ;; *) bad "setup --check with another Qt minor and a tool missing still notes the Qt" ;; esac
+case "$missing" in
+  "$said") bad "and lists the missing tool under missing" ;;
+  *"no wasm-bindgen 9.9.9"*) ok "and lists the missing tool under missing" ;;
+  *) bad "and lists the missing tool under missing" ;;
+esac
+if [ "$status" -eq 1 ]; then ok "and fails"; else bad "and fails"; fi
+stub wasm-bindgen 'echo "wasm-bindgen 9.9.9"'
+rm -f "$log" "$co/.github/workflows/ci.yml"
 stub wasm-bindgen 'echo "wasm-bindgen 0.0.1"'
 ENVS="SETUP_LOG=$log LJOS=$stubs/ljos usage_check=true" call 'bash mise-tasks/setup'
 refuses "setup --check with something missing fails, naming it" "no wasm-bindgen 9.9.9"
