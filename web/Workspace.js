@@ -35,8 +35,11 @@ export function serve(studio) {
 // on a page with no preview.
 export const workspaces = () => [...live].map((queue) => queue.self);
 
-// The view's parts, as the workspace's properties.
-const PARTS = ["documents", "generation", "text", "layers", "selected", "selection", "inspector", "states", "roles", "flow", "palette", "done", "undone", "problem", "previews", "theme", "tokens", "comments", "leases", "blank", "chosen", "toolkit", "offers", "assets", "signals"];
+// The view's parts, as the workspace's properties, given in this order and
+// each settled before the next. `previews` comes before `documents`: the
+// documents panel's first look opens a lone document's preview only when
+// `previews` is already true (the native block sets them in the same order).
+const PARTS = ["previews", "documents", "generation", "text", "layers", "selected", "selection", "inspector", "states", "roles", "flow", "palette", "done", "undone", "problem", "theme", "tokens", "comments", "leases", "blank", "chosen", "toolkit", "offers", "assets", "signals"];
 
 export const Workspace = defineType("Workspace", QtObject, {
   properties: {

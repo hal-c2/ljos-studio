@@ -1071,6 +1071,10 @@ fn publish(engine: &Engine, ws: ObjectId, view: View, seen: u64) {
         .filter(|p| p.doc == view.doc)
         .map(|p| p.generation)
         .filter(|&g| resized || other_doc || (g != picture && g != fetched));
+    // Before the documents: setting them runs the documents panel's first
+    // look, which opens a lone document's preview only when `previews` is
+    // already true. Set after, the first publish left the canvas empty.
+    let _ = cx.set(Workspace::PREVIEWS, view.previews);
     let _ = cx.set(Workspace::BLANK, view.blank);
     give(
         &cx,
@@ -1188,7 +1192,6 @@ fn publish(engine: &Engine, ws: ObjectId, view: View, seen: u64) {
     );
     let _ = cx.set(Workspace::PREVIEW, preview);
     let _ = cx.set(Workspace::PROBLEM, view.problem);
-    let _ = cx.set(Workspace::PREVIEWS, view.previews);
     let _ = cx.set(Workspace::THEME, view.theme);
     give(
         &cx,

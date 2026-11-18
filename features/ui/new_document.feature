@@ -63,6 +63,24 @@ Feature: A person starts a document in Studio's window
     And Studio's window shows the project
     Then the window shows the document "Main.qml"
 
+  # `mise run dev` on a fresh clone opened on Main.qml with an empty canvas
+  # that said "Open a document to preview it".
+  @preview
+  Scenario: A project of one document opens on its preview
+    Given the file "Main.qml":
+      """qml
+      import QtQuick
+
+      Rectangle {
+          id: root
+          width: 400; height: 300
+          color: "white"
+      }
+      """
+    And Studio's window shows the project
+    Then the canvas has a frame "Desktop" of 1280 by 800
+    And the frame "Desktop" shows a picture of the preview
+
   Scenario: A project of several documents waits to be told which
     Given the file "Main.qml":
       """qml
