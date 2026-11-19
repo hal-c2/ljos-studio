@@ -476,12 +476,13 @@ done
 rm -f "$log"
 stub wasm-bindgen 'echo "wasm-bindgen 0.0.1"'
 ENVS="SETUP_LOG=$log LJOS=$stubs/ljos LJOS_WEB=$scratch/web-for-qt QT_INSTALL_QML=$scratch/qt-new/qml usage_check=true" call 'bash mise-tasks/setup'
-# Each section is read only when its heading is there; missing comes last.
-noted="" missing=""
-case "$said" in *"setup notes:"*"setup is missing:"*)
-  noted="${said#*setup notes:}"
-  missing="${noted#*setup is missing:}"
-  noted="${noted%%setup is missing:*}"
+# Each section is read only when its heading is a line of its own; missing
+# comes last.
+nl=$'\n' noted="" missing=""
+case "$nl$said" in *"${nl}setup notes:${nl}"*"${nl}setup is missing:${nl}"*)
+  noted="${said#*"${nl}setup notes:${nl}"}"
+  missing="${noted#*"${nl}setup is missing:${nl}"}"
+  noted="${noted%%"${nl}setup is missing:${nl}"*}"
   ;;
 esac
 case "$noted" in *"Qt 6.12.1 found ($scratch/qt-new/bin/qtpaths6)"*) ok "setup --check with another Qt minor and a tool missing still notes the Qt" ;; *) bad "setup --check with another Qt minor and a tool missing still notes the Qt" ;; esac
