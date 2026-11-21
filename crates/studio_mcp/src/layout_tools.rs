@@ -480,10 +480,8 @@ pub(crate) fn anchor(
     generation: Option<u64>,
     dry_run: bool,
 ) -> Result<ManyOut, SurfaceError> {
-    if pin.fill == Some(true) && pin.center_in == Some(true) {
-        return Err(SurfaceError::invalid_argument(
-            "`fill` and `centerIn` say different things",
-        ));
+    if let Some(why) = pin.disagreement() {
+        return Err(SurfaceError::invalid_argument(why));
     }
     if nodes.is_empty() {
         return Err(SurfaceError::invalid_argument("`anchor` needs `nodes`"));

@@ -961,10 +961,13 @@ of them, or a `*Layout` into another `*Layout`, writing only the type's name.
 Refused: `not_a_layout`, `other_family`, `says_other` (it says something the new
 kind has no member for, such as a Grid's `columns`), `locked`.
 
-`anchor` {nodes, fill?, centerIn?, sides?: {left, right, top, bottom}, target?}
-writes `anchors.*` and takes away the x, y, width and height that now disagree.
-A side's value is its margin, null takes it off; `fill` and `centerIn` take
-true or false. An axis let go of keeps its place from the preview when one is
+`anchor` {nodes, fill?, centerIn?, sides?: {left, right, top, bottom,
+horizontalCenter, verticalCenter}, target?} writes `anchors.*` and takes away
+the x, y, width and height that now disagree. A side's value is its margin
+(one equal to a number `anchors.margins` says writes none of its own), a
+centre line's its offset, and null takes either off; a centre line replaces the
+sides of its axis, and one asked of a `centerIn` keeps the other axis centred.
+`fill` and `centerIn` take true or false. An axis let go of keeps its place from the preview when one is
 running. `target` is `parent` (the default) or a sibling's id. Refused:
 `arranged` in a Row, Column, Grid, Flow or `*Layout`, saying what to use
 instead; `not_a_sibling`, `root`, `locked`.
