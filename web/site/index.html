@@ -2,10 +2,13 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Ljós site</title>
     <style>
-      html, body { margin: 0; height: 100%; }
-      #app { width: 100vw; height: 100vh; }
+      html, body { margin: 0; }
+      /* main.js gives #app the root's height, which may be taller than the
+         window: then the page scrolls as a document does. */
+      #app { width: 100%; height: 100vh; }
     </style>
   </head>
   <body>

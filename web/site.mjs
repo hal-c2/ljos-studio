@@ -135,9 +135,68 @@ check('no file of the site names "mocks/" or ".studio"', naming.length === 0, na
 // And the page does not show "Playing", which only the mock module says
 check('the page does not show "Playing"', !(await page.evaluate(() => document.body.innerText)).includes("Playing"));
 
+// And the site has no "images/unused.svg", which nothing names
+check('the site has no "images/unused.svg"', !files.includes("images/unused.svg"), files);
+
+// Then the page's title is "Media, from Studio"
+const head = await page.evaluate(() => ({
+  title: document.title,
+  description: document.querySelector('meta[name="description"]')?.content,
+  icon: document.querySelector('link[rel="icon"]')?.getAttribute("href"),
+}));
+check('the page\'s title is "Media, from Studio"', head.title === "Media, from Studio", head);
+// And the page's description is "A page Studio built"
+check('the page\'s description is "A page Studio built"', head.description === "A page Studio built", head);
+// And the page's icon is "images/logo.svg", a file of the site
+check(
+  'the page\'s icon is "images/logo.svg", a file of the site',
+  head.icon === "./images/logo.svg" && files.includes("images/logo.svg"),
+  { head, files },
+);
+
+// Then the page has a link "Read the docs" to "https://example.com/docs"
+const link = await page.evaluate(() =>
+  [...document.querySelectorAll("a")].map((a) => ({ text: a.innerText.trim(), href: a.getAttribute("href") })),
+);
+check(
+  'the page has a link "Read the docs" to "https://example.com/docs"',
+  link.some((a) => a.text === "Read the docs" && a.href === "https://example.com/docs"),
+  link,
+);
+
+// Then the page shows "Wide"
+const shows = (text) =>
+  page
+    .getByText(text, { exact: true })
+    .waitFor({ timeout: 2000 })
+    .then(() => true, () => false);
+check('the page shows "Wide"', await shows("Wide"), await page.evaluate(() => document.body.innerText));
+
+// Then the document is taller than the window
+const tall = await page.evaluate(() => ({ document: document.scrollingElement.scrollHeight, window: innerHeight }));
+check("the document is taller than the window", tall.document > tall.window, tall);
+// And a full-page picture of it is taller than the window
+const picture = await page.screenshot({ fullPage: true });
+const pictureHeight = picture.readUInt32BE(20);
+check("a full-page picture of it is taller than the window", pictureHeight > tall.window, { pictureHeight, ...tall });
+// When the reader turns the mouse wheel down
+await page.mouse.move(400, 300);
+await page.mouse.wheel(0, 1200);
+await page.waitForFunction(() => scrollY > 0, null, { timeout: 2000 }).catch(() => {});
+// Then the window has scrolled down
+const scrolled = await page.evaluate(() => scrollY);
+check("the window has scrolled down", scrolled > 0, { scrolled });
+// And the page shows "The end"
+const end = await page.getByText("The end", { exact: true }).evaluate((e) => {
+  const box = e.getBoundingClientRect();
+  return { top: box.top, bottom: box.bottom, window: innerHeight };
+}).catch((e) => e.message);
+check('the page shows "The end"', typeof end === "object", end);
+
 // When the page is made 390 by 844 pixels
+await page.evaluate(() => scrollTo(0, 0));
 await page.setViewportSize({ width: 390, height: 844 });
-// Then the entry's root is 390 by 844 pixels
+// Then the entry's root is 390 pixels wide and at least 844 tall
 // The browser sends its resize event on a later frame than the size changes.
 await page
   .waitForFunction(() => document.querySelector("#app > *").getBoundingClientRect().width === 390, null, { timeout: 2000 })
@@ -146,7 +205,9 @@ const root = await page.evaluate(() => {
   const box = document.querySelector("#app > *").getBoundingClientRect();
   return { width: box.width, height: box.height };
 });
-check("the entry's root is 390 by 844 pixels", root.width === 390 && root.height === 844, root);
+check("the entry's root is 390 pixels wide and at least 844 tall", root.width === 390 && root.height >= 844, root);
+// And the page shows "Narrow"
+check('the page shows "Narrow"', await shows("Narrow"), await page.evaluate(() => document.body.innerText));
 
 await browser.close();
 

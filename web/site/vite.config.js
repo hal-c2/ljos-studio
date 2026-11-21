@@ -1,6 +1,7 @@
 // A site from a Studio web export (`ljos-site.json`, DESIGN.md S6, the site
 // contract): ljos-web's compiler and Vite plugin over the bundle's files.
-// Studio's interim builder until ljos-web has one of its own (request 30).
+// Studio's builder (`build.mjs`) runs it; ljos-web's own `buildSite` makes a
+// page that cannot scroll as a document.
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { defineConfig } from "vite";
@@ -18,7 +19,10 @@ export default defineConfig({
       // The project's own modules are found by their qmldirs below the
       // bundle, wherever its entry is.
       args: ["--root", site],
-      standins: process.env.LJOS_DESIGN ? [process.env.LJOS_DESIGN] : [],
+      // Ljós's controls and Ljos.Design, ljos-web's own copy of them, as
+      // Studio's preview draws them, whatever Qt is installed: a site is
+      // built alike wherever Studio runs.
+      styles: "ljos",
     }),
   ],
   resolve: {
