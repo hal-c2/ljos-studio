@@ -83,9 +83,7 @@ Panel {
             color: Colors.text
             leftPadding: Spacing.sm
             topPadding: Spacing.xs
-            background: Rectangle {
-                color: Colors.surface
-            }
+            background: null
 
             Rectangle {
                 id: band
@@ -93,8 +91,9 @@ Panel {
                 property string marks: ""
                 visible: marks !== ""
                 width: area.width
+                // A tint of the accent behind the words, drawn over them.
                 color: Colors.accent
-                opacity: 0.2
+                opacity: 0.18
             }
 
             onTextChanged: {

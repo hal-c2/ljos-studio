@@ -1,22 +1,44 @@
-// Which of a sidebar's panels shows. The current tab is marked by a bar and
-// by weight, so it does not rest on colour alone.
+// Which of a sidebar's panels shows. The current tab is marked by a pill and
+// by weight, so it does not rest on colour alone; the pill slides between
+// tabs, and with reduced motion it is there at once while its colour fades.
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import Ljos.Design
 
-Rectangle {
+Item {
     id: strip
     required property var tabs
     property int current: 0
-    implicitHeight: 36
-    color: Colors.surface
+    implicitHeight: 40
 
-    RowLayout {
-        anchors.fill: parent
-        anchors.leftMargin: Spacing.xxs
-        anchors.rightMargin: Spacing.xxs
-        spacing: 0
+    // Under the current tab, behind its words.
+    Rectangle {
+        id: pill
+        readonly property Item under: row.children[strip.current] || null
+        x: row.x + (under ? under.x : 0)
+        y: (strip.height - height) / 2
+        width: under ? under.width : 0
+        height: 26
+        radius: 8
+        color: Colors.surfaceHover
+        visible: under !== null
+        Behavior on x {
+            enabled: !Motion.reduced
+            NumberAnimation { duration: Motion.moveSmallFrequent; easing.type: Easing.BezierSpline; easing.bezierCurve: Motion.easeInOut }
+        }
+        Behavior on width {
+            enabled: !Motion.reduced
+            NumberAnimation { duration: Motion.moveSmallFrequent; easing.type: Easing.BezierSpline; easing.bezierCurve: Motion.easeInOut }
+        }
+    }
+
+    Row {
+        id: row
+        anchors.left: parent.left
+        anchors.leftMargin: Spacing.xs
+        anchors.verticalCenter: parent.verticalCenter
+        spacing: 2
 
         Repeater {
             model: strip.tabs
@@ -28,42 +50,37 @@ Rectangle {
                 text: modelData
                 checkable: true
                 checked: shown
+                hoverEnabled: true
                 Accessible.name: text + " tab"
                 Accessible.role: Accessible.PageTab
-                implicitHeight: 36
-                implicitWidth: label.implicitWidth + 2 * Spacing.xs
+                implicitHeight: 26
+                implicitWidth: label.implicitWidth + 2 * Spacing.sm
                 onClicked: {
                     strip.current = index
                     // A click toggles a checkable button and ends its binding.
                     checked = Qt.binding(() => shown)
                 }
 
-                Text {
-                    id: label
-                    anchors.centerIn: parent
-                    text: tab.text
-                    color: tab.shown || tab.hovered ? Colors.text : Colors.textMuted
-                    font.pixelSize: Typography.captionSize
-                    font.weight: tab.shown ? Typography.bodyStrongWeight : Typography.bodyWeight
+                background: Rectangle {
+                    radius: 8
+                    color: Colors.surfaceHover
+                    opacity: tab.hovered && !tab.shown ? 0.6 : 0
+                    border.width: tab.visualFocus ? 2 : 0
+                    border.color: Colors.focusRing
+                    Behavior on opacity {
+                        NumberAnimation { duration: Motion.enterSmallFrequent; easing.type: Easing.BezierSpline; easing.bezierCurve: Motion.easeOut }
+                    }
                 }
-                Rectangle {
-                    visible: tab.shown
-                    anchors.bottom: parent.bottom
-                    anchors.horizontalCenter: parent.horizontalCenter
-                    width: label.implicitWidth
-                    height: 2
-                    color: Colors.accent
+                contentItem: Text {
+                    id: label
+                    text: tab.text
+                    horizontalAlignment: Text.AlignHCenter
+                    verticalAlignment: Text.AlignVCenter
+                    color: tab.shown || tab.hovered ? Colors.text : Colors.textMuted
+                    font.pixelSize: Typography.bodySize
+                    font.weight: tab.shown ? Typography.bodyStrongWeight : Typography.bodyWeight
                 }
             }
         }
-        Item {
-            Layout.fillWidth: true
-        }
-    }
-    Rectangle {
-        anchors.bottom: parent.bottom
-        width: parent.width
-        height: 1
-        color: Colors.surfacePressed
     }
 }
