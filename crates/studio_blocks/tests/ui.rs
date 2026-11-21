@@ -4471,6 +4471,13 @@ fn problems_until(w: &mut UiWorld, count: usize, seconds: u64) -> StepResult {
     ))
 }
 
+#[then(regex = r#"^the window has no button "([^"]+)"$"#)]
+fn has_no_button(w: &mut UiWorld, name: String) -> StepResult {
+    let tree = w.window()?.tree();
+    find(&tree, &|n| n.name == name && n.role == "button")
+        .map_or(Ok(()), |_| Err(format!("a button {name:?}")))
+}
+
 /// Where the frame for `target` is drawn; its button and label share the name.
 fn frame_bounds(window: &Window, target: &str) -> Result<ljos::item::kurbo::Rect, String> {
     window

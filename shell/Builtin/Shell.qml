@@ -125,9 +125,11 @@ Item {
                             inset: Spacing.xxs
                             Layout.fillWidth: true
                             DocumentsPanel {
+                                id: documentsPanel
                                 workspace: workspace
                                 Layout.fillWidth: true
-                                Layout.preferredHeight: 150
+                                Layout.preferredHeight: documentsPanel.wants
+                                Layout.minimumHeight: documentsPanel.least
                             }
                         }
                         // Beside the documents: what the open one offers when it is a block.

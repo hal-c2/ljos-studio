@@ -1,6 +1,7 @@
 # Sources:
 #   docs/DOGFOOD.md (D11: seven rows and no scroll bar; D15: the new-property
 #   row keeps the old text)
+#   studio7 dogfood backlog P7-22 (the documents list is 4 rows tall)
 
 @ui
 Feature: The panels say what they hold and start clean
@@ -42,6 +43,11 @@ Feature: The panels say what they hold and start clean
     Given 40 more documents
     And Studio's window shows the project
     Then the documents panel shows a scroll bar
+
+  Scenario: Eight documents all show, with no scroll bar
+    Given 7 more documents
+    And Studio's window shows the project
+    Then the documents panel shows no scroll bar
 
   Scenario: A short list of documents has none
     Given Studio's window shows the project

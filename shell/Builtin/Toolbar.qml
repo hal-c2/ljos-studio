@@ -135,14 +135,15 @@ ToolBar {
         }
         // How it is shown: on live or mocked data, in which look, with its code.
         Well {
+            // One name, read and seen alike; whether it is on is its check.
             IconButton {
                 readonly property bool mocked: bar.preview !== null && bar.preview.state === "mocked"
                 icon_: "data"
-                text: mocked ? "Mocked data" : "Live data"
+                text: "Mocked data"
                 checkable: true
                 checked: mocked
-                Accessible.name: "Data"
-                Accessible.description: mocked ? "Mocked" : "Live"
+                Accessible.description: mocked ? "The canvas runs on the project's mocks"
+                    : "The canvas runs on live data"
                 enabled: bar.preview !== null
                 onClicked: {
                     bar.open(bar.preview.target.toLowerCase(), mocked ? "live" : "mocked")
@@ -150,9 +151,11 @@ ToolBar {
                     checked = Qt.binding(() => mocked)
                 }
             }
+            // Studio's own look: the canvas shows the app as the app has it.
             IconButton {
                 icon_: Colors.dark ? "sun" : "moon"
-                text: Colors.dark ? "Light look" : "Dark look"
+                text: Colors.dark ? "Studio in light" : "Studio in dark"
+                Accessible.description: "The canvas keeps the app's own look"
                 onClicked: Colors.dark = !Colors.dark
             }
             IconButton {
