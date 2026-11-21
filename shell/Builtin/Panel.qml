@@ -1,5 +1,6 @@
 // A pane of the shell. Its title is left to whoever shows it, a tab or a
-// header, unless `headed`; a reader always hears it.
+// header, unless `headed`; a reader always hears it. It lies on a card the
+// shell draws, so by default it has no ground of its own.
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
@@ -9,7 +10,7 @@ Pane {
     id: panel
     required property string title
     property bool headed: false
-    property color fill: Colors.surface
+    property color fill: "transparent"
     default property alias content: body.data
 
     padding: 0
@@ -26,8 +27,8 @@ Pane {
         Label {
             visible: panel.headed
             text: panel.title
-            font.pixelSize: Typography.captionSize
-            font.weight: Typography.bodyStrongWeight
+            font.pixelSize: Typography.subtitleSize
+            font.weight: Typography.subtitleWeight
             color: Colors.text
             padding: Spacing.xs
             Layout.fillWidth: true
