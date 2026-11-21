@@ -85,21 +85,21 @@ Panel {
             Field {
                 id: nameField
                 width: maker.width - newButton.width - newBlock.width - 2 * Spacing.xxs
-                placeholderText: "Name"
+                placeholderText: "New document"
                 Accessible.name: "New document's name"
                 onAccepted: newButton.clicked()
             }
-            TextButton {
+            IconButton {
                 id: newButton
-                text: "New"
-                Accessible.name: "New document"
+                icon_: "plus"
+                text: "New document"
                 enabled: nameField.text !== ""
                 onClicked: panel.make(nameField.text)
             }
-            TextButton {
+            IconButton {
                 id: newBlock
-                text: "Block"
-                Accessible.name: "New block"
+                icon_: "component"
+                text: "New block"
                 enabled: nameField.text !== ""
                 onClicked: panel.make(nameField.text, true)
             }
@@ -151,12 +151,12 @@ Panel {
                 spacing: Spacing.xxs
                 Icon {
                     name: "document"
-                    color: entry.highlighted ? Colors.accent : Colors.textMuted
+                    color: entry.highlighted ? Colors.link : Colors.textMuted
                 }
                 Text {
                     text: entry.text
                     color: Colors.text
-                    font.pixelSize: Typography.captionSize
+                    font.pixelSize: Typography.bodySize
                     font.weight: entry.highlighted ? Typography.bodyStrongWeight : Typography.bodyWeight
                     elide: Text.ElideRight
                     Layout.fillWidth: true
