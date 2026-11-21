@@ -15,6 +15,9 @@ ColumnLayout {
     // How far the body sits in from the panel's edges; a list whose rows
     // carry their own padding takes less.
     property int inset: Spacing.sm
+    // Between the parts of the body. A body whose rows keep a note line
+    // under them takes none: that line is the gap.
+    property int gap: Spacing.xs
     default property alias content: body.data
     spacing: 0
 
@@ -62,7 +65,7 @@ ColumnLayout {
     ColumnLayout {
         id: body
         visible: section.open
-        spacing: Spacing.xs
+        spacing: section.gap
         Layout.fillWidth: true
         Layout.fillHeight: true
         Layout.leftMargin: section.inset
