@@ -132,7 +132,7 @@ Feature: A person places a 3D view from the palette
     When the person sets "eulerRotation" to "Qt.vector3d(0, 60, 0)" in the inspector
     Then the file "Main.qml" says "eulerRotation: Qt.vector3d(0, 60, 0)"
 
-  Scenario: A literal row still refuses an expression typed by mistake
+  Scenario: A literal row still refuses a word that names nothing
     Given the person has searched the palette for "View3D"
     And the person has placed "View3D" from the palette
     And the person has selected "Model" in the layers panel

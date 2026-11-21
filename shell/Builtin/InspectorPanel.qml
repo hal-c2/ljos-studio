@@ -1,7 +1,9 @@
 // The selected object's bindings as written, and the properties it declares
-// without a value. A value is set as a literal (`binding_set`, as written); "Bind" sets
-// it as an expression (`binding_set`). The last row adds a property not yet
-// bound. A colour has a swatch, which opens a picker.
+// without a value. What is typed is read for what it is, whatever the row held:
+// a literal is written as typed, a colour's name or `#` in a colour row as
+// text, a design role or any expression bound; a bare word that names nothing
+// is asked about. "Bind" binds whatever is typed. The last row adds a property
+// not yet bound; × takes one away. A colour has a swatch, which opens a picker.
 //
 // Below them, its states (`state_edit`): one is picked to edit the values
 // it changes and the condition that turns it on, or to give it a
@@ -327,10 +329,6 @@ Panel {
         }
     }
 
-    // A row that holds an expression stays one when it is edited: a vector
-    // or an enumeration has no literal to fall back on. Only the row's own
-    // kind, as the parser read it, decides, so a typo in a literal row is
-    // still refused, not bound.
     function enter(row, text) {
         // An id is no value: what names it elsewhere has to follow it.
         refusal.at = row.name
@@ -346,13 +344,9 @@ Panel {
             }
             return
         }
-        if (picked === "" && row.name !== "id" && row.expression === true && !workspace.literal(text.trim()))
-            bind(row.name, text)
-        else {
-            heldText = (row.value === "" && row.notText !== true) || String(row.value).startsWith('"')
-            set(row.name, text)
-            heldText = false
-        }
+        heldText = (row.value === "" && row.notText !== true) || String(row.value).startsWith('"')
+        set(row.name, text)
+        heldText = false
     }
     // The row being entered held a string or nothing yet, so a word typed in it
     // may be meant as one.
@@ -369,14 +363,20 @@ Panel {
             return
         }
         // The parser's word on what QML reads as a literal, and written as typed:
-        // `0x20` stays `0x20`. An expression is for "Bind".
-        // Only a colour starts with `#`: no expression does, so it needs no asking.
+        // `0x20` stays `0x20`. Only a colour starts with `#`: no expression
+        // does. A colour's name in a colour row is that colour, not a name
+        // the file could mean, so neither needs asking.
         const trimmed = text.trim()
-        const typed = /^#[0-9a-fA-F]+$/.test(trimmed) ? '"' + trimmed + '"' : trimmed
-        // One of the property's own values needs no asking either.
-        if (!workspace.literal(typed) && choices(name).indexOf(typed) < 0) {
+        const colour = /^#[0-9a-fA-F]+$/.test(trimmed)
+            || (isColourRow(name) && /^[A-Za-z]+$/.test(trimmed) && writesColour(trimmed))
+        const typed = colour ? '"' + trimmed + '"' : trimmed
+        // One of the property's own values is written as it is too.
+        const literal = workspace.literal(typed) || choices(name).indexOf(typed) >= 0
+        // A bare word is the one guess left: text, or a name mistyped. One
+        // that names nothing the file has is asked about, not written.
+        if (!literal && /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(typed) && !names(typed)) {
             // The field goes back to what the file says; what was typed is
-            // kept for the button under the refusal, which is what it asks for.
+            // kept for the offers under the refusal, which is what they write.
             offered = {name: name, value: typed, asText: heldText}
             refusal.text = typed + " is not a literal: bind it as an expression"
             offeredSays = refusal.text
@@ -390,6 +390,55 @@ Panel {
             name: name,
             value: typed === "null" ? null : typed
         })
+    }
+    // Whether a bare word names something an expression here could read: an
+    // object's id, the parent, a property of the selected object, or one of
+    // the language's own.
+    function names(word) {
+        if (["parent", "undefined", "NaN", "Infinity"].indexOf(word) >= 0)
+            return true
+        if (workspace.layers.some(l => l.id === word))
+            return true
+        return workspace.inspector.some(r => r.name === word) || offer(word) !== null
+    }
+    function isColourRow(name) {
+        const row = workspace.inspector.find(r => r.name === name)
+        return (row !== undefined && row.colour === true) || /(^|\.)[a-zA-Z]*[cC]olor$/.test(name)
+    }
+    // The colours a value paints, at most two: what it writes, or the roles
+    // and colours an expression names, as the theme has them, for a person
+    // to see what it picks between. What only the running app can work out
+    // (`Qt.rgba(width, 0, 0, 1)`) paints nothing here.
+    function paints(written) {
+        const t = written.trim()
+        const own = writtenText(t)
+        if (own !== null)
+            return own !== "" && writesColour(own) ? [own] : []
+        if (t === "" || workspace.literal(t))
+            return []
+        const out = []
+        const add = c => {
+            if (c !== "" && out.indexOf(c) < 0)
+                out.push(c)
+        }
+        const parts = /Colors\.[A-Za-z]+|"([^"\\]*)"|'([^'\\]*)'|Qt\.(rgba|hsla|hsva)\(([^()]*)\)/g
+        let m
+        while ((m = parts.exec(t)) !== null) {
+            if (m[0].startsWith("Colors.")) {
+                add(tokenPaint(m[0]))
+            } else if (m[3] !== undefined) {
+                const n = m[4].split(",").map(a => a.trim())
+                if ((n.length === 3 || n.length === 4) && n.every(a => isNumber(a))) {
+                    const v = n.map(Number)
+                    add(String(Qt[m[3]](v[0], v[1], v[2], v.length === 4 ? v[3] : 1)))
+                }
+            } else {
+                const quoted = m[1] !== undefined ? m[1] : m[2]
+                if (quoted !== "" && writesColour(quoted))
+                    add(quoted)
+            }
+        }
+        return out.slice(0, 2)
     }
 
     // The state picked to edit; empty for none. It belongs to the object
@@ -1274,8 +1323,10 @@ Panel {
                             TextButton {
                                 id: swatch
                                 readonly property var kind: panel.colourRow(row.modelData, value.text)
-                                // What it paints: written, or the role it names as the theme has it.
-                                readonly property string shown: kind.paint !== "" ? kind.paint : panel.tokenPaint(value.text)
+                                // What it paints: written, or what an expression picks between,
+                                // the second as the swatch's right half.
+                                readonly property var paints: panel.paints(value.text)
+                                readonly property string shown: paints.length > 0 ? paints[0] : ""
                                 visible: kind.picker
                                 Layout.preferredWidth: 28
                                 Layout.minimumWidth: 28
@@ -1286,7 +1337,7 @@ Panel {
                                 topPadding: 0
                                 bottomPadding: 0
                                 Accessible.name: "Pick " + row.modelData.name
-                                Accessible.description: kind.paint
+                                Accessible.description: paints.join(" or ")
                                 onClicked: picker.show(row.modelData, value.text, this)
                                 background: null
                                 contentItem: Rectangle {
@@ -1294,6 +1345,23 @@ Panel {
                                     color: swatch.shown || "transparent"
                                     border.width: 1
                                     border.color: swatch.hovered ? Colors.border : Colors.surfacePressed
+                                    Rectangle {
+                                        visible: swatch.paints.length > 1
+                                        x: parent.width / 2
+                                        width: parent.width / 2
+                                        height: parent.height
+                                        radius: 6
+                                        color: visible ? swatch.paints[1] : "transparent"
+                                        border.width: 1
+                                        border.color: parent.border.color
+                                        // Square where the halves meet.
+                                        Rectangle {
+                                            width: 6
+                                            height: parent.height - 2
+                                            y: 1
+                                            color: parent.color
+                                        }
+                                    }
                                     // No paint known: a slash, as an empty well.
                                     Rectangle {
                                         visible: swatch.shown === ""
@@ -1349,6 +1417,33 @@ Panel {
                                 onClicked: {
                                     refusal.at = row.modelData.name
                                     panel.bind(row.modelData.name, value.text)
+                                }
+                            }
+                            // What is written, taken away. A declaration's own value
+                            // is the property, and the code's to take; an id is
+                            // what others name the object by.
+                            // Its place is kept where there is nothing to take, so
+                            // the fields of every row end at one edge.
+                            Item {
+                                implicitWidth: remove.implicitWidth
+                                implicitHeight: remove.implicitHeight
+                                IconButton {
+                                    id: remove
+                                    anchors.fill: parent
+                                    visible: row.modelData.value !== "" && row.modelData.declared !== true
+                                        && row.modelData.name !== "id" && panel.picked === ""
+                                    icon_: "close"
+                                    text: "Remove " + row.modelData.name
+                                    onClicked: {
+                                        refusal.at = row.modelData.name
+                                        refusal.text = ""
+                                        panel.ask("binding_set", {
+                                            doc: panel.workspace.doc,
+                                            node: {node: panel.workspace.selected},
+                                            name: row.modelData.name,
+                                            value: null
+                                        })
+                                    }
                                 }
                             }
                         }

@@ -76,6 +76,10 @@ pub struct Shown {
     /// A row with nothing written whose declared type takes no string.
     #[serde(rename = "notText", skip_serializing_if = "std::ops::Not::not")]
     pub not_text: bool,
+    /// A `property` declaration's own value: taking it away takes the
+    /// property, which only the code does.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub declared: bool,
 }
 
 /// The selected object's place in [`View::text`], in UTF-16 units, as a
@@ -524,6 +528,7 @@ impl Studio {
                     colour: b.colour,
                     expression: !b.literal,
                     not_text: false,
+                    declared: b.declared,
                 })
                 .collect();
             // Declared without a value (`property var stack`): nothing is
@@ -536,6 +541,7 @@ impl Studio {
                         colour: node.colours.contains(name),
                         expression: false,
                         not_text: node.not_text.contains(name),
+                        declared: true,
                     });
                 }
             }
@@ -549,6 +555,7 @@ impl Studio {
                         value: String::new(),
                         colour: false,
                         expression: false,
+                        declared: false,
                     });
                 }
             }
