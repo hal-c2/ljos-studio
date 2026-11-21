@@ -239,6 +239,20 @@ Popup {
         return rows
     }
 
+    // A line's kind, as lines() begins it, and its mark. The build's own
+    // lines have none.
+    readonly property var kinds_: [
+        ["Left out", "close"], ["Picture for shared links", "image"], ["Entry", "play"],
+        ["Manifest", "data"], ["Page", "window"], ["Icon", "image"], ["File", "document"],
+        ["Block", "component"], ["Theme", "sun"], ["Link", "link"], ["Import", "down"]
+    ]
+    function lineKind(row) {
+        for (const k of kinds_)
+            if (row.startsWith(k[0] + " "))
+                return {word: k[0], icon: k[1]}
+        return {word: "", icon: "check"}
+    }
+
     function manifestName(a) {
         return a.manifest.target === "web" ? "ljos-site.json" : "ljos-bundle.json"
     }
@@ -307,7 +321,6 @@ Popup {
     height: Math.min(target === "web" ? 720 : 560, parent.height - Spacing.lg * 2)
     modal: true
     focus: true
-    padding: Spacing.sm
     closePolicy: Popup.CloseOnEscape
     onClosed: settle.stop()
 
@@ -381,9 +394,16 @@ Popup {
         visible: false
     }
 
+    padding: Spacing.md
+    // The window behind dims, so the dialog is the one thing to read.
+    Overlay.modal: Rectangle {
+        color: Qt.rgba(0, 0, 0, Colors.dark ? 0.5 : 0.25)
+    }
     background: Rectangle {
-        color: Colors.surface
-        border.color: Colors.border
+        radius: 12
+        color: Colors.surfaceRaised
+        border.width: 1
+        border.color: Colors.surfacePressed
     }
 
     contentItem: ColumnLayout {
@@ -392,52 +412,118 @@ Popup {
         Accessible.role: Accessible.Pane
         Accessible.name: "Export panel"
 
-        Label {
-            text: "Export"
-            font.pixelSize: Typography.titleSize
-            font.weight: Typography.bodyStrongWeight
-            color: Colors.text
+        RowLayout {
+            spacing: Spacing.xs
             Layout.fillWidth: true
+            Layout.bottomMargin: Spacing.xs
+            Rectangle {
+                implicitWidth: 28
+                implicitHeight: 28
+                radius: 8
+                color: Colors.surfaceSelected
+                Icon {
+                    anchors.centerIn: parent
+                    name: "export"
+                    color: Colors.link
+                }
+            }
+            Label {
+                text: "Export"
+                font.pixelSize: Typography.titleSize
+                font.weight: Typography.titleWeight
+                color: Colors.text
+                Layout.fillWidth: true
+            }
         }
 
-        RowLayout {
-            spacing: Spacing.sm
+        // The two kinds as one segmented switch; each is still a radio
+        // button to a reader.
+        Rectangle {
+            implicitHeight: 32
+            radius: 8
+            color: Colors.surfaceHover
+            Layout.fillWidth: true
             ButtonGroup {
                 id: kinds
             }
-            RadioButton {
-                id: native_
-                text: "Native app"
-                Accessible.name: text
-                checked: true
-                ButtonGroup.group: kinds
-                onClicked: {
-                    panel.buildReady = false
-                    panel.check()
+            RowLayout {
+                anchors.fill: parent
+                anchors.margins: 2
+                spacing: 2
+                Repeater {
+                    model: [
+                        {kind: "native", text: "Native app", icon: "window"},
+                        {kind: "web", text: "Web site", icon: "code"}
+                    ]
+                    delegate: RadioButton {
+                        id: kindButton
+                        required property var modelData
+                        text: modelData.text
+                        Accessible.name: text
+                        checked: modelData.kind === "native"
+                        ButtonGroup.group: kinds
+                        hoverEnabled: true
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        onClicked: {
+                            panel.buildReady = false
+                            panel.check()
+                        }
+                        onCheckedChanged: if (modelData.kind === "web") web.checked = checked
+                        indicator: Item { }
+                        contentItem: Row {
+                            spacing: Spacing.xxs
+                            Item {
+                                width: (kindButton.availableWidth - mark.width - word.implicitWidth - Spacing.xxs) / 2
+                                height: 1
+                            }
+                            Icon {
+                                id: mark
+                                name: kindButton.modelData.icon
+                                size: 14
+                                color: kindButton.checked ? Colors.link : Colors.textMuted
+                                anchors.verticalCenter: parent.verticalCenter
+                            }
+                            Text {
+                                id: word
+                                text: kindButton.text
+                                color: kindButton.checked ? Colors.text : Colors.textMuted
+                                font.pixelSize: Typography.bodySize
+                                font.weight: kindButton.checked ? Typography.bodyStrongWeight : Typography.bodyWeight
+                                anchors.verticalCenter: parent.verticalCenter
+                                Accessible.ignored: true
+                            }
+                        }
+                        background: Rectangle {
+                            radius: 6
+                            color: kindButton.checked ? Colors.surfaceRaised
+                                : kindButton.hovered ? Colors.surfacePressed : "transparent"
+                            border.width: kindButton.checked ? 1 : 0
+                            border.color: Colors.surfacePressed
+                            Behavior on color { ColorAnimation { duration: Motion.enterSmallFrequent; easing.type: Motion.easeOut } }
+                        }
+                    }
                 }
             }
-            RadioButton {
-                id: web
-                text: "Web site"
-                Accessible.name: text
-                ButtonGroup.group: kinds
-                onClicked: {
-                    panel.buildReady = false
-                    panel.check()
-                }
-            }
+        }
+        // Which kind is picked, for the rest of the panel to read.
+        QtObject {
+            id: web
+            property bool checked: false
         }
 
         RowLayout {
             spacing: Spacing.xs
             Label {
                 text: "Entry"
-                color: Colors.text
+                color: Colors.textMuted
+                font.pixelSize: Typography.captionSize
                 // As wide as the page's widest label, so the fields line up.
                 Layout.preferredWidth: widest.implicitWidth
             }
-            ComboBox {
+            Choice {
                 id: entries
+                leadIcon: "document"
                 model: panel.workspace.documents
                 currentIndex: panel.workspace.documents.indexOf(panel.chosen)
                 Accessible.name: "Entry document"
@@ -453,11 +539,13 @@ Popup {
             spacing: Spacing.xs
             Label {
                 text: "Into"
-                color: Colors.text
+                color: Colors.textMuted
+                font.pixelSize: Typography.captionSize
                 Layout.preferredWidth: widest.implicitWidth
             }
             Field {
                 id: out
+                leadIcon: "document"
                 placeholderText: "build/" + panel.target
                 Accessible.name: "Output directory"
                 Layout.fillWidth: true
@@ -482,7 +570,8 @@ Popup {
 
             Label {
                 text: "Title"
-                color: Colors.text
+                color: Colors.textMuted
+                font.pixelSize: Typography.captionSize
             }
             Field {
                 id: title
@@ -495,7 +584,8 @@ Popup {
             Label {
                 id: widest
                 text: "Description"
-                color: Colors.text
+                color: Colors.textMuted
+                font.pixelSize: Typography.captionSize
             }
             Field {
                 id: description
@@ -507,7 +597,8 @@ Popup {
             }
             Label {
                 text: "Icon"
-                color: Colors.text
+                color: Colors.textMuted
+                font.pixelSize: Typography.captionSize
             }
             Field {
                 id: icon
@@ -525,7 +616,8 @@ Popup {
             }
             Label {
                 text: "Picture"
-                color: Colors.text
+                color: Colors.textMuted
+                font.pixelSize: Typography.captionSize
             }
             Field {
                 id: image
@@ -543,7 +635,8 @@ Popup {
             }
             Label {
                 text: "ljos-web"
-                color: Colors.text
+                color: Colors.textMuted
+                font.pixelSize: Typography.captionSize
             }
             Field {
                 id: builder
@@ -576,6 +669,11 @@ Popup {
             visible: text !== ""
             color: Colors.text
             wrapMode: Text.Wrap
+            padding: Spacing.xs
+            background: Rectangle {
+                radius: 6
+                color: Colors.surfaceSelected
+            }
             Accessible.role: Accessible.StaticText
             Accessible.name: text
             Layout.fillWidth: true
@@ -619,6 +717,7 @@ Popup {
             Accessible.role: Accessible.AlertMessage
             Accessible.name: text
             background: Rectangle {
+                radius: 6
                 color: Colors.danger
             }
             Layout.fillWidth: true
@@ -647,6 +746,7 @@ Popup {
             Accessible.role: Accessible.AlertMessage
             Accessible.name: text
             background: Rectangle {
+                radius: 6
                 color: Colors.danger
             }
             Layout.fillWidth: true
@@ -657,7 +757,14 @@ Popup {
             text: panel.next(panel.answer)
             visible: text !== ""
             color: Colors.text
+            font.family: "monospace"
+            font.pixelSize: Typography.captionSize
             wrapMode: Text.Wrap
+            padding: Spacing.xs
+            background: Rectangle {
+                radius: 6
+                color: Colors.surfaceHover
+            }
             Accessible.role: Accessible.StaticText
             Accessible.name: text
             Layout.fillWidth: true
@@ -667,6 +774,7 @@ Popup {
             id: files
             objectName: "exportFiles"
             clip: true
+            spacing: 2
             model: panel.buildSteps().concat(panel.lines(panel.answer))
             Accessible.role: Accessible.List
             Accessible.name: "Bundle contents"
@@ -680,41 +788,44 @@ Popup {
                 visible: files.contentHeight > files.height
             }
 
-            delegate: Label {
+            // The kind in a quiet column and a mark for it, then what it is.
+            // A line of the build's own, timed, has no kind and a tick.
+            delegate: RowLayout {
+                id: line
                 required property string modelData
+                readonly property var kind: panel.lineKind(modelData)
                 width: ListView.view.width
-                text: modelData
-                color: Colors.text
-                font.pixelSize: Typography.captionSize
-                elide: Text.ElideMiddle
+                spacing: Spacing.xs
                 Accessible.role: Accessible.StaticText
                 Accessible.name: modelData
+                Icon {
+                    name: line.kind.icon
+                    size: 14
+                    color: line.kind.word === "Left out" ? Colors.textMuted : Colors.link
+                }
+                Text {
+                    text: line.kind.word === "Picture for shared links" ? "Picture" : line.kind.word
+                    color: Colors.textMuted
+                    font.pixelSize: Typography.captionSize
+                    elide: Text.ElideRight
+                    Layout.preferredWidth: 52
+                    Accessible.ignored: true
+                }
+                Text {
+                    text: line.kind.word === "" ? line.modelData : line.modelData.slice(line.kind.word.length + 1)
+                    color: line.kind.word === "Left out" ? Colors.textMuted : Colors.text
+                    font.pixelSize: Typography.captionSize
+                    elide: Text.ElideMiddle
+                    Layout.fillWidth: true
+                    Accessible.ignored: true
+                }
             }
         }
 
+        // The way out on the left, the one thing to do on the right.
         RowLayout {
             spacing: Spacing.xs
-            TextButton {
-                text: "Check"
-                Accessible.name: text
-                enabled: panel.entry !== "" && !panel.busy
-                onClicked: panel.check()
-            }
-            TextButton {
-                text: "Write bundle"
-                Accessible.name: text
-                // A build reads the bundle this would replace.
-                enabled: panel.entry !== "" && !panel.busy && !panel.building
-                highlighted: true
-                onClicked: panel.run(false)
-            }
-            TextButton {
-                text: "Build and open"
-                Accessible.name: text
-                visible: panel.target === "web"
-                enabled: panel.entry !== "" && !panel.busy && !panel.building && panel.buildReady
-                onClicked: panel.build()
-            }
+            Layout.topMargin: Spacing.xs
             TextButton {
                 text: "Copy path"
                 Accessible.name: text
@@ -740,6 +851,29 @@ Popup {
                 text: "Close"
                 Accessible.name: text
                 onClicked: panel.close()
+            }
+            TextButton {
+                text: "Check"
+                Accessible.name: text
+                enabled: panel.entry !== "" && !panel.busy
+                onClicked: panel.check()
+            }
+            TextButton {
+                text: "Write bundle"
+                Accessible.name: text
+                // A build reads the bundle this would replace.
+                enabled: panel.entry !== "" && !panel.busy && !panel.building
+                accent: true
+                icon_: "export"
+                onClicked: panel.run(false)
+            }
+            // After the bundle, and only once a check finds the site can be built.
+            TextButton {
+                text: "Build and open"
+                Accessible.name: text
+                visible: panel.target === "web"
+                enabled: panel.entry !== "" && !panel.busy && !panel.building && panel.buildReady
+                onClicked: panel.build()
             }
         }
 
