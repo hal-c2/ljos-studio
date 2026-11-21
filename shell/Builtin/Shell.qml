@@ -37,6 +37,18 @@ Item {
         workspace: workspace
     }
 
+    Shortcut {
+        sequences: ["Ctrl+K", "Meta+K", "Ctrl+Shift+P"]
+        onActivated: commands.show()
+    }
+    CommandPalette {
+        id: commands
+        workspace: workspace
+        canvas: canvas
+        toolbar: toolbar
+        exporter: exporter
+    }
+
     ColumnLayout {
         anchors.fill: parent
         spacing: 0
@@ -107,6 +119,7 @@ Item {
                 }
 
                 CanvasPanel {
+                    id: canvas
                     workspace: workspace
                     recording: inspector.recording
                     onDoneRecording: inspector.pick("", "")
