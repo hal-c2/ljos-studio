@@ -1,0 +1,31 @@
+{
+  "Colors": {
+    "seedHue": 300,
+    "canvas": { "light": "#f2f2f5", "dark": "#0e0e11" },
+    "surface": { "light": "#fbfbfc", "dark": "#17171b" },
+    "surfaceRaised": { "light": "#ffffff", "dark": "#1f1f24" },
+    "surfaceHover": { "light": "#eeeef2", "dark": "#27272d" },
+    "surfacePressed": { "light": "#e4e4ea", "dark": "#303037" },
+    "surfaceSelected": { "light": "#eceaff", "dark": "#2b2552" },
+    "border": { "light": "#888893", "dark": "#6a6a75" },
+    "borderStrong": { "light": "#6c6c78", "dark": "#878792" },
+    "focusRing": { "light": "#6a4de6", "dark": "#9580ff" },
+    "accent": { "light": "#6a4de6", "dark": "#6d50ec" },
+    "accentHover": { "light": "#5b3ed6", "dark": "#6145df" },
+    "accentPressed": { "light": "#4d31bf", "dark": "#5438cc" },
+    "textOnAccent": "#ffffff",
+    "text": { "light": "#1c1c21", "dark": "#ededf2" },
+    "textMuted": { "light": "#5c5c68", "dark": "#a8a8b4" },
+    "textDisabled": { "light": "#8a8a96", "dark": "#71717c" },
+    "link": { "light": "#5638d0", "dark": "#b4a6ff" },
+    "info": "#00799c",
+    "textOnInfo": "#ffffff"
+  },
+  "Typography": {
+    "captionSize": 11, "captionLineHeight": 14,
+    "bodySize": 12, "bodyLineHeight": 16,
+    "bodyStrongSize": 12, "bodyStrongLineHeight": 16,
+    "subtitleSize": 13, "subtitleLineHeight": 18, "subtitleWeight": 600,
+    "titleSize": 15, "titleLineHeight": 20
+  }
+}

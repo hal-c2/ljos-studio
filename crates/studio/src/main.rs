@@ -26,6 +26,10 @@ use studio_preview::NativeHost;
 
 mod state;
 
+/// Studio's own look, light and dark: the theme its window has when the
+/// person has none, and the one a person's theme file starts as.
+const THEME: &str = include_str!("../theme.json");
+
 #[derive(Parser, Debug)]
 #[command(name = "studio", version, about)]
 struct Args {
@@ -50,7 +54,8 @@ struct Args {
     shell: Option<PathBuf>,
     /// The roles of `Ljos.Design` Studio's own window is drawn with, a
     /// theme file as `theme_set` writes one. Default:
-    /// `ljos-studio/theme.json` in the configuration directory.
+    /// `ljos-studio/theme.json` in the configuration directory. Without
+    /// one Studio uses its own; a watched window copies it there first.
     #[arg(long, value_name = "FILE", conflicts_with = "mcp")]
     theme: Option<PathBuf>,
     /// Serve no tools to agents while the window is open.
@@ -128,7 +133,12 @@ fn main() -> anyhow::Result<()> {
         std::fs::create_dir_all(dir).with_context(|| format!("making {}", dir.display()))?;
     }
     let ended = match shell {
-        Some(shell) => watched_window(server, &shell, theme, &state),
+        Some(shell) => {
+            if let Some(file) = &theme {
+                seed_theme(file)?;
+            }
+            watched_window(server, &shell, theme, &state)
+        }
         None => window(server, theme),
     };
     close_preview();
@@ -213,6 +223,10 @@ fn window(server: Arc<StudioServer>, theme: Option<PathBuf>) -> anyhow::Result<(
         Some(file) => read_theme(&file)?,
         None => None,
     };
+    let theme = match theme {
+        Some(theme) => theme,
+        None => builtin_theme()?,
+    };
     ljos::App::new("Ljós Studio")
         .size(1440.0, 900.0)
         .register(studio_blocks::register)
@@ -220,10 +234,8 @@ fn window(server: Arc<StudioServer>, theme: Option<PathBuf>) -> anyhow::Result<(
         .compiled(ljos::include_compiled!("shell.rs"))
         .root("Window")
         .run_with(move |setup| {
-            if let Some(theme) = &theme {
-                ljos_design_qml::theme::apply(setup.engine(), Some(theme))
-                    .map_err(|errors| -> ljos::SetupError { joined(&errors).into() })?;
-            }
+            ljos_design_qml::theme::apply(setup.engine(), Some(&theme))
+                .map_err(|errors| -> ljos::SetupError { joined(&errors).into() })?;
             // Before the root is made, so its workspace starts with the session.
             studio_blocks::serve(setup.engine(), server);
             setup
@@ -301,6 +313,28 @@ fn seed(dir: &Path) -> anyhow::Result<()> {
         dir.display()
     );
     Ok(())
+}
+
+/// Gives `file` a copy of Studio's theme when there is none, as [`seed`]
+/// does the shell: a watched window takes its roles from that file alone,
+/// so without the copy it would lose Studio's look, and a person who
+/// changes one role keeps the rest.
+fn seed_theme(file: &Path) -> anyhow::Result<()> {
+    if file.exists() {
+        return Ok(());
+    }
+    std::fs::write(file, THEME).with_context(|| format!("writing {}", file.display()))?;
+    eprintln!(
+        "studio: {} had no theme; it now has a copy of Studio's",
+        file.display()
+    );
+    Ok(())
+}
+
+/// The theme Studio ships ([`THEME`]).
+fn builtin_theme() -> anyhow::Result<ljos_design::theme::Theme> {
+    ljos_design::theme::parse("Studio's theme", THEME)
+        .map_err(|errors| anyhow::anyhow!(joined(&errors)))
 }
 
 /// Studio's own theme from `file`; none when there is no such file.
@@ -383,6 +417,23 @@ mod tests {
             granted_by(&["--mcp"]),
             CapSet::of([Cap::Inspect, Cap::Mutate])
         );
+    }
+
+    #[test]
+    fn the_theme_studio_ships_loads_and_keeps_its_contrast() {
+        let theme = builtin_theme().unwrap();
+        theme.check_contrast(theme.seed_hue()).unwrap();
+    }
+
+    #[test]
+    fn a_missing_theme_file_starts_as_studios_and_an_existing_one_is_kept() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("theme.json");
+        seed_theme(&file).unwrap();
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), THEME);
+        std::fs::write(&file, "{}").unwrap();
+        seed_theme(&file).unwrap();
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), "{}");
     }
 
     #[test]
