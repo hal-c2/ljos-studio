@@ -415,3 +415,185 @@ Feature: A project is exported for ljos-web to build a site from
         """
         <!doctype html>
         """
+
+  # A public site is everything it holds: a file nothing names would be
+  # served to whoever asks for it, and weighs on the upload. The code is
+  # kept whole, since a page may load another by a name it makes.
+  Rule: A site holds the project's code and only the files its code names
+
+    Scenario: A file nothing names is left out of the site, saying why
+      Given the file "images/unused.svg":
+        """
+        <svg xmlns="http://www.w3.org/2000/svg" width="4" height="4"/>
+        """
+      And the file "notes.txt":
+        """
+        Ideas for the next page
+        """
+      When the agent calls the tool "export" with:
+        """json
+        {"entry": "Shell.qml", "target": "web"}
+        """
+      Then the answer's "/manifest/left_out" has the entry:
+        """json
+        {"path": "images/unused.svg", "why": "nothing the site's code names"}
+        """
+      And the answer's "/manifest/left_out" has the entry:
+        """json
+        {"path": "notes.txt", "why": "nothing the site's code names"}
+        """
+      And the answer's "/manifest/files" has 5 entries
+      And the file "build/web/images/logo.svg" exists
+      And the file "build/web/images/unused.svg" does not exist
+
+    Scenario: The pictures of a directory the code names by part of a path are in the site
+      Given the file "icons/play.svg":
+        """
+        <svg xmlns="http://www.w3.org/2000/svg" width="4" height="4"/>
+        """
+      And the file "icons/stop.svg":
+        """
+        <svg xmlns="http://www.w3.org/2000/svg" width="4" height="4"/>
+        """
+      And the file "Shell.qml":
+        """qml
+        import QtQuick
+        import App.Media
+
+        Column {
+            Player { id: player1 }
+            Image { source: "icons/" + (player1.playing ? "stop" : "play") + ".svg" }
+        }
+        """
+      When the agent calls the tool "export" with:
+        """json
+        {"entry": "Shell.qml", "target": "web", "dry_run": true}
+        """
+      Then the answer's "/manifest/files" has the entry:
+        """json
+        {"path": "icons/play.svg", "bytes": 64}
+        """
+      And the answer's "/manifest/files" has the entry:
+        """json
+        {"path": "icons/stop.svg", "bytes": 64}
+        """
+      And the answer's "/manifest/left_out" has the entry:
+        """json
+        {"path": "images/logo.svg", "why": "nothing the site's code names"}
+        """
+
+    Scenario: A native bundle still holds every file, since an app may read one by a path it makes
+      Given the file "notes.txt":
+        """
+        Ideas for the next page
+        """
+      When the agent calls the tool "export" with:
+        """json
+        {"entry": "Shell.qml", "dry_run": true}
+        """
+      Then the answer's "/manifest/files" has the entry:
+        """json
+        {"path": "notes.txt", "bytes": 24}
+        """
+
+    Scenario: The answer counts the manifest among the files it writes
+      When the agent calls the tool "export" with:
+        """json
+        {"entry": "Shell.qml", "target": "web", "dry_run": true}
+        """
+      Then the answer's "/files" is 5
+      And the answer's "/writes" is 6
+
+  Rule: A site has a title, a description and pictures of its own
+
+    Scenario: The project's site.json gives the page its title, description and icon
+      Given the file "site.json":
+        """json
+        {"title": "Media", "description": "Plays one source", "icon": "images/logo.svg"}
+        """
+      When the agent calls the tool "export" with:
+        """json
+        {"entry": "Shell.qml", "target": "web"}
+        """
+      Then the answer's "/manifest/page" is {"title": "Media", "description": "Plays one source", "icon": "images/logo.svg"}
+      And the answer's "/manifest/left_out" has the entry:
+        """json
+        {"path": "site.json", "why": "the page's title, description and pictures, which the manifest's page holds"}
+        """
+      And the file "build/web/site.json" does not exist
+
+    Scenario: An export given the page writes it into the project's site.json
+      When the agent calls the tool "export" with:
+        """json
+        {"entry": "Shell.qml", "target": "web", "page": {"title": "Media", "image": "images/logo.svg"}}
+        """
+      Then the answer's "/manifest/page" is {"title": "Media", "image": "images/logo.svg"}
+      And the file "site.json" is:
+        """json
+        {
+          "title": "Media",
+          "image": "images/logo.svg"
+        }
+        """
+
+    Scenario: A dry run shows the page it was given and writes no site.json
+      When the agent calls the tool "export" with:
+        """json
+        {"entry": "Shell.qml", "target": "web", "dry_run": true, "page": {"title": "Media"}}
+        """
+      Then the answer's "/manifest/page/title" is "Media"
+      And the file "site.json" does not exist
+
+    Scenario: A picture of the page that is no file of the site is refused
+      When the agent calls the tool "export" with:
+        """json
+        {"entry": "Shell.qml", "target": "web", "page": {"icon": ".studio/review.json"}}
+        """
+      Then the agent is refused with "invalid_argument"
+      And the refusal's "/details/kind" is "page_file"
+      And the refusal's "/details/path" is ".studio/review.json"
+      And the file "site.json" does not exist
+      And the file "build/web/ljos-site.json" does not exist
+
+  # Building needs ljos-web's compiler, runtime and bundler, which Studio
+  # finds (DESIGN.md S6, as built: Studio builds the site); these say what
+  # happens without them, which needs none of them to run.
+  Rule: Studio builds the site when asked, and says what it lacks first
+
+    Scenario: A build without ljos-web says what is missing and writes nothing
+      Given the studio tools are connected with the capabilities "inspect, mutate, fs, run"
+      When the agent calls the tool "export" with:
+        """json
+        {"entry": "Shell.qml", "target": "web", "build": true, "ljos_web": "no-ljos-web"}
+        """
+      Then the agent is refused with "unavailable"
+      And the refusal's "/details/kind" is "no_site_builder"
+      And the refusal's "/details/missing/0" contains "no-ljos-web"
+      And the file "build/web/ljos-site.json" does not exist
+
+    Scenario: Checking a build gives a verdict and writes nothing
+      Given the studio tools are connected with the capabilities "inspect, mutate, fs, run"
+      When the agent calls the tool "export" with:
+        """json
+        {"entry": "Shell.qml", "target": "web", "dry_run": true, "build": true, "ljos_web": "no-ljos-web"}
+        """
+      Then the answer's "/build/ready" is false
+      And the answer's "/build/missing/0" contains "no-ljos-web"
+      And the file "build/web/ljos-site.json" does not exist
+
+    Scenario: Building a site runs a program, which needs the run capability
+      When the agent calls the tool "export" with:
+        """json
+        {"entry": "Shell.qml", "target": "web", "build": true}
+        """
+      Then the agent is refused with "capability_denied"
+      And the file "build/web/ljos-site.json" does not exist
+
+    Scenario: Only a web export is built
+      Given the studio tools are connected with the capabilities "inspect, mutate, fs, run"
+      When the agent calls the tool "export" with:
+        """json
+        {"entry": "Shell.qml", "build": true}
+        """
+      Then the agent is refused with "invalid_argument"
+      And the refusal's "/details/kind" is "build_target"

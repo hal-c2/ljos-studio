@@ -4,10 +4,10 @@
 #   ljos-web README.md at bf49026 (`qmlc`, its Vite plugin, `mount`)
 #
 # Run by `mise run export:web:check` (`web/site.mjs`): Studio exports
-# `web/site/project` for the web, `mise run export:web:build` builds the
-# site with ljos-web's `qmlc` and Vite plugin, and headless Chromium loads
-# it from a plain static server. It needs an ljos-web checkout, so neither
-# ledger runs it.
+# `web/site/project` for the web and builds the site itself (the tool
+# `export` with `build`, through ljos-web's `qmlc` and Vite plugin), and
+# headless Chromium loads it from a plain static server. It needs an
+# ljos-web checkout, so neither ledger runs it.
 
 @web @disk
 Feature: A web export becomes a site any static server serves
@@ -18,8 +18,7 @@ Feature: A web export becomes a site any static server serves
 
   Background:
     Given the project "web/site/project", whose entry "Shell.qml" uses its own module "App.Media", "Ljos.Design" and a picture
-    And it is exported with the tool "export" and the target "web"
-    And the site is built from "build/web" with `mise run export:web:build`
+    And it is exported with the tool "export", the target "web" and "build": true
 
   Scenario: The site shows the entry's text and picture
     When the site is opened from a static server, below a path of its own
@@ -37,10 +36,35 @@ Feature: A web export becomes a site any static server serves
     Then no file of the site names "mocks/" or ".studio"
     And the page does not show "Playing", which only the mock module says
 
+    And the site has no "images/unused.svg", which nothing names
+
   # A window sizes the root it shows, so a breakpoint state turns on by the
   # window's width. A page is that window; the root kept its declared size, and
   # a phone saw the corner of a desktop page.
-  Scenario: The entry's root takes the page's size
+  Scenario: The entry's root takes the page's width, and a breakpoint turns on by it
     When the site is opened from a static server, below a path of its own
-    And the page is made 390 by 844 pixels
-    Then the entry's root is 390 by 844 pixels
+    Then the page shows "Wide"
+    When the page is made 390 by 844 pixels
+    Then the entry's root is 390 pixels wide and at least 844 tall
+    And the page shows "Narrow"
+
+  Scenario: The page has the project's title, description and icon
+    When the site is opened from a static server, below a path of its own
+    Then the page's title is "Media, from Studio"
+    And the page's description is "A page Studio built"
+    And the page's icon is "images/logo.svg", a file of the site
+
+  Scenario: A link on the page is a link
+    When the site is opened from a static server, below a path of its own
+    Then the page has a link "Read the docs" to "https://example.com/docs"
+
+  # The browser scrolls a document: its wheel, keys, scroll bar and "find"
+  # are the reader's own, and a full-page picture is the whole page. The
+  # root's Flickable scrolls in a window, where there is no document.
+  Scenario: A page taller than the window scrolls as a document
+    When the site is opened from a static server, below a path of its own
+    Then the document is taller than the window
+    And a full-page picture of it is taller than the window
+    When the reader turns the mouse wheel down
+    Then the window has scrolled down
+    And the page shows "The end"

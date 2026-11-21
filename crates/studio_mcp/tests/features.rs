@@ -1057,6 +1057,18 @@ fn refusal_is(w: &mut StudioWorld, pointer: String, want: String) -> StepResult 
         .ok_or_else(|| format!("`{pointer}` is {got}, not {want}"))
 }
 
+/// A refusal that names a path holds it as the system wrote it, which is
+/// absolute and the scenario's directory is not known to it.
+#[then(regex = r#"^the refusal's "(/[^"]*)" contains "([^"]*)"$"#)]
+fn refusal_contains(w: &mut StudioWorld, pointer: String, text: String) -> StepResult {
+    let error = w.refusal()?;
+    let got = at(&error, &pointer)?;
+    match got.as_str() {
+        Some(got) if got.contains(&text) => Ok(()),
+        _ => Err(format!("`{pointer}` is {got}, without {text:?}")),
+    }
+}
+
 /// Ljós's messages name a column and a contrast that are its to choose;
 /// a scenario pins what it means and leaves those to a pattern.
 #[then(regex = r#"^the refusal's message matches "(.+)"$"#)]
