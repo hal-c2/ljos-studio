@@ -52,7 +52,7 @@ documents: export), `run` (start previews). They are granted at launch with
 | 20 | `preview_state` | Read an object's state and a block's published state in the preview; set it when the block is mocked; hold an object in a state of its own (`show`); click, scroll, swipe, press keys or type first | run |
 | 21 | `preview_screenshot` | A PNG of the preview (≤ 1280 px), or its outline as text | inspect |
 | 22 | `preview_events` | Since a cursor: opened, reloaded (with ms), reload failed, logs, ended; or wait until its app rests saying something new (`wait_ms`, past `rests`), answering when it wakes next (`wake_in_ms`) and asking the app nothing meanwhile | inspect |
-| 23 | `export` | Write a bundle that `ljos run` starts (`native`) or that ljos-web builds a site from (`web`): the project's QML, theme, assets and own modules with a manifest, never mocks or `.studio/` | fs |
+| 23 | `export` | Write a bundle that `ljos run` starts (`native`) or a site's (`web`): the project's QML, theme, own modules and the assets its code names, with a manifest, never mocks or `.studio/`; `build` makes the site with ljos-web and serves it | fs (`build`: run) |
 | 24 | `review` | Add, reply to, resolve, reopen or list design review comments on objects, kept in `.studio/` | inspect (writing: mutate) |
 | 25 | `node_arrange` | What a canvas gesture does: `geometry` (boxes, what a drag does, siblings), `place` (`record` writes into a state), `align`, `copy`, `paste`, `duplicate`, `remove`, `component_extract` (below), `wrap`, `unwrap`, `relayout`, `anchor`; each edit is one undo step, all or none | inspect; mutate to edit |
 
@@ -624,13 +624,17 @@ fitting its screen. The answer and the window's preview say `fit`.
   the few a trigger is for. `node_inspect` lists them, marked `change`.
 ## Export and review (S6)
 
-`export {entry, target?, out?, dry_run?}` (`fs`) writes a bundle of the
+`export {entry, target?, out?, dry_run?, page?, build?, open?, ljos_web?, qmlc?}`
+(`fs`; `build` also `run`) writes a bundle of the
 project below its `build/` (`build/native` by default) and answers `out`,
 `path` (the same, absolute),
 `files` and `bytes` (totals that stay true when a long manifest is cut
-short in the answer), the `manifest`, `written` (false for `dry_run`),
+short in the answer), `writes` (what a real export writes: the files and
+the manifest, so a panel's "Would write" is what "Wrote" says), the
+`manifest`, `written` (false for `dry_run`),
 `replaces` (whether `out` held a bundle before the call, which a real export
-swaps out) and `ms`. The bundle holds every file
+swaps out), `ms` (the export's own time; a build's steps say theirs) and,
+with `build`, `build`. The bundle holds every file
 of the project except `.studio/`, the top-level `mocks/`, hidden files,
 `build/`, `target/`, `node_modules/` and unfinished writes, and beside them
 `ljos-bundle.json`:
@@ -656,9 +660,47 @@ instead (DESIGN.md S6, the site contract), which a site builder reads:
 | `modules` | The project's own modules, `module` and `qmldir` |
 | `imports` | The modules the documents import that are not the project's, sorted |
 | `ljos_web` | The ljos-web commit they were checked against |
+| `page` | The page's `title`, `description`, `icon` (the tab's) and `image` (a shared link's), when it has any |
 
-It has no `run`. `mise run export:web:build build/web` builds the site
-with an ljos-web checkout.
+It has no `run`. A site holds only what its code reaches: every document,
+script and `qmldir`, the theme, the page's pictures, and each other file a
+string in the code names (`"images/logo.svg"`), or a directory or the
+start of a path a name is made from (`"icons/" + name + ".svg"` keeps
+`icons/`). Every other file is in `left_out` with "nothing the site's code
+names", so a picture nobody uses is not shipped.
+
+`page` is kept in the project's `site.json` (written by a real export that
+is given one, read by one that is not; it is in `left_out` itself, since the
+manifest holds it). Its `icon` and `image` are paths of the project's
+files: one that is not a file of the site is refused (`invalid_argument`,
+`page_file`, `details.path`), as is a `site.json` that is not a page
+(`page`) and a `page` or `build` for `native` (`page_target`,
+`build_target`).
+
+`build: true` (needs `run`) builds the site from the bundle it just wrote
+into `<out>-site` (`build/web-site`) and serves it on this machine over
+loopback; `open: true` asks the system's browser to open it. Studio carries
+its own builder (`web/site/`: a Vite build with ljos-web's plugin, whose
+page has the head `page` gives and scrolls as a document) but not ljos-web,
+which it finds, never downloads (DESIGN.md S6, as built):
+
+| What | Looked for, in order |
+|---|---|
+| ljos-web, with its packages installed (`pnpm install`) | `ljos_web`; `LJOS_WEB`; `ljos-web` beside the studio binary or in its `../share`; `ljos-web` beside the project; `$XDG_DATA_HOME/ljos-web` |
+| its compiler | `qmlc`; `QMLC`; the checkout's `target/release` and `target/debug`; beside the studio binary; `PATH` |
+| node | `PATH` |
+
+The answer's `build` holds `ready`, what was found (`ljos_web`, `qmlc`,
+`node`), and after a build `site` (relative), `path` (absolute), `url`,
+`bytes`, `steps` (each `what`, in plain words, and its `ms`) and `opened`.
+With `dry_run`, `build` only says whether a build would find what it needs:
+`ready`, or `missing`, a plain-word list of what is not there and where it
+was looked for. A real export with `build` that lacks something is refused
+before anything is written (`unavailable`, `no_site_builder`,
+`details.missing`); a build that fails is refused with `not_actionable`
+(`build_failed`, with `details.step`, where it stopped, `why`, in plain
+words, `log`, the builder's whole output, and the `steps` before it). A
+build runs on its own thread, one at a time, and does not hold the project.
 
 A bundle is written beside its place and swapped in, so it is never half
 of two exports. Refusals: `capability_denied` without `fs`; `not_found`
@@ -680,10 +722,21 @@ than a bundle of either kind (a site built from one, say).
   starts it. Ljós's production bundles (ARCHITECTURE.md 12.2: hashed,
   signed, A/B) and AOT binaries need a build Studio does not make, so the
   manifest has no hashes or signature yet.
-- DECISION: a web export is a directory and its manifest, not a site:
-  compiling and bundling are ljos-web's, choosing the files and refusing
-  what has no face on the web are Studio's. `export:web:build` uses ljos-web's
-  compiler and Vite plugin until `ljos-web build-site` handles a themed bundle.
+- DECISION: a web export is a directory and its manifest, and `build` makes
+  the site from it: compiling and bundling are ljos-web's, choosing the
+  files, the page and refusing what has no face on the web are Studio's.
+  `mise run export:web:build` runs the same builder from a terminal.
+- DECISION: Studio finds ljos-web rather than shipping it: ljos-web has no
+  package to install and its compiler is a native program (CORE-GAPS
+  "ljos-web: no package a person installs"). The build downloads nothing.
+- DECISION: the builder is Studio's own rather than ljos-web's
+  `buildSite`, whose page is one window tall and cannot scroll as a
+  document; it lets a page's Flickable that fills the root grow with its
+  content and scroll the document instead.
+- DECISION: what a site holds is what its code reaches, for files other
+  than code: documents and scripts are kept whole, since a page may load
+  another by a name it makes. A string naming a directory or the start of a
+  path keeps everything below it rather than guessing.
 - DECISION: `export` writes no history entry; it changes no document.
 
 `review {action, doc?, node?, comment?, text?, author?}` keeps design
@@ -939,7 +992,8 @@ own because the list stays at 25 tools.
   → `review` (`resolve`) once an edit answers one.
 - **ship:** `export` with `dry_run` → mend what it refuses → `export` →
   start the bundle with its manifest's `run`; for the web, `export` with
-  `target: "web"` and build the site from `build/web`.
+  `target: "web"`, `page`, `build` and `dry_run` → mend what `missing`
+  says → the same without `dry_run` (and `open`) → `build.url`.
 
 ## What a write refuses because the file would not load
 

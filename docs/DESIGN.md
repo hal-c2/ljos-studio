@@ -976,9 +976,10 @@ Measured in a release build on the reference desktop:
 project, the same refusals, `left_out` and link rules, and a manifest for a
 site builder instead of for `ljos run` (`features/project/export-web.feature`).
 ljos-web compiles, bundles and runs; Studio chooses the files and refuses
-what has no face on the web. `mise run export:web:build <bundle> [out]` builds
-the site with an ljos-web checkout until ljos-web has a builder of its own,
-and `mise run export:web:check` holds the result to
+what has no face on the web. Studio builds the site itself (`export`'s
+`build`, the panel's "Build and open"; below, "Studio builds the site"), and
+`mise run export:web:build <bundle> [out]` runs the same builder from a
+terminal, and `mise run export:web:check` holds the result to
 `features/web/site.feature` in headless Chromium.
 
 **What ljos-web bf49026 can do** (evidence, M3): `qmlc --root DIR` compiles
@@ -1063,7 +1064,8 @@ bundle has where the system makes no links, so `import "alias"` resolves on
 the page too. Links that fan out and meet again would copy a directory once
 per way down, which doubles with every level, so past 10,000 entries reached
 through links (each link followed and each file placed) the export is
-refused rather than written. DECISION: Studio's interim builder is a task
+refused rather than written. DECISION (since replaced: "Studio builds the
+site" below): Studio's interim builder is a task
 (`export:web:build`) over ljos-web's own compiler and plugin, not code in a
 crate, so it is gone when request 30 lands; it copies only the listed files,
 asks for Qt only when the site imports the controls, and replaces only a
@@ -1096,12 +1098,90 @@ contentful paint 60–72 ms in headless Chromium, the entry's text shown by
 panel lists the files with sizes, blocks, theme, links, imports and
 `left_out` with reasons, and says so when the answer's size cap cut those
 lists short; "Write bundle" exports for real and shows the output, the
-manifest's `run` command (native) or `mise run export:web:build <path>` (web),
+manifest's `run` command (native) or, for the web, what "Build and open" does,
 and "Copy path", both with the answer's absolute `path`. A refusal shows the
 tool's message, in the panel only: its calls leave the window's error line be. The panel keeps the last answer and refusal from `Workspace`'s
 `answered`/`refused`. `Workspace` changed in three ways: the window's calls
 carry `fs`, `export` calls are no gesture for its error line, and a call whose
 job panics is refused to whoever waits for it. `features/ui/export.feature`.
+
+#### As built: Studio builds the site (P7c-3)
+
+A person makes a website in Studio and opens it in their browser without a
+terminal. `features/ui/export.feature`, `features/project/export-web.feature`,
+`features/web/site.feature`.
+
+- **The build.** `export` with `build` (needs `run`) writes `build/web`,
+  then builds it into `build/web-site` with the builder Studio carries
+  (`web/site/`: `build.mjs`, the page's `index.html` and `main.js`, and
+  `vite.config.js`, compiled into `studio_mcp`). It unpacks them into
+  `build/.site-work`, links ljos-web's packages beside them and runs
+  `node build.mjs`. The builder prints a `step` line as each part starts
+  and `fail` in plain words before it stops, and Studio answers those
+  steps with their times. It then serves the site over loopback (a
+  browser runs no module script from `file://`; the server answers only
+  its own `Host`) and, with `open`, asks the system's browser to open the
+  URL. The answer holds the site's `path` and `url` (MCP.md, "Export and
+  review").
+- **Found, not shipped.** ljos-web has no package to install, and its
+  compiler is a native program (CORE-GAPS, "ljos-web: no package a person
+  installs"), so Studio finds a checkout with its packages installed and
+  its `qmlc` (order in MCP.md), says what it lacks and where it looked,
+  and downloads nothing. A dry run with `build` says only that, which is
+  the panel's verdict.
+- **A site, not an app in a page.** The page's title, description, icon
+  and picture for shared links are the project's `site.json`, written by
+  an export given `page` and read by one that is not. The builder writes
+  them into the head (`<title>`, `description`, `og:*`, `rel=icon`) and
+  copies the two pictures, since Vite does not read the head.
+  - A link is a block, `Site/Link.qml` (the panel's "Add a Link block"):
+    an item with `Accessible.role: Accessible.Link` that calls
+    `Qt.openUrlExternally`. ljos-web renders that role as an `<a href>`,
+    and Ljós opens the URL in the browser.
+  - The page is as wide as the window and as tall as its root's content,
+    so it scrolls as a document: the browser's scroll bar, keys, find,
+    and a full-page screenshot taller than the window. A Flickable that
+    fills the root grows with its content and does not scroll inside it.
+    A root whose content grows with its own height falls back to the
+    window's height after a few fits.
+  - Breakpoints read `root.width` as before.
+- **Honest counts.** A site holds what its code reaches: documents,
+  scripts and qmldirs whole, the theme, the page's pictures, and files a
+  string names (a directory or path prefix keeps what is below it). The
+  rest is in `left_out` ("nothing the site's code names"). The answer's
+  `writes` counts the files and the manifest, so the panel's "Would
+  write 4 files" is the "Wrote 4 files" that follows, and a picture
+  nothing names is not shipped.
+- **The panel** (`shell/Builtin/ExportPanel.qml`). For the web it has
+  fields for the page (Title, Description, Icon, Shared) and the ljos-web
+  folder, all filled from the dry run's `manifest.page` until edited. Its
+  verdict reads "Ready to write", "Ready to write and to build", or "Ready
+  to write; to build the site here Studio needs: …".
+  - "Build and open" is enabled only when the check is ready. It runs
+    through `Workspace.aside` and shows the steps, then "Built the site,
+    … It is served at <url>", or the failure with where it stopped and
+    the log's path.
+  - "Copy path" copies the built site's path.
+- DECISION: find ljos-web, do not ship it. There is nothing to ship
+  until ljos-web publishes a package with its compiler (request 30 still
+  stands), and fetching one at build time would make a build depend on
+  the network.
+- DECISION: Studio's own builder rather than ljos-web's `buildSite`. Its
+  page is one window tall (CORE-GAPS, "ljos-web: `buildSite`'s page can't
+  scroll as a document"), and it writes no head. `main.js` lets the
+  reader's wheel reach the document through ljos-web's private `$node`
+  until a Flickable that is not `interactive` stops holding it.
+- DECISION: the build runs on a deferred thread through
+  `Workspace.aside`, one at a time, and does not hold the project, so the
+  window stays live while Vite works. Its steps are reported when it
+  ends, not as they happen. `ms` is the export's own time.
+- DECISION: reachability applies to files other than code. A page may
+  load another page by a name it makes up, so code is never left out.
+- DECISION: the panel has one ljos-web field and no compiler field. The
+  compiler lives with the checkout, or it is `QMLC` or the MCP's `qmlc`.
+- DECISION: no check of the found ljos-web's commit against the
+  manifest's `ljos_web`. A checkout has no rev to read without git, and
+  the build fails in plain words when a module is missing.
 
 The tool's answer gained `replaces` (whether `out` already held a bundle),
 and `path` (`out` as an absolute path), so the warning is the tool's word and
