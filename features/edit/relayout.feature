@@ -1,13 +1,16 @@
 # Sources:
 #   docs/MCP.md (`node_arrange`, layout tools)
 #   Qt Quick docs: Row, Column, Grid, Flow; RowLayout, ColumnLayout, GridLayout
+#   studio7 dogfood backlog P7-21 (the root is a bare Item with no fill and
+#   no type change)
 
 Feature: A layout is turned into another kind of layout
   Three texts in a Row don't fit a phone, and taking them out and putting them
   in a new Flow would lose the Row's place, its id and what reads it. `relayout`
   writes only the type's name. A positioner turns into a positioner and a
   layout into a layout: the children of one are placed by their own numbers,
-  of the other by what they say of `Layout`.
+  of the other by what they say of `Layout`. A plain Item turns into a
+  Rectangle, which can be given a fill, and back.
 
   Background:
     Given the file "Main.qml":
@@ -66,6 +69,35 @@ Feature: A layout is turned into another kind of layout
     Then the file "Main.qml" contains "ColumnLayout {"
     And the file "Main.qml" does not contain "RowLayout {"
 
+  Scenario: A plain Item turns into a Rectangle, which can be given a fill
+    When the agent calls the tool "node_arrange" with:
+      """json
+      {"action": "relayout", "doc": "Main.qml", "nodes": [{"id": "root"}], "name": "Rectangle"}
+      """
+    Then the file "Main.qml" contains "Rectangle {"
+    And the file "Main.qml" does not contain "Item {"
+    When the agent calls the tool "binding_set" with:
+      """json
+      {"doc": "Main.qml", "node": {"id": "root"}, "name": "color", "value": "\"white\""}
+      """
+    Then the file "Main.qml" contains "color: \"white\""
+
+  Scenario: A Rectangle with a fill does not turn into an Item, which has none
+    Given the agent has called the tool "node_arrange" with:
+      """json
+      {"action": "relayout", "doc": "Main.qml", "nodes": [{"id": "root"}], "name": "Rectangle"}
+      """
+    And the agent has called the tool "binding_set" with:
+      """json
+      {"doc": "Main.qml", "node": {"id": "root"}, "name": "color", "value": "\"white\""}
+      """
+    When the agent calls the tool "node_arrange" with:
+      """json
+      {"action": "relayout", "doc": "Main.qml", "nodes": [{"id": "root"}], "name": "Item"}
+      """
+    Then the agent is refused with "not_actionable"
+    And the refusal's "/details/kind" is "says_other"
+
   Scenario Outline: What would not load, or would move the children, is refused
     When the agent calls the tool "node_arrange" with:
       """json
@@ -77,6 +109,7 @@ Feature: A layout is turned into another kind of layout
     Examples:
       | node  | kind      | why          |
       | root  | Row       | not_a_layout |
+      | cards | Item      | not_a_layout |
       | cards | Rectangle | not_a_layout |
       | cards | RowLayout | other_family |
       | table | Row       | says_other   |

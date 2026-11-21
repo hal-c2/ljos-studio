@@ -957,9 +957,10 @@ or anchor reads `parent`), `needs_preview` (its anchors or an expression put it
 where only a run knows, and no preview is showing), `root`, `locked`.
 
 `relayout` {nodes: [one], name} turns a Row, Column, Grid or Flow into another
-of them, or a `*Layout` into another `*Layout`, writing only the type's name.
+of them, a `*Layout` into another `*Layout`, or an Item into a Rectangle (which
+can be given a fill) and back, writing only the type's name.
 Refused: `not_a_layout`, `other_family`, `says_other` (it says something the new
-kind has no member for, such as a Grid's `columns`), `locked`.
+kind has no member for, such as a Grid's `columns` or a Rectangle's `color`), `locked`.
 
 `anchor` {nodes, fill?, centerIn?, sides?: {left, right, top, bottom,
 horizontalCenter, verticalCenter}, target?} writes `anchors.*` and takes away
