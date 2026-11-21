@@ -100,14 +100,14 @@ Popup {
             out.push(row("Zoom to 100%", "Ctrl+1", "Show the frame at its real size", () => cv.actualSize()))
             out.push(row("Zoom to fit", "Ctrl+0", "Fit the frame into the canvas", () => cv.fitNow()))
             out.push(row("Fit all frames", "Shift+1", "Fit every frame shown into the canvas", () => cv.fitAll()))
-            out.push(row("Zoom in", "Ctrl+=", "", () => cv.zoomBy(1)))
-            out.push(row("Zoom out", "Ctrl+-", "", () => cv.zoomBy(-1)))
+            out.push(row("Zoom in", "Ctrl+=", "One step closer, about the middle", () => cv.zoomBy(1)))
+            out.push(row("Zoom out", "Ctrl+-", "One step back, about the middle", () => cv.zoomBy(-1)))
             out.push(row(cv.sideBySide ? "Show one frame" : "Show the frames side by side", "",
                          "Every target's frame on the canvas", () => { cv.sideBySide = !cv.sideBySide }))
-            out.push(row("Select tool", "V", "", () => cv.useTool("select")))
+            out.push(row("Select tool", "V", "Click to pick, drag to move", () => cv.useTool("select")))
             out.push(row("Hand tool", "H", "Drag to move the view", () => cv.useTool("hand")))
-            out.push(row("Draw rectangle", "R", "", () => cv.useTool("Rectangle")))
-            out.push(row("Draw text", "T", "", () => cv.useTool("Text")))
+            out.push(row("Draw rectangle", "R", "Drag out a Rectangle", () => cv.useTool("Rectangle")))
+            out.push(row("Draw text", "T", "Click to place a Text", () => cv.useTool("Text")))
             out.push(row(cv.playing ? "Stop playing" : "Play", "", "Clicks go to the running app", () => cv.useTool("play")))
             if (ws.chosen.length > 0) {
                 for (const a of [["left", "Left"], ["hcenter", "Centre"], ["right", "Right"],
