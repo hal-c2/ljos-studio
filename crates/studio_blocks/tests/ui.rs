@@ -3884,14 +3884,15 @@ fn frame_moved_by(w: &mut UiWorld, target: String, dx: f64, dy: f64) -> StepResu
 }
 
 #[when(
-    regex = r#"^the person zooms in with Ctrl and the wheel over the frame "([^"]+)" at (\d+), (\d+)$"#
+    regex = r#"^the person zooms (in|out) with Ctrl and the wheel over the frame "([^"]+)" at (\d+), (\d+)$"#
 )]
-fn ctrl_wheel(w: &mut UiWorld, target: String, x: f64, y: f64) -> StepResult {
+fn ctrl_wheel(w: &mut UiWorld, way: String, target: String, x: f64, y: f64) -> StepResult {
     let window = w.window()?;
     let before = frame_bounds(window, &target)?;
     let at = frame_point(window, &target, x, y)?;
     let mut driver = window.stage.drive();
-    let mut turned = WheelEvent::notches(at.x, at.y, 0.0, 1.0, driver.now());
+    let notches = if way == "in" { 1.0 } else { -1.0 };
+    let mut turned = WheelEvent::notches(at.x, at.y, 0.0, notches, driver.now());
     turned.modifiers = ljos_drive::parse_modifiers("Ctrl")?;
     driver.send_wheel(&turned);
     driver.settle().map_err(drive_error)?;
@@ -3902,12 +3903,14 @@ fn ctrl_wheel(w: &mut UiWorld, target: String, x: f64, y: f64) -> StepResult {
     Ok(())
 }
 
-#[then(regex = r#"^the frame "([^"]+)" grew, with its point under the pointer still there$"#)]
-fn zoomed_about_pointer(w: &mut UiWorld, target: String) -> StepResult {
+#[then(
+    regex = r#"^the frame "([^"]+)" (grew|shrank), with its point under the pointer still there$"#
+)]
+fn zoomed_about_pointer(w: &mut UiWorld, target: String, way: String) -> StepResult {
     let before = w.frame_before.ok_or("no place noted")?;
     let at = w.pointer_was.ok_or("no pointer noted")?;
     let now = frame_bounds(w.window()?, &target)?;
-    if now.width() <= before.width() {
+    if (now.width() > before.width()) != (way == "grew") || now.width() == before.width() {
         return Err(format!("the frame went from {before:?} to {now:?}"));
     }
     let along =
@@ -3944,7 +3947,8 @@ fn frame_kept_size(w: &mut UiWorld, target: String) -> StepResult {
 #[when("the person zooms in with the button")]
 fn zooms_in(w: &mut UiWorld) -> StepResult {
     w.frame_before = Some(frame_bounds(w.window()?, "Desktop")?);
-    clicks_button(w, "Zoom in".to_owned())
+    clicks_button(w, "Zoom in".to_owned())?;
+    finished_moving(w)
 }
 
 #[then(regex = r#"^the middle of the view shows the same place of the frame "([^"]+)"$"#)]
@@ -3970,13 +3974,346 @@ fn zoom_kept_middle(w: &mut UiWorld, target: String) -> StepResult {
     Ok(())
 }
 
-#[when(regex = r"^the person zooms in with the button (\d+) times$")]
-fn zooms_in_times(w: &mut UiWorld, times: u32) -> StepResult {
+#[when(regex = r"^the person zooms (in|out) with the button (\d+) times$")]
+fn zooms_in_times(w: &mut UiWorld, way: String, times: u32) -> StepResult {
     w.frame_before = Some(frame_bounds(w.window()?, "Desktop")?);
+    let button = if way == "in" { "Zoom in" } else { "Zoom out" };
     for _ in 0..times {
-        clicks_button(w, "Zoom in".to_owned())?;
+        clicks_button(w, button.to_owned())?;
+        // A click on the way eases from wherever the one before had got to.
+        w.window()?.stage.drive().advance(30).map_err(drive_error)?;
     }
+    finished_moving(w)
+}
+
+// ------------------------------------------------- the canvas's view
+
+#[when("the person turns the wheel over the canvas holding Shift")]
+fn shift_wheel_over_canvas(w: &mut UiWorld) -> StepResult {
+    let window = w.window()?;
+    let before = frame_bounds(window, "Desktop")?;
+    let at = before.center();
+    let mut driver = window.stage.drive();
+    let mut turned = WheelEvent::notches(at.x, at.y, 0.0, -1.0, driver.now());
+    turned.modifiers = ljos_drive::parse_modifiers("Shift")?;
+    driver.send_wheel(&turned);
+    driver.settle().map_err(drive_error)?;
+    window.stage.drive().advance(1000).map_err(drive_error)?;
+    window.rest()?;
+    w.frame_before = Some(before);
     Ok(())
+}
+
+#[then(regex = r#"^the frame "([^"]+)" has moved across and not down$"#)]
+fn moved_across(w: &mut UiWorld, target: String) -> StepResult {
+    let before = w.frame_before.ok_or("no place noted")?;
+    let now = frame_bounds(w.window()?, &target)?;
+    ((now.x0 - before.x0).abs() >= 1.0 && (now.y0 - before.y0).abs() < 0.5)
+        .then_some(())
+        .ok_or_else(|| format!("the frame went from {before:?} to {now:?}"))
+}
+
+#[given(regex = r#"^the person has noted where the frame "([^"]+)" is$"#)]
+fn notes_frame(w: &mut UiWorld, target: String) -> StepResult {
+    w.frame_before = Some(frame_bounds(w.window()?, &target)?);
+    Ok(())
+}
+
+#[when(regex = r"^(\d+) ms pass on the canvas$")]
+fn ms_pass(w: &mut UiWorld, ms: u64) -> StepResult {
+    let window = w.window()?;
+    window.stage.drive().advance(ms).map_err(drive_error)?;
+    window.rest()
+}
+
+/// Longer than any move of the view the design's motion gives.
+#[given("the canvas has finished moving")]
+#[when("the canvas has finished moving")]
+fn finished_moving(w: &mut UiWorld) -> StepResult {
+    let window = w.window()?;
+    window.stage.drive().advance(1000).map_err(drive_error)?;
+    window.rest()
+}
+
+#[then(regex = r#"^the frame "([^"]+)" is drawn wider than it was and narrower than (\d+)$"#)]
+fn drawn_between(w: &mut UiWorld, target: String, most: f64) -> StepResult {
+    let before = w.frame_before.ok_or("no place noted")?;
+    let now = frame_bounds(w.window()?, &target)?;
+    (now.width() > before.width() + 0.5 && now.width() < most - 0.5)
+        .then_some(())
+        .ok_or_else(|| format!("the frame went from {before:?} to {now:?}"))
+}
+
+#[then(
+    regex = r#"^the canvas, once it has finished moving, draws the frame "([^"]+)" at (\d+) by (\d+)$"#
+)]
+fn once_finished_draws(w: &mut UiWorld, target: String, width: f64, height: f64) -> StepResult {
+    finished_moving(w)?;
+    draws_frame_at(w, target, width, height)
+}
+
+#[then(regex = r#"^the canvas draws the frame "([^"]+)" at (\d+) by (\d+)$"#)]
+fn draws_frame_at(w: &mut UiWorld, target: String, width: f64, height: f64) -> StepResult {
+    let now = frame_bounds(w.window()?, &target)?;
+    ((now.width() - width).abs() < 1.0 && (now.height() - height).abs() < 1.0)
+        .then_some(())
+        .ok_or_else(|| format!("the frame is drawn at {now:?}"))
+}
+
+fn canvas_pane(window: &Window) -> Result<ljos::item::kurbo::Rect, String> {
+    window
+        .bounds(&|role, name| role == "pane" && name == "Canvas")
+        .ok_or_else(|| "no canvas pane".to_owned())
+}
+
+/// Within the canvas, and filling it along one side but for its margins.
+fn fits(window: &Window, drawn: ljos::item::kurbo::Rect) -> StepResult {
+    let pane = canvas_pane(window)?;
+    let inside = drawn.x0 >= pane.x0 - 0.5
+        && drawn.y0 >= pane.y0 - 0.5
+        && drawn.x1 <= pane.x1 + 0.5
+        && drawn.y1 <= pane.y1 + 0.5;
+    let fills = drawn.width() >= 0.6 * pane.width() || drawn.height() >= 0.6 * pane.height();
+    (inside && fills)
+        .then_some(())
+        .ok_or_else(|| format!("{drawn:?} is drawn in a canvas at {pane:?}"))
+}
+
+#[then(regex = r#"^the frame "([^"]+)" fits in the canvas$"#)]
+fn frame_fits(w: &mut UiWorld, target: String) -> StepResult {
+    let window = w.window()?;
+    fits(window, frame_bounds(window, &target)?)
+}
+
+/// Where each target's frame is drawn, the one shown and those beside it.
+fn frames_drawn(window: &Window) -> Vec<(String, ljos::item::kurbo::Rect)> {
+    let mut found = Vec::new();
+    window.stage.scene.accessibility_tree().walk(|_, _, d| {
+        let role = ljos_a11y::role_word(d.role);
+        let b = d.bounds;
+        let rect = ljos::item::kurbo::Rect::new(b.x0, b.y0, b.x1, b.y1);
+        let name = d.name.to_string();
+        if role == "image" && ["Desktop", "Tablet", "Phone"].contains(&name.as_str()) {
+            found.push((name, rect));
+        } else if role == "button"
+            && let Some(target) = name.strip_prefix("Show ")
+            && ["Desktop", "Tablet", "Phone"].contains(&target)
+        {
+            found.push((target.to_owned(), rect));
+        }
+    });
+    found
+}
+
+#[then(regex = r#"^the frames "([^"]+)" fit in the canvas$"#)]
+fn frames_fit(w: &mut UiWorld, targets: String) -> StepResult {
+    let window = w.window()?;
+    let drawn = frames_drawn(window);
+    let mut all: Option<ljos::item::kurbo::Rect> = None;
+    for target in targets.split(", ") {
+        let (_, rect) = drawn
+            .iter()
+            .find(|(name, _)| name == target)
+            .ok_or_else(|| format!("no frame {target:?} drawn; there are {drawn:?}"))?;
+        all = Some(all.map_or(*rect, |a| a.union(*rect)));
+    }
+    fits(window, all.ok_or("no frames named")?)
+}
+
+#[then("the frames do not overlap")]
+fn frames_apart(w: &mut UiWorld) -> StepResult {
+    let drawn = frames_drawn(w.window()?);
+    for (i, (a, ra)) in drawn.iter().enumerate() {
+        for (b, rb) in &drawn[i + 1..] {
+            if ra.intersect(*rb).area() > 0.0 {
+                return Err(format!("{a} at {ra:?} overlaps {b} at {rb:?}"));
+            }
+        }
+    }
+    (drawn.len() > 1)
+        .then_some(())
+        .ok_or_else(|| format!("only {drawn:?} drawn"))
+}
+
+#[then(regex = r#"^the canvas labels the frames "([^"]+)" from left to right$"#)]
+fn frames_labelled(w: &mut UiWorld, want: String) -> StepResult {
+    let window = w.window()?;
+    let mut labels = Vec::new();
+    for frame in frames_drawn(window) {
+        let below = if window.frame(&frame.0).is_ok() {
+            window.frame(&frame.0)?
+        } else {
+            ljos_drive::find(window.engine(), &[window.root], &format!("beside {}", frame.0))
+                .map_err(|_| format!("no frame beside for {}", frame.0))?
+        };
+        let label = ljos_drive::find_below(window.engine(), below, "frameLabel")
+            .ok_or_else(|| format!("the frame {} has no label", frame.0))?;
+        let text = window
+            .engine()
+            .read_by_name(label, "text")
+            .to_js_string()
+            .to_string();
+        labels.push((frame.1.x0, text));
+    }
+    labels.sort_by(|a, b| a.0.total_cmp(&b.0));
+    let got: Vec<String> = labels.into_iter().map(|(_, t)| t).collect();
+    (got.join(", ") == want)
+        .then_some(())
+        .ok_or_else(|| format!("the frames are labelled {got:?}"))
+}
+
+#[then(regex = r#"^the frame beside it for "([^"]+)" shows the picture it last drew$"#)]
+fn beside_shows_kept(w: &mut UiWorld, target: String) -> StepResult {
+    let window = w.window()?;
+    let beside = ljos_drive::find(window.engine(), &[window.root], &format!("beside {target}"))
+        .map_err(|_| format!("no frame beside for {target}"))?;
+    let picture = ljos_drive::find_below(window.engine(), beside, "keptPicture")
+        .ok_or("the frame beside has no picture")?;
+    let node = window
+        .stage
+        .scene
+        .node_of(picture)
+        .ok_or("the picture beside is not shown")?;
+    let image = window
+        .stage
+        .scene
+        .render_tree()
+        .node(node)
+        .and_then(|n| n.content())
+        .and_then(|c| {
+            c.ops().iter().find_map(|op| match op {
+                DrawOp::Image { image, .. } => Some(image.clone()),
+                _ => None,
+            })
+        })
+        .ok_or_else(|| {
+            format!(
+                "the frame beside draws no picture; the preview is {}",
+                window.read_json("preview")
+            )
+        })?;
+    // Drawn on that target: of its shape, not the one shown now.
+    let size = target_size(&target)?;
+    let (w_, h_) = (f64::from(image.width()), f64::from(image.height()));
+    ((w_ / h_ - size.0 / size.1).abs() < 0.02)
+        .then_some(())
+        .ok_or_else(|| format!("the picture beside is {w_} by {h_}"))
+}
+
+/// The size of a target, as its frame's label gives it.
+fn target_size(name: &str) -> Result<(f64, f64), String> {
+    match name {
+        "Desktop" => Ok((1280.0, 800.0)),
+        "Tablet" => Ok((820.0, 1180.0)),
+        "Phone" => Ok((390.0, 844.0)),
+        _ => Err(format!("no target {name:?}")),
+    }
+}
+
+fn zoom_field(window: &Window) -> Result<AccessibleNode, String> {
+    let tree = window.tree();
+    find(&tree, &|n| n.name == "Zoom" && n.key.is_some() && n.role != "button")
+        .cloned()
+        .ok_or_else(|| format!("no zoom field; the window holds {}", names(&tree)))
+}
+
+#[given(regex = r#"^the person has entered "([^"]*)" in the zoom field$"#)]
+#[when(regex = r#"^the person enters "([^"]*)" in the zoom field$"#)]
+fn enters_zoom(w: &mut UiWorld, text: String) -> StepResult {
+    let window = w.window()?;
+    let field = zoom_field(window)?;
+    window.enter(&field, &text)
+}
+
+#[then(regex = r#"^the zoom reads "([^"]*)"$"#)]
+fn zoom_reads(w: &mut UiWorld, want: String) -> StepResult {
+    let field = zoom_field(w.window()?)?;
+    (field.value == want)
+        .then_some(())
+        .ok_or_else(|| format!("the zoom reads {:?}", field.value))
+}
+
+#[then(regex = r"^the canvas's resize handles are (\d+) by (\d+) on the screen$")]
+fn handles_on_screen(w: &mut UiWorld, width: f64, height: f64) -> StepResult {
+    let window = w.window()?;
+    let overlay = overlay_part(window, "overlay")?;
+    let size = window
+        .engine()
+        .read_by_name(overlay, "handleSize")
+        .to_number();
+    // The overlay draws in its own pixels; the screen may show it bigger.
+    let across = window.engine().read_by_name(overlay, "width").to_number();
+    let drawn = frame_bounds(window, "Desktop")?.width();
+    let on_screen = size * drawn / across;
+    ((on_screen - width).abs() < 0.5 && (on_screen - height).abs() < 0.5)
+        .then_some(())
+        .ok_or_else(|| format!("the handles are {on_screen} across on the screen"))
+}
+
+// ------------------------------------------------- the command palette
+
+fn is_row(role: &str) -> bool {
+    role == "listitem" || role == "listboxoption"
+}
+
+/// The rows the command palette shows, top first.
+fn palette_rows(window: &Window) -> Result<Vec<AccessibleNode>, String> {
+    let tree = window.tree();
+    let list = find(&tree, &|n| n.name == "Commands" && n.role == "list")
+        .ok_or_else(|| format!("no command palette open; the window holds {}", names(&tree)))?;
+    let mut rows = Vec::new();
+    collect(list, &mut |n| {
+        if is_row(&n.role) && n.key.is_some() {
+            rows.push(n.clone());
+        }
+    });
+    let top = |n: &AccessibleNode| {
+        window
+            .bounds(&|role, name| is_row(role) && name == n.name)
+            .map_or(f64::MAX, |b| b.y0)
+    };
+    rows.sort_by(|a, b| top(a).total_cmp(&top(b)));
+    Ok(rows)
+}
+
+#[given(regex = r#"^the person has typed "(.*)" into the command palette$"#)]
+#[when(regex = r#"^the person types "(.*)" into the command palette$"#)]
+fn types_in_palette(w: &mut UiWorld, text: String) -> StepResult {
+    let window = w.window()?;
+    let mut driver = window.stage.drive();
+    driver.commit(&text).map_err(drive_error)?;
+    window.rest()
+}
+
+#[then(regex = r#"^the command palette's first row is "([^"]+)"$"#)]
+fn palette_first(w: &mut UiWorld, want: String) -> StepResult {
+    let rows = palette_rows(w.window()?)?;
+    let first = rows.first().ok_or("the command palette shows no rows")?;
+    (first.name == want).then_some(()).ok_or_else(|| {
+        let shown: Vec<&str> = rows.iter().take(5).map(|r| r.name.as_str()).collect();
+        format!("the first rows are {shown:?}")
+    })
+}
+
+#[then(regex = r#"^the command palette's row "([^"]+)" names the shortcut "([^"]+)"$"#)]
+fn palette_shortcut(w: &mut UiWorld, name: String, want: String) -> StepResult {
+    let rows = palette_rows(w.window()?)?;
+    let row = rows
+        .iter()
+        .find(|r| r.name == name)
+        .ok_or_else(|| format!("no row {name:?}"))?;
+    (row.description == want)
+        .then_some(())
+        .ok_or_else(|| format!("the row names {:?}", row.description))
+}
+
+#[then(regex = r#"^the command palette lists "([^"]+)"$"#)]
+fn palette_lists(w: &mut UiWorld, want: String) -> StepResult {
+    let rows = palette_rows(w.window()?)?;
+    rows.iter().any(|r| r.name == want).then_some(()).ok_or_else(|| {
+        let shown: Vec<&str> = rows.iter().map(|r| r.name.as_str()).collect();
+        format!("the palette lists {shown:?}")
+    })
 }
 
 #[when("the person pans the canvas with the middle button")]
