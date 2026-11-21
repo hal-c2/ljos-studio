@@ -1181,6 +1181,9 @@ const LAYOUT_FAMILIES: [&[&str]; 2] = [
     &["Row", "Column", "Grid", "Flow"],
     &["RowLayout", "ColumnLayout", "GridLayout"],
 ];
+/// A plain box turns into one that can be given a fill, and back: neither
+/// places its children, so nothing moves.
+const BOXES: &[&str] = &["Item", "Rectangle"];
 
 fn relayout(
     studio: &mut Studio,
@@ -1194,16 +1197,28 @@ fn relayout(
         return Err(refused("one_object", "`relayout` turns one object"));
     };
     let (handle, node) = studio.session.resolve(doc, address).map_err(error)?;
-    let family = |ty: &str| LAYOUT_FAMILIES.iter().find(|f| f.contains(&ty));
-    let (Some(from), Some(to)) = (family(&node.ty), family(kind)) else {
-        return Err(refused(
+    let family = |ty: &str| {
+        LAYOUT_FAMILIES
+            .iter()
+            .copied()
+            .chain([BOXES])
+            .find(|f| f.contains(&ty))
+    };
+    let not_a_layout = || {
+        refused(
             "not_a_layout",
             format!(
-                "`relayout` turns a Row, Column, Grid, Flow or `*Layout` into another: not `{}` into `{kind}`",
+                "`relayout` turns a Row, Column, Grid, Flow or `*Layout` into another, or an Item into a Rectangle and back: not `{}` into `{kind}`",
                 node.ty
             ),
-        ));
+        )
     };
+    let (Some(from), Some(to)) = (family(&node.ty), family(kind)) else {
+        return Err(not_a_layout());
+    };
+    if (from == BOXES) != (to == BOXES) {
+        return Err(not_a_layout());
+    }
     if from != to {
         return Err(refused(
             "other_family",
