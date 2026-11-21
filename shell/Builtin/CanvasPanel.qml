@@ -459,7 +459,6 @@ Panel {
                     PreviewPicture {
                         id: keptPicture
                         objectName: "keptPicture"
-                        objectName: "picture"
                         anchors.fill: parent
                         anchors.margins: 1
                         workspace: panel.workspace
