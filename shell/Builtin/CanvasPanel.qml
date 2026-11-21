@@ -1,11 +1,23 @@
 // The document running on its target: a frame of the preview's size with
-// the preview's latest picture in it, and the state its breakpoint shows. Ctrl+wheel zooms; a click selects
-// the object drawn there, as `node_select` with a point does for an agent,
-// and CanvasOverlay moves and resizes it. A new frame is fitted to the panel
-// until the person picks a zoom. Round the frame the canvas goes on a window's
-// worth in every direction: it pans by the wheel, the middle button or the hand.
-// In play mode a click is the app's own: `preview_state` clicks the
-// running app there and reads the root's state, which the flow panel shows.
+// the preview's latest picture in it, and the state its breakpoint shows. A
+// click selects the object drawn there, as `node_select` with a point does
+// for an agent, and CanvasOverlay moves and resizes it. In play mode a click
+// is the app's own: `preview_state` clicks the running app there and reads
+// the root's state, which the flow panel shows.
+//
+// The canvas has no edges. The view is a point of it (`viewX`, `viewY`, in
+// document pixels, at the view's top left) and a `zoom`: a document pixel
+// at `p` is drawn at `(p - view) * zoom`. Only the frames scale; the lines
+// above them, the handles and the bars keep their size on the screen. The
+// wheel, Space and a drag, the middle button and the hand move the view;
+// Ctrl or ⌘ with the wheel, and a pinch, zoom about the point under the
+// hand and follow it. A zoom asked for by a key, a button or the zoom field
+// glides there, keeping one point of the canvas still on the screen. A new
+// frame is fitted to the view until the person moves or zooms it.
+//
+// The targets' frames can sit side by side. A session runs one preview, so
+// one frame is live; the others show the last picture their target drew
+// (`preview.kept`) and a click on one runs the document there.
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
@@ -35,17 +47,19 @@ Panel {
     title: "Canvas"
     clip: true
 
-    // Until the person zooms, the frame fits: a desktop frame in a panel
-    // narrower than it would otherwise show only its corner.
+    // ------------------------------------------------------------ the view
+
+    property real viewX: 0
+    property real viewY: 0
+    property real zoom: 1
+    // 2 % shows a wall of frames; 6400 % a pixel as a tile to place by.
+    readonly property real minZoom: 0.02
+    readonly property real maxZoom: 64
+    // Until the person moves or zooms, the view keeps `fitting` in sight
+    // as the panel and the frames change size.
     property bool fitted: true
-    property real chosenZoom: 1
-    readonly property real fit: preview === null ? 1
-        : Math.min(1, (flick.width - 2 * Spacing.xxl) / Math.max(1, preview.width),
-                   (flick.height - 2 * Spacing.xxl - frameLabels) / Math.max(1, preview.height))
-    // The lines above the frame.
-    readonly property real frameLabels: (held === "" ? 1 : 2) * (Typography.captionSize * 1.5 + Spacing.xxs)
-    // How far the canvas goes on past the frame, each way.
-    readonly property real reach: Math.max(flick.width, flick.height)
+    // "live": the frame the preview runs in; "all": every frame shown.
+    property string fitting: "live"
     // Whether a drag pans, whatever is under it, and a click selects nothing.
     property bool hand: false
     // In play a press is the app's, whichever tool waits for after.
@@ -57,7 +71,6 @@ Panel {
     property var keysWere: null
     // What a drag on the frame draws; "" selects and moves.
     property string drawing: ""
-    readonly property real zoom: fitted ? Math.max(0.125, fit) : chosenZoom
     readonly property bool playing: workspace.playing
     onPlayingChanged: workspace.followPicture(playing)
     // The state the inspector is recording into; null for none. What the
@@ -68,6 +81,8 @@ Panel {
     property bool dragging: false
     property string says: ""
     readonly property var preview: workspace.preview
+    // The targets' frames beside the live one.
+    property bool sideBySide: false
     // Who holds what of the document shown: the frame says so, as the
     // picture cannot mark an object it does not know the place of.
     readonly property string held: {
@@ -86,195 +101,452 @@ Panel {
         }
         return out.join(", ")
     }
+    // The lines above a frame, on the screen.
+    readonly property real frameLabels: (held === "" ? 1 : 2) * (Typography.captionSize * 1.5 + Spacing.xxs) + Spacing.xxs
 
-    // Whether the person has moved the view since it was last centred: then
-    // nothing but Fit takes it back.
-    property bool panned: false
-    // The view is being moved by this panel, not by the person.
-    property bool placing: false
-    function moveView(x, y) {
-        placing = true
-        flick.contentX = x
-        flick.contentY = y
-        placing = false
+    // ----------------------------------------------------------- the frames
+
+    // Studio's targets, as `preview_open` knows them; a preview without the
+    // list (an older Studio) has the same three.
+    readonly property var targets: preview !== null && preview.targets !== undefined ? preview.targets : [
+        {name: "Desktop", width: 1280, height: 800},
+        {name: "Tablet", width: 820, height: 1180},
+        {name: "Phone", width: 390, height: 844}
+    ]
+    readonly property string liveName: preview === null ? "" : (preview.target !== "" ? preview.target : "Custom")
+    // Room between frames side by side, in document pixels: enough for the
+    // label of the next not to run into the one before at any zoom shown.
+    readonly property real gap: 160
+    // Where each frame sits on the canvas, left to right, tops in a line. A
+    // string, which changes only when the arrangement does: `preview` is a
+    // new value at every publish, and a new model would build the frames
+    // again.
+    readonly property string arrangement: {
+        if (preview === null)
+            return "[]"
+        const out = []
+        let x = 0
+        const live = {name: liveName, width: preview.width, height: preview.height, live: true}
+        if (!sideBySide) {
+            out.push(Object.assign({x: 0}, live))
+        } else {
+            if (!targets.some(t => t.name === liveName))
+                out.push(live)
+            for (const t of targets)
+                out.push(t.name === liveName ? live : {name: t.name, width: t.width, height: t.height, live: false})
+            for (const f of out) {
+                f.x = x
+                x += f.width + gap
+            }
+        }
+        return JSON.stringify(out)
     }
+    readonly property var frames: JSON.parse(arrangement)
+    readonly property var liveFrame: frames.find(f => f.live) || {name: "", x: 0, width: 0, height: 0}
+    readonly property var besideFrames: JSON.parse(JSON.stringify(frames.filter(f => !f.live)))
 
-    // The middle of the view, in the view's own coordinates, unless the wheel
-    // says otherwise: the point under the pointer stays under the pointer. Only
-    // the frame scales; the lines above it stay their size.
-    function zoomTo(wanted, atX, atY) {
-        const x = atX === undefined ? flick.width / 2 : atX
-        const y = atY === undefined ? flick.height / 2 : atY
-        const before = zoom
-        const above = frames.height - (preview === null ? 0 : preview.height * before)
-        const onX = (flick.contentX + x - reach) / before
-        const onY = (flick.contentY + y - reach - above) / before
-        chosenZoom = Math.min(8, Math.max(0.125, wanted))
+    // ------------------------------------------------------------- motion
+
+    // A glide from one view to another: the zoom changes at an even rate
+    // of scale, and each axis keeps the point of the canvas still that is
+    // in the same place on the screen at both ends. A zoom about a point
+    // keeps that point; a fit lands where it has to.
+    property real glideT: 0
+    property real fromZoom: 1
+    property real fromX: 0
+    property real fromY: 0
+    property real toZoom: 1
+    property real toX: 0
+    property real toY: 0
+    NumberAnimation {
+        id: glider
+        target: panel
+        property: "glideT"
+        from: 0
+        to: 1
+        easing.type: Easing.BezierSpline
+        easing.bezierCurve: Motion.reduced ? Motion.easeOutSoft : Motion.easeInOut
+    }
+    onGlideTChanged: {
+        const z = fromZoom * Math.pow(toZoom / fromZoom, glideT)
+        const d = 1 / fromZoom - 1 / toZoom
+        const along = Math.abs(d) < 1e-9 ? glideT : (1 / fromZoom - 1 / z) / d
+        zoom = z
+        viewX = fromX + (toX - fromX) * along
+        viewY = fromY + (toY - fromY) * along
+    }
+    // A step of zoom is met many times a day; a fit or a jump to 100 % now
+    // and then. Less motion asked for is a shorter glide, never none: the
+    // move is what says where the view went.
+    readonly property int stepTime: Motion.reduced ? Motion.exitSmallFrequent : Motion.moveScreenFrequent
+    readonly property int jumpTime: Motion.reduced ? Motion.exitSmallFrequent : Motion.moveScreen
+    function glideTo(z, x, y, time) {
+        glider.stop()
+        if (time <= 0 || (Math.abs(z - zoom) < 1e-9 && Math.abs(x - viewX) < 1e-6 && Math.abs(y - viewY) < 1e-6)) {
+            zoom = z
+            viewX = x
+            viewY = y
+            toZoom = z
+            return
+        }
+        fromZoom = zoom
+        fromX = viewX
+        fromY = viewY
+        toZoom = z
+        toX = x
+        toY = y
+        glider.duration = time
+        glideT = 0
+        glider.start()
+    }
+    // Where a glide under way is going, or the zoom now.
+    readonly property real goalZoom: glider.running ? toZoom : zoom
+
+    function clampZoom(z) {
+        return Math.min(maxZoom, Math.max(minZoom, z))
+    }
+    // The point under (`atX`, `atY`) of the view, the middle unless said,
+    // stays there. `time` 0 follows the hand.
+    function zoomTo(wanted, atX, atY, time) {
+        const sx = atX === undefined ? surface.width / 2 : atX
+        const sy = atY === undefined ? surface.height / 2 : atY
+        const z = clampZoom(wanted)
+        const px = viewX + sx / zoom
+        const py = viewY + sy / zoom
         fitted = false
-        moveView(onX * chosenZoom + reach - x, onY * chosenZoom + reach + above - y)
+        glideTo(z, px - sx / z, py - sy / z, time === undefined ? stepTime : time)
     }
-    // From a centred frame the corner stays put, so a frame too big for the
+    function zoomBy(notches, atX, atY, time) {
+        zoomTo(goalZoom * Math.pow(1.25, notches), atX, atY, time)
+    }
+    function panBy(dx, dy) {
+        glider.stop()
+        fitted = false
+        viewX -= dx / zoom
+        viewY -= dy / zoom
+    }
+    // From a fitted frame its corner stays put, so a frame too big for the
     // view at its real size shows its start rather than its middle.
     function actualSize() {
-        if (fitted && !panned) {
-            const above = frames.height - (preview === null ? 0 : preview.height * zoom)
-            zoomTo(1, panel.reach - flick.contentX, panel.reach + above - flick.contentY)
-        } else {
-            zoomTo(1)
-        }
-    }
-    function zoomBy(notches, atX, atY) {
-        zoomTo(zoom * Math.pow(1.25, notches), atX, atY)
+        if (fitted && preview !== null)
+            zoomTo(1, (liveFrame.x - viewX) * zoom, (0 - viewY) * zoom, jumpTime)
+        else
+            zoomTo(1, undefined, undefined, jumpTime)
     }
 
-    function centre() {
-        moveView(reach + (frames.width - flick.width) / 2, reach + (frames.height - flick.height) / 2)
+    // The box of document pixels `what` names on the canvas.
+    function boxOf(what) {
+        const shown = what === "all" ? frames : frames.filter(f => f.live)
+        if (shown.length === 0)
+            return null
+        let x0 = Infinity, x1 = -Infinity, y1 = 0
+        for (const f of shown) {
+            x0 = Math.min(x0, f.x)
+            x1 = Math.max(x1, f.x + f.width)
+            y1 = Math.max(y1, f.height)
+        }
+        return {x: x0, y: 0, width: x1 - x0, height: y1}
+    }
+    // The whole of `what` in the view with its labels, no larger than its
+    // real size: a phone's frame in a wide panel shows as a phone.
+    function fit(what, time) {
+        const box = boxOf(what)
+        if (box === null || surface.width <= 0 || surface.height <= 0)
+            return
+        const room = Spacing.xxl
+        const z = clampZoom(Math.min(1,
+            (surface.width - 2 * room) / Math.max(1, box.width),
+            (surface.height - 2 * room - frameLabels) / Math.max(1, box.height)))
+        const x = box.x + box.width / 2 - surface.width / 2 / z
+        const y = box.y - ((surface.height - frameLabels - box.height * z) / 2 + frameLabels) / z
+        fitting = what
+        glideTo(z, x, y, time)
+        fitted = true
     }
     function fitNow() {
-        fitted = true
-        panned = false
-        centre()
+        fit("live", jumpTime)
     }
-    function centreIfUntouched() {
-        if (fitted && !panned)
-            centre()
+    function fitAll() {
+        fit(sideBySide ? "all" : "live", jumpTime)
     }
-    // A new picture is a new `preview` whose frame has not changed: only a
-    // frame of another size is a reason to centre.
-    readonly property string frameSize: preview === null ? "" : preview.width + "x" + preview.height
-    onFrameSizeChanged: Qt.callLater(centreIfUntouched)
-    onZoomChanged: Qt.callLater(centreIfUntouched)
-    onFittedChanged: if (fitted) Qt.callLater(centreIfUntouched)
-    // The canvas grew or shrank round the frame: what is in view stays there.
-    property real reachWas: 0
-    onReachChanged: {
-        const by = reach - reachWas
-        reachWas = reach
-        if (fitted && !panned)
-            Qt.callLater(centre)
-        else
-            moveView(flick.contentX + by, flick.contentY + by)
+    // A fitted view follows what it fits without moving by itself: a new
+    // size is a new arrangement, not a move of the person's.
+    readonly property string fitKey: arrangement + " " + surface.width + "x" + surface.height + " " + frameLabels
+    onFitKeyChanged: Qt.callLater(refit)
+    function refit() {
+        if (fitted)
+            fit(fitting, 0)
     }
+    onSideBySideChanged: Qt.callLater(() => fit("all", jumpTime))
 
     // A step back from the panels and from the frame on it.
     fill: Colors.surfaceHover
 
-    // The middle button and the hand pan wherever they press, over the frame too.
-    MouseArea {
-        anchors.fill: flick
-        acceptedButtons: panel.panning ? Qt.LeftButton | Qt.MiddleButton : Qt.MiddleButton
-        cursorShape: panel.panning ? (pressed ? Qt.ClosedHandCursor : Qt.OpenHandCursor) : Qt.ArrowCursor
-        property real fromX: 0
-        property real fromY: 0
-        onPressed: (mouse) => {
-            fromX = flick.contentX + mouse.x
-            fromY = flick.contentY + mouse.y
-        }
-        onPositionChanged: (mouse) => {
-            panel.panned = true
-            panel.moveView(fromX - mouse.x, fromY - mouse.y)
-        }
-    }
-
-    // Lines that travel with the canvas and keep a useful spacing as it zooms.
-    Shape {
-        id: grid
-        readonly property real step: {
-            let at = 48 * panel.zoom
-            while (at < 24)
-                at *= 2
-            while (at > 96)
-                at /= 2
-            return at
-        }
-        x: -(flick.contentX % step) - step
-        y: -(flick.contentY % step) - step
-        width: flick.width + 2 * step
-        height: flick.height + 2 * step
-        Accessible.ignored: true
-        ShapePath {
-            strokeColor: Colors.surfacePressed
-            strokeWidth: 1
-            fillColor: "transparent"
-            PathSvg {
-                path: {
-                    let out = ""
-                    for (let at = 0; at <= grid.width; at += grid.step)
-                        out += "M" + at + " 0V" + grid.height
-                    for (let at = 0; at <= grid.height; at += grid.step)
-                        out += "M0 " + at + "H" + grid.width
-                    return out
-                }
-            }
-        }
-    }
-
-    Flickable {
-        id: flick
+    Item {
+        id: surface
         objectName: "canvas"
         anchors.fill: parent
         clip: true
-        // The hand pans in the area under this, as the middle button does.
-        interactive: !panel.dragging && !panel.panning
-        boundsBehavior: Flickable.StopAtBounds
-        contentWidth: frames.width + 2 * panel.reach
-        contentHeight: frames.height + 2 * panel.reach
-        onContentXChanged: if (!panel.placing) panel.panned = true
-        onContentYChanged: if (!panel.placing) panel.panned = true
 
-        WheelHandler {
-            acceptedModifiers: Qt.ControlModifier
-            onWheel: (event) => panel.zoomBy(event.angleDelta.y / 120, event.x, event.y)
-        }
-        // A view that is not interactive takes no wheel of its own, and the
-        // hand must not cost the wheel its pan.
-        WheelHandler {
-            enabled: panel.panning
-            acceptedModifiers: Qt.NoModifier
-            onWheel: (event) => {
-                panel.panned = true
-                panel.moveView(
-                    Math.max(0, Math.min(flick.contentX - event.angleDelta.x, flick.contentWidth - flick.width)),
-                    Math.max(0, Math.min(flick.contentY - event.angleDelta.y, flick.contentHeight - flick.height)))
+        // Lines that travel with the canvas and keep a useful spacing as it
+        // zooms.
+        Shape {
+            id: grid
+            readonly property real step: {
+                let at = 48 * panel.zoom
+                while (at < 24)
+                    at *= 2
+                while (at > 96)
+                    at /= 2
+                return at
+            }
+            readonly property real originX: -panel.viewX * panel.zoom
+            readonly property real originY: -panel.viewY * panel.zoom
+            x: ((originX % step) + step) % step - step
+            y: ((originY % step) + step) % step - step
+            width: surface.width + 2 * step
+            height: surface.height + 2 * step
+            Accessible.ignored: true
+            ShapePath {
+                strokeColor: Colors.surfacePressed
+                strokeWidth: 1
+                fillColor: "transparent"
+                PathSvg {
+                    path: {
+                        let out = ""
+                        for (let at = 0; at <= grid.width; at += grid.step)
+                            out += "M" + at + " 0V" + grid.height
+                        for (let at = 0; at <= grid.height; at += grid.step)
+                            out += "M0 " + at + "H" + grid.width
+                        return out
+                    }
+                }
             }
         }
 
-        Column {
-            id: frames
-            x: panel.reach
-            y: panel.reach
-            spacing: Spacing.xs
-            // The frame arrives after the preview that asks for it.
-            onWidthChanged: panel.centreIfUntouched()
-            onHeightChanged: panel.centreIfUntouched()
+        // A drag on the canvas around the frames, the middle button and the
+        // hand pan wherever they press, over a frame too. Nothing here to
+        // name for assistive technology: the keys move the view by Ctrl+0,
+        // Ctrl+1, Shift+1 and the zoom field.
+        MouseArea {
+            anchors.fill: parent
+            Accessible.ignored: true
+            acceptedButtons: Qt.LeftButton | Qt.MiddleButton
+            cursorShape: panel.panning || pressed ? (pressed ? Qt.ClosedHandCursor : Qt.OpenHandCursor) : Qt.ArrowCursor
+            property real lastX: 0
+            property real lastY: 0
+            onPressed: (mouse) => {
+                lastX = mouse.x
+                lastY = mouse.y
+            }
+            onPositionChanged: (mouse) => {
+                panel.panBy(mouse.x - lastX, mouse.y - lastY)
+                lastX = mouse.x
+                lastY = mouse.y
+            }
+        }
 
-            // One frame per target the document runs on; a session runs
-            // one preview at a time. A count, not the preview: `preview` is a
-            // new value at every publish, and a new model would build the
-            // frame again, taking the keyboard focus and a drag with it.
-            Repeater {
-                model: panel.preview !== null ? 1 : 0
-                delegate: Column {
-                    id: frame
-                    readonly property var modelData: panel.preview !== null ? panel.preview
-                        : ({target: "", width: 0, height: 0, variant: ""})
-                    readonly property string name: modelData.target !== "" ? modelData.target : "Custom"
-                    objectName: "frame " + name
+        // A notch of the wheel moves the view as far as a few lines of text;
+        // a trackpad says its own distance.
+        function wheelDelta(event, horizontal) {
+            const px = event.pixelDelta
+            const ang = event.angleDelta
+            let dx = px.x !== 0 || px.y !== 0 ? px.x : ang.x / 120 * 64
+            let dy = px.x !== 0 || px.y !== 0 ? px.y : ang.y / 120 * 64
+            if (horizontal && dx === 0)
+                return Qt.point(dy, 0)
+            return Qt.point(dx, dy)
+        }
+        WheelHandler {
+            acceptedModifiers: Qt.NoModifier
+            onWheel: (event) => {
+                const d = surface.wheelDelta(event, false)
+                panel.panBy(d.x, d.y)
+            }
+        }
+        WheelHandler {
+            acceptedModifiers: Qt.ShiftModifier
+            onWheel: (event) => {
+                const d = surface.wheelDelta(event, true)
+                panel.panBy(d.x, d.y)
+            }
+        }
+        // Ctrl on Linux and Windows, ⌘ on a Mac. The zoom follows the wheel
+        // as the hand turns it, a trackpad's small steps as smoothly.
+        WheelHandler {
+            acceptedModifiers: Qt.ControlModifier
+            onWheel: (event) => panel.zoomBy(event.angleDelta.y / 120, event.x, event.y, 0)
+        }
+        WheelHandler {
+            acceptedModifiers: Qt.MetaModifier
+            onWheel: (event) => panel.zoomBy(event.angleDelta.y / 120, event.x, event.y, 0)
+        }
+        // Two fingers on a touch screen; a trackpad's pinch too, once the
+        // window hands it on (CORE-GAPS: egui's Zoom reaches no handler).
+        PinchHandler {
+            target: null
+            property real scaleWas: 1
+            property point centreWas: Qt.point(0, 0)
+            onActiveChanged: {
+                scaleWas = 1
+                centreWas = centroid.position
+            }
+            onActiveScaleChanged: {
+                if (!active || activeScale <= 0)
+                    return
+                const at = centroid.position
+                panel.panBy(at.x - centreWas.x, at.y - centreWas.y)
+                panel.zoomTo(panel.zoom * activeScale / scaleWas, at.x, at.y, 0)
+                scaleWas = activeScale
+                centreWas = at
+            }
+        }
+
+        // The frames the preview does not run in, side by side with it: the
+        // picture their target last drew, and a click to run it there.
+        Repeater {
+            model: panel.besideFrames
+            delegate: Item {
+                id: beside
+                required property var modelData
+                readonly property var kept: panel.preview !== null && panel.preview.kept !== undefined
+                    ? panel.preview.kept[modelData.name] : undefined
+                objectName: "beside " + modelData.name
+                x: (modelData.x - panel.viewX) * panel.zoom
+                y: -panel.viewY * panel.zoom
+                width: besideBody.width
+                height: besideBody.height
+
+                Item {
+                    anchors.left: parent.left
+                    anchors.bottom: besideBody.top
+                    anchors.bottomMargin: Spacing.xxs
+                    width: 1
+                    height: Typography.captionSize * 1.5
+                    Label {
+                        objectName: "frameLabel"
+                        anchors.verticalCenter: parent.verticalCenter
+                        width: Math.min(implicitWidth, Math.max(Typography.captionSize, besideBody.width))
+                        elide: Text.ElideRight
+                        text: beside.modelData.name + " · " + beside.modelData.width + " × " + beside.modelData.height
+                        color: Colors.textMuted
+                        font.pixelSize: Typography.captionSize
+                        font.weight: Typography.bodyStrongWeight
+                        Accessible.role: Accessible.StaticText
+                        Accessible.name: text
+                    }
+                }
+                Rectangle {
+                    id: besideBody
+                    width: beside.modelData.width * panel.zoom
+                    height: beside.modelData.height * panel.zoom
+                    color: Colors.surface
+                    border.color: pick.containsMouse ? Colors.focusRing : Colors.border
+                    border.width: pick.containsMouse ? 2 : 1
+                    Accessible.role: Accessible.Button
+                    Accessible.name: "Show " + beside.modelData.name
+                    Accessible.onPressAction: pick.show()
+                    Rectangle {
+                        x: 2
+                        y: 4
+                        z: -1
+                        width: parent.width
+                        height: parent.height
+                        color: Colors.shadow
+                        opacity: 0.25
+                        Accessible.ignored: true
+                    }
+                    PreviewPicture {
+                        id: keptPicture
+                        objectName: "keptPicture"
+                        objectName: "picture"
+                        anchors.fill: parent
+                        anchors.margins: 1
+                        workspace: panel.workspace
+                        target: beside.modelData.name
+                        visible: beside.kept !== undefined
+                        // Behind the document's latest: shown, but quieter.
+                        opacity: beside.kept !== undefined && panel.preview !== null
+                            && beside.kept < panel.workspace.generation ? 0.6 : 1
+                    }
+                    Label {
+                        anchors.centerIn: parent
+                        visible: beside.kept === undefined && parent.width >= 10 * Typography.captionSize
+                            && parent.height >= 4 * Typography.captionSize
+                        width: parent.width - 2 * Spacing.xs
+                        horizontalAlignment: Text.AlignHCenter
+                        wrapMode: Text.WordWrap
+                        text: "Click to run it on " + beside.modelData.name.toLowerCase()
+                        color: Colors.textMuted
+                        font.pixelSize: Typography.captionSize
+                        Accessible.ignored: true
+                    }
+                    MouseArea {
+                        id: pick
+                        anchors.fill: parent
+                        enabled: !panel.panning
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        function show() {
+                            panel.workspace.dispatch("preview_open", {
+                                doc: panel.workspace.doc,
+                                target: beside.modelData.name.toLowerCase(),
+                                state: panel.preview !== null ? panel.preview.state : ""
+                            })
+                        }
+                        onClicked: show()
+                    }
+                }
+            }
+        }
+
+        // The frame the preview runs in. One delegate for as long as there
+        // is a preview: `preview` is a new value at every publish, and a new
+        // model would build the frame again, taking the keyboard focus and a
+        // drag with it.
+        Repeater {
+            model: panel.preview !== null ? 1 : 0
+            delegate: Item {
+                id: frame
+                readonly property var modelData: panel.preview !== null ? panel.preview
+                    : ({target: "", width: 0, height: 0, variant: ""})
+                readonly property string name: panel.liveName
+                objectName: "frame " + name
+                x: (panel.liveFrame.x - panel.viewX) * panel.zoom
+                y: -panel.viewY * panel.zoom
+                width: body.width
+                height: body.height
+
+                // Above the frame at their own size, whatever the zoom.
+                Column {
+                    anchors.left: parent.left
+                    anchors.bottom: body.top
+                    anchors.bottomMargin: Spacing.xxs
                     spacing: Spacing.xxs
-
                     Row {
                         spacing: Spacing.xs
+                        height: Typography.captionSize * 1.5
                         Label {
+                            id: liveLabel
                             objectName: "frameLabel"
+                            anchors.verticalCenter: parent.verticalCenter
+                            // A frame zoomed out to a sliver names itself in
+                            // as much as it has, not over its neighbour's.
+                            width: Math.min(implicitWidth, Math.max(Typography.captionSize, frame.width))
+                            elide: Text.ElideRight
                             text: frame.name + " · " + frame.modelData.width + " × " + frame.modelData.height
                             color: Colors.text
                             font.pixelSize: Typography.captionSize
                             font.weight: Typography.bodyStrongWeight
+                            Accessible.role: Accessible.StaticText
+                            Accessible.name: text
                         }
                         // The state the frame's breakpoint turns on, as the
                         // file's `when` says.
                         Label {
                             objectName: "frameState"
+                            anchors.verticalCenter: parent.verticalCenter
+                            visible: frame.width >= liveLabel.implicitWidth
                             text: frame.modelData.variant !== "" ? "State " + frame.modelData.variant : "No state"
                             color: Colors.textMuted
                             font.pixelSize: Typography.captionSize
@@ -286,7 +558,7 @@ Panel {
                         TextButton {
                             readonly property string target: frame.modelData.target.toLowerCase()
                             anchors.verticalCenter: parent.verticalCenter
-                            visible: target !== "" && panel.recording === null
+                            visible: target !== "" && panel.recording === null && frame.width >= liveLabel.implicitWidth
                             text: frame.modelData.variant !== ""
                                   ? "Edit " + target + " layout"
                                   : target.charAt(0).toUpperCase() + target.slice(1) + " layout"
@@ -302,48 +574,49 @@ Panel {
                         Accessible.role: Accessible.StaticText
                         Accessible.name: text
                     }
+                }
+                Rectangle {
+                    id: body
+                    width: frame.modelData.width * panel.zoom
+                    height: frame.modelData.height * panel.zoom
+                    color: Colors.surface
+                    border.color: Colors.border
+                    // Lifted off the canvas by its shadow.
                     Rectangle {
-                        width: frame.modelData.width * panel.zoom
-                        height: frame.modelData.height * panel.zoom
-                        color: Colors.surface
-                        border.color: Colors.border
-                        // Lifted off the canvas by its shadow.
-                        Rectangle {
-                            x: 2
-                            y: 4
-                            z: -1
-                            width: parent.width
-                            height: parent.height
-                            color: Colors.shadow
-                            opacity: 0.25
-                            Accessible.ignored: true
-                        }
-                        Accessible.role: Accessible.Graphic
-                        Accessible.name: frame.name
+                        x: 2
+                        y: 4
+                        z: -1
+                        width: parent.width
+                        height: parent.height
+                        color: Colors.shadow
+                        opacity: 0.25
+                        Accessible.ignored: true
+                    }
+                    Accessible.role: Accessible.Graphic
+                    Accessible.name: frame.name
 
-                        PreviewPicture {
-                            objectName: "picture"
-                            anchors.fill: parent
-                            workspace: panel.workspace
-                        }
-                        CanvasOverlay {
-                            onHasBoxesChanged: panel.framesWithoutBoxes += hasBoxes ? -1 : 1
-                            Component.onDestruction: if (!hasBoxes) panel.framesWithoutBoxes -= 1
-                            id: overlayHere
-                            objectName: "overlay"
-                            enabled: !panel.panning
-                            anchors.fill: parent
-                            workspace: panel.workspace
-                            zoom: panel.zoom
-                            playing: panel.playing
-                            recording: panel.recording
-                            drawing: panel.drawing
-                            onDrawn: panel.drawing = ""
-                            toolKey: (event) => panel.toolKey(event, overlayHere)
-                            onDraggingChanged: panel.dragging = dragging
-                            onSaysChanged: panel.says = says
-                            Component.onCompleted: refetch()
-                        }
+                    PreviewPicture {
+                        objectName: "picture"
+                        anchors.fill: parent
+                        workspace: panel.workspace
+                    }
+                    CanvasOverlay {
+                        onHasBoxesChanged: panel.framesWithoutBoxes += hasBoxes ? -1 : 1
+                        Component.onDestruction: if (!hasBoxes) panel.framesWithoutBoxes -= 1
+                        id: overlayHere
+                        objectName: "overlay"
+                        enabled: !panel.panning
+                        anchors.fill: parent
+                        workspace: panel.workspace
+                        zoom: panel.zoom
+                        playing: panel.playing
+                        recording: panel.recording
+                        drawing: panel.drawing
+                        onDrawn: panel.drawing = ""
+                        toolKey: (event) => panel.toolKey(event, overlayHere)
+                        onDraggingChanged: panel.dragging = dragging
+                        onSaysChanged: panel.says = says
+                        Component.onCompleted: refetch()
                     }
                 }
             }
@@ -351,7 +624,6 @@ Panel {
 
         Label {
             visible: panel.preview === null
-            parent: panel
             anchors.centerIn: parent
             text: panel.workspace.previews ? "Open a document to preview it" : "Previews are off"
             color: Colors.textMuted
@@ -391,17 +663,7 @@ Panel {
                 icon_: modelData.icon
                 text: "Align " + modelData.label
                 visible: panel.workspace.chosen.length >= (modelData.least || 1)
-                onClicked: {
-                    const args = {
-                        action: "align",
-                        doc: panel.workspace.doc,
-                        nodes: panel.workspace.chosen.map(h => ({node: h})),
-                        align: modelData.align
-                    }
-                    if (panel.recording !== null)
-                        args.record = panel.recording
-                    panel.workspace.dispatch("node_arrange", args)
-                }
+                onClicked: panel.arrange("align", {align: modelData.align})
             }
         }
 
@@ -418,12 +680,7 @@ Panel {
                 required property var modelData
                 icon_: modelData.icon
                 text: "Wrap in " + modelData.kind
-                onClicked: panel.workspace.dispatch("node_arrange", {
-                    action: "wrap",
-                    doc: panel.workspace.doc,
-                    nodes: panel.workspace.chosen.map(h => ({node: h})),
-                    in: modelData.kind
-                })
+                onClicked: panel.arrange("wrap", {in: modelData.kind})
             }
         }
 
@@ -433,12 +690,20 @@ Panel {
             text: "Unwrap"
             visible: !panel.playing && panel.workspace.chosen.length === 1
                 && panel.wrappers.indexOf(panel.chosenType) >= 0
-            onClicked: panel.workspace.dispatch("node_arrange", {
-                action: "unwrap",
-                doc: panel.workspace.doc,
-                nodes: [{node: panel.workspace.chosen[0]}]
-            })
+            onClicked: panel.arrange("unwrap", {})
         }
+    }
+    // `node_arrange` on the selection, as the bar above and the command
+    // palette ask for it.
+    function arrange(action, more) {
+        const args = Object.assign({
+            action: action,
+            doc: workspace.doc,
+            nodes: workspace.chosen.map(h => ({node: h}))
+        }, more)
+        if (action === "align" && recording !== null)
+            args.record = recording
+        workspace.dispatch("node_arrange", args)
     }
 
     // Here and not in the inspector: the inspector can be folded or behind a
@@ -481,8 +746,7 @@ Panel {
             // A click toggles a checkable button and ends its binding, and
             // clicking the tool in use is not putting it down.
             onClicked: {
-                panel.hand = false
-                panel.drawing = ""
+                panel.useTool("select")
                 checked = Qt.binding(() => !panel.hand && panel.drawing === "")
             }
         }
@@ -492,10 +756,8 @@ Panel {
             checkable: true
             checked: panel.hand
             onClicked: {
-                panel.hand = true
-                panel.drawing = ""
+                panel.useTool("hand")
                 checked = Qt.binding(() => panel.hand)
-                canvasFocus.forceActiveFocus()
             }
         }
         Hairline {}
@@ -511,11 +773,8 @@ Panel {
                 checkable: true
                 checked: panel.drawing === modelData.kind
                 onClicked: {
-                    panel.hand = false
-                    panel.workspace.playing = false
-                    panel.drawing = panel.drawing === modelData.kind ? "" : modelData.kind
+                    panel.useTool(panel.drawing === modelData.kind ? "select" : modelData.kind)
                     checked = Qt.binding(() => panel.drawing === modelData.kind)
-                    canvasFocus.forceActiveFocus()
                 }
             }
         }
@@ -526,11 +785,25 @@ Panel {
             checkable: true
             checked: panel.playing
             onClicked: {
-                panel.workspace.playing = !panel.playing
-                panel.drawing = ""
+                panel.useTool("play")
                 checked = Qt.binding(() => panel.playing)
             }
         }
+    }
+    // The tools by name, as the bar and the command palette pick them:
+    // "select", "hand", "Rectangle", "Text" or "play" (which toggles).
+    function useTool(tool) {
+        if (tool === "play") {
+            workspace.playing = !playing
+            drawing = ""
+            return
+        }
+        hand = tool === "hand"
+        drawing = tool === "select" || tool === "hand" ? "" : tool
+        if (drawing !== "")
+            workspace.playing = false
+        if (tool !== "select")
+            canvasFocus.forceActiveFocus()
     }
 
     FloatBar {
@@ -540,20 +813,43 @@ Panel {
         visible: panel.preview !== null
 
         IconButton {
+            icon_: "row"
+            text: "Side by side"
+            checkable: true
+            checked: panel.sideBySide
+            onClicked: {
+                panel.sideBySide = !panel.sideBySide
+                checked = Qt.binding(() => panel.sideBySide)
+            }
+        }
+        Hairline {}
+        IconButton {
             icon_: "minus"
             text: "Zoom out"
             onClicked: panel.zoomBy(-1)
         }
-        Button {
-            id: actual
-            flat: true
-            implicitHeight: 28
-            implicitWidth: 48
-            padding: 0
-            text: Math.round(panel.zoom * 100) + "%"
-            font.pixelSize: Typography.captionSize
-            Accessible.name: "Actual size"
-            onClicked: panel.actualSize()
+        // The zoom, and a place to type one: "250", "250%" or "2.5x".
+        Field {
+            id: zoomField
+            objectName: "zoomField"
+            implicitWidth: 64
+            horizontalAlignment: TextInput.AlignHCenter
+            Accessible.name: "Zoom"
+            readonly property string shown: panel.zoomText(panel.goalZoom)
+            text: shown
+            onActiveFocusChanged: if (activeFocus) selectAll(); else text = Qt.binding(() => shown)
+            onAccepted: {
+                const typed = text.trim().toLowerCase()
+                const n = parseFloat(typed)
+                if (!isNaN(n) && n > 0)
+                    panel.zoomTo(typed.endsWith("x") ? n : n / 100, undefined, undefined, panel.jumpTime)
+                text = Qt.binding(() => shown)
+                canvasFocus.forceActiveFocus()
+            }
+            Keys.onEscapePressed: {
+                text = Qt.binding(() => shown)
+                canvasFocus.forceActiveFocus()
+            }
         }
         IconButton {
             icon_: "plus"
@@ -565,6 +861,11 @@ Panel {
             text: "Fit"
             onClicked: panel.fitNow()
         }
+    }
+    // Whole per cents but where they would all round the same: 2.5 % and 6400 %.
+    function zoomText(z) {
+        const p = z * 100
+        return (p < 10 ? Math.round(p * 10) / 10 : Math.round(p)) + "%"
     }
 
     Label {
@@ -643,6 +944,12 @@ Panel {
     Shortcut {
         sequence: "Ctrl+1"
         onActivated: panel.actualSize()
+    }
+    Shortcut {
+        // A US keyboard sends Shift+1 as "!" with Shift held, so both
+        // spellings are listed.
+        sequences: ["Shift+1", "Shift+!"]
+        onActivated: panel.fitAll()
     }
     Shortcut {
         sequences: ["Ctrl+=", "Ctrl++"]

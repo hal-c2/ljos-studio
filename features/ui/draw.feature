@@ -29,6 +29,7 @@ Feature: Drawing on the canvas and writing text where it is
     And Studio's window shows the project
     And the person has opened "Main.qml" in the documents list
     And the person has pressed "Ctrl+1"
+    And the canvas has finished moving
 
   Scenario: A rectangle is drawn where the hand dragged
     Given the person has clicked the button "Draw rectangle"
