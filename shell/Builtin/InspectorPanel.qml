@@ -830,31 +830,103 @@ Panel {
                 Layout.fillWidth: true
             }
 
-            // Where it sits in the pad is which side it pins.
-            Item {
+            // The parent as a box and the object as a box inside it: a strut
+            // from an inner edge to the outer one is a pin on that side, with
+            // its margin beside it. Where a button sits is which side it pins.
+            Rectangle {
+                id: pad
                 visible: panel.placedBy === "" && !panel.isRoot
-                implicitWidth: 3 * 28
-                implicitHeight: 3 * 28
-                Layout.alignment: Qt.AlignHCenter
+                readonly property bool filled: panel.isPinned("fill")
+                implicitHeight: 112
+                Layout.fillWidth: true
+                radius: 8
+                color: Colors.surfaceHover
+                border.width: 1
+                border.color: filled ? Colors.link : Colors.surfacePressed
+
+                Rectangle {
+                    id: inner
+                    anchors.centerIn: parent
+                    width: 64
+                    height: 36
+                    radius: 6
+                    color: Colors.surfaceRaised
+                    border.width: 1
+                    border.color: pad.filled || panel.isPinned("centerIn") ? Colors.link : Colors.surfacePressed
+                }
 
                 Repeater {
                     model: [
-                        {side: "top", label: "Pin top", icon: "pinTop", column: 1, row: 0},
-                        {side: "left", label: "Pin left", icon: "pinLeft", column: 0, row: 1},
-                        {side: "centerIn", label: "Pin centre", icon: "pinCentre", column: 1, row: 1},
-                        {side: "right", label: "Pin right", icon: "pinRight", column: 2, row: 1},
-                        {side: "bottom", label: "Pin bottom", icon: "pinBottom", column: 1, row: 2},
-                        {side: "fill", label: "Fill parent", icon: "frame", column: 2, row: 2}
+                        {side: "top", label: "Pin top", icon: "pinTop"},
+                        {side: "left", label: "Pin left", icon: "pinLeft"},
+                        {side: "right", label: "Pin right", icon: "pinRight"},
+                        {side: "bottom", label: "Pin bottom", icon: "pinBottom"}
                     ]
-                    delegate: IconButton {
+                    delegate: Item {
+                        id: strut
                         required property var modelData
-                        x: modelData.column * 28
-                        y: modelData.row * 28
-                        icon_: modelData.icon
-                        text: modelData.label
-                        checked: panel.isPinned(modelData.side)
-                        onClicked: panel.togglePin(modelData.side)
+                        readonly property bool across: modelData.side === "left" || modelData.side === "right"
+                        readonly property bool on: panel.isPinned(modelData.side) || pad.filled
+                        readonly property string gap: {
+                            const own = panel.written("anchors." + modelData.side + "Margin")
+                            return own !== "" ? own : panel.written("anchors.margins")
+                        }
+                        // The span between the inner edge and the outer one.
+                        x: modelData.side === "left" ? 0
+                            : modelData.side === "right" ? inner.x + inner.width
+                            : inner.x
+                        y: modelData.side === "top" ? 0
+                            : modelData.side === "bottom" ? inner.y + inner.height
+                            : inner.y
+                        width: across ? inner.x : inner.width
+                        height: across ? inner.height : inner.y
+
+                        Rectangle {
+                            anchors.centerIn: parent
+                            width: strut.across ? parent.width : (strut.on ? 2 : 1)
+                            height: strut.across ? (strut.on ? 2 : 1) : parent.height
+                            color: strut.on ? Colors.link : Colors.surfacePressed
+                            Behavior on color { ColorAnimation { duration: Motion.enterSmallFrequent; easing.type: Motion.easeOut } }
+                        }
+                        IconButton {
+                            anchors.centerIn: parent
+                            icon_: strut.modelData.icon
+                            text: strut.modelData.label
+                            iconSize: 14
+                            checked: panel.isPinned(strut.modelData.side)
+                            onClicked: panel.togglePin(strut.modelData.side)
+                        }
+                        Text {
+                            visible: strut.on && strut.gap !== ""
+                            text: strut.gap
+                            color: Colors.textMuted
+                            font.pixelSize: Typography.captionSize
+                            elide: Text.ElideRight
+                            width: Math.min(implicitWidth, 56)
+                            // Beside the strut, clear of its button.
+                            x: strut.across ? (parent.width - width) / 2 : parent.width / 2 + 18
+                            y: strut.across ? parent.height / 2 + 16 : (parent.height - height) / 2
+                        }
                     }
+                }
+
+                IconButton {
+                    anchors.centerIn: inner
+                    icon_: "pinCentre"
+                    text: "Pin centre"
+                    iconSize: 14
+                    checked: panel.isPinned("centerIn")
+                    onClicked: panel.togglePin("centerIn")
+                }
+                IconButton {
+                    anchors.right: parent.right
+                    anchors.bottom: parent.bottom
+                    anchors.margins: Spacing.xxs
+                    icon_: "frame"
+                    text: "Fill parent"
+                    iconSize: 14
+                    checked: pad.filled
+                    onClicked: panel.togglePin("fill")
                 }
             }
 
@@ -923,25 +995,23 @@ Panel {
                 Layout.fillWidth: true
                 Repeater {
                     model: panel.isLayout ? ["spacing", "columns"].filter(n => n === "spacing" || panel.selectedType.startsWith("Grid")) : []
-                    delegate: RowLayout {
-                        required property string modelData
-                        spacing: Spacing.xxs
-                        Label {
-                            text: modelData
-                            color: Colors.textMuted
-                            font.pixelSize: Typography.captionSize
-                        }
-                        Field {
+                    delegate: Field {
+                            required property string modelData
+                            lead: modelData === "spacing" ? "Gap" : "Cols"
+                            unit: panel.unitOf(modelData, text)
+                            scrub: true
+                            bound: panel.valueKind(modelData, text) === "binding"
+                            token: panel.valueKind(modelData, text) === "token"
                             text: panel.written(modelData)
                             Accessible.name: "Layout " + modelData
-                            Layout.preferredWidth: 56
+                            Layout.fillWidth: true
+                            Layout.preferredWidth: 1
                             onAccepted: panel.workspace.dispatch("binding_set", {
                                 doc: panel.workspace.doc,
                                 node: {node: panel.workspace.selected},
                                 name: modelData,
                                 value: text === "" ? null : text
                             })
-                        }
                     }
                 }
             }
@@ -952,6 +1022,14 @@ Panel {
                 visible: panel.isLayout
                 spacing: Spacing.xxs
                 Layout.fillWidth: true
+                Label {
+                    text: "Turn into"
+                    color: Colors.textMuted
+                    font.pixelSize: Typography.captionSize
+                    width: 64
+                    height: 28
+                    verticalAlignment: Text.AlignVCenter
+                }
                 Repeater {
                     model: {
                         const kinds = panel.selectedType.endsWith("Layout")
@@ -976,6 +1054,14 @@ Panel {
             Row {
                 visible: !panel.isRoot
                 spacing: Spacing.xxs
+                Label {
+                    text: "Wrap in"
+                    color: Colors.textMuted
+                    font.pixelSize: Typography.captionSize
+                    width: 64
+                    height: 28
+                    verticalAlignment: Text.AlignVCenter
+                }
                 Repeater {
                     model: [
                         {kind: "Row", icon: "row"},
