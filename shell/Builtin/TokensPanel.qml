@@ -116,17 +116,6 @@ Panel {
             Layout.fillWidth: true
         }
 
-        Label {
-            id: refusal
-            objectName: "tokensRefusal"
-            Accessible.role: Accessible.StaticText
-            Accessible.name: text
-            color: Colors.text
-            visible: text !== ""
-            wrapMode: Text.Wrap
-            Layout.fillWidth: true
-        }
-
         ListView {
             objectName: "tokens"
             clip: true
@@ -265,6 +254,27 @@ Panel {
                     }
                 }
             }
+        }
+
+        // What the theme refused, under the list in a place kept for it:
+        // the list starts where it always does, and the row the person just
+        // typed in stays under the pointer. Three lines at most; the whole
+        // is its name.
+        Label {
+            id: refusal
+            objectName: "tokensRefusal"
+            Accessible.role: Accessible.StaticText
+            Accessible.name: text
+            color: Colors.danger
+            font.pixelSize: Typography.captionSize
+            lineHeight: Typography.captionLineHeight
+            lineHeightMode: Text.FixedHeight
+            wrapMode: Text.Wrap
+            maximumLineCount: 3
+            elide: Text.ElideRight
+            Layout.fillWidth: true
+            Layout.preferredHeight: 3 * Typography.captionLineHeight
+            verticalAlignment: Text.AlignTop
         }
     }
 }

@@ -71,6 +71,8 @@ struct UiWorld {
     /// The export panel's check, answered as it was before a later step
     /// wrote anything, and delivered when a step says it arrives.
     check_on_its_way: Option<Json>,
+    /// Where fields were when a scenario noted them, by panel and name.
+    noted: std::collections::HashMap<String, ljos::item::kurbo::Rect>,
 }
 
 /// A preview that answers everything but `placed`, whose default refuses.
@@ -369,6 +371,7 @@ impl UiWorld {
             scrolls: Arc::default(),
             held: None,
             check_on_its_way: None,
+            noted: std::collections::HashMap::new(),
         }
     }
 
@@ -2591,7 +2594,66 @@ fn sets_token(w: &mut UiWorld, name: String, value: String) -> StepResult {
     window.enter(&field, &value)
 }
 
+#[given(regex = r#"^the person has noted where the (inspector|tokens panel)'s "([^"]+)" is$"#)]
+fn notes_where(w: &mut UiWorld, panel: String, name: String) -> StepResult {
+    let at = field_bounds(w.window()?, &panel, &name)?;
+    w.noted.insert(format!("{panel} {name}"), at);
+    Ok(())
+}
+
 // ------------------------------------------------------------------- then
+
+#[then(regex = r#"^the (inspector|tokens panel)'s "([^"]+)" is where it was$"#)]
+fn is_where_it_was(w: &mut UiWorld, panel: String, name: String) -> StepResult {
+    let was = *w
+        .noted
+        .get(&format!("{panel} {name}"))
+        .ok_or_else(|| format!("where {name:?} was is not noted"))?;
+    let now = field_bounds(w.window()?, &panel, &name)?;
+    ((now.x0 - was.x0).abs() < 0.5 && (now.y0 - was.y0).abs() < 0.5)
+        .then_some(())
+        .ok_or_else(|| format!("{name:?} moved from {was:?} to {now:?}"))
+}
+
+#[then(regex = r#"^the inspector says "(.*)" under its "([^"]+)"$"#)]
+fn says_under(w: &mut UiWorld, want: String, name: String) -> StepResult {
+    let window = w.window()?;
+    let field = field_bounds(window, "inspector", &name)?;
+    let said = window
+        .bounds(&|_, n| n == want)
+        .ok_or_else(|| format!("the inspector does not say {want:?}"))?;
+    // Its own line: just below the field, and across from it.
+    let under = said.y0 >= field.y1 - 1.0 && said.y0 <= field.y1 + 24.0;
+    let across = said.x0 < field.x1 && said.x1 > field.x0;
+    (under && across)
+        .then_some(())
+        .ok_or_else(|| format!("{want:?} is at {said:?}, {name:?} at {field:?}"))
+}
+
+/// Where the field `name` of the inspector or the tokens panel is now. A
+/// token is looked for as the tokens panel's steps look for it, filtered.
+fn field_bounds(
+    window: &mut Window,
+    panel: &str,
+    name: &str,
+) -> Result<ljos::item::kurbo::Rect, String> {
+    let within = if panel == "tokens panel" {
+        filter_tokens(window, token_of(name))?;
+        "Tokens"
+    } else {
+        "Inspector"
+    };
+    let node = window.node(within, Some("textinput"), name)?;
+    let key = node.key.ok_or("the node has no key")?;
+    let mut at = None;
+    window.stage.scene.accessibility_tree().walk(|k, _, d| {
+        if k == key {
+            let b = d.bounds;
+            at = Some(ljos::item::kurbo::Rect::new(b.x0, b.y0, b.x1, b.y1));
+        }
+    });
+    at.ok_or_else(|| format!("{name:?} is not in the window"))
+}
 
 #[then(regex = r#"^the tokens panel shows "([^"]+): ([^"]*)"$"#)]
 fn tokens_show(w: &mut UiWorld, name: String, value: String) -> StepResult {
