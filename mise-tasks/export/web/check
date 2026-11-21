@@ -1,21 +1,19 @@
 #!/usr/bin/env bash
-#MISE description="features/web/site.feature: web/site/project exported for the web, built by ljos-web, checked in headless Chromium"
+#MISE description="features/web/site.feature: web/site/project exported and built by Studio for the web, checked in headless Chromium"
 set -euo pipefail
-# Needs what export:web:build needs (an ljos-web checkout with its packages
-# installed, its qmlc) and Playwright's Chromium from that checkout. It
-# downloads nothing.
+# Needs what Studio's build needs (an ljos-web checkout with its packages
+# installed, its qmlc, node) and Playwright's Chromium from that checkout.
+# It downloads nothing.
 # shellcheck source-path=SCRIPTDIR source=../../_lib/env.sh
 . "$(dirname "$0")/../../_lib/env.sh"
 find_ljos_web
+find_qmlc
 find_playwright
 find_design_qml
 project="$(own_target)/export-web-project"
 rm -rf "$project"
 mkdir -p "$project"
 cp -R "$studio_root/web/site/project/." "$project/"
-# And it is exported with the tool "export" and the target "web"
-cargo run --quiet -p studio_mcp --example export -- "$project" Shell.qml web >/dev/null
-# And the site is built from "build/web" with `mise run export:web:build`
-# Run as a script, not through mise: its argument is the variable mise sets.
-usage_bundle="$project/build/web" "$studio_root/mise-tasks/export/web/build"
+# And it is exported with the tool "export", the target "web" and "build": true
+cargo run --quiet -p studio_mcp --example export -- "$project" Shell.qml web --build >/dev/null
 node "$studio_root/web/site.mjs" "$project/build/web-site" "$project"
