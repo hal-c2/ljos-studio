@@ -754,6 +754,7 @@ Panel {
             spacing: Spacing.xs
             Layout.alignment: Qt.AlignHCenter
             Layout.topMargin: Spacing.xxl
+            Layout.bottomMargin: Spacing.xl
             Rectangle {
                 implicitWidth: 40
                 implicitHeight: 40
