@@ -1528,6 +1528,22 @@ fn inspector_button_disabled(w: &mut UiWorld, name: String) -> StepResult {
         .ok_or_else(|| format!("{name:?} is {:?}", button.states))
 }
 
+#[when(regex = r#"^the person chooses "([^"]+)" in the inspector's "([^"]+)"$"#)]
+fn chooses_in_inspector(w: &mut UiWorld, choice: String, name: String) -> StepResult {
+    let window = w.window()?;
+    let combo = window.node("Inspector", Some("combobox"), &name)?;
+    window.click_node(&combo)?;
+    let tree = window.tree();
+    let mut rows = Vec::new();
+    collect_named(&tree, &choice, &mut rows);
+    // The popup is drawn over everything, so it is read last.
+    let row = rows
+        .last()
+        .cloned()
+        .ok_or_else(|| format!("no row {choice:?}; the window holds {}", names(&tree)))?;
+    window.click_node(&row)
+}
+
 #[then(regex = r#"^the inspector's field "([^"]+)" is (enabled|disabled)$"#)]
 fn inspector_field_enabled(w: &mut UiWorld, name: String, want: String) -> StepResult {
     let field = w.window()?.node("Inspector", Some("textinput"), &name)?;

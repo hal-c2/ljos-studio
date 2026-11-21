@@ -118,6 +118,117 @@ Panel {
             return written("anchors." + side) !== "" || written("anchors.centerIn") !== ""
         return written("anchors." + side) !== ""
     }
+    // Whether the selected object takes `name`, written yet or not.
+    function has(name) {
+        return offer(name) !== null || written(name) !== ""
+    }
+    // The document reads the theme, so a value may name one of its roles.
+    readonly property bool themed: /^\s*import\s+Ljos\.Design\b/m.test(workspace.text)
+    // What the selected object's kind is about, in a section of its own:
+    // its rows whether the file writes them yet or not, so nobody has to
+    // know their names to find them.
+    readonly property var kindSection: {
+        if (workspace.selected === "")
+            return null
+        const rows = list => list.filter(r => has(r.name))
+        if (has("font.pixelSize")) {
+            return {
+                title: "Text",
+                rows: rows([
+                    {name: "font.pixelSize", lead: "Size"},
+                    {name: "font.weight", lead: "Weight"},
+                    {name: "wrapMode", lead: "Wrap"}
+                ]),
+                styles: themed,
+                aligns: has("horizontalAlignment")
+            }
+        }
+        if (has("fillMode") && (has("sourceSize") || has("sourceSize.width"))) {
+            return {
+                title: "Image",
+                rows: [
+                    {name: "fillMode", lead: "Fit"},
+                    {name: "sourceSize.width", lead: "Decode W"},
+                    {name: "sourceSize.height", lead: "Decode H"}
+                ]
+            }
+        }
+        // A view makes its own content from its model; a plain scrolling
+        // area holds what is put in it, and its content is that size.
+        if (has("contentHeight") && has("contentY")) {
+            return {
+                title: "Scrolling",
+                rows: rows([
+                    {name: "contentWidth", lead: "Content W", fits: !has("model")},
+                    {name: "contentHeight", lead: "Content H", fits: !has("model")}
+                ])
+            }
+        }
+        if (selectedType === "Item")
+            return {title: "Fill", rows: [], fill: true}
+        return null
+    }
+    readonly property var kindNames: kindSection !== null ? kindSection.rows.map(r => r.name) : []
+    // The theme's text styles: a size and a weight that go together.
+    readonly property var textStyles: [
+        {key: "caption", label: "Caption"},
+        {key: "body", label: "Body"},
+        {key: "bodyStrong", label: "Body strong"},
+        {key: "subtitle", label: "Subtitle"},
+        {key: "title", label: "Title"},
+        {key: "headline", label: "Headline"},
+        {key: "display", label: "Display"}
+    ]
+    function textStyle() {
+        const size = inState("font.pixelSize", written("font.pixelSize")).trim()
+        return textStyles.findIndex(t => size === "Typography." + t.key + "Size")
+    }
+    function giveStyle(key) {
+        refusal.at = "kind"
+        set("font.pixelSize", "Typography." + key + "Size")
+        set("font.weight", "Typography." + key + "Weight")
+    }
+    // Writes what a row of the kind's section says, as a row of the list does.
+    function put(name, text) {
+        const row = workspace.inspector.find(r => r.name === name)
+        if (text.trim() !== "")
+            enter(row !== undefined ? row : {name: name, value: ""}, text)
+        else if (inState(name, written(name)) !== "") {
+            refusal.at = name
+            set(name, "null")
+        }
+    }
+    // A scrolling area's content is as big as its first child, or as what
+    // all its children cover when that one has no name to read.
+    function fitContent(name) {
+        const across = name === "contentWidth"
+        const all = workspace.layers
+        const at = selectedLayer.at
+        const child = at + 1 < all.length && all[at + 1].depth === selectedLayer.layer.depth + 1 ? all[at + 1] : null
+        refusal.at = name
+        set(name, child !== null && child.id !== ""
+            ? child.id + (across ? ".implicitWidth" : ".implicitHeight")
+            : "contentItem.childrenRect." + (across ? "width" : "height"))
+    }
+    // A plain box turned into one that can be filled, then filled: the page
+    // with the theme's canvas, anything else with its surface.
+    property bool filling: false
+    function giveFill() {
+        filling = true
+        refusal.at = "kind"
+        refusal.text = ""
+        ask("node_arrange", {
+            action: "relayout",
+            doc: workspace.doc,
+            nodes: [{node: workspace.selected}],
+            name: "Rectangle"
+        })
+    }
+    function filled(node) {
+        filling = false
+        refusal.at = "kind"
+        set("color", themed ? (isRoot ? "Colors.canvas" : "Colors.surface") : '"white"', node)
+    }
     // Neither the root nor what a layout places is pinned.
     readonly property bool pinnable: placedBy === "" && !isRoot
     readonly property var marginNames: ["anchors.margins", "anchors.topMargin", "anchors.leftMargin",
@@ -332,6 +443,8 @@ Panel {
             panel.seenParent = null
         }
         function onRefused(tool, error, asked) {
+            if (tool === "node_arrange" && asked.action === "relayout")
+                panel.filling = false
             if (["property_set", "binding_set", "state_edit", "node_arrange"].includes(tool))
                 panel.reseed()
             if (refusal.asking !== "" && refusal.asking === panel.asked(tool, asked)) {
@@ -352,6 +465,8 @@ Panel {
             }
             if (tool === "state_edit")
                 panel.renamedPicked = ""
+            if (tool === "node_arrange" && asked.action === "relayout" && panel.filling)
+                panel.filled(answer.nodes !== undefined && answer.nodes.length === 1 ? answer.nodes[0] : "")
         }
     }
     // The picked state's old name while its rename is unanswered: the pick
@@ -1445,6 +1560,121 @@ Panel {
                 }
             }
 
+            // What the kind is about: a text's type, a picture's fit, a
+            // scrolling area's content, a plain box's fill.
+            Section {
+                id: kind
+                visible: panel.kindSection !== null
+                title: panel.kindSection !== null ? panel.kindSection.title : ""
+                gap: 0
+                Layout.fillWidth: true
+
+                Choice {
+                    id: style
+                    visible: panel.kindSection !== null && panel.kindSection.styles === true
+                    lead: "Style"
+                    model: panel.textStyles.map(t => t.label)
+                    currentIndex: panel.textStyle()
+                    displayText: currentIndex >= 0 ? currentText : "Custom"
+                    Accessible.name: "Text style"
+                    Layout.fillWidth: true
+                    Layout.bottomMargin: Spacing.xxs
+                    onActivated: index => {
+                        panel.giveStyle(panel.textStyles[index].key)
+                        currentIndex = Qt.binding(() => panel.textStyle())
+                    }
+                }
+                Repeater {
+                    model: panel.kindSection !== null ? panel.kindSection.rows : []
+                    delegate: RowLayout {
+                        id: kindRow
+                        required property var modelData
+                        readonly property string written: panel.inState(modelData.name, panel.written(modelData.name))
+                        spacing: 2
+                        Layout.fillWidth: true
+                        Field {
+                            id: kindValue
+                            lead: kindRow.modelData.lead
+                            unit: panel.unitOf(kindRow.modelData.name, text)
+                            scrub: panel.choices(kindRow.modelData.name).length === 0
+                            bound: panel.valueKind(kindRow.modelData.name, text) === "binding"
+                            token: panel.valueKind(kindRow.modelData.name, text) === "token"
+                            text: kindRow.written
+                            Accessible.name: kindRow.modelData.name
+                            Layout.fillWidth: true
+                            onAccepted: panel.put(kindRow.modelData.name, text)
+                            Connections {
+                                target: panel
+                                function onReseed() {
+                                    kindValue.text = Qt.binding(() => kindRow.written)
+                                }
+                            }
+                        }
+                        IconButton {
+                            visible: panel.choices(kindRow.modelData.name).length > 0
+                            implicitWidth: 24
+                            implicitHeight: 24
+                            iconSize: 14
+                            icon_: "chevronDown"
+                            text: "Choices for " + kindRow.modelData.name
+                            onClicked: choiceList.show(kindRow.modelData.name, this, kindRow.modelData.name)
+                        }
+                        IconButton {
+                            visible: kindRow.modelData.fits === true
+                            implicitWidth: 24
+                            implicitHeight: 24
+                            iconSize: 14
+                            icon_: "fit"
+                            text: kindRow.modelData.name === "contentWidth"
+                                ? "Fit the width to the content" : "Fit the height to the content"
+                            onClicked: panel.fitContent(kindRow.modelData.name)
+                        }
+                    }
+                }
+                RowLayout {
+                    visible: panel.kindSection !== null && panel.kindSection.aligns === true
+                    spacing: 2
+                    Layout.fillWidth: true
+                    Repeater {
+                        model: [
+                            {flag: "Text.AlignLeft", label: "Align the text left", icon: "alignLeft"},
+                            {flag: "Text.AlignHCenter", label: "Centre the text", icon: "alignHCenter"},
+                            {flag: "Text.AlignRight", label: "Align the text right", icon: "alignRight"}
+                        ]
+                        delegate: IconButton {
+                            required property var modelData
+                            readonly property bool on: panel.inState("horizontalAlignment",
+                                panel.written("horizontalAlignment")).trim() === modelData.flag
+                            icon_: modelData.icon
+                            text: modelData.label
+                            iconSize: 14
+                            checked: on
+                            onClicked: {
+                                refusal.at = "kind"
+                                panel.set("horizontalAlignment", on ? "null" : modelData.flag)
+                            }
+                        }
+                    }
+                    Item {
+                        Layout.fillWidth: true
+                    }
+                }
+                TextButton {
+                    visible: panel.kindSection !== null && panel.kindSection.fill === true
+                    text: "Give it a fill"
+                    Accessible.name: text
+                    onClicked: panel.giveFill()
+                }
+                Note {
+                    text: panel.kindNames.concat(["kind"]).map(n => panel.says(n)).find(t => t !== "") || ""
+                    bindSays: panel.kindNames.map(n => panel.offersBind(n)).find(t => t !== "") || ""
+                    textSays: panel.kindNames.map(n => panel.offersText(n)).find(t => t !== "") || ""
+                    onBindAsked: panel.takeOffer(false)
+                    onTextAsked: panel.takeOffer(true)
+                    Layout.fillWidth: true
+                }
+            }
+
             Section {
                 title: "Properties"
                 gap: 0
@@ -1455,6 +1685,7 @@ Panel {
                     // Where and how big, and a pinned object's margins, have
                     // their own fields above.
                     model: panel.workspace.inspector.filter(r => panel.geometryNames.indexOf(r.name) < 0
+                        && panel.kindNames.indexOf(r.name) < 0
                         && !(panel.pinnable && panel.marginNames.indexOf(r.name) >= 0))
                     delegate: ColumnLayout {
                         id: row
