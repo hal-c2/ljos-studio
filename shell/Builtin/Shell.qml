@@ -143,6 +143,7 @@ Item {
                             }
                         }
                         Section {
+                            id: layersSection
                             title: "Layers"
                             inset: Spacing.xxs
                             Layout.fillWidth: true
@@ -152,6 +153,12 @@ Item {
                                 Layout.fillWidth: true
                                 Layout.fillHeight: true
                             }
+                        }
+                        // A closed Layers leaves its room empty below, so the
+                        // card keeps its tabs at the top.
+                        Item {
+                            visible: !layersSection.open
+                            Layout.fillHeight: true
                         }
                     }
                     PalettePanel {
@@ -276,11 +283,27 @@ Item {
             Accessible.role: Accessible.StatusBar
             Accessible.name: "Status"
             padding: Spacing.xs
+            leftPadding: Spacing.xs + 14 + Spacing.xs
             text: workspace.error
             color: Colors.text
             font.pixelSize: Typography.captionSize
+            elide: Text.ElideRight
+            // A slim bar on the canvas's ground, its mark saying it is a
+            // refusal and not news.
             background: Rectangle {
-                color: Colors.surfaceRaised
+                color: Colors.surface
+                Rectangle {
+                    width: parent.width
+                    height: 1
+                    color: Colors.surfacePressed
+                }
+                Icon {
+                    x: Spacing.xs
+                    anchors.verticalCenter: parent.verticalCenter
+                    name: "close"
+                    size: 14
+                    color: Colors.danger
+                }
             }
             visible: text !== ""
             Layout.fillWidth: true
