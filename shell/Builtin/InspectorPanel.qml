@@ -113,7 +113,59 @@ Panel {
         return row !== undefined ? row.value : ""
     }
     function isPinned(side) {
+        // A centring holds it on both centre lines.
+        if (side === "horizontalCenter" || side === "verticalCenter")
+            return written("anchors." + side) !== "" || written("anchors.centerIn") !== ""
         return written("anchors." + side) !== ""
+    }
+    // Neither the root nor what a layout places is pinned.
+    readonly property bool pinnable: placedBy === "" && !isRoot
+    readonly property var marginNames: ["anchors.margins", "anchors.topMargin", "anchors.leftMargin",
+        "anchors.rightMargin", "anchors.bottomMargin"]
+    // What a row, column or grid layout places is told where it sits in its
+    // place there, on the axes that layout leaves room on.
+    readonly property var alignments: {
+        const across = [
+            {flag: "Qt.AlignLeft", word: "Left", icon: "alignLeft"},
+            {flag: "Qt.AlignHCenter", word: "Centre", icon: "alignHCenter"},
+            {flag: "Qt.AlignRight", word: "Right", icon: "alignRight"}
+        ]
+        const down = [
+            {flag: "Qt.AlignTop", word: "Top", icon: "alignTop"},
+            {flag: "Qt.AlignVCenter", word: "Middle", icon: "alignVCenter"},
+            {flag: "Qt.AlignBottom", word: "Bottom", icon: "alignBottom"}
+        ]
+        const tell = (list, axis, where) => list.map(a => ({
+            flag: a.flag, icon: a.icon, axis: axis, label: a.word + " of " + where
+        }))
+        if (placedBy === "RowLayout")
+            return tell(down, "down", "the row")
+        if (placedBy === "ColumnLayout")
+            return tell(across, "across", "the column")
+        if (placedBy === "GridLayout")
+            return tell(across, "across", "its cell").concat(tell(down, "down", "its cell"))
+        return []
+    }
+    // The flags `Layout.alignment` is written with, or null for an expression
+    // that is more than flags.
+    function alignmentFlags() {
+        const text = inState("Layout.alignment", written("Layout.alignment")).trim()
+        if (text === "")
+            return []
+        if (!/^Qt\.Align[A-Za-z]+(\s*\|\s*Qt\.Align[A-Za-z]+)*$/.test(text))
+            return null
+        return text.split("|").map(f => f.trim())
+    }
+    // One axis's flag in place of whatever that axis had, or none when it was
+    // the one written; the other axis keeps its own.
+    function align(flag, axis) {
+        const sameAxis = alignments.filter(a => a.axis === axis).map(a => a.flag)
+        const had = alignmentFlags() || []
+        const kept = had.filter(f => sameAxis.indexOf(f) < 0)
+        if (had.indexOf(flag) < 0)
+            kept.push(flag)
+        refusal.at = "align"
+        set("Layout.alignment", kept.length > 0 ? kept.join(" | ") : "null")
     }
     // The newest boxes the canvas asked for: a new pin keeps the distance the
     // object has, where one is known.
@@ -122,8 +174,11 @@ Panel {
     function margin(side) {
         const box = seenBox
         const outer = seenParent
-        if (box === null || outer === null || box.window === undefined)
-            return 0
+        // Unmeasured, it is where the margin it shares puts it.
+        if (box === null || outer === null || box.window === undefined) {
+            const shared = written("anchors.margins")
+            return isNumber(shared) ? Number(shared) : 0
+        }
         const at = box.window
         const away = side === "left" ? at.x - outer.x
             : side === "top" ? at.y - outer.y
@@ -205,6 +260,10 @@ Panel {
             args.centerIn = !isPinned(side)
         } else if (side === "fill") {
             args.fill = !isPinned(side)
+        } else if (side === "horizontalCenter" || side === "verticalCenter") {
+            // A centre line's value is its offset from the parent's.
+            args.sides = {}
+            args.sides[side] = isPinned(side) ? null : 0
         } else {
             args.sides = {}
             args.sides[side] = isPinned(side) ? null : margin(side)
@@ -945,14 +1004,42 @@ Panel {
                     wrapMode: Text.Wrap
                     Layout.fillWidth: true
                 }
+                RowLayout {
+                    visible: panel.alignments.length > 0
+                    spacing: 2
+                    Layout.fillWidth: true
+                    Repeater {
+                        model: panel.alignments
+                        delegate: IconButton {
+                            required property var modelData
+                            required property int index
+                            icon_: modelData.icon
+                            text: modelData.label
+                            iconSize: 14
+                            checked: (panel.alignmentFlags() || []).indexOf(modelData.flag) >= 0
+                            // A gap between a grid's two axes.
+                            Layout.leftMargin: index === 3 ? Spacing.sm : 0
+                            onClicked: panel.align(modelData.flag, modelData.axis)
+                        }
+                    }
+                    Item {
+                        Layout.fillWidth: true
+                    }
+                }
+                Note {
+                    visible: panel.alignments.length > 0
+                    text: panel.says("align")
+                    Layout.fillWidth: true
+                }
 
                 // The parent as a box and the object as a box inside it: a strut
                 // from an inner edge to the outer one is a pin on that side, with
                 // its margin beside it. Where a button sits is which side it pins.
                 Rectangle {
                     id: pad
-                    visible: panel.placedBy === "" && !panel.isRoot
+                    visible: panel.pinnable
                     readonly property bool filled: panel.isPinned("fill")
+                    readonly property bool centred: panel.isPinned("horizontalCenter") || panel.isPinned("verticalCenter")
                     implicitHeight: 112
                     Layout.fillWidth: true
                     radius: 8
@@ -968,7 +1055,7 @@ Panel {
                         radius: 6
                         color: Colors.surfaceRaised
                         border.width: 1
-                        border.color: pad.filled || panel.isPinned("centerIn") ? Colors.link : Colors.surfacePressed
+                        border.color: pad.filled || pad.centred ? Colors.link : Colors.surfacePressed
                     }
 
                     Repeater {
@@ -1050,10 +1137,85 @@ Panel {
                         checked: pad.filled
                         onClicked: panel.togglePin("fill")
                     }
+                    // One centre line each, in the corner across from the fill.
+                    Row {
+                        anchors.left: parent.left
+                        anchors.bottom: parent.bottom
+                        anchors.margins: Spacing.xxs
+                        spacing: 0
+                        IconButton {
+                            icon_: "centreAcross"
+                            text: "Pin horizontal centre"
+                            iconSize: 14
+                            checked: panel.isPinned("horizontalCenter")
+                            onClicked: panel.togglePin("horizontalCenter")
+                        }
+                        IconButton {
+                            icon_: "centreDown"
+                            text: "Pin vertical centre"
+                            iconSize: 14
+                            checked: panel.isPinned("verticalCenter")
+                            onClicked: panel.togglePin("verticalCenter")
+                        }
+                    }
                 }
                 Note {
                     visible: pad.visible
                     text: panel.says("pin")
+                    Layout.fillWidth: true
+                }
+                // The margin every side shares, then each side's own: a side
+                // has one only while it is pinned.
+                RowLayout {
+                    id: margins
+                    visible: pad.visible
+                    spacing: 2
+                    Layout.fillWidth: true
+                    readonly property string shared: panel.written("anchors.margins")
+                    Repeater {
+                        model: [
+                            {name: "anchors.margins", label: "Margins", lead: "All", side: ""},
+                            {name: "anchors.topMargin", label: "Top margin", lead: "T", side: "top"},
+                            {name: "anchors.leftMargin", label: "Left margin", lead: "L", side: "left"},
+                            {name: "anchors.rightMargin", label: "Right margin", lead: "R", side: "right"},
+                            {name: "anchors.bottomMargin", label: "Bottom margin", lead: "B", side: "bottom"}
+                        ]
+                        delegate: Field {
+                            id: marginField
+                            required property var modelData
+                            readonly property string written: panel.inState(modelData.name, panel.written(modelData.name))
+                            lead: modelData.lead
+                            scrub: true
+                            enabled: modelData.side === "" || pad.filled || panel.isPinned(modelData.side)
+                            bound: panel.valueKind(modelData.name, text) === "binding"
+                            token: panel.valueKind(modelData.name, text) === "token"
+                            text: written
+                            // What the side has when it says nothing of its own.
+                            placeholderText: modelData.side !== "" && enabled ? margins.shared : ""
+                            Accessible.name: modelData.label
+                            Layout.fillWidth: true
+                            Layout.preferredWidth: modelData.side === "" ? 3 : 2
+                            Layout.minimumWidth: modelData.side === "" ? 52 : 40
+                            onAccepted: {
+                                refusal.at = "margin"
+                                // Emptied, it says nothing of its own any more.
+                                if (text.trim() !== "")
+                                    panel.set(modelData.name, text)
+                                else if (written !== "")
+                                    panel.set(modelData.name, "null")
+                            }
+                            Connections {
+                                target: panel
+                                function onReseed() {
+                                    marginField.text = Qt.binding(() => marginField.written)
+                                }
+                            }
+                        }
+                    }
+                }
+                Note {
+                    visible: pad.visible
+                    text: panel.says("margin")
                     Layout.fillWidth: true
                 }
 
@@ -1290,7 +1452,10 @@ Panel {
                 Layout.fillWidth: true
 
                 Repeater {
-                    model: panel.workspace.inspector.filter(r => panel.geometryNames.indexOf(r.name) < 0)
+                    // Where and how big, and a pinned object's margins, have
+                    // their own fields above.
+                    model: panel.workspace.inspector.filter(r => panel.geometryNames.indexOf(r.name) < 0
+                        && !(panel.pinnable && panel.marginNames.indexOf(r.name) >= 0))
                     delegate: ColumnLayout {
                         id: row
                         required property var modelData

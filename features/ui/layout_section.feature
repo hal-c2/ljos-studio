@@ -1,17 +1,23 @@
 # Sources:
 #   docs/MCP.md (node_arrange `anchor`, `wrap`)
 #   features/edit/anchors.feature (the same actions as an agent has them)
+#   studio7 dogfood backlog P7-16 (margin fields per pin, centre lines, a pin
+#   writes no `topMargin: 0` over `anchors.margins`, per-child alignment)
 
 @ui
 Feature: A person pins an object from the inspector's Layout section
-  A small pad shows the four sides and the centre; pressing one pins or
-  unpins it. A layout shows its spacing and columns here too, and the selected
+  A small pad shows the four sides, the centre and each centre line; pressing
+  one pins or unpins it. Under the pad each pinned side has its margin to
+  write, and all of them have the margin they share. What a row, column or
+  grid layout places is not pinned: it is told where it sits in its place
+  there. A layout shows its spacing and columns here too, and the selected
   object can be wrapped from here.
 
   Background:
     Given the file "Main.qml":
       """qml
       import QtQuick
+      import QtQuick.Layouts
 
       Item {
           id: root
@@ -25,6 +31,11 @@ Feature: A person pins an object from the inspector's Layout section
               Text { id: cell }
           }
           Timer { id: tick }
+          RowLayout {
+              id: bar
+              y: 200
+              Rectangle { id: chip; width: 10; height: 10 }
+          }
       }
       """
     And Studio's window shows the project
@@ -41,6 +52,49 @@ Feature: A person pins an object from the inspector's Layout section
     When the person selects "Rectangle box" in the layers panel
     And the person clicks the button "Pin centre"
     Then the file "Main.qml" says "anchors.centerIn: parent"
+
+  Scenario: A centre line pins one axis to the middle, and pressing it again lets it go
+    When the person selects "Rectangle box" in the layers panel
+    And the person clicks the button "Pin horizontal centre"
+    Then the file "Main.qml" says "anchors.horizontalCenter: parent.horizontalCenter"
+    When the person clicks the button "Pin horizontal centre"
+    Then the file "Main.qml" does not say "anchors.horizontalCenter"
+
+  Scenario: Letting one line of a centring go keeps the other
+    When the person selects "Rectangle box" in the layers panel
+    And the person clicks the button "Pin centre"
+    And the person clicks the button "Pin horizontal centre"
+    Then the file "Main.qml" says "anchors.verticalCenter: parent.verticalCenter"
+    And the file "Main.qml" does not say "anchors.centerIn"
+
+  Scenario: A pinned side's margin is written in its field
+    When the person selects "Rectangle box" in the layers panel
+    And the person clicks the button "Pin left"
+    And the person sets "Left margin" to "12" in the inspector
+    Then the file "Main.qml" says "anchors.leftMargin: 12"
+
+  Scenario: A side that is not pinned has no margin to write
+    When the person selects "Rectangle box" in the layers panel
+    And the person clicks the button "Pin left"
+    Then the inspector's field "Left margin" is enabled
+    And the inspector's field "Right margin" is disabled
+
+  # The box sits 10 from the left, where the shared margin puts it too.
+  Scenario: A pin where the shared margin already puts it writes no margin of its own
+    When the person selects "Rectangle box" in the layers panel
+    And the person sets "Margins" to "10" in the inspector
+    And the person clicks the button "Pin left"
+    Then the file "Main.qml" says "anchors.left: parent.left"
+    And the file "Main.qml" says "anchors.margins: 10"
+    And the file "Main.qml" does not say "leftMargin"
+
+  Scenario: What a row layout places is told where it sits in the row
+    When the person selects "Rectangle chip" in the layers panel
+    Then the inspector has no button "Pin left"
+    When the person clicks the button "Bottom of the row"
+    Then the file "Main.qml" says "Layout.alignment: Qt.AlignBottom"
+    When the person clicks the button "Bottom of the row"
+    Then the file "Main.qml" does not say "Layout.alignment"
 
   Scenario: An object is wrapped from the section
     When the person selects "Rectangle box" in the layers panel
