@@ -118,6 +118,41 @@ Panel {
             displayText: "Wire " + panel.trigger
             Accessible.name: "Wire"
             onActivated: index => panel.picked = panel.triggers[index]
+            implicitHeight: 28
+            hoverEnabled: true
+            leftPadding: Spacing.xs
+            contentItem: Row {
+                spacing: Spacing.xxs
+                Icon {
+                    name: "pointer"
+                    size: 14
+                    color: Colors.textMuted
+                    anchors.verticalCenter: parent.verticalCenter
+                }
+                Text {
+                    text: "Wire"
+                    color: Colors.textMuted
+                    font.pixelSize: Typography.captionSize
+                    anchors.verticalCenter: parent.verticalCenter
+                }
+                Text {
+                    text: panel.trigger
+                    color: Colors.text
+                    font.pixelSize: Typography.bodySize
+                    anchors.verticalCenter: parent.verticalCenter
+                }
+            }
+            indicator: Icon {
+                name: "chevronDown"
+                size: 14
+                color: Colors.textMuted
+                x: triggerBox.width - width - Spacing.xs
+                y: (triggerBox.height - height) / 2
+            }
+            background: Rectangle {
+                radius: 6
+                color: triggerBox.hovered || triggerBox.down ? Colors.surfacePressed : Colors.surfaceHover
+            }
             // The popup's list is the style's; it is named here so a
             // reader of the window can tell it from the others.
             Component.onCompleted: {
@@ -152,7 +187,7 @@ Panel {
                     anchors.fill: parent
                     Accessible.ignored: true
                     ShapePath {
-                        strokeColor: modelData.kind === "interaction" ? Colors.accent : Colors.textMuted
+                        strokeColor: modelData.kind === "interaction" ? Colors.link : Colors.textMuted
                         strokeWidth: 1.5
                         fillColor: "transparent"
                         capStyle: ShapePath.RoundCap
@@ -173,9 +208,12 @@ Panel {
                     y: panel.nodeY(modelData) - panel.nodeHeight / 2
                     width: graph.nodeWidth
                     height: panel.nodeHeight
-                    radius: 6
-                    color: panel.playing === modelData ? Colors.accent : Colors.surfaceRaised
-                    border.color: Colors.border
+                    radius: 8
+                    color: panel.playing === modelData ? Colors.accent
+                        : showState.hovered ? Colors.surfaceHover : Colors.surfaceRaised
+                    border.width: 1
+                    border.color: Colors.surfacePressed
+                    Behavior on color { ColorAnimation { duration: Motion.enterSmallFrequent; easing.type: Motion.easeOut } }
                     Accessible.role: Accessible.StaticText
                     Accessible.name: "Flow state " + name
 
@@ -192,10 +230,13 @@ Panel {
                             Accessible.role: Accessible.Button
                             Accessible.name: "Show " + node.name
                             onClicked: panel.show(node.modelData)
+                            hoverEnabled: true
                             contentItem: Label {
                                 text: node.name
                                 elide: Text.ElideRight
                                 verticalAlignment: Text.AlignVCenter
+                                font.pixelSize: Typography.bodySize
+                                font.weight: node.modelData === "" ? Typography.bodyStrongWeight : Typography.bodyWeight
                                 color: panel.playing === node.modelData ? Colors.textOnAccent : Colors.text
                             }
                             background: Item { }
@@ -211,12 +252,12 @@ Panel {
                                 animations: "NumberAnimation { properties: \"x,y,width,height,opacity\"; duration: " + Motion.moveScreen + " }"
                             })
                         }
-                        TextButton {
-                            text: "+"
+                        IconButton {
+                            icon_: "plus"
                             enabled: panel.selected !== ""
-                            Accessible.name: panel.trigger === "tapped"
-                                             ? "Tap selection to go to " + node.name
-                                             : "On " + panel.trigger + " of selection go to " + node.name
+                            text: panel.trigger === "tapped"
+                                  ? "Tap selection to go to " + node.name
+                                  : "On " + panel.trigger + " of selection go to " + node.name
                             onClicked: {
                                 const args = {
                                     action: "interaction",
@@ -241,19 +282,30 @@ Panel {
                 Layout.fillWidth: true
                 spacing: Spacing.xxs
 
+                Icon {
+                    name: edge.modelData.kind === "interaction" ? "pointer" : "motion"
+                    size: 14
+                    color: edge.modelData.kind === "interaction" ? Colors.link : Colors.textMuted
+                }
                 Label {
                     text: (edge.modelData.from === "*" ? "any" : panel.stateName(edge.modelData.from))
                           + " → " + panel.stateName(edge.modelData.to)
-                          + (edge.modelData.kind === "interaction" ? " · " + edge.modelData.label : "")
                     color: Colors.text
+                    font.pixelSize: Typography.bodySize
+                    Accessible.ignored: true
+                }
+                Label {
+                    text: edge.modelData.kind === "interaction" ? edge.modelData.label : ""
+                    color: Colors.textMuted
+                    font.pixelSize: Typography.captionSize
                     elide: Text.ElideRight
                     Layout.fillWidth: true
                     Accessible.role: Accessible.StaticText
                     Accessible.name: "Flow edge " + edge.modelData.label
                 }
-                TextButton {
-                    text: "Remove"
-                    Accessible.name: "Remove flow " + edge.modelData.label
+                IconButton {
+                    icon_: "trash"
+                    text: "Remove flow " + edge.modelData.label
                     onClicked: {
                         if (edge.modelData.kind !== "interaction") {
                             panel.edit({action: "remove_transition", from: edge.modelData.from, to: edge.modelData.to})
@@ -265,6 +317,36 @@ Panel {
                         panel.edit(args)
                     }
                 }
+            }
+        }
+
+        // A flow is drawn between states, so without one there is nothing
+        // to draw yet: say where they come from.
+        ColumnLayout {
+            visible: panel.nodes.length < 2
+            spacing: Spacing.xxs
+            Layout.fillWidth: true
+            Layout.topMargin: Spacing.sm
+            Icon {
+                name: "motion"
+                size: 20
+                color: Colors.textMuted
+                Layout.alignment: Qt.AlignHCenter
+            }
+            Label {
+                text: "No states to flow between"
+                color: Colors.text
+                font.pixelSize: Typography.bodySize
+                font.weight: Typography.bodyStrongWeight
+                Layout.alignment: Qt.AlignHCenter
+            }
+            Label {
+                text: "Add a state in the Design tab, then wire the selection to it here"
+                color: Colors.textMuted
+                font.pixelSize: Typography.captionSize
+                wrapMode: Text.Wrap
+                horizontalAlignment: Text.AlignHCenter
+                Layout.fillWidth: true
             }
         }
 
