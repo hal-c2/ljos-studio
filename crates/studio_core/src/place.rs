@@ -557,6 +557,9 @@ pub struct Pin {
     pub right: Option<Option<f64>>,
     pub top: Option<Option<f64>>,
     pub bottom: Option<Option<f64>>,
+    /// A centre line, its value the offset from the target's: null lets it go.
+    pub horizontal_center: Option<Option<f64>>,
+    pub vertical_center: Option<Option<f64>>,
     /// `parent` or a sibling's id.
     pub target: String,
 }
@@ -581,6 +584,10 @@ struct PinAxis<'a> {
     near: &'a str,
     far: &'a str,
     centre: &'a str,
+    /// The centre's line on the target, and how far off it the object is.
+    line: &'a str,
+    offset: &'a str,
+    asked_centre: Option<Option<f64>>,
     place: &'a str,
     size: &'a str,
     asked_near: Option<Option<f64>>,
@@ -627,8 +634,13 @@ pub fn anchoring(node: &Node, pin: &Pin, now: Known) -> Vec<Change> {
     let had_fill = binding(node, "anchors.fill").is_some();
     let had_centre = binding(node, "anchors.centerIn").is_some();
     let lets_go = |asked: Option<bool>, had: bool| had && (asked == Some(false) || pin.sides());
-    let fill_goes = lets_go(pin.fill, had_fill);
-    let centre_goes = lets_go(pin.center_in, had_centre);
+    let fill_goes = lets_go(pin.fill, had_fill) || (had_fill && pin.centring());
+    // One centre line asked for, or let go of, splits a centring in two.
+    let centres_asked = pin.horizontal_center.is_some() || pin.vertical_center.is_some();
+    let centre_goes = lets_go(pin.center_in, had_centre) || (had_centre && centres_asked);
+    let centred_on = binding(node, "anchors.centerIn")
+        .unwrap_or("parent")
+        .to_owned();
     if fill_goes {
         drop(&mut out, "anchors.fill");
     }
@@ -640,6 +652,9 @@ pub fn anchoring(node: &Node, pin: &Pin, now: Known) -> Vec<Change> {
             near: "left",
             far: "right",
             centre: "anchors.horizontalCenter",
+            line: "horizontalCenter",
+            offset: "anchors.horizontalCenterOffset",
+            asked_centre: pin.horizontal_center,
             place: "x",
             size: "width",
             asked_near: pin.left,
@@ -651,6 +666,9 @@ pub fn anchoring(node: &Node, pin: &Pin, now: Known) -> Vec<Change> {
             near: "top",
             far: "bottom",
             centre: "anchors.verticalCenter",
+            line: "verticalCenter",
+            offset: "anchors.verticalCenterOffset",
+            asked_centre: pin.vertical_center,
             place: "y",
             size: "height",
             asked_near: pin.top,
@@ -667,6 +685,57 @@ pub fn anchoring(node: &Node, pin: &Pin, now: Known) -> Vec<Change> {
             || pinned(axis.near)
             || pinned(axis.far)
             || binding(node, axis.centre).is_some();
+        let sides_asked = axis.asked_near.is_some() || axis.asked_far.is_some();
+        match axis.asked_centre {
+            Some(Some(by)) => {
+                for side in [axis.near, axis.far] {
+                    drop(&mut out, &format!("anchors.{side}"));
+                    drop(&mut out, &format!("anchors.{side}Margin"));
+                }
+                drop(&mut out, axis.place);
+                out.push(Change::Set(
+                    axis.centre.to_owned(),
+                    format!("{}.{}", pin.target, axis.line),
+                ));
+                if by != 0.0 {
+                    out.push(Change::Set(axis.offset.to_owned(), number(by)));
+                } else {
+                    drop(&mut out, axis.offset);
+                }
+                if had_both
+                    && binding(node, axis.size).is_none()
+                    && let Some(size) = axis.known_size
+                {
+                    out.push(Change::Set(axis.size.to_owned(), number(size)));
+                }
+                continue;
+            }
+            Some(None) => {
+                let was_centred = binding(node, axis.centre).is_some() || centre_goes;
+                drop(&mut out, axis.centre);
+                drop(&mut out, axis.offset);
+                if was_centred
+                    && !pinned(axis.near)
+                    && !pinned(axis.far)
+                    && binding(node, axis.place).is_none()
+                    && let Some(place) = axis.known_place
+                {
+                    out.push(Change::Set(axis.place.to_owned(), number(place)));
+                }
+                continue;
+            }
+            // The axis a split centring does not touch stays centred.
+            None if centre_goes && centres_asked && !sides_asked => {
+                if binding(node, axis.centre).is_none() {
+                    out.push(Change::Set(
+                        axis.centre.to_owned(),
+                        format!("{centred_on}.{}", axis.line),
+                    ));
+                }
+                continue;
+            }
+            None => {}
+        }
         let mut after = 0;
         for (side, asked) in [(axis.near, axis.asked_near), (axis.far, axis.asked_far)] {
             let name = format!("anchors.{side}");
@@ -675,7 +744,13 @@ pub fn anchoring(node: &Node, pin: &Pin, now: Known) -> Vec<Change> {
                 Some(Some(by)) => {
                     after += 1;
                     out.push(Change::Set(name, format!("{}.{side}", pin.target)));
-                    if by != 0.0 || binding(node, "anchors.margins").is_some() {
+                    // The shared margin says a side's distance until the side
+                    // says its own, so a pin at it writes nothing over it; one at
+                    // 0 with a shared margin must say 0, or it would get the
+                    // shared one.
+                    let shared = binding(node, "anchors.margins");
+                    let at_shared = shared.is_some_and(|m| m.trim().parse::<f64>() == Ok(by));
+                    if !at_shared && (by != 0.0 || shared.is_some()) {
                         out.push(Change::Set(margin, number(by)));
                     } else {
                         drop(&mut out, &margin);
@@ -694,6 +769,7 @@ pub fn anchoring(node: &Node, pin: &Pin, now: Known) -> Vec<Change> {
         }
         if after > 0 {
             drop(&mut out, axis.centre);
+            drop(&mut out, axis.offset);
             drop(&mut out, axis.place);
         }
         if after == 2 {
@@ -723,6 +799,30 @@ impl Pin {
         [self.left, self.right, self.top, self.bottom]
             .iter()
             .any(|side| matches!(side, Some(Some(_))))
+    }
+
+    fn centring(&self) -> bool {
+        [self.horizontal_center, self.vertical_center]
+            .iter()
+            .any(|line| matches!(line, Some(Some(_))))
+    }
+
+    /// What in the asking says two things of one axis, for a refusal.
+    pub fn disagreement(&self) -> Option<&'static str> {
+        let on = |side: Option<Option<f64>>| matches!(side, Some(Some(_)));
+        if self.fill == Some(true) && self.center_in == Some(true) {
+            return Some("`fill` and `centerIn` say different things");
+        }
+        if on(self.horizontal_center) && (on(self.left) || on(self.right)) {
+            return Some("`horizontalCenter` and a left or right side say different things");
+        }
+        if on(self.vertical_center) && (on(self.top) || on(self.bottom)) {
+            return Some("`verticalCenter` and a top or bottom side say different things");
+        }
+        if self.centring() && (self.fill == Some(true) || self.center_in == Some(true)) {
+            return Some("a centre line and `fill` or `centerIn` say different things");
+        }
+        None
     }
 }
 

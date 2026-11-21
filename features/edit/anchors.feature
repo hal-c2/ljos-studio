@@ -1,6 +1,9 @@
 # Sources:
 #   docs/MCP.md (node_arrange `anchor`)
 #   docs/DESIGN.md (the lossless edit seam)
+#   studio7 dogfood backlog P7-16 (a pin wrote `topMargin: 0` over the
+#   `anchors.margins` already there; there was no vertical or horizontal
+#   centre pin)
 
 Feature: An object is pinned to its parent or a sibling
   Anchoring writes `anchors.*` and takes away the x, y, width and height that
@@ -118,6 +121,81 @@ Feature: An object is pinned to its parent or a sibling
       """
     Then the file "Grouped.qml" contains "top: parent.top"
     And the file "Grouped.qml" does not contain "left: parent.left"
+
+  Scenario: A vertical centre takes the place on its axis and keeps the size
+    When the agent calls the tool "node_arrange" with:
+      """json
+      {"action": "anchor", "doc": "Main.qml", "nodes": [{"id": "box"}], "sides": {"verticalCenter": 0}}
+      """
+    Then the file "Main.qml" contains "Rectangle { id: box; x: 10; width: 50; height: 40; anchors.verticalCenter: parent.verticalCenter } // keep this note"
+
+  Scenario: A centre's value is its offset
+    When the agent calls the tool "node_arrange" with:
+      """json
+      {"action": "anchor", "doc": "Main.qml", "nodes": [{"id": "box"}], "sides": {"horizontalCenter": 8}}
+      """
+    Then the file "Main.qml" contains "Rectangle { id: box; y: 20; width: 50; height: 40; anchors.horizontalCenter: parent.horizontalCenter; anchors.horizontalCenterOffset: 8 }"
+
+  Scenario: A centre takes the place of the sides of its axis
+    Given the file "Pinned.qml":
+      """qml
+      import QtQuick
+
+      Rectangle {
+          Rectangle { id: p; x: 3; width: 10; height: 10; anchors.top: parent.top; anchors.topMargin: 4 }
+      }
+      """
+    When the agent calls the tool "node_arrange" with:
+      """json
+      {"action": "anchor", "doc": "Pinned.qml", "nodes": [{"id": "p"}], "sides": {"verticalCenter": 0}}
+      """
+    Then the file "Pinned.qml" contains "Rectangle { id: p; x: 3; width: 10; height: 10; anchors.verticalCenter: parent.verticalCenter }"
+
+  Scenario: Letting one axis of a centring go keeps the other centred
+    Given the file "Centred.qml":
+      """qml
+      import QtQuick
+
+      Rectangle {
+          Rectangle { id: c; width: 10; height: 10; anchors.centerIn: parent }
+      }
+      """
+    When the agent calls the tool "node_arrange" with:
+      """json
+      {"action": "anchor", "doc": "Centred.qml", "nodes": [{"id": "c"}], "sides": {"horizontalCenter": null}}
+      """
+    Then the file "Centred.qml" contains "anchors.verticalCenter: parent.verticalCenter"
+    And the file "Centred.qml" does not contain "centerIn"
+    And the file "Centred.qml" does not contain "horizontalCenter"
+
+  Scenario: A centre and a side of one axis are not asked for together
+    When the agent calls the tool "node_arrange" with:
+      """json
+      {"action": "anchor", "doc": "Main.qml", "nodes": [{"id": "box"}], "sides": {"top": 0, "verticalCenter": 0}}
+      """
+    Then the agent is refused with "invalid_argument"
+
+  Scenario: A pin at the shared margin leaves the shared margin to say it
+    Given the file "Margins.qml":
+      """qml
+      import QtQuick
+
+      Rectangle {
+          Rectangle {
+              id: m
+              anchors.margins: 24
+              width: 50
+          }
+      }
+      """
+    When the agent calls the tool "node_arrange" with:
+      """json
+      {"action": "anchor", "doc": "Margins.qml", "nodes": [{"id": "m"}], "sides": {"top": 24, "left": 0}}
+      """
+    Then the file "Margins.qml" contains "anchors.top: parent.top"
+    And the file "Margins.qml" does not contain "anchors.topMargin"
+    And the file "Margins.qml" contains "anchors.leftMargin: 0"
+    And the file "Margins.qml" contains "anchors.margins: 24"
 
   Scenario: In a layout the layout decides, and the refusal says what to use
     When the agent calls the tool "node_arrange" with:

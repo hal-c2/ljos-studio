@@ -72,6 +72,10 @@ struct Sides {
     top: Option<Option<f64>>,
     #[serde(default, deserialize_with = "stated")]
     bottom: Option<Option<f64>>,
+    #[serde(rename = "horizontalCenter", default, deserialize_with = "stated")]
+    horizontal_center: Option<Option<f64>>,
+    #[serde(rename = "verticalCenter", default, deserialize_with = "stated")]
+    vertical_center: Option<Option<f64>>,
 }
 
 /// Serde reads null as a field left out, and here they differ.
@@ -1107,6 +1111,8 @@ fn arrange(studio: &mut Studio, a: ArrangeArgs) -> Result<ArrangeOut, SurfaceErr
                 right: sides.right,
                 top: sides.top,
                 bottom: sides.bottom,
+                horizontal_center: sides.horizontal_center,
+                vertical_center: sides.vertical_center,
                 target: a.target.unwrap_or_else(|| "parent".to_owned()),
             };
             layout_tools::anchor(studio, &doc, &nodes, &pin, generation, a.dry_run).map(many)
