@@ -101,6 +101,56 @@ Panel {
             {name: "height", at: box.local.height}
         ].filter(p => !workspace.inspector.some(r => r.name === p.name))
     }
+    // Where and how big, apart from the other properties: the four numbers
+    // the file writes or, where it does not, the running app's, in a grid.
+    readonly property var geometryNames: ["x", "y", "width", "height"]
+    readonly property var geometry: {
+        const out = []
+        const rows = workspace.inspector
+        const measured = placeRows
+        for (let i = 0; i < geometryNames.length; i++) {
+            const name = geometryNames[i]
+            const row = rows.find(r => r.name === name)
+            if (row !== undefined) {
+                out.push({name: name, row: row, at: null})
+            } else {
+                const seen = measured.find(m => m.name === name)
+                if (seen !== undefined)
+                    out.push({name: name, row: null, at: seen.at})
+            }
+        }
+        return out
+    }
+    // What a value is at a glance: a literal, a design role (a token), or an
+    // expression the runtime keeps up to date (a binding). An enumeration a
+    // property offers reads as the literal it is.
+    function valueKind(name, text) {
+        const t = text.trim()
+        // An id is a name, neither a value nor an expression.
+        if (name === "id" || t === "" || workspace.literal(t) || choices(name).indexOf(t) >= 0)
+            return "literal"
+        if (/^(Colors|Typography|Spacing|Motion|Radius|Elevation)\.[A-Za-z]+$/.test(t))
+            return "token"
+        return "binding"
+    }
+    function isNumber(text) {
+        return /^-?\d+(\.\d+)?$/.test(String(text).trim())
+    }
+    function unitOf(name, text) {
+        return isNumber(text) && /^(x|y|z|width|height|radius|spacing|padding|font\.pixelSize|.*Padding|.*[mM]argin|.*[mM]argins|.*Width|.*Height|.*Spacing)$/.test(name)
+            ? "px" : ""
+    }
+    // A colour role's paint as the document's theme has it, in the look shown.
+    function tokenPaint(text) {
+        const t = text.trim()
+        if (!/^Colors\.[A-Za-z]+$/.test(t))
+            return ""
+        const found = workspace.tokens.find(r => r.token === t)
+        if (found === undefined)
+            return ""
+        return Colors.dark ? found.dark : found.light
+    }
+
     function togglePin(side) {
         const args = {
             action: "anchor",
@@ -698,13 +748,38 @@ Panel {
         width: scroll.width
         spacing: 0
 
-        Label {
+        // Nothing chosen: what the panel is for, and how to give it something.
+        ColumnLayout {
             visible: panel.workspace.selected === ""
-            text: "Select something to edit it"
-            color: Colors.textMuted
-            font.pixelSize: Typography.captionSize
-            padding: Spacing.md
+            spacing: Spacing.xs
             Layout.alignment: Qt.AlignHCenter
+            Layout.topMargin: Spacing.xxl
+            Rectangle {
+                implicitWidth: 40
+                implicitHeight: 40
+                radius: 12
+                color: Colors.surfaceHover
+                Layout.alignment: Qt.AlignHCenter
+                Icon {
+                    anchors.centerIn: parent
+                    name: "pointer"
+                    size: 20
+                    color: Colors.textMuted
+                }
+            }
+            Label {
+                text: "Nothing selected"
+                color: Colors.text
+                font.pixelSize: Typography.subtitleSize
+                font.weight: Typography.subtitleWeight
+                Layout.alignment: Qt.AlignHCenter
+            }
+            Label {
+                text: "Select something to edit it"
+                color: Colors.textMuted
+                font.pixelSize: Typography.bodySize
+                Layout.alignment: Qt.AlignHCenter
+            }
         }
 
         Label {
@@ -783,36 +858,61 @@ Panel {
                 }
             }
 
-            Repeater {
-                model: panel.placeRows
-                delegate: RowLayout {
-                    id: placeRow
-                    required property var modelData
-                    Layout.fillWidth: true
-                    spacing: Spacing.xxs
-
-                    Label {
-                        text: placeRow.modelData.name
-                        color: Colors.textMuted
-                        font.pixelSize: Typography.captionSize
-                        Layout.preferredWidth: 72
-                    }
-                    Field {
-                        id: placeValue
-                        placeholderText: Math.round(placeRow.modelData.at)
-                        Accessible.name: placeRow.modelData.name
+            GridLayout {
+                visible: panel.geometry.length > 0
+                columns: 2
+                columnSpacing: Spacing.xs
+                rowSpacing: Spacing.xxs
+                Layout.fillWidth: true
+                Repeater {
+                    model: panel.geometry
+                    delegate: RowLayout {
+                        id: cell
+                        required property var modelData
+                        readonly property string written: modelData.row !== null
+                            ? panel.inState(modelData.name, modelData.row.value) : ""
+                        spacing: 2
                         Layout.fillWidth: true
-                        onAccepted: if (text.trim() !== "") panel.set(placeRow.modelData.name, text)
-                        Connections {
-                            target: panel
-                            function onSelectionMoved() { placeValue.text = "" }
+                        // Equal columns, whatever each holds.
+                        Layout.preferredWidth: 1
+                        Field {
+                            id: cellValue
+                            lead: ({x: "X", y: "Y", width: "W", height: "H"})[cell.modelData.name]
+                            unit: panel.unitOf(cell.modelData.name, text !== "" ? text : placeholderText)
+                            scrub: true
+                            bound: panel.valueKind(cell.modelData.name, text) === "binding"
+                            token: panel.valueKind(cell.modelData.name, text) === "token"
+                            text: cell.written
+                            placeholderText: cell.modelData.at !== null ? Math.round(cell.modelData.at) : ""
+                            Accessible.name: cell.modelData.name
+                            Layout.fillWidth: true
+                            Layout.minimumWidth: 48
+                            onAccepted: {
+                                if (cell.modelData.row !== null)
+                                    panel.enter(cell.modelData.row, text)
+                                else if (text.trim() !== "")
+                                    panel.set(cell.modelData.name, text)
+                            }
+                            Connections {
+                                target: panel
+                                function onReseed() {
+                                    cellValue.text = Qt.binding(() => cell.written)
+                                }
+                                function onSelectionMoved() {
+                                    if (cell.modelData.row === null)
+                                        cellValue.text = ""
+                                }
+                            }
                         }
-                    }
-                    IconButton {
-                        icon_: "link"
-                        text: "Bind " + placeRow.modelData.name
-                        enabled: placeValue.text.trim() !== ""
-                        onClicked: panel.bind(placeRow.modelData.name, placeValue.text)
+                        IconButton {
+                            implicitWidth: 24
+                            implicitHeight: 24
+                            iconSize: 14
+                            icon_: "link"
+                            text: "Bind " + cell.modelData.name
+                            enabled: cell.modelData.row !== null || cellValue.text.trim() !== ""
+                            onClicked: panel.bind(cell.modelData.name, cellValue.text)
+                        }
                     }
                 }
             }
@@ -933,7 +1033,7 @@ Panel {
             Layout.fillWidth: true
 
             Repeater {
-                model: panel.workspace.inspector
+                model: panel.workspace.inspector.filter(r => panel.geometryNames.indexOf(r.name) < 0)
                 delegate: RowLayout {
                     id: row
                     required property var modelData
@@ -946,20 +1046,52 @@ Panel {
                         font.pixelSize: Typography.captionSize
                         Layout.preferredWidth: 72
                         elide: Text.ElideRight
+                        // A number's name is its handle: drag across it to change it.
+                        MouseArea {
+                            anchors.fill: parent
+                            enabled: panel.isNumber(value.text)
+                            cursorShape: enabled ? Qt.SizeHorCursor : Qt.ArrowCursor
+                            property real startX: 0
+                            onPressed: mouse => {
+                                startX = mapToItem(null, mouse.x, 0).x
+                                value.scrubStart()
+                            }
+                            onPositionChanged: mouse => value.scrubTo(mapToItem(null, mouse.x, 0).x - startX)
+                            onReleased: value.scrubEnd()
+                        }
                     }
                     TextButton {
                         id: swatch
                         readonly property var kind: panel.colourRow(row.modelData, value.text)
+                        // What it paints: written, or the role it names as the theme has it.
+                        readonly property string shown: kind.paint !== "" ? kind.paint : panel.tokenPaint(value.text)
                         visible: kind.picker
-                        Layout.preferredWidth: 24
-                        Layout.preferredHeight: 24
+                        Layout.preferredWidth: 28
+                        Layout.minimumWidth: 28
+                        Layout.preferredHeight: 28
                         padding: 0
+                        leftPadding: 0
+                        rightPadding: 0
+                        topPadding: 0
+                        bottomPadding: 0
                         Accessible.name: "Pick " + row.modelData.name
                         Accessible.description: kind.paint
                         onClicked: picker.show(row.modelData, value.text, this)
+                        background: null
                         contentItem: Rectangle {
-                            color: swatch.kind.paint || "transparent"
-                            border.color: Colors.border
+                            radius: 6
+                            color: swatch.shown || "transparent"
+                            border.width: 1
+                            border.color: swatch.hovered ? Colors.border : Colors.surfacePressed
+                            // No paint known: a slash, as an empty well.
+                            Rectangle {
+                                visible: swatch.shown === ""
+                                anchors.centerIn: parent
+                                width: parent.width * 1.2
+                                height: 1.5
+                                rotation: -45
+                                color: Colors.textMuted
+                            }
                         }
                     }
                     Field {
@@ -967,6 +1099,10 @@ Panel {
                         text: panel.inState(row.modelData.name, row.modelData.value)
                         placeholderText: "no value"
                         Accessible.name: row.modelData.name
+                        bound: panel.valueKind(row.modelData.name, text) === "binding"
+                        token: panel.valueKind(row.modelData.name, text) === "token"
+                        // A colour role shows its hex; a size its unit.
+                        unit: swatch.visible && token ? swatch.shown : panel.unitOf(row.modelData.name, text)
                         Layout.fillWidth: true
                         Layout.minimumWidth: 96
                         onAccepted: panel.enter(row.modelData, text)
@@ -979,6 +1115,16 @@ Panel {
                                 value.text = Qt.binding(() => panel.inState(row.modelData.name, row.modelData.value))
                             }
                         }
+                    }
+                    // A face shown in itself.
+                    Text {
+                        readonly property var face: row.modelData.name === "font.family" ? panel.writtenText(value.text) : null
+                        visible: face !== null && face !== ""
+                        text: "Ag"
+                        font.family: visible ? face : "sans-serif"
+                        font.pixelSize: Typography.titleSize
+                        color: Colors.text
+                        Accessible.ignored: true
                     }
                     IconButton {
                         visible: panel.choices(row.modelData.name).length > 0
@@ -1014,22 +1160,24 @@ Panel {
                 }
             }
 
-            // Two lines: on one, the panel's width left the value a few pixels.
+            // One line: the actions are icons, which leave the value its room.
             RowLayout {
                 Layout.fillWidth: true
+                Layout.topMargin: Spacing.xxs
                 spacing: Spacing.xxs
 
                 Field {
                     id: newName
                     placeholderText: "property"
                     Accessible.name: "New property"
-                    Layout.preferredWidth: 96
+                    Layout.preferredWidth: 88
                 }
                 Field {
                     id: newValue
                     placeholderText: "value"
                     Accessible.name: "New value"
                     Layout.fillWidth: true
+                    Layout.minimumWidth: 48
                     onAccepted: add.clicked()
                 }
                 IconButton {
@@ -1038,24 +1186,17 @@ Panel {
                     text: "Choices for new property"
                     onClicked: choiceList.show(newName.text, this)
                 }
-            }
-            RowLayout {
-                Layout.fillWidth: true
-                spacing: Spacing.xxs
-
-                Item {
-                    Layout.fillWidth: true
-                }
-                TextButton {
+                IconButton {
                     id: add
-                    text: "Set"
-                    Accessible.name: "Set new property"
+                    icon_: "plus"
+                    text: "Set new property"
+                    shortcut: "Enter"
                     enabled: newName.text !== ""
                     onClicked: panel.fromRow(() => panel.set(newName.text, newValue.text))
                 }
-                TextButton {
-                    text: "Bind"
-                    Accessible.name: "Bind new property"
+                IconButton {
+                    icon_: "link"
+                    text: "Bind new property"
                     enabled: newName.text !== ""
                     onClicked: panel.fromRow(() => panel.bind(newName.text, newValue.text))
                 }
@@ -1128,10 +1269,10 @@ Panel {
                     Layout.fillWidth: true
                     onAccepted: addState.clicked()
                 }
-                TextButton {
+                IconButton {
                     id: addState
-                    text: "Add"
-                    Accessible.name: "Add state"
+                    icon_: "plus"
+                    text: "Add state"
                     enabled: newState.text !== ""
                     onClicked: {
                         panel.editState({action: "add", state: newState.text})
@@ -1151,8 +1292,9 @@ Panel {
 
                     Label {
                         text: "when"
-                        color: Colors.text
-                        Layout.preferredWidth: 96
+                        color: Colors.textMuted
+                        font.pixelSize: Typography.captionSize
+                        Layout.preferredWidth: 72
                     }
                     Field {
                         id: stateWhen
@@ -1180,12 +1322,18 @@ Panel {
                     Layout.fillWidth: true
                     spacing: Spacing.xxs
 
+                    Label {
+                        text: "at"
+                        color: Colors.textMuted
+                        font.pixelSize: Typography.captionSize
+                        Layout.preferredWidth: 72
+                    }
                     Repeater {
                         model: ["phone", "tablet", "desktop"]
-                        delegate: TextButton {
+                        delegate: IconButton {
                             required property string modelData
-                            text: modelData
-                            Accessible.name: "Breakpoint " + modelData
+                            icon_: modelData
+                            text: "Breakpoint " + modelData
                             onClicked: {
                                 panel.editState({action: "when", state: panel.picked, breakpoint: modelData})
                                 panel.show(panel.pickedOn, "", true)
@@ -1205,8 +1353,9 @@ Panel {
 
                         Label {
                             text: changeRow.name
-                            color: Colors.text
-                            Layout.preferredWidth: 96
+                            color: Colors.textMuted
+                            font.pixelSize: Typography.captionSize
+                            Layout.preferredWidth: 72
                             elide: Text.ElideRight
                         }
                         Field {
@@ -1248,10 +1397,10 @@ Panel {
                         Layout.fillWidth: true
                         onAccepted: setChange.clicked()
                     }
-                    TextButton {
+                    IconButton {
                         id: setChange
-                        text: "Set"
-                        Accessible.name: "Set change"
+                        icon_: "check"
+                        text: "Set change"
                         enabled: changeTarget.text !== "" && changeName.text !== ""
                         onClicked: panel.change(changeTarget.text, changeName.text, changeValue.text)
                     }
@@ -1280,7 +1429,8 @@ Panel {
                     Label {
                         text: signalRow.modelData.name + "(" + signalRow.modelData.arguments
                             .map(a => a.type === "" ? a.name : a.name + ": " + a.type).join(", ") + ")"
-                        color: Colors.text
+                        color: Colors.textMuted
+                        font.pixelSize: Typography.captionSize
                         elide: Text.ElideRight
                         Layout.fillWidth: true
                         Accessible.role: Accessible.StaticText
@@ -1323,8 +1473,9 @@ Panel {
 
                     Label {
                         text: roleRow.modelData
-                        color: Colors.text
-                        Layout.preferredWidth: 96
+                        color: Colors.textMuted
+                        font.pixelSize: Typography.captionSize
+                        Layout.preferredWidth: 72
                         elide: Text.ElideRight
                         Accessible.role: Accessible.StaticText
                         Accessible.name: "Role " + roleRow.modelData
@@ -1373,9 +1524,9 @@ Panel {
                         Accessible.role: Accessible.StaticText
                         Accessible.name: commentRow.kind + " comment: " + commentRow.modelData.text
                     }
-                    TextButton {
-                        text: commentRow.modelData.resolved ? "Reopen" : "Resolve"
-                        Accessible.name: text + " " + commentRow.modelData.text
+                    IconButton {
+                        icon_: commentRow.modelData.resolved ? "undo" : "check"
+                        text: (commentRow.modelData.resolved ? "Reopen" : "Resolve") + " " + commentRow.modelData.text
                         onClicked: panel.review({
                             action: commentRow.modelData.resolved ? "reopen" : "resolve",
                             comment: commentRow.modelData.id
@@ -1395,10 +1546,10 @@ Panel {
                     Layout.fillWidth: true
                     onAccepted: if (addComment.enabled) addComment.clicked()
                 }
-                TextButton {
+                IconButton {
                     id: addComment
-                    text: "Comment"
-                    Accessible.name: "Add comment"
+                    icon_: "plus"
+                    text: "Add comment"
                     enabled: newComment.text.trim() !== "" && panel.workspace.selected !== ""
                     onClicked: {
                         panel.adding = true
