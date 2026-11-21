@@ -54,11 +54,16 @@ Feature: Studio's window is laid out to work in
     And the window has a pane "Inspector"
     And the window has a pane "Code of Main.qml"
 
-  Scenario: The look turns dark and back, and the button says which is next
-    When the person clicks the button "Dark look"
-    Then the window has a button "Light look"
-    When the person clicks the button "Light look"
-    Then the window has a button "Dark look"
+  Scenario: Studio's look turns dark and back, and the button says which is next
+    When the person clicks the button "Studio in dark"
+    Then the window has a button "Studio in light"
+    When the person clicks the button "Studio in light"
+    Then the window has a button "Studio in dark"
+
+  Scenario: The data the canvas runs on is one button, named as it reads
+    Then the window has a button "Mocked data"
+    And the window has no button "Data"
+    And the window has no button "Live data"
 
   @preview
   Scenario: The wheel moves over the canvas without changing the frame's size

@@ -12,6 +12,13 @@ Panel {
     required property Workspace workspace
     title: "Documents"
 
+    // As tall as its documents, up to eight rows: a project's few all show,
+    // and a long list scrolls in a box that still leaves Layers its room.
+    readonly property real rowHeight: 28
+    readonly property real wants: maker.height + Spacing.xxs
+        + Math.min(Math.max(workspace.documents.length, 3), 8) * rowHeight
+    readonly property real least: maker.height + Spacing.xxs + 3 * rowHeight
+
     // The document asked for and not yet answered.
     property string making: ""
     property string refusal: ""
@@ -140,7 +147,7 @@ Panel {
             id: entry
             required property string modelData
             width: ListView.view.width
-            implicitHeight: 28
+            implicitHeight: panel.rowHeight
             padding: 0
             leftPadding: Spacing.xs
             text: modelData
