@@ -1633,6 +1633,14 @@ fn lists_signals(w: &mut UiWorld, names: String) -> StepResult {
         .ok_or_else(|| format!("the inspector lists the signals {shown:?}"))
 }
 
+#[then(regex = r#"^the inspector lists the members "([^"]*)"$"#)]
+fn lists_members(w: &mut UiWorld, names: String) -> StepResult {
+    let shown = shown_with(w.window()?, "Inspector", "Declares ")?;
+    (shown == listed(&names))
+        .then_some(())
+        .ok_or_else(|| format!("the inspector lists the members {shown:?}"))
+}
+
 /// Opens the flow panel's box of what a wire handles, as a person clicks
 /// it.
 #[given("the person has opened the list of what to wire in the flow panel")]
