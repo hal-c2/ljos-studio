@@ -65,7 +65,50 @@ pub fn serve(engine: &Engine, server: Arc<StudioServer>) {
         }
     });
     lock(&server.studio()).watch(watcher);
+    let tools = tool_rows(&server);
     *context.server.borrow_mut() = Some(server);
+    let made = context.workspaces.borrow().clone();
+    for ws in made {
+        let _ = Cx::new(engine, ws).set(Workspace::TOOLS, tools.clone());
+    }
+}
+
+/// The tools a person may call, as `Workspace.tools` lists them.
+fn tool_rows(server: &StudioServer) -> Json {
+    let names = |schema: Option<&Json>| -> Vec<Json> {
+        schema
+            .and_then(Json::as_object)
+            .map(|o| o.keys().map(|k| json!(k)).collect())
+            .or_else(|| schema.and_then(Json::as_array).cloned())
+            .unwrap_or_default()
+    };
+    server
+        .tools()
+        .visible(person().caps)
+        .map(|d| {
+            json!({
+                "name": d.name,
+                "description": d.description,
+                "writes": !d.annotations.read_only,
+                "args": names(d.input_schema.get("properties")),
+                "needs": names(d.input_schema.get("required")),
+            })
+        })
+        .collect()
+}
+
+/// The targets a preview opens on, widest first: the order their frames
+/// sit side by side.
+fn target_rows() -> Json {
+    studio_core::preview::Target::ALL
+        .into_iter()
+        .rev()
+        .map(|t| {
+            let size = t.size();
+            let name = format!("{t:?}");
+            json!({"name": name, "width": size.width, "height": size.height})
+        })
+        .collect()
 }
 
 /// What the workspaces of one Engine share.
@@ -218,6 +261,12 @@ pub struct Workspace {
     /// `theme_set` shows at once.
     #[qml(readonly, notify)]
     pub tokens: Json,
+    /// The tools a person's gestures may call, so a shell can offer every
+    /// one by name (the command palette): `name`, `description`, `writes`
+    /// (it may change the project), `args` (its arguments' names) and
+    /// `needs` (those it cannot go without).
+    #[qml(readonly, notify)]
+    pub tools: Json,
     #[qml(skip)]
     queue: Rc<RefCell<Queue>>,
 }
@@ -230,6 +279,7 @@ impl Default for Workspace {
         let none = || Json::Array(Vec::new());
         Self {
             documents: none(),
+            tools: none(),
             assets: none(),
             settling: false,
             playing: false,
@@ -367,7 +417,9 @@ impl Workspace {
     fn completed(cx: &Cx) -> Result<(), EngineError> {
         let context = cx.engine.extension::<Context>();
         context.workspaces.borrow_mut().push(cx.this);
-        if context.server.borrow().is_some() {
+        let tools = context.server.borrow().as_deref().map(tool_rows);
+        if let Some(tools) = tools {
+            cx.set(Workspace::TOOLS, tools)?;
             enqueue(cx.engine, cx.this, Job::Refresh);
         }
         Ok(())
@@ -415,6 +467,11 @@ struct Queue {
     following: Option<Arc<Stop>>,
     /// The lists last set, by the property's name.
     given: HashMap<&'static str, Json>,
+    /// The last picture of the document on each target it was shown on, by
+    /// the target's name, with the document's generation it was drawn at:
+    /// what the canvas shows in a target's frame while the preview runs on
+    /// another.
+    kept: HashMap<String, (ImageHandle, u64)>,
 }
 
 impl Drop for Queue {
@@ -755,12 +812,12 @@ fn finish(engine: &Engine, ws: ObjectId, done: Done) {
             }
             let picture = picture.and_then(|(w, h, rgba, pixels)| {
                 let image = ImageHandle::from_straight(w, h, rgba).map_err(|e| e.to_string())?;
-                Ok((image, pixels))
+                Ok((image, pixels, (w, h)))
             });
             let failed = picture.is_err();
             let mut changed = false;
             match picture {
-                Ok((image, pixels)) => {
+                Ok((image, pixels, drawn)) => {
                     {
                         let mut q = queue.borrow_mut();
                         changed = q.pixels != pixels || q.picture != generation;
@@ -775,8 +832,19 @@ fn finish(engine: &Engine, ws: ObjectId, done: Done) {
                     if let Some(fields) = preview.as_object_mut()
                         && changed
                     {
+                        let target = fields["target"].as_str().unwrap_or_default().to_owned();
+                        let text = engine.get(ws, Workspace::GENERATION).unwrap_or_default();
+                        let mut q = queue.borrow_mut();
+                        // A picture asked for before the preview moved to
+                        // this target has the shape of the one before.
+                        if !target.is_empty() && same_shape(drawn, q.size) {
+                            let image = q.image.clone().expect("just drawn");
+                            q.kept.insert(target, (image, text as u64));
+                        }
                         fields.insert("picture".to_owned(), json!(generation));
-                        fields.insert("shots".to_owned(), json!(queue.borrow().shots));
+                        fields.insert("shots".to_owned(), json!(q.shots));
+                        fields.insert("kept".to_owned(), kept_of(&q));
+                        drop(q);
                         let _ = cx.set(Workspace::PREVIEW, preview);
                     }
                 }
@@ -1023,6 +1091,24 @@ fn rebase(engine: &Engine, ws: ObjectId, tool: &str, args: &Json, answer: &Json)
     }
 }
 
+/// Whether a picture `drawn` big is of a window `size` big: the picture
+/// is scaled down to fit, by whole pixels.
+fn same_shape(drawn: (u32, u32), size: (u32, u32)) -> bool {
+    let (w, h) = (f64::from(drawn.0), f64::from(drawn.1));
+    let (sw, sh) = (f64::from(size.0), f64::from(size.1));
+    w > 0.0 && sw > 0.0 && ((w / h) - (sw / sh)).abs() <= 2.0 / h.min(w)
+}
+
+/// `preview.kept`: each target with a kept picture, and the document's
+/// generation it was drawn at.
+fn kept_of(q: &Queue) -> Json {
+    q.kept
+        .iter()
+        .map(|(target, (_, text))| (target.clone(), json!(text)))
+        .collect::<serde_json::Map<_, _>>()
+        .into()
+}
+
 fn publish(engine: &Engine, ws: ObjectId, view: View, seen: u64) {
     let Some(queue) = queue_of(engine, ws) else {
         return;
@@ -1037,7 +1123,7 @@ fn publish(engine: &Engine, ws: ObjectId, view: View, seen: u64) {
         q.published = q.published.max(seen);
         (q.picture, q.fetched, q.shots)
     };
-    let preview = match &view.preview {
+    let mut preview = match &view.preview {
         Some(p) if p.doc == view.doc => json!({
             "target": p.target,
             "width": p.width,
@@ -1047,6 +1133,7 @@ fn publish(engine: &Engine, ws: ObjectId, view: View, seen: u64) {
             "variant": p.variant,
             "picture": picture,
             "shots": shots,
+            "targets": target_rows(),
         }),
         _ => Json::Null,
     };
@@ -1062,9 +1149,13 @@ fn publish(engine: &Engine, ws: ObjectId, view: View, seen: u64) {
         let other = q.previewed != doc;
         if other {
             doc.clone_into(&mut q.previewed);
+            q.kept.clear();
         }
         other
     });
+    if let Some(fields) = preview.as_object_mut() {
+        fields.insert("kept".to_owned(), kept_of(&queue.borrow()));
+    }
     let wanted = view
         .preview
         .as_ref()
@@ -1407,6 +1498,10 @@ pub struct PreviewPicture {
     /// The `Workspace` whose preview it draws.
     #[qml(notify, object = "Workspace")]
     pub workspace: Option<ObjectId>,
+    /// Empty for the preview as it runs; a target's name for the last
+    /// picture drawn on that target (`preview.kept`).
+    #[qml(notify)]
+    pub target: String,
 }
 
 #[derive(Debug)]
@@ -1427,8 +1522,17 @@ fn read_picture(engine: &Engine, obj: ObjectId) -> Rc<dyn ItemPaint> {
     // Both reads are tracked: the item paints again when its workspace or
     // that workspace's preview changes, and not otherwise.
     let ws = item::prop(engine, obj, PreviewPicture::WORKSPACE);
+    let target = item::prop(engine, obj, PreviewPicture::TARGET);
     let image = ws.and_then(|ws| {
         let preview = item::prop(engine, ws, Workspace::PREVIEW);
+        if !target.is_empty() {
+            preview["kept"].get(&target)?;
+            return queue_of(engine, ws)?
+                .borrow()
+                .kept
+                .get(&target)
+                .map(|(image, _)| image.clone());
+        }
         let picture = preview["picture"].as_u64().unwrap_or(0);
         let (image, drawn) = queue_of(engine, ws)
             .map(|q| {
