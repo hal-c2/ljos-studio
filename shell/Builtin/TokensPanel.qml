@@ -44,6 +44,11 @@ Panel {
         workspace.dispatch("theme_set", args)
     }
 
+    function unitOf(token) {
+        return /^(Spacing|Radius)\.|Size$/.test(token) ? "px"
+            : /^Motion\.(enter|exit|move|change)[A-Z]/.test(token) ? "ms" : ""
+    }
+
     Connections {
         target: panel.workspace
         function onAnswered(tool, answer) {
@@ -63,15 +68,24 @@ Panel {
 
         // The one colour a theme starts from, which the roles are worked out
         // of. A hue is a place on a wheel, so it is picked from one.
-        Row {
+        Rectangle {
             id: hues
+            readonly property real seed: {
+                const row = panel.workspace.tokens.find(t => t.token === "Colors.seedHue")
+                return row !== undefined ? Number(row.value) : NaN
+            }
             Layout.fillWidth: true
+            implicitHeight: 20
+            radius: 6
+            clip: true
+            color: "transparent"
             Repeater {
                 model: 24
                 delegate: AbstractButton {
                     id: hueTile
                     required property int index
                     readonly property int hue: index * 15
+                    x: index * width
                     width: hues.width / 24
                     height: 20
                     Accessible.role: Accessible.Button
@@ -79,6 +93,16 @@ Panel {
                     onClicked: panel.set({kind: "number", token: "Colors.seedHue"}, "", String(hue))
                     background: Rectangle {
                         color: Qt.hsla(hueTile.hue / 360, 0.7, 0.55, 1)
+                        // The hue the theme starts from, ringed.
+                        Rectangle {
+                            visible: Math.round(hues.seed / 15) % 24 === hueTile.index
+                            anchors.fill: parent
+                            anchors.margins: 2
+                            radius: 3
+                            color: "transparent"
+                            border.width: 2
+                            border.color: Colors.surfaceRaised
+                        }
                     }
                 }
             }
@@ -86,6 +110,7 @@ Panel {
 
         Field {
             id: filter
+            leadIcon: "search"
             placeholderText: "Filter tokens"
             Accessible.name: "Filter tokens"
             Layout.fillWidth: true
@@ -122,14 +147,38 @@ Panel {
                 width: ListView.view.width
                 spacing: 0
 
-                Label {
-                    text: row.modelData.set ? row.modelData.token + " (theme)" : row.modelData.token
-                    color: Colors.text
-                    font.pixelSize: Typography.captionSize
-                    font.weight: Typography.bodyStrongWeight
-                    topPadding: Spacing.xs
-                    elide: Text.ElideRight
+                // The role strong, its group quiet, and a chip where the
+                // theme file sets it rather than the module.
+                RowLayout {
+                    spacing: Spacing.xxs
                     Layout.fillWidth: true
+                    Layout.topMargin: Spacing.xs
+                    Text {
+                        readonly property int dot: row.modelData.token.indexOf(".")
+                        text: row.modelData.token.slice(0, dot + 1)
+                            + "<b>" + row.modelData.token.slice(dot + 1) + "</b>"
+                        textFormat: Text.StyledText
+                        color: Colors.textMuted
+                        font.pixelSize: Typography.captionSize
+                        elide: Text.ElideRight
+                        Layout.fillWidth: true
+                        Accessible.role: Accessible.StaticText
+                        Accessible.name: row.modelData.token
+                    }
+                    Rectangle {
+                        visible: row.modelData.set
+                        implicitWidth: themed.implicitWidth + Spacing.xs
+                        implicitHeight: 16
+                        radius: 8
+                        color: Colors.surfaceSelected
+                        Text {
+                            id: themed
+                            anchors.centerIn: parent
+                            text: "theme"
+                            color: Colors.link
+                            font.pixelSize: Typography.captionSize
+                        }
+                    }
                 }
 
                 RowLayout {
@@ -150,11 +199,13 @@ Panel {
                         visible: /^Spacing\./.test(row.modelData.token)
                         implicitWidth: Math.min(64, Number(row.modelData.value))
                         implicitHeight: 8
-                        color: Colors.accent
+                        radius: 2
+                        color: Colors.link
                         Accessible.ignored: true
                     }
                     Field {
                         text: row.modelData.value
+                        unit: panel.unitOf(row.modelData.token)
                         Accessible.name: row.modelData.token
                         Layout.fillWidth: true
                         onAccepted: {
@@ -186,9 +237,9 @@ Panel {
                             spacing: Spacing.xxs
 
                             Rectangle {
-                                implicitWidth: 24
-                                implicitHeight: 24
-                                radius: 4
+                                implicitWidth: 28
+                                implicitHeight: 28
+                                radius: 6
                                 color: variantRow.shown
                                 // A swatch the colour of the panel still shows.
                                 border.width: 1
@@ -198,6 +249,7 @@ Panel {
                             }
                             Field {
                                 text: variantRow.shown
+                                leadIcon: variantRow.modelData === "light" ? "sun" : "moon"
                                 Accessible.name: row.modelData.token + " " + variantRow.modelData
                                 Layout.fillWidth: true
                                 Layout.minimumWidth: 40
