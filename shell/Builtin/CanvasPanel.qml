@@ -470,7 +470,7 @@ Panel {
                     }
                     Label {
                         anchors.centerIn: parent
-                        visible: beside.kept === undefined && parent.width >= 10 * Typography.captionSize
+                        visible: beside.kept === undefined && parent.width >= 6 * Typography.captionSize
                             && parent.height >= 4 * Typography.captionSize
                         width: parent.width - 2 * Spacing.xs
                         horizontalAlignment: Text.AlignHCenter
