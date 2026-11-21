@@ -1,5 +1,7 @@
 # Sources:
 #   docs/MCP.md (project_open's assets)
+#   studio7 dogfood backlog P7-20 (the window said "send it as `data` with a
+#   `name`", which is an agent's word)
 
 @ui
 Feature: The Insert tab offers the project's pictures
@@ -54,3 +56,8 @@ Feature: The Insert tab offers the project's pictures
     When the person imports "incoming/new.svg" in the palette
     Then the palette offers "new.svg"
     And the file "assets/new.svg" exists
+
+  Scenario: A file from outside the project is refused in a person's words
+    Given the person has opened "Main.qml" in the documents list
+    When the person imports "elsewhere/none.svg" in the palette
+    Then the status line says "There is no elsewhere/none.svg in the project's folder: copy the file in, then import it"

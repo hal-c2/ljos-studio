@@ -18,6 +18,24 @@ Item {
         id: workspace
     }
 
+    // A refusal says what an agent should send next; a person in the window
+    // is told what is the matter instead. Kept with the message it replaces,
+    // so the next refusal, which may need no other words, shows as it is.
+    property var plainly: ({message: "", words: ""})
+    function plain(tool, error, asked) {
+        if (tool === "project_open" && asked.asset === "import" && error.code === "path_denied")
+            return "There is no " + asked.file + " in the project's folder: copy the file in, then import it"
+        if (tool === "preview_open" && error.details !== undefined && error.details.kind === "no_mocks")
+            return "This project has no mock data: it is a mocks folder with a stand-in for each block's module"
+        return ""
+    }
+    Connections {
+        target: workspace
+        function onRefused(tool, error, asked) {
+            shell.plainly = {message: error.message, words: shell.plain(tool, error, asked)}
+        }
+    }
+
     Shortcut {
         sequences: [StandardKey.Undo]
         onActivated: workspace.dispatch("history", {action: "undo"})
@@ -284,9 +302,12 @@ Item {
             objectName: "status"
             Accessible.role: Accessible.StatusBar
             Accessible.name: "Status"
+            Accessible.description: text
             padding: Spacing.xs
             leftPadding: Spacing.xs + 14 + Spacing.xs
-            text: workspace.error
+            // The preview's problems have a pane of their own; this line says what was refused.
+            text: workspace.error === shell.plainly.message && shell.plainly.words !== "" ? shell.plainly.words
+                : workspace.error
             color: Colors.text
             font.pixelSize: Typography.captionSize
             elide: Text.ElideRight

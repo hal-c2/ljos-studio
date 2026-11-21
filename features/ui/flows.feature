@@ -3,11 +3,13 @@
 #   features/edit/flows.feature, features/edit/models.feature (the same
 #   edits over MCP; the file text is the oracle for both)
 #   features/preview/flows.feature (the preview plays the flow)
+#   studio7 dogfood backlog P7-20 ("Wire tapped", "Base +" said nothing to a
+#   person)
 
 @ui
 Feature: A person wires and plays a prototype's flow in Studio's window
   The flow panel draws the open document's flow as a graph: the root's
-  states are its nodes, the base state first, and its transitions and
+  states are its nodes, the one it starts in first ("Start"), and its transitions and
   interactions are its edges. A person wires the selected object to go to
   a state when tapped, and takes a wire out again, each the `state_edit`
   call an agent makes. In play mode a click in a frame is a click on the
@@ -98,8 +100,18 @@ Feature: A person wires and plays a prototype's flow in Studio's window
       """json
       {"doc": "Main.qml", "action": "add_transition", "from": "*", "to": "details", "animations": "NumberAnimation { duration: 200 }"}
       """
-    Then the flow panel lists the states "Base, details"
+    Then the flow panel lists the states "Start, details"
     And the flow panel lists the flows "* to details, tapped card to details"
+
+  Scenario: With nothing selected the flow panel says what to select
+    Given the person has opened the "Flow tab"
+    Then the window says "Select an object to link it to a state"
+
+  Scenario: The flow panel says in plain words what a state's link does
+    Given the person has selected "Rectangle card" in the layers panel
+    And the person has opened the "Flow tab"
+    Then the window says "A state's link goes to it when the selection is tapped"
+    And the window has a button "Tap selection to go to details"
 
   Scenario: The selection is wired to go to a state
     Given the person has selected "Rectangle card" in the layers panel
@@ -157,7 +169,8 @@ Feature: A person wires and plays a prototype's flow in Studio's window
     Then the inspector lists the signals "pressAndHold, pressed, released, clicked, doubleClicked, positionChanged, entered, exited, canceled, wheel"
     Given the person has opened the "Flow tab"
     When the person picks the signal "clicked" to wire in the flow panel
-    And the person clicks the button "On clicked of selection go to details"
+    Then the window says "A state's link goes to it when the selection's clicked is emitted"
+    When the person clicks the button "On clicked of selection go to details"
     Then the flow panel lists the flows "clicked area to details"
     And the history lists "clicked area to details"
 

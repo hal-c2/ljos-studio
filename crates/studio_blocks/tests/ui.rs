@@ -1615,10 +1615,10 @@ fn opens_wire_box(w: &mut UiWorld) -> StepResult {
     let window = w.window()?;
     let tree = window.tree();
     let box_ = find(&tree, &|n| {
-        n.name == "Wire" && n.role != "label" && n.key.is_some()
+        n.name == WIRE_BOX && n.role != "label" && n.key.is_some()
     })
     .cloned()
-    .ok_or_else(|| format!("no box \"Wire\"; the window holds {}", names(&tree)))?;
+    .ok_or_else(|| format!("no box {WIRE_BOX:?}; the window holds {}", names(&tree)))?;
     window.click_node(&box_)
 }
 
@@ -1643,7 +1643,10 @@ fn picks_signal(w: &mut UiWorld, signal: String) -> StepResult {
 
 /// The accessible name of the list the open box of what a wire handles
 /// shows.
-const WIRE_LIST: &str = "Wire list";
+const WIRE_LIST: &str = "Ways to go to a state";
+
+/// The accessible name of the flow panel's box of what a wire handles.
+const WIRE_BOX: &str = "Go to a state when";
 
 /// `signal`'s row in the open box of what a wire handles; none while it is
 /// closed.
@@ -2411,6 +2414,18 @@ fn problem_shown_whole(w: &mut UiWorld, want: String) -> StepResult {
                 .collect();
             format!("{want:?} is cut off; its texts show {lines:?} lines")
         })
+}
+
+/// The window's status line, read as a person reads it: a reader hears
+/// "Status" and then what it says.
+#[then(regex = r#"^the status line says "(.*)"$"#)]
+fn status_says(w: &mut UiWorld, want: String) -> StepResult {
+    let tree = w.window()?.tree();
+    let status =
+        find(&tree, &|n| n.object_name == "status").ok_or("the window has no status line")?;
+    (status.description == want)
+        .then_some(())
+        .ok_or_else(|| format!("the status line says {:?}", status.description))
 }
 
 #[then(regex = r#"^the window does not say "(.*)"$"#)]
