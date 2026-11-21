@@ -121,6 +121,11 @@ Panel {
             delegate: ItemDelegate {
                 id: row
                 required property var modelData
+                // The eye and the lock come up under the pointer, on the
+                // chosen row and when the keys reach them; a hidden or locked
+                // row keeps its mark, so its state is seen at a glance.
+                readonly property bool revealed: hover.hovered || row.highlighted
+                                                 || eye.activeFocus || padlock.activeFocus
                 width: ListView.view.width
                 implicitHeight: 28
                 topPadding: 0
@@ -129,23 +134,54 @@ Panel {
                 rightPadding: trailing.width + Spacing.xxs
                 text: modelData.label
                 contentItem: RowLayout {
-                    spacing: Spacing.xxs
+                    spacing: Spacing.xxs + 2
                     Icon {
                         name: panel.typeIcon(row.modelData.type)
-                        color: row.highlighted ? Colors.accent : Colors.textMuted
+                        // link, not accent: it holds 3:1 on the selected tint in both looks.
+                        color: row.highlighted ? Colors.link : Colors.textMuted
                     }
                     Text {
                         text: row.text
                         color: Colors.text
-                        font.pixelSize: Typography.captionSize
+                        font.pixelSize: Typography.bodySize
                         font.weight: row.highlighted ? Typography.bodyStrongWeight : Typography.bodyWeight
                         elide: Text.ElideRight
                         Layout.fillWidth: true
                     }
                 }
-                background: Rectangle {
-                    color: row.highlighted ? Colors.surfaceSelected
-                        : row.hovered ? Colors.surfaceHover : "transparent"
+                background: Item {
+                    Rectangle {
+                        anchors.fill: parent
+                        anchors.leftMargin: Spacing.xxs
+                        anchors.rightMargin: Spacing.xxs
+                        anchors.topMargin: 1
+                        anchors.bottomMargin: 1
+                        radius: 6
+                        color: row.highlighted ? Colors.surfaceSelected
+                            : hover.hovered ? Colors.surfaceHover : "transparent"
+                        Behavior on color {
+                            ColorAnimation {
+                                duration: Motion.enterSmallFrequent
+                                easing.type: Easing.Bezier
+                                easing.bezierCurve: Motion.easeOut
+                            }
+                        }
+                    }
+                    // One guide per level above the row, under its ancestors' icons,
+                    // so a deep tree reads as nesting rather than as a ragged edge.
+                    Repeater {
+                        model: row.modelData.depth
+                        delegate: Rectangle {
+                            required property int index
+                            x: Spacing.xs + index * Spacing.sm + 7
+                            width: 1
+                            height: parent.height
+                            color: Colors.surfacePressed
+                        }
+                    }
+                }
+                HoverHandler {
+                    id: hover
                 }
                 Accessible.name: modelData.label
                 highlighted: panel.workspace.chosen.indexOf(modelData.node) >= 0
@@ -244,8 +280,9 @@ Panel {
                         visible: row.modelData.comments > 0
                         anchors.verticalCenter: parent.verticalCenter
                         text: String(row.modelData.comments)
-                        color: Colors.text
+                        color: Colors.link
                         font.pixelSize: Typography.captionSize
+                        font.weight: Typography.bodyStrongWeight
                         rightPadding: Spacing.xxs
                         Accessible.role: Accessible.StaticText
                         Accessible.name: row.modelData.comments
@@ -254,7 +291,17 @@ Panel {
                     }
                     // The preview finds what it hides by its id.
                     IconButton {
+                        id: eye
                         visible: row.modelData.id !== ""
+                        opacity: row.revealed || row.modelData.hidden ? 1 : 0
+                        // A fade, not a move: it stays as it is under reduced motion.
+                        Behavior on opacity {
+                            NumberAnimation {
+                                duration: Motion.enterSmallFrequent
+                                easing.type: Easing.Bezier
+                                easing.bezierCurve: Motion.easeOut
+                            }
+                        }
                         implicitWidth: 24
                         implicitHeight: 24
                         icon_: row.modelData.hidden ? "eyeOff" : "eye"
@@ -262,6 +309,16 @@ Panel {
                         onClicked: panel.arrange(row.modelData.hidden ? "show" : "hide", row.modelData.node)
                     }
                     IconButton {
+                        id: padlock
+                        opacity: row.revealed || row.modelData.locked ? 1 : 0
+                        // A fade, not a move: it stays as it is under reduced motion.
+                        Behavior on opacity {
+                            NumberAnimation {
+                                duration: Motion.enterSmallFrequent
+                                easing.type: Easing.Bezier
+                                easing.bezierCurve: Motion.easeOut
+                            }
+                        }
                         implicitWidth: 24
                         implicitHeight: 24
                         icon_: row.modelData.locked ? "lock" : "unlock"
