@@ -1528,6 +1528,15 @@ fn inspector_button_disabled(w: &mut UiWorld, name: String) -> StepResult {
         .ok_or_else(|| format!("{name:?} is {:?}", button.states))
 }
 
+#[then(regex = r#"^the inspector's field "([^"]+)" is (enabled|disabled)$"#)]
+fn inspector_field_enabled(w: &mut UiWorld, name: String, want: String) -> StepResult {
+    let field = w.window()?.node("Inspector", Some("textinput"), &name)?;
+    let disabled = field.states.iter().any(|s| s == "disabled");
+    (disabled == (want == "disabled"))
+        .then_some(())
+        .ok_or_else(|| format!("{name:?} is {:?}", field.states))
+}
+
 #[given(regex = r#"^the person has typed "(.*)" in the inspector's "([^"]+)" and left it$"#)]
 #[when(regex = r#"^the person types "(.*)" in the inspector's "([^"]+)" and leaves it$"#)]
 fn types_in_row(w: &mut UiWorld, text: String, name: String) -> StepResult {

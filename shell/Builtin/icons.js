@@ -49,6 +49,8 @@ var paths = {
     pinBottom: "M2 13.5 H14 M8 13.5 V3",
     pinCentre: "M8 2 V14 M2 8 H14 M5.5 5.5 H10.5 V10.5 H5.5 Z",
     frame: "M2.5 2.5 H13.5 V13.5 H2.5 Z",
+    centreAcross: "M8 1.5 V14.5 M5 5 H11 V11 H5 Z",
+    centreDown: "M1.5 8 H14.5 M5 5 H11 V11 H5 Z",
     unwrap: "M2.5 5 V2.5 H5 M11 2.5 H13.5 V5 M13.5 11 V13.5 H11 M5 13.5 H2.5 V11 M6 6 H10 V10 H6 Z",
     text: "M3 4 V3 H13 V4 M8 3 V13 M6 13 H10",
     image: "M2 3 H14 V13 H2 Z M2 11 L6 7 L10 11 M9 9.5 L11 8 L14 11",
