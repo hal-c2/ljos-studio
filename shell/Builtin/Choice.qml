@@ -54,6 +54,12 @@ ComboBox {
         color: box.down || box.hovered ? Colors.surfacePressed : Colors.surfaceHover
         border.width: box.visualFocus ? 2 : 0
         border.color: Colors.focusRing
-        Behavior on color { ColorAnimation { duration: Motion.enterSmallFrequent; easing.type: Motion.easeOut } }
+        Behavior on color {
+            ColorAnimation {
+                duration: Motion.enterSmallFrequent
+                easing.type: Easing.BezierSpline
+                easing.bezierCurve: Motion.easeOut
+            }
+        }
     }
 }

@@ -456,6 +456,8 @@ Panel {
                                     Image {
                                         id: thumbnail
                                         anchors.fill: parent
+                                        // The picture's name is the row's.
+                                        Accessible.ignored: true
                                         anchors.margins: 2
                                         source: picture.modelData.file
                                         sourceSize.width: 96

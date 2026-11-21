@@ -30,6 +30,7 @@ Pane {
             font.pixelSize: Typography.subtitleSize
             font.weight: Typography.subtitleWeight
             color: Colors.text
+            elide: Text.ElideRight
             padding: Spacing.xs
             Layout.fillWidth: true
         }

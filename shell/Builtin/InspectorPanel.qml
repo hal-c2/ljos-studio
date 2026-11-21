@@ -788,6 +788,7 @@ Panel {
             text: visible ? panel.workspace.chosen.length + " selected. This edits the first." : ""
             color: Colors.textMuted
             font.pixelSize: Typography.captionSize
+            wrapMode: Text.WordWrap
             padding: Spacing.xs
             Layout.fillWidth: true
             Accessible.role: Accessible.StaticText
@@ -887,7 +888,7 @@ Panel {
                             width: strut.across ? parent.width : (strut.on ? 2 : 1)
                             height: strut.across ? (strut.on ? 2 : 1) : parent.height
                             color: strut.on ? Colors.link : Colors.surfacePressed
-                            Behavior on color { ColorAnimation { duration: Motion.enterSmallFrequent; easing.type: Motion.easeOut } }
+                            Behavior on color { ColorAnimation { duration: Motion.enterSmallFrequent; easing.type: Easing.BezierSpline; easing.bezierCurve: Motion.easeOut } }
                         }
                         IconButton {
                             anchors.centerIn: parent

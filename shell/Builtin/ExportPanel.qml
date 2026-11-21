@@ -470,7 +470,7 @@ Popup {
                             panel.check()
                         }
                         onCheckedChanged: if (modelData.kind === "web") web.checked = checked
-                        indicator: Item { }
+                        indicator: Item {}
                         contentItem: Row {
                             spacing: Spacing.xxs
                             Item {
@@ -500,7 +500,13 @@ Popup {
                                 : kindButton.hovered ? Colors.surfacePressed : "transparent"
                             border.width: kindButton.checked ? 1 : 0
                             border.color: Colors.surfacePressed
-                            Behavior on color { ColorAnimation { duration: Motion.enterSmallFrequent; easing.type: Motion.easeOut } }
+                            Behavior on color {
+                                ColorAnimation {
+                                    duration: Motion.enterSmallFrequent
+                                    easing.type: Easing.BezierSpline
+                                    easing.bezierCurve: Motion.easeOut
+                                }
+                            }
                         }
                     }
                 }
