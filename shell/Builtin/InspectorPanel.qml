@@ -229,6 +229,140 @@ Panel {
         refusal.at = "kind"
         set("color", themed ? (isRoot ? "Colors.canvas" : "Colors.surface") : '"white"', node)
     }
+
+    // What the selected object declares of its own: each property, signal
+    // and function at its own depth of the text, in the order written. A
+    // child's are the child's, and strings and comments say nothing.
+    readonly property var declared: {
+        const at = workspace.selection
+        if (workspace.selected === "" || at === null || at === undefined || at.start === undefined)
+            return []
+        const text = workspace.text.slice(at.start, at.end)
+        const member = /^(?:(?:readonly|required|default)\s+)*(?:property\s+[\w.<>]+\s+([A-Za-z_$][\w$]*)|signal\s+([A-Za-z_$][\w$]*)|function\s+([A-Za-z_$][\w$]*))/
+        const out = []
+        let depth = 0
+        let words = ""
+        const end = () => {
+            const said = words.trim()
+            const m = member.exec(said)
+            if (m !== null)
+                out.push({name: m[1] || m[2] || m[3], says: said.replace(/\s*\{$/, "").replace(/\s+/g, " ")})
+            words = ""
+        }
+        for (let i = 0; i < text.length; i++) {
+            const c = text[i]
+            if (c === "/" && text[i + 1] === "/") {
+                while (i < text.length && text[i] !== "\n")
+                    i++
+                if (depth === 1)
+                    end()
+                continue
+            }
+            if (c === "/" && text[i + 1] === "*") {
+                const close = text.indexOf("*/", i + 2)
+                i = close < 0 ? text.length : close + 1
+                continue
+            }
+            if (c === '"' || c === "'" || c === "`") {
+                let j = i + 1
+                while (j < text.length && text[j] !== c)
+                    j += text[j] === "\\" ? 2 : 1
+                if (depth === 1)
+                    words += text.slice(i, j + 1)
+                i = j
+                continue
+            }
+            if (c === "{") {
+                if (depth === 1)
+                    end()
+                depth++
+            } else if (c === "}") {
+                depth--
+                words = ""
+            } else if (depth === 1) {
+                if (c === "\n" || c === ";")
+                    end()
+                else
+                    words += c
+            }
+        }
+        return out
+    }
+    // The kinds a member is added as, in the order the row offers them.
+    readonly property var memberKinds: ["Property", "Signal", "Function"]
+    property bool addingMember: false
+    // One more member of the selected object, as its row says it; the row
+    // is emptied once the file has it, and kept for a fix when it refuses.
+    function addMember() {
+        const name = memberName.text.trim()
+        if (name === "" || workspace.selected === "")
+            return
+        let text
+        if (memberKind.currentIndex === 0) {
+            const value = memberValue.text.trim()
+            text = "property " + (memberType.text.trim() || "var") + " " + name + (value !== "" ? ": " + value : "")
+        } else if (memberKind.currentIndex === 1) {
+            const args = memberArgs.text.trim()
+            text = "signal " + name + (args !== "" ? "(" + args + ")" : "")
+        } else {
+            const body = memberBody.text.trim()
+            text = "function " + name + "(" + memberArgs.text.trim() + ") {" + (body !== "" ? "\n" + body + "\n" : "") + "}"
+        }
+        refusal.at = "api"
+        refusal.text = ""
+        addingMember = true
+        ask("node_insert", {doc: workspace.doc, parent: {node: workspace.selected}, text: text})
+    }
+    function memberAdded() {
+        addingMember = false
+        memberName.text = ""
+        memberType.text = ""
+        memberArgs.text = ""
+        memberValue.text = ""
+        memberBody.text = ""
+    }
+
+    // The signal whose handler is open over several lines, or empty.
+    property string handlerOf: ""
+    function handlerName(signal) {
+        return "on" + signal[0].toUpperCase() + signal.slice(1)
+    }
+    // A handler's statements as a person writes them: its braces taken off
+    // and its lines brought back to the left edge together.
+    function handlerBody(signal) {
+        let said = written(handlerName(signal)).trim()
+        if (!/^\{[\s\S]*\}$/.test(said))
+            return said
+        let lines = said.slice(1, -1).split("\n")
+        while (lines.length > 0 && lines[0].trim() === "")
+            lines.shift()
+        while (lines.length > 0 && lines[lines.length - 1].trim() === "")
+            lines.pop()
+        const indents = lines.filter(l => l.trim() !== "").map(l => l.match(/^\s*/)[0].length)
+        const cut = indents.length > 0 ? Math.min(...indents) : 0
+        return lines.map(l => l.slice(cut).replace(/\s+$/, "")).join("\n").trim()
+    }
+    function writeHandler(signal, text) {
+        const lines = text.replace(/\s+$/, "").split("\n").map(l => l.replace(/\s+$/, ""))
+        while (lines.length > 0 && lines[0].trim() === "")
+            lines.shift()
+        const name = handlerName(signal)
+        refusal.at = "handle " + signal
+        refusal.text = ""
+        let value
+        if (lines.length === 0) {
+            // Emptied, the handler goes; one never written stays unwritten.
+            if (written(name) === "") {
+                handlerOf = ""
+                return
+            }
+            value = null
+        } else {
+            value = lines.length === 1 ? lines[0].trim()
+                : "{\n" + lines.map(l => l === "" ? "" : "    " + l).join("\n") + "\n}"
+        }
+        ask("binding_set", {doc: workspace.doc, node: {node: workspace.selected}, name: name, value: value})
+    }
     // Neither the root nor what a layout places is pinned.
     readonly property bool pinnable: placedBy === "" && !isRoot
     readonly property var marginNames: ["anchors.margins", "anchors.topMargin", "anchors.leftMargin",
@@ -421,6 +555,8 @@ Panel {
         newValue.text = ""
         componentName.text = ""
         newComment.text = ""
+        memberAdded()
+        handlerOf = ""
     }
     Connections {
         target: panel.workspace
@@ -445,6 +581,8 @@ Panel {
         function onRefused(tool, error, asked) {
             if (tool === "node_arrange" && asked.action === "relayout")
                 panel.filling = false
+            if (tool === "node_insert")
+                panel.addingMember = false
             if (["property_set", "binding_set", "state_edit", "node_arrange"].includes(tool))
                 panel.reseed()
             if (refusal.asking !== "" && refusal.asking === panel.asked(tool, asked)) {
@@ -465,6 +603,10 @@ Panel {
             }
             if (tool === "state_edit")
                 panel.renamedPicked = ""
+            if (tool === "node_insert" && panel.addingMember)
+                panel.memberAdded()
+            if (tool === "binding_set" && panel.handlerOf !== "" && asked.name === panel.handlerName(panel.handlerOf))
+                panel.handlerOf = ""
             if (tool === "node_arrange" && asked.action === "relayout" && panel.filling)
                 panel.filled(answer.nodes !== undefined && answer.nodes.length === 1 ? answer.nodes[0] : "")
         }
@@ -1926,6 +2068,99 @@ Panel {
                 }
             }
 
+            // What the object declares of its own, and one more added by its
+            // kind (`node_insert` of a member).
+            Section {
+                title: "API"
+                gap: 0
+                visible: panel.workspace.selected !== ""
+                Layout.fillWidth: true
+
+                Repeater {
+                    model: panel.declared
+                    delegate: Label {
+                        required property var modelData
+                        text: modelData.says
+                        color: Colors.textMuted
+                        font.family: "monospace"
+                        font.pixelSize: Typography.captionSize
+                        elide: Text.ElideRight
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: 20
+                        verticalAlignment: Text.AlignVCenter
+                        Accessible.role: Accessible.StaticText
+                        Accessible.name: "Declares " + modelData.name
+                    }
+                }
+                RowLayout {
+                    spacing: Spacing.xxs
+                    Layout.fillWidth: true
+                    Layout.topMargin: panel.declared.length > 0 ? Spacing.xxs : 0
+                    Choice {
+                        id: memberKind
+                        model: panel.memberKinds
+                        Accessible.name: "Member kind"
+                        Layout.preferredWidth: 96
+                    }
+                    Field {
+                        id: memberName
+                        placeholderText: "name"
+                        Accessible.name: "Member name"
+                        Layout.fillWidth: true
+                    }
+                }
+                RowLayout {
+                    spacing: Spacing.xxs
+                    Layout.fillWidth: true
+                    Layout.topMargin: Spacing.xxs
+                    Field {
+                        id: memberType
+                        visible: memberKind.currentIndex === 0
+                        placeholderText: "var"
+                        lead: "Type"
+                        Accessible.name: "Member type"
+                        Layout.preferredWidth: 96
+                    }
+                    Field {
+                        id: memberValue
+                        visible: memberKind.currentIndex === 0
+                        placeholderText: "first value"
+                        Accessible.name: "Member value"
+                        Layout.fillWidth: true
+                        onAccepted: panel.addMember()
+                    }
+                    Field {
+                        id: memberArgs
+                        visible: memberKind.currentIndex !== 0
+                        placeholderText: "string name, int index"
+                        lead: "("
+                        Accessible.name: "Member arguments"
+                        Layout.fillWidth: true
+                        onAccepted: if (memberKind.currentIndex === 1) panel.addMember()
+                    }
+                    IconButton {
+                        icon_: "plus"
+                        text: "Add the member"
+                        enabled: memberName.text.trim() !== ""
+                        onClicked: panel.addMember()
+                    }
+                }
+                Field {
+                    id: memberBody
+                    visible: memberKind.currentIndex === 2
+                    placeholderText: "what it does"
+                    lead: "{"
+                    Accessible.name: "Member body"
+                    Layout.fillWidth: true
+                    Layout.topMargin: Spacing.xxs
+                    onAccepted: panel.addMember()
+                }
+                Note {
+                    text: panel.says("api")
+                    Layout.fillWidth: true
+                }
+            }
+
             Section {
                 title: "States"
                 gap: 0
@@ -2198,21 +2433,97 @@ Panel {
                         Layout.fillWidth: true
                         spacing: Spacing.xxs
 
-                        Label {
-                            text: signalRow.modelData.name + "(" + signalRow.modelData.arguments
-                                .map(a => a.type === "" ? a.name : a.name + ": " + a.type).join(", ") + ")"
-                            color: Colors.textMuted
-                            font.pixelSize: Typography.captionSize
-                            elide: Text.ElideRight
+                        readonly property bool opened: panel.handlerOf === modelData.name
+                        RowLayout {
+                            spacing: Spacing.xxs
                             Layout.fillWidth: true
-                            Accessible.role: Accessible.StaticText
-                            Accessible.name: "Signal " + signalRow.modelData.name
+                            Label {
+                                text: signalRow.modelData.name + "(" + signalRow.modelData.arguments
+                                    .map(a => a.type === "" ? a.name : a.name + ": " + a.type).join(", ") + ")"
+                                color: Colors.textMuted
+                                font.pixelSize: Typography.captionSize
+                                elide: Text.ElideRight
+                                Layout.fillWidth: true
+                                Accessible.role: Accessible.StaticText
+                                Accessible.name: "Signal " + signalRow.modelData.name
+                            }
+                            IconButton {
+                                implicitWidth: 24
+                                implicitHeight: 24
+                                iconSize: 14
+                                icon_: "code"
+                                checked: signalRow.opened
+                                text: "Edit the " + signalRow.modelData.name + " handler"
+                                onClicked: {
+                                    if (signalRow.opened) {
+                                        panel.handlerOf = ""
+                                        return
+                                    }
+                                    panel.handlerOf = signalRow.modelData.name
+                                    handlerLines.text = panel.handlerBody(signalRow.modelData.name)
+                                    handlerLines.forceActiveFocus()
+                                }
+                            }
+                        }
+                        // Over as many lines as it takes: Return is a new line,
+                        // and the button (or Ctrl+Return) writes it.
+                        TextArea {
+                            id: handlerLines
+                            visible: signalRow.opened
+                            wrapMode: TextEdit.NoWrap
+                            selectByMouse: true
+                            color: Colors.text
+                            selectionColor: Colors.surfaceSelected
+                            selectedTextColor: Colors.text
+                            placeholderText: "what it does, a line at a time"
+                            placeholderTextColor: Colors.textMuted
+                            font.family: "monospace"
+                            font.pixelSize: Typography.captionSize
+                            padding: Spacing.xs
+                            Layout.fillWidth: true
+                            Layout.minimumHeight: 72
+                            Accessible.name: "Handler for " + signalRow.modelData.name
+                            Keys.onPressed: event => {
+                                if ((event.key === Qt.Key_Return || event.key === Qt.Key_Enter)
+                                    && (event.modifiers & Qt.ControlModifier)) {
+                                    panel.writeHandler(signalRow.modelData.name, text)
+                                    event.accepted = true
+                                } else if (event.key === Qt.Key_Escape) {
+                                    panel.handlerOf = ""
+                                    event.accepted = true
+                                }
+                            }
+                            background: Rectangle {
+                                radius: 6
+                                color: handlerLines.activeFocus ? Colors.surfaceRaised : Colors.surfaceHover
+                                border.width: handlerLines.activeFocus ? 2 : 1
+                                border.color: handlerLines.activeFocus ? Colors.focusRing : Colors.border
+                            }
+                        }
+                        RowLayout {
+                            visible: signalRow.opened
+                            spacing: Spacing.xxs
+                            Layout.fillWidth: true
+                            Item {
+                                Layout.fillWidth: true
+                            }
+                            TextButton {
+                                text: "Cancel"
+                                Accessible.name: "Leave the " + signalRow.modelData.name + " handler as it was"
+                                onClicked: panel.handlerOf = ""
+                            }
+                            TextButton {
+                                text: "Write"
+                                accent: true
+                                Accessible.name: "Write the " + signalRow.modelData.name + " handler"
+                                onClicked: panel.writeHandler(signalRow.modelData.name, handlerLines.text)
+                            }
                         }
                         // Once written the handler is a row of Properties, like
                         // anything else the file says.
                         Field {
                             id: handlerText
-                            visible: !panel.workspace.inspector.some(r => r.name === signalRow.handler)
+                            visible: !signalRow.opened && !panel.workspace.inspector.some(r => r.name === signalRow.handler)
                             placeholderText: "what it does"
                             Accessible.name: "Handle " + signalRow.modelData.name
                             Layout.fillWidth: true
