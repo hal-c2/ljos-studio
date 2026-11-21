@@ -4,7 +4,9 @@
 // and lets go as Enter does. A `unit` sits at its right; `bound` marks what it
 // holds as an expression with an accent ƒ, apart from a literal; `token` shows
 // a design role it names as a chip. Anything beside the field may scrub it too,
-// through scrubStart, scrubTo and scrubEnd.
+// through scrubStart, scrubTo and scrubEnd. Left alone, a value too long for
+// it shows its start and its end, cut in the middle: an expression's last
+// term is as often what tells it apart as its first.
 import QtQuick
 import QtQuick.Controls
 import Ljos.Design
@@ -50,7 +52,12 @@ TextField {
     bottomPadding: 0
     verticalAlignment: TextInput.AlignVCenter
     font.pixelSize: Typography.bodySize
-    color: !enabled ? Colors.textDisabled : bound || token ? Colors.link : Colors.text
+    readonly property color ink: !enabled ? Colors.textDisabled : bound || token ? Colors.link : Colors.text
+    readonly property bool cut: !activeFocus && text !== ""
+        && contentWidth > width - leftPadding - rightPadding
+    // The cut copy below draws it while it is cut; the field's own text is
+    // still there for the caret, a selection and a reader.
+    color: cut ? "transparent" : ink
     placeholderTextColor: Colors.textMuted
     selectionColor: Colors.surfaceSelected
     selectedTextColor: Colors.text
@@ -121,6 +128,17 @@ TextField {
             onPositionChanged: mouse => field.scrubTo(mapToItem(null, mouse.x, 0).x - startX)
             onReleased: field.scrubEnd()
         }
+    }
+    Text {
+        visible: field.cut
+        x: field.leftPadding
+        width: field.width - field.leftPadding - field.rightPadding
+        anchors.verticalCenter: parent.verticalCenter
+        text: field.text
+        elide: Text.ElideMiddle
+        font: field.font
+        color: field.ink
+        Accessible.ignored: true
     }
     Text {
         id: unitText

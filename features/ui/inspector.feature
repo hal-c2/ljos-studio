@@ -1,11 +1,13 @@
 # Sources:
 #   docs/DOGFOOD.md (D15: the inspector shows colours as text and hides declared properties)
+#   studio7 dogfood backlog P7-7 (literal or binding guessed from the old value)
 
 @ui
 Feature: The inspector shows colours and every declared property
   A colour has a swatch, and the swatch opens a picker; what the picker sets
   is `binding_set`, as the row's own field's is. A property declared without a
-  value has a row too, so it can be given one.
+  value has a row too, so it can be given one. What a person types is read
+  for what it is, not for what the row held, and a row can be taken away.
 
   Background:
     Given the file "Main.qml":
@@ -37,7 +39,7 @@ Feature: The inspector shows colours and every declared property
     When the person sets "stack" to "3" in the inspector
     Then the file "Main.qml" says "stack: 3"
 
-  Scenario: A row with nothing written still refuses an expression typed by mistake
+  Scenario: A word that names nothing is refused, not written
     When the person sets "stack" to "cube" in the inspector
     Then the window says "cube is not a literal: bind it as an expression"
     And the file "Main.qml" does not say "cube"
@@ -79,7 +81,7 @@ Feature: The inspector shows colours and every declared property
     Then the window shows a refusal that says "is declared with this value"
     And the file "Main.qml" says "property int count: 1"
 
-  Scenario Outline: A row written as a literal in any of QML's forms refuses an expression
+  Scenario Outline: A row written as a literal in any of QML's forms refuses a word that names nothing
     When the person replaces "width: 100" with "<name>: <written>" in the code view
     And the person sets "<name>" to "cube" in the inspector
     Then the window says "cube is not a literal: bind it as an expression"
@@ -195,7 +197,7 @@ Feature: The inspector shows colours and every declared property
       | declared colour, empty              | property color shade                           | shade                | a picker  |             |                                                        |
       | colour by name                      | property var borderColor: "red"                | borderColor          | a picker  | red         |                                                        |
       | colour by a longer name             | property var selectedTextColor: "red"          | selectedTextColor    | a picker  | red         |                                                        |
-      | colour by a longer name, expression | property var placeholderTextColor: Colors.text | placeholderTextColor | a picker  |             | Worked out by Colors.text: picking replaces it         |
+      | colour by a longer name, expression | property var placeholderTextColor: Colors.accent | placeholderTextColor | a picker  | #007cb7     | Worked out by Colors.accent: picking replaces it       |
       | colour by name, transparent         | property var borderColor: "transparent"        | borderColor          | a picker  | transparent |                                                        |
       | colour by name, empty               | property var borderColor                       | borderColor          | a picker  |             |                                                        |
       | colour by name, not one             | property string borderColor: "nope"            | borderColor          | a picker  |             |                                                        |
@@ -205,8 +207,10 @@ Feature: The inspector shows colours and every declared property
       | not a colour                        | property string label: "nope"                  | label                | no picker |             |                                                        |
       | number                              | property int size: 3                           | size                 | no picker |             |                                                        |
       | expression                          | property int size: 1 + 1                       | size                 | no picker |             |                                                        |
-      | colour by expression                | property color shade: Qt.rgba(0, 1, 0, 1)      | shade                | a picker  |             | Worked out by Qt.rgba(0, 1, 0, 1): picking replaces it |
-      | colour-named expression             | property var borderColor: Colors.text          | borderColor          | a picker  |             | Worked out by Colors.text: picking replaces it         |
+      | colour by expression                | property color shade: Qt.rgba(0, 1, 0, 1)      | shade                | a picker  | #00ff00     | Worked out by Qt.rgba(0, 1, 0, 1): picking replaces it |
+      | colour-named expression             | property var borderColor: Colors.accent        | borderColor          | a picker  | #007cb7     | Worked out by Colors.accent: picking replaces it       |
+      | colour picked by a condition        | property var borderColor: count > 1 ? Colors.accent : 'red' | borderColor | a picker | #007cb7 or red | Worked out by count > 1 ? Colors.accent : 'red': picking replaces it |
+      | colour worked out from a size       | property color shade: Qt.rgba(width, 0, 0, 1)  | shade                | a picker  |             | Worked out by Qt.rgba(width, 0, 0, 1): picking replaces it |
       | single-quoted colour                | property color shade: 'red'                    | shade                | a picker  | red         |                                                        |
       | single-quoted hex text              | property string code: '#123456'                | code                 | a picker  | #123456     |                                                        |
       | single-quoted text                  | property string label: 'red'                   | label                | no picker |             |                                                        |
@@ -259,9 +263,9 @@ Feature: The inspector shows colours and every declared property
     And the file "Main.qml" says "Qt.rgba(0, 1, 0, 1)"
 
   Scenario: A refused value can be bound as the refusal says
-    When the person sets "width" to "parent.width" in the inspector
-    And the person clicks the button "Bind width to parent.width"
-    Then the file "Main.qml" says "width: parent.width"
+    When the person sets "width" to "cube" in the inspector
+    And the person clicks the button "Bind width to cube"
+    Then the file "Main.qml" says "width: cube"
     And the window shows no refusal
 
   Scenario: A colour is written the way a person writes one
@@ -269,20 +273,57 @@ Feature: The inspector shows colours and every declared property
     Then the file "Main.qml" says "color: \"#123456\""
     And the window shows no refusal
 
+  # What is typed says what it is, whatever the row held before: a colour's
+  # name or `#` in a colour row is text, a design role or any expression is
+  # bound, and only a bare word that names nothing is asked about.
+  Scenario Outline: What is typed is read for what it is: <kind>
+    When the person sets "<row>" to "<typed>" in the inspector
+    Then the file "Main.qml" says "<written>"
+    And the window shows no refusal
+
+    Examples:
+      | kind                                | row   | typed         | written                |
+      | a colour's name in a colour row     | color | white         | color: \"white\"         |
+      | a role over a literal colour        | color | Colors.accent | color: Colors.accent   |
+      | a role over a literal number        | width | Spacing.md    | width: Spacing.md      |
+      | an expression over a literal number | width | parent.width  | width: parent.width    |
+      | an object's id                      | stack | other         | stack: other           |
+      | a property of the object            | stack | count         | stack: count           |
+
+  Scenario: A colour's name typed over an expression is written as text
+    When the person replaces "color: \"#ff0000\"" with "color: Qt.rgba(1, 0, 0, 1)" in the code view
+    And the person selects "Rectangle root" in the layers panel
+    And the person sets "color" to "transparent" in the inspector
+    Then the file "Main.qml" says "color: \"transparent\""
+    And the window shows no refusal
+
   Scenario: A word typed over a string can be written as one
-    When the person sets "color" to "red" in the inspector
-    And the person clicks the button "Write red as text"
-    Then the file "Main.qml" says "color: \"red\""
+    When the person replaces "width: 100" with "objectName: \"hello\"" in the code view
+    And the person selects "Rectangle root" in the layers panel
+    And the person sets "objectName" to "cube" in the inspector
+    And the person clicks the button "Write cube as text"
+    Then the file "Main.qml" says "objectName: \"cube\""
     And the window shows no refusal
 
   Scenario: A number row does not offer to write a word as text
-    When the person sets "width" to "parent.width" in the inspector
-    Then the inspector has no button "Write parent.width as text"
+    When the person sets "width" to "cube" in the inspector
+    Then the inspector has no button "Write cube as text"
+
+  Scenario: A property is taken away from its row, and Undo brings it back
+    When the person clicks the button "Remove color"
+    Then the file "Main.qml" does not say "color:"
+    And the inspector does not offer the field "color"
+    When the person clicks the button "Undo"
+    Then the file "Main.qml" says "color: \"#ff0000\""
+
+  Scenario: What only the code can take away has no button to remove it
+    Then the inspector has no button "Remove tint"
+    And the inspector has no button "Remove id"
 
   Scenario: A refused value is forgotten when something else is selected
-    Given the person has set "width" to "parent.width" in the inspector
+    Given the person has set "width" to "cube" in the inspector
     When the person selects "Item other" in the layers panel
-    Then the inspector has no button "Bind width to parent.width"
+    Then the inspector has no button "Bind width to cube"
     And the window shows no refusal
 
 
@@ -296,17 +337,17 @@ Feature: The inspector shows colours and every declared property
     Then the window does not say "cube is not a literal: bind it as an expression"
 
   Scenario: A refused value is forgotten when another document opens
-    Given the person has set "width" to "parent.width" in the inspector
+    Given the person has set "width" to "cube" in the inspector
     When the person opens "Other.qml" in the documents list
-    Then the inspector has no button "Bind width to parent.width"
+    Then the inspector has no button "Bind width to cube"
     And the window shows no refusal
 
   Scenario: A refused value is forgotten when a state is picked
-    Given the person has set "width" to "parent.width" in the inspector
+    Given the person has set "width" to "cube" in the inspector
     And the person has added the state "compact" in the inspector
-    And the person has set "width" to "parent.width" in the inspector
+    And the person has set "width" to "cube" in the inspector
     When the person picks the state "compact" in the inspector
-    Then the inspector has no button "Bind width to parent.width"
+    Then the inspector has no button "Bind width to cube"
     And the window shows no refusal
 
   Scenario: A signal is handled from its row
