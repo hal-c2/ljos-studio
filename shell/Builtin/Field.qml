@@ -90,6 +90,7 @@ TextField {
                 text: field.lead
                 color: Colors.textMuted
                 font.pixelSize: Typography.captionSize
+                elide: Text.ElideRight
             }
             Rectangle {
                 visible: field.bound
@@ -143,7 +144,11 @@ TextField {
         border.color: field.activeFocus ? Colors.focusRing
             : field.hovered ? Colors.border : "transparent"
         Behavior on border.color {
-            ColorAnimation { duration: Motion.enterSmallFrequent; easing.type: Easing.BezierSpline; easing.bezierCurve: Motion.easeOut }
+            ColorAnimation {
+                duration: Motion.enterSmallFrequent
+                easing.type: Easing.BezierSpline
+                easing.bezierCurve: Motion.easeOut
+            }
         }
     }
 }

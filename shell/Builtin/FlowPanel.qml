@@ -180,7 +180,7 @@ Panel {
                         : showState.hovered ? Colors.surfaceHover : Colors.surfaceRaised
                     border.width: 1
                     border.color: Colors.surfacePressed
-                    Behavior on color { ColorAnimation { duration: Motion.enterSmallFrequent; easing.type: Motion.easeOut } }
+                    Behavior on color { ColorAnimation { duration: Motion.enterSmallFrequent; easing.type: Easing.BezierSpline; easing.bezierCurve: Motion.easeOut } }
                     Accessible.role: Accessible.StaticText
                     Accessible.name: "Flow state " + name
 

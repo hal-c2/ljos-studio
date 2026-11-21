@@ -48,7 +48,11 @@ Button {
         border.width: button.visualFocus ? 2 : 0
         border.color: Colors.focusRing
         Behavior on color {
-            ColorAnimation { duration: Motion.enterSmallFrequent; easing.type: Easing.BezierSpline; easing.bezierCurve: Motion.easeOut }
+            ColorAnimation {
+                duration: Motion.enterSmallFrequent
+                easing.type: Easing.BezierSpline
+                easing.bezierCurve: Motion.easeOut
+            }
         }
     }
 }

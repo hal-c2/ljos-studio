@@ -25,11 +25,19 @@ Item {
         visible: under !== null
         Behavior on x {
             enabled: !Motion.reduced
-            NumberAnimation { duration: Motion.moveSmallFrequent; easing.type: Easing.BezierSpline; easing.bezierCurve: Motion.easeInOut }
+            NumberAnimation {
+                duration: Motion.moveSmallFrequent
+                easing.type: Easing.BezierSpline
+                easing.bezierCurve: Motion.easeInOut
+            }
         }
         Behavior on width {
             enabled: !Motion.reduced
-            NumberAnimation { duration: Motion.moveSmallFrequent; easing.type: Easing.BezierSpline; easing.bezierCurve: Motion.easeInOut }
+            NumberAnimation {
+                duration: Motion.moveSmallFrequent
+                easing.type: Easing.BezierSpline
+                easing.bezierCurve: Motion.easeInOut
+            }
         }
     }
 
@@ -68,7 +76,11 @@ Item {
                     border.width: tab.visualFocus ? 2 : 0
                     border.color: Colors.focusRing
                     Behavior on opacity {
-                        NumberAnimation { duration: Motion.enterSmallFrequent; easing.type: Easing.BezierSpline; easing.bezierCurve: Motion.easeOut }
+                        NumberAnimation {
+                            duration: Motion.enterSmallFrequent
+                            easing.type: Easing.BezierSpline
+                            easing.bezierCurve: Motion.easeOut
+                        }
                     }
                 }
                 contentItem: Text {
