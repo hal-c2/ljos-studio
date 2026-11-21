@@ -109,50 +109,17 @@ Panel {
         // A box however many signals the selection has: a MouseArea has
         // ten, which as a row of buttons would push the graph out of the
         // panel.
-        ComboBox {
+        Choice {
             id: triggerBox
+            lead: "Wire"
+            leadIcon: "pointer"
             Layout.fillWidth: true
             visible: panel.workspace.selected !== ""
             model: panel.triggers
             currentIndex: panel.triggers.indexOf(panel.trigger)
-            displayText: "Wire " + panel.trigger
+            displayText: panel.trigger
             Accessible.name: "Wire"
             onActivated: index => panel.picked = panel.triggers[index]
-            implicitHeight: 28
-            hoverEnabled: true
-            leftPadding: Spacing.xs
-            contentItem: Row {
-                spacing: Spacing.xxs
-                Icon {
-                    name: "pointer"
-                    size: 14
-                    color: Colors.textMuted
-                    anchors.verticalCenter: parent.verticalCenter
-                }
-                Text {
-                    text: "Wire"
-                    color: Colors.textMuted
-                    font.pixelSize: Typography.captionSize
-                    anchors.verticalCenter: parent.verticalCenter
-                }
-                Text {
-                    text: panel.trigger
-                    color: Colors.text
-                    font.pixelSize: Typography.bodySize
-                    anchors.verticalCenter: parent.verticalCenter
-                }
-            }
-            indicator: Icon {
-                name: "chevronDown"
-                size: 14
-                color: Colors.textMuted
-                x: triggerBox.width - width - Spacing.xs
-                y: (triggerBox.height - height) / 2
-            }
-            background: Rectangle {
-                radius: 6
-                color: triggerBox.hovered || triggerBox.down ? Colors.surfacePressed : Colors.surfaceHover
-            }
             // The popup's list is the style's; it is named here so a
             // reader of the window can tell it from the others.
             Component.onCompleted: {
