@@ -436,7 +436,10 @@ their own.
 - **Studio's own theme.** `--theme FILE`, else `ljos-studio/theme.json`
   in the configuration directory: the same kind of file `theme_set`
   writes, so a person restyles Studio by opening its configuration
-  directory as a project.
+  directory as a project. Studio ships its own (`crates/studio/theme.json`:
+  a violet accent, light and dark): the window uses it when there is no
+  such file, and a watched window copies it there first, as it seeds the
+  shell, since a watched session takes every role from that one file.
 - **The self-reskin.** With a shell of the person's, the window is a
   watched session, as any app under `ljos run --watch`: its roots are
   the person's directory and Studio's own shell, written to the state
