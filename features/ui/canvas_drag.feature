@@ -34,6 +34,7 @@ Feature: Objects are moved and resized on the canvas
     And Studio's window shows the project
     And the person has opened "Main.qml" in the documents list
     And the person has pressed "Ctrl+1"
+    And the canvas has finished moving
 
   Scenario: A selected object has an outline and eight handles
     When the person clicks the frame "Desktop" at 40, 40

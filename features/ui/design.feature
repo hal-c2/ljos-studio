@@ -98,6 +98,7 @@ Feature: Studio's window is laid out to work in
     Given the person has opened "Main.qml" in the documents list
     When the person turns the wheel over the canvas
     And the person clicks the button "Fit"
+    And the canvas has finished moving
     Then the frame "Desktop" is back where it was
 
   @preview
