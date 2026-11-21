@@ -40,6 +40,12 @@ Item {
         workspace: workspace
     }
 
+    // The canvas's ground, under the panels that float on it.
+    Rectangle {
+        anchors.fill: parent
+        color: Colors.canvas
+    }
+
     Shortcut {
         sequences: ["Ctrl+K", "Meta+K", "Ctrl+Shift+P"]
         onActivated: commands.show()
@@ -66,127 +72,198 @@ Item {
 
         SplitView {
             orientation: Qt.Horizontal
-            handle: Rectangle {
-                implicitWidth: 5
-                color: SplitHandle.hovered || SplitHandle.pressed ? Colors.border : Colors.surfacePressed
+            // A gutter of the canvas's own ground: the panels float beside it.
+            handle: Item {
+                implicitWidth: Spacing.xs
+                Rectangle {
+                    anchors.centerIn: parent
+                    width: 2
+                    height: parent.height / 3
+                    radius: 1
+                    color: Colors.border
+                    opacity: SplitHandle.hovered || SplitHandle.pressed ? 1 : 0
+                }
             }
             Layout.fillWidth: true
             Layout.fillHeight: true
 
             // What the document is made of, and what can go in it.
-            ColumnLayout {
+            Item {
                 visible: toolbar.leftOpen
-                spacing: 0
-                SplitView.preferredWidth: 260
-                SplitView.minimumWidth: 200
+                SplitView.preferredWidth: 268
+                SplitView.minimumWidth: 208
 
-                TabStrip {
-                    id: leftTabs
-                    tabs: ["Layers", "Insert"]
-                    Layout.fillWidth: true
+                Rectangle {
+                    id: leftCard
+                    anchors.fill: parent
+                    anchors.margins: Spacing.xs
+                    anchors.rightMargin: 0
+                    radius: 12
+                    color: Colors.surface
+                    border.width: 1
+                    border.color: Colors.surfacePressed
                 }
                 ColumnLayout {
-                    visible: leftTabs.current === 0
+                    anchors.fill: leftCard
+                    anchors.margins: 1
                     spacing: 0
-                    Layout.fillWidth: true
-                    Layout.fillHeight: true
 
-                    Section {
-                        title: "Documents"
+                    TabStrip {
+                        id: leftTabs
+                        tabs: ["Layers", "Insert"]
                         Layout.fillWidth: true
-                        DocumentsPanel {
-                            workspace: workspace
+                    }
+                    ColumnLayout {
+                        visible: leftTabs.current === 0
+                        spacing: 0
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+
+                        Section {
+                            title: "Documents"
+                            ruled: false
+                            inset: Spacing.xxs
                             Layout.fillWidth: true
-                            Layout.preferredHeight: 150
+                            DocumentsPanel {
+                                workspace: workspace
+                                Layout.fillWidth: true
+                                Layout.preferredHeight: 150
+                            }
+                        }
+                        // Beside the documents: what the open one offers when it is a block.
+                        Section {
+                            title: "Block"
+                            visible: blockActions.block !== null
+                            inset: Spacing.xxs
+                            Layout.fillWidth: true
+                            BlockActions {
+                                id: blockActions
+                                workspace: workspace
+                                Layout.fillWidth: true
+                            }
+                        }
+                        Section {
+                            title: "Layers"
+                            inset: Spacing.xxs
+                            Layout.fillWidth: true
+                            Layout.fillHeight: true
+                            LayersPanel {
+                                workspace: workspace
+                                Layout.fillWidth: true
+                                Layout.fillHeight: true
+                            }
                         }
                     }
-                    // Beside the documents: what the open one offers when it is a block.
-                    Section {
-                        title: "Block"
-                        visible: blockActions.block !== null
-                        Layout.fillWidth: true
-                        BlockActions {
-                            id: blockActions
-                            workspace: workspace
-                            Layout.fillWidth: true
-                        }
-                    }
-                    LayersPanel {
+                    PalettePanel {
+                        visible: leftTabs.current === 1
                         workspace: workspace
                         Layout.fillWidth: true
                         Layout.fillHeight: true
                     }
-                }
-                PalettePanel {
-                    visible: leftTabs.current === 1
-                    workspace: workspace
-                    Layout.fillWidth: true
-                    Layout.fillHeight: true
-                }
-                // Under whichever fills: its room comes out of that, so it
-                // covers nothing and the code and the frame stay put.
-                PreviewProblems {
-                    id: previewProblems
-                    workspace: workspace
-                    Layout.fillWidth: true
-                    Layout.margins: Spacing.xs
+                    // Under whichever fills: its room comes out of that, so it
+                    // covers nothing and the code and the frame stay put.
+                    PreviewProblems {
+                        id: previewProblems
+                        workspace: workspace
+                        Layout.fillWidth: true
+                        Layout.margins: Spacing.xs
+                    }
                 }
             }
 
             SplitView {
                 orientation: Qt.Vertical
                 SplitView.fillWidth: true
-                handle: Rectangle {
-                    implicitHeight: 5
-                    color: SplitHandle.hovered || SplitHandle.pressed ? Colors.border : Colors.surfacePressed
+                handle: Item {
+                    implicitHeight: Spacing.xs
+                    Rectangle {
+                        anchors.centerIn: parent
+                        width: parent.width / 3
+                        height: 2
+                        radius: 1
+                        color: Colors.border
+                        opacity: SplitHandle.hovered || SplitHandle.pressed ? 1 : 0
+                    }
                 }
 
                 CanvasPanel {
                     id: canvas
                     workspace: workspace
                     recording: inspector.recording
+                    // The window's own ground, so the gutters round the
+                    // panels are the canvas going on behind them.
+                    fill: Colors.canvas
                     onDoneRecording: inspector.pick("", "")
                     onLayoutAsked: (target, state) => inspector.editLayout(target, state)
                     SplitView.fillHeight: true
                 }
-                CodePanel {
+                Item {
                     visible: toolbar.codeOpen
-                    workspace: workspace
-                    SplitView.preferredHeight: 180
-                    SplitView.minimumHeight: 80
+                    SplitView.preferredHeight: 188
+                    SplitView.minimumHeight: 88
+
+                    Rectangle {
+                        id: codeCard
+                        anchors.fill: parent
+                        anchors.bottomMargin: Spacing.xs
+                        radius: 12
+                        color: Colors.surface
+                        border.width: 1
+                        border.color: Colors.surfacePressed
+                    }
+                    CodePanel {
+                        workspace: workspace
+                        anchors.fill: codeCard
+                        anchors.margins: 1
+                    }
                 }
             }
 
             // What the selection is, and what the document's look and flow are.
-            ColumnLayout {
+            Item {
                 visible: toolbar.rightOpen
-                spacing: 0
                 SplitView.preferredWidth: 300
-                SplitView.minimumWidth: 220
+                SplitView.minimumWidth: 240
 
-                TabStrip {
-                    id: rightTabs
-                    tabs: ["Design", "Tokens", "Flow"]
-                    Layout.fillWidth: true
+                Rectangle {
+                    id: rightCard
+                    anchors.fill: parent
+                    anchors.margins: Spacing.xs
+                    anchors.leftMargin: 0
+                    radius: 12
+                    color: Colors.surface
+                    border.width: 1
+                    border.color: Colors.surfacePressed
                 }
-                InspectorPanel {
-                    id: inspector
-                    visible: rightTabs.current === 0
-                    workspace: workspace
-                    Layout.fillWidth: true
-                    Layout.fillHeight: true
-                }
-                TokensPanel {
-                    visible: rightTabs.current === 1
-                    workspace: workspace
-                    Layout.fillWidth: true
-                    Layout.fillHeight: true
-                }
-                FlowPanel {
-                    visible: rightTabs.current === 2
-                    workspace: workspace
-                    Layout.fillWidth: true
-                    Layout.fillHeight: true
+                ColumnLayout {
+                    anchors.fill: rightCard
+                    anchors.margins: 1
+                    spacing: 0
+
+                    TabStrip {
+                        id: rightTabs
+                        tabs: ["Design", "Tokens", "Flow"]
+                        Layout.fillWidth: true
+                    }
+                    InspectorPanel {
+                        id: inspector
+                        visible: rightTabs.current === 0
+                        workspace: workspace
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                    }
+                    TokensPanel {
+                        visible: rightTabs.current === 1
+                        workspace: workspace
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                    }
+                    FlowPanel {
+                        visible: rightTabs.current === 2
+                        workspace: workspace
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                    }
                 }
             }
         }

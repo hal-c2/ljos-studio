@@ -1,5 +1,6 @@
-// The top of the window: the panels on or off, undo and redo, the target the
-// canvas runs on, live or mocked data, the look, and export, the one accent.
+// The top of the window, in clusters: the file and its history; the target
+// the canvas runs on; how it is shown (data, look, code); and export, the one
+// accent. Every tool is an icon whose tip names it and its keys.
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
@@ -24,15 +25,25 @@ ToolBar {
         workspace.dispatch("preview_open", {doc: workspace.doc, target: target, state: state})
     }
 
-    implicitHeight: 44
+    implicitHeight: 48
     padding: 0
     background: Rectangle {
+        color: Colors.canvas
+    }
+
+    // A cluster of tools on one soft well, so a group reads as one thing.
+    component Well: Rectangle {
+        default property alias tools: row.data
+        implicitWidth: row.implicitWidth + 4
+        implicitHeight: 32
+        radius: 8
         color: Colors.surface
-        Rectangle {
-            anchors.bottom: parent.bottom
-            width: parent.width
-            height: 1
-            color: Colors.surfacePressed
+        border.width: 1
+        border.color: Colors.surfacePressed
+        Row {
+            id: row
+            anchors.centerIn: parent
+            spacing: 2
         }
     }
 
@@ -40,8 +51,9 @@ ToolBar {
         anchors.fill: parent
         anchors.leftMargin: Spacing.xs
         anchors.rightMargin: Spacing.xs
-        spacing: Spacing.xxs
+        spacing: Spacing.xs
 
+        // The file and its history.
         IconButton {
             icon_: "sidebarLeft"
             text: "Left panels"
@@ -53,60 +65,104 @@ ToolBar {
                 checked = Qt.binding(() => bar.leftOpen)
             }
         }
-        Label {
-            text: bar.workspace.doc === "" ? "Ljós Studio" : bar.workspace.doc
-            color: Colors.text
-            font.pixelSize: Typography.bodySize
-            font.weight: Typography.bodyStrongWeight
-            elide: Text.ElideRight
-            leftPadding: Spacing.xs
-            rightPadding: Spacing.xs
-            Layout.maximumWidth: 200
+        RowLayout {
+            spacing: Spacing.xs
+            Layout.leftMargin: Spacing.xxs
+            // Studio's mark: a spark of its accent.
+            Rectangle {
+                implicitWidth: 20
+                implicitHeight: 20
+                radius: 6
+                color: Colors.accent
+                Accessible.ignored: true
+                Icon {
+                    anchors.centerIn: parent
+                    name: "component"
+                    size: 14
+                    color: Colors.textOnAccent
+                }
+            }
+            Label {
+                text: bar.workspace.doc === "" ? "Ljós Studio" : bar.workspace.doc
+                color: Colors.text
+                font.pixelSize: Typography.subtitleSize
+                font.weight: Typography.subtitleWeight
+                elide: Text.ElideRight
+                Layout.maximumWidth: 220
+            }
         }
-        Hairline {}
-        IconButton {
-            icon_: "undo"
-            text: "Undo"
-            enabled: bar.workspace.done.length > 0
-            onClicked: bar.workspace.dispatch("history", {action: "undo"})
-        }
-        IconButton {
-            icon_: "redo"
-            text: "Redo"
-            enabled: bar.workspace.undone.length > 0
-            onClicked: bar.workspace.dispatch("history", {action: "redo"})
+        Well {
+            IconButton {
+                icon_: "undo"
+                text: "Undo"
+                shortcut: "Ctrl+Z"
+                enabled: bar.workspace.done.length > 0
+                onClicked: bar.workspace.dispatch("history", {action: "undo"})
+            }
+            IconButton {
+                icon_: "redo"
+                text: "Redo"
+                shortcut: "Ctrl+Shift+Z"
+                enabled: bar.workspace.undone.length > 0
+                onClicked: bar.workspace.dispatch("history", {action: "redo"})
+            }
         }
 
         Item {
             Layout.fillWidth: true
         }
 
+        // Where the canvas runs: a breakpoint each.
         ButtonGroup {
             id: targets
         }
-        Repeater {
-            model: [{name: "Desktop", icon: "desktop"}, {name: "Tablet", icon: "tablet"},
-                    {name: "Phone", icon: "phone"}]
-            delegate: IconButton {
-                required property var modelData
-                icon_: modelData.icon
-                text: modelData.name
-                checkable: true
-                checked: bar.preview !== null && bar.preview.target === modelData.name
-                ButtonGroup.group: targets
-                enabled: bar.workspace.previews && bar.workspace.doc !== ""
-                onClicked: bar.open(modelData.name.toLowerCase(),
-                                    bar.preview !== null ? bar.preview.state : "live")
+        Well {
+            Repeater {
+                model: [{name: "Desktop", icon: "desktop"}, {name: "Tablet", icon: "tablet"},
+                        {name: "Phone", icon: "phone"}]
+                delegate: IconButton {
+                    required property var modelData
+                    icon_: modelData.icon
+                    text: modelData.name
+                    checkable: true
+                    checked: bar.preview !== null && bar.preview.target === modelData.name
+                    ButtonGroup.group: targets
+                    enabled: bar.workspace.previews && bar.workspace.doc !== ""
+                    onClicked: bar.open(modelData.name.toLowerCase(),
+                                        bar.preview !== null ? bar.preview.state : "live")
+                }
             }
         }
-        Hairline {}
-        TextButton {
-            text: bar.preview !== null && bar.preview.state === "mocked" ? "Mocked" : "Live"
-            Accessible.name: "Data"
-            Accessible.description: text
-            enabled: bar.preview !== null
-            onClicked: bar.open(bar.preview.target.toLowerCase(),
-                                bar.preview.state === "mocked" ? "live" : "mocked")
+        // How it is shown: on live or mocked data, in which look, with its code.
+        Well {
+            IconButton {
+                readonly property bool mocked: bar.preview !== null && bar.preview.state === "mocked"
+                icon_: "data"
+                text: mocked ? "Mocked data" : "Live data"
+                checkable: true
+                checked: mocked
+                Accessible.name: "Data"
+                Accessible.description: mocked ? "Mocked" : "Live"
+                enabled: bar.preview !== null
+                onClicked: {
+                    bar.open(bar.preview.target.toLowerCase(), mocked ? "live" : "mocked")
+                    // A click toggles a checkable button and ends its binding.
+                    checked = Qt.binding(() => mocked)
+                }
+            }
+            IconButton {
+                icon_: Colors.dark ? "sun" : "moon"
+                text: Colors.dark ? "Light look" : "Dark look"
+                onClicked: Colors.dark = !Colors.dark
+            }
+            IconButton {
+                icon_: "code"
+                text: "Code"
+                checkable: true
+                checked: bar.codeOpen
+                onClicked: bar.codeOpen = checked
+                Accessible.name: "Show code"
+            }
         }
 
         Item {
@@ -123,18 +179,15 @@ ToolBar {
             }
         }
 
-        IconButton {
-            icon_: Colors.dark ? "sun" : "moon"
-            text: Colors.dark ? "Light look" : "Dark look"
-            onClicked: Colors.dark = !Colors.dark
-        }
-        IconButton {
-            icon_: "code"
-            text: "Code"
-            checkable: true
-            checked: bar.codeOpen
-            onClicked: bar.codeOpen = checked
-            Accessible.name: "Show code"
+        // Out of Studio: a bundle, then the right panels' toggle at the edge,
+        // as the left one is.
+        TextButton {
+            text: "Export"
+            icon_: "export"
+            accent: true
+            Accessible.name: text
+            Accessible.description: "Write a bundle (Ctrl+E)"
+            onClicked: bar.exportRequested()
         }
         IconButton {
             icon_: "sidebarRight"
@@ -142,14 +195,6 @@ ToolBar {
             checkable: true
             checked: bar.rightOpen
             onClicked: bar.rightOpen = checked
-        }
-        Hairline {}
-        TextButton {
-            text: "Export"
-            accent: true
-            Accessible.name: text
-            Accessible.description: "Write a bundle (Ctrl+E)"
-            onClicked: bar.exportRequested()
         }
     }
 }
