@@ -37,6 +37,12 @@ Panel {
         "BorderImage", "Canvas", "Button", "CheckBox", "RadioButton", "Switch", "Slider",
         "ProgressBar", "SpinBox", "TextField", "TextArea", "ComboBox", "Label", "ToolButton"]
     readonly property string needle: search.text.toLowerCase()
+    // What was placed lately, newest first: most of a session places the same
+    // few things, so they come first.
+    property var recent: []
+    function placed(type) {
+        recent = [type].concat(recent.filter(t => t.name !== type.name || t.module !== type.module)).slice(0, 6)
+    }
     // A picture is a decode and a live button, so a folder of nine hundred
     // shows its first few and the search reaches the rest.
     readonly property var assetsFound: workspace.assets.filter(a => a.name.toLowerCase().includes(needle))
@@ -87,7 +93,8 @@ Panel {
         const rank = t => first.indexOf(t.name) < 0 ? first.length : first.indexOf(t.name)
         for (const g of out)
             g.types.sort((a, b) => rank(a) - rank(b))
-        return out.filter(g => g.types.length > 0)
+        const lately = {name: "Recently used", types: panel.recent.filter(t => t.name.toLowerCase().includes(needle))}
+        return [lately].concat(out).filter(g => g.types.length > 0)
     }
     function category(type, module) {
         if (["Rectangle", "Text", "Image", "Item", "TextInput", "TextEdit", "AnimatedImage", "BorderImage", "Canvas"].includes(type))
@@ -169,7 +176,8 @@ Panel {
         anchors.right: parent.right
         anchors.margins: Spacing.xs
         y: Spacing.xs
-        placeholderText: "Search"
+        placeholderText: "Search types, blocks, assets"
+        leadIcon: "search"
         Accessible.name: "Search the palette"
     }
 
@@ -299,6 +307,105 @@ Panel {
                 Accessible.name: text
             }
 
+            Repeater {
+                model: panel.groups
+                delegate: Column {
+                    id: group
+                    required property var modelData
+                    width: parent.width
+                    spacing: Spacing.xxs
+
+                    Label {
+                        text: group.modelData.name
+                        color: Colors.textMuted
+                        font.pixelSize: Typography.captionSize
+                        font.weight: Typography.bodyStrongWeight
+                        topPadding: Spacing.sm
+                        bottomPadding: 2
+                        leftPadding: Spacing.xxs
+                        Accessible.role: Accessible.StaticText
+                        Accessible.name: group.modelData.name
+                    }
+                    Flow {
+                        width: parent.width
+                        spacing: Spacing.xxs
+
+                        Repeater {
+                            model: group.modelData.types
+                            delegate: AbstractButton {
+                                id: tile
+                                required property var modelData
+                                text: modelData.name
+                                Accessible.name: "Place " + modelData.name
+                                Accessible.description: modelData.module
+                                Accessible.role: Accessible.Button
+                                enabled: panel.target !== ""
+                                width: (group.width - 2 * Spacing.xxs) / 3
+                                height: 76
+                                hoverEnabled: true
+                                ToolTip.visible: hovered
+                                ToolTip.text: "Place " + modelData.name + " (" + (modelData.module || "this project") + ")"
+                                ToolTip.delay: 500
+                                background: Rectangle {
+                                    radius: 8
+                                    color: tile.down ? Colors.surfacePressed
+                                        : tile.hovered ? Colors.surfaceHover : "transparent"
+                                    border.width: tile.visualFocus ? 2 : 0
+                                    border.color: Colors.focusRing
+                                    Behavior on color {
+                                        ColorAnimation {
+                                            duration: Motion.enterSmallFrequent
+                                            easing.type: Easing.Bezier
+                                            easing.bezierCurve: Motion.easeOut
+                                        }
+                                    }
+                                }
+                                contentItem: Column {
+                                    spacing: Spacing.xxs
+                                    topPadding: Spacing.xxs
+                                    // A small piece of canvas with the thing on it, as it will look placed.
+                                    Rectangle {
+                                        anchors.horizontalCenter: parent.horizontalCenter
+                                        width: parent.width - Spacing.xs
+                                        height: 44
+                                        radius: 6
+                                        color: Colors.canvas
+                                        border.width: 1
+                                        border.color: tile.hovered ? Colors.border : Colors.surfacePressed
+                                        TypeSketch {
+                                            anchors.centerIn: parent
+                                            kind: panel.typeIcon(tile.modelData.name)
+                                            ink: tile.enabled ? Colors.text : Colors.textDisabled
+                                        }
+                                    }
+                                    Text {
+                                        width: parent.width
+                                        leftPadding: 2
+                                        rightPadding: 2
+                                        text: tile.modelData.name
+                                        color: tile.enabled ? Colors.text : Colors.textDisabled
+                                        font.pixelSize: Typography.captionSize
+                                        horizontalAlignment: Text.AlignHCenter
+                                        elide: Text.ElideRight
+                                    }
+                                }
+                                onClicked: {
+                                    const place = {
+                                        doc: panel.workspace.doc,
+                                        parent: {node: panel.target},
+                                        text: panel.starter(modelData.name)
+                                    }
+                                    if (modelData.module !== "")
+                                        place.import = modelData.module
+                                    panel.workspace.dispatch("node_insert", place)
+                                    panel.placed({name: modelData.name, module: modelData.module})
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
             Section {
                 id: assetsSection
                 title: "Assets"
@@ -336,7 +443,7 @@ Panel {
                             background: Rectangle {
                                 radius: 6
                                 color: picture.down ? Colors.surfacePressed
-                                    : picture.hovered ? Colors.surfaceHover : Colors.surfaceRaised
+                                    : picture.hovered ? Colors.surfaceHover : Colors.canvas
                                 border.width: picture.visualFocus ? 2 : 1
                                 border.color: picture.visualFocus ? Colors.focusRing : Colors.surfacePressed
                             }
@@ -397,92 +504,14 @@ Panel {
                         Layout.fillWidth: true
                         onAccepted: bring.clicked()
                     }
-                    TextButton {
+                    IconButton {
                         id: bring
-                        text: "Import"
-                        Accessible.name: "Import asset"
+                        icon_: "plus"
+                        text: "Import asset"
                         enabled: incoming.text !== ""
                         onClicked: {
                             panel.workspace.dispatch("project_open", {asset: "import", file: incoming.text})
                             incoming.text = ""
-                        }
-                    }
-                }
-            }
-
-            Repeater {
-                model: panel.groups
-                delegate: Column {
-                    id: group
-                    required property var modelData
-                    width: parent.width
-                    spacing: Spacing.xxs
-
-                    Label {
-                        text: group.modelData.name
-                        color: Colors.textMuted
-                        font.pixelSize: Typography.captionSize
-                        font.weight: Typography.bodyStrongWeight
-                        topPadding: Spacing.xs
-                        Accessible.role: Accessible.StaticText
-                        Accessible.name: group.modelData.name
-                    }
-                    Flow {
-                        width: parent.width
-                        spacing: Spacing.xxs
-
-                        Repeater {
-                            model: group.modelData.types
-                            delegate: AbstractButton {
-                                id: tile
-                                required property var modelData
-                                text: modelData.name
-                                Accessible.name: "Place " + modelData.name
-                                Accessible.description: modelData.module
-                                Accessible.role: Accessible.Button
-                                enabled: panel.target !== ""
-                                width: (group.width - 2 * Spacing.xxs) / 3
-                                height: 68
-                                ToolTip.visible: hovered
-                                ToolTip.text: "Place " + modelData.name + " (" + (modelData.module || "this project") + ")"
-                                ToolTip.delay: 500
-                                background: Rectangle {
-                                    radius: 6
-                                    color: tile.down ? Colors.surfacePressed
-                                        : tile.hovered ? Colors.surfaceHover : Colors.surfaceRaised
-                                    border.width: tile.visualFocus ? 2 : 1
-                                    border.color: tile.visualFocus ? Colors.focusRing : Colors.surfacePressed
-                                }
-                                contentItem: Column {
-                                    spacing: Spacing.xxs
-                                    topPadding: Spacing.xs
-                                    TypeSketch {
-                                        anchors.horizontalCenter: parent.horizontalCenter
-                                        kind: panel.typeIcon(tile.modelData.name)
-                                        ink: tile.enabled ? Colors.text : Colors.textDisabled
-                                    }
-                                    Text {
-                                        width: parent.width
-                                        leftPadding: 2
-                                        rightPadding: 2
-                                        text: tile.modelData.name
-                                        color: tile.enabled ? Colors.text : Colors.textDisabled
-                                        font.pixelSize: Typography.captionSize
-                                        horizontalAlignment: Text.AlignHCenter
-                                        elide: Text.ElideRight
-                                    }
-                                }
-                                onClicked: {
-                                    const place = {
-                                        doc: panel.workspace.doc,
-                                        parent: {node: panel.target},
-                                        text: panel.starter(modelData.name)
-                                    }
-                                    if (modelData.module !== "")
-                                        place.import = modelData.module
-                                    panel.workspace.dispatch("node_insert", place)
-                                }
-                            }
                         }
                     }
                 }
