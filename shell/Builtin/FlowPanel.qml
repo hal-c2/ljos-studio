@@ -1,6 +1,6 @@
 // The open document's flow as a graph: the root's states are its nodes,
 // the base state first, and its transitions and interactions its edges.
-// Each state wires the selected object to go to it when tapped, or when
+// Each state links the selected object to go to it when tapped, or when
 // one of its own signals is emitted (picked above the graph from those
 // `node_inspect` lists, change signals left out), and each interaction is
 // taken out again, as `state_edit` does for an agent.
@@ -40,8 +40,9 @@ Panel {
     readonly property string selected: workspace.selected
     onSelectedChanged: picked = "tapped"
 
+    // The base state is where the app starts, and a person calls it that.
     function stateName(state) {
-        return state === "" ? "Base" : state
+        return state === "" ? "Start" : state
     }
 
     // Where the states stand, and each edge as an arc down their right side:
@@ -109,23 +110,39 @@ Panel {
         // A box however many signals the selection has: a MouseArea has
         // ten, which as a row of buttons would push the graph out of the
         // panel.
+        // Read as a sentence: "When tapped", "When clicked".
         Choice {
             id: triggerBox
-            lead: "Wire"
+            lead: "When"
             leadIcon: "pointer"
             Layout.fillWidth: true
             visible: panel.workspace.selected !== ""
             model: panel.triggers
             currentIndex: panel.triggers.indexOf(panel.trigger)
             displayText: panel.trigger
-            Accessible.name: "Wire"
+            Accessible.name: "Go to a state when"
             onActivated: index => panel.picked = panel.triggers[index]
             // The popup's list is the style's; it is named here so a
             // reader of the window can tell it from the others.
             Component.onCompleted: {
                 popup.contentItem.Accessible.role = Accessible.List
-                popup.contentItem.Accessible.name = "Wire list"
+                popup.contentItem.Accessible.name = "Ways to go to a state"
             }
+        }
+
+        // What the link on a state does, said once here rather than in a
+        // tooltip, since the link is only a mark.
+        Label {
+            visible: panel.nodes.length > 1
+            text: panel.selected === "" ? "Select an object to link it to a state"
+                : panel.trigger === "tapped" ? "A state's link goes to it when the selection is tapped"
+                : "A state's link goes to it when the selection's " + panel.trigger + " is emitted"
+            color: Colors.textMuted
+            font.pixelSize: Typography.captionSize
+            wrapMode: Text.Wrap
+            Layout.fillWidth: true
+            Accessible.role: Accessible.StaticText
+            Accessible.name: text
         }
 
         Item {
@@ -141,7 +158,7 @@ Panel {
                 y: 0
                 height: panel.nodeHeight
                 verticalAlignment: Text.AlignVCenter
-                text: "any state"
+                text: "From any state"
                 color: Colors.textMuted
                 font.pixelSize: Typography.captionSize
             }
@@ -180,7 +197,13 @@ Panel {
                         : showState.hovered ? Colors.surfaceHover : Colors.surfaceRaised
                     border.width: 1
                     border.color: Colors.surfacePressed
-                    Behavior on color { ColorAnimation { duration: Motion.enterSmallFrequent; easing.type: Easing.BezierSpline; easing.bezierCurve: Motion.easeOut } }
+                    Behavior on color {
+                        ColorAnimation {
+                            duration: Motion.enterSmallFrequent
+                            easing.type: Easing.BezierSpline
+                            easing.bezierCurve: Motion.easeOut
+                        }
+                    }
                     Accessible.role: Accessible.StaticText
                     Accessible.name: "Flow state " + name
 
@@ -206,7 +229,7 @@ Panel {
                                 font.weight: node.modelData === "" ? Typography.bodyStrongWeight : Typography.bodyWeight
                                 color: panel.playing === node.modelData ? Colors.textOnAccent : Colors.text
                             }
-                            background: Item { }
+                            background: Item {}
                         }
                         IconButton {
                             icon_: "motion"
@@ -220,7 +243,7 @@ Panel {
                             })
                         }
                         IconButton {
-                            icon_: "plus"
+                            icon_: "link"
                             enabled: panel.selected !== ""
                             text: panel.trigger === "tapped"
                                   ? "Tap selection to go to " + node.name
@@ -255,7 +278,7 @@ Panel {
                     color: edge.modelData.kind === "interaction" ? Colors.link : Colors.textMuted
                 }
                 Label {
-                    text: (edge.modelData.from === "*" ? "any" : panel.stateName(edge.modelData.from))
+                    text: (edge.modelData.from === "*" ? "Any state" : panel.stateName(edge.modelData.from))
                           + " → " + panel.stateName(edge.modelData.to)
                     color: Colors.text
                     font.pixelSize: Typography.bodySize

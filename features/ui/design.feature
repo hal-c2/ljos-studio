@@ -65,6 +65,13 @@ Feature: Studio's window is laid out to work in
     And the window has no button "Data"
     And the window has no button "Live data"
 
+  # An agent is told where mocks live; a person is told what they are.
+  @preview
+  Scenario: Mocked data in a project with none says what it would need
+    Given the person has opened "Main.qml" in the documents list
+    When the person clicks the button "Mocked data"
+    Then the status line says "This project has no mock data: it is a mocks folder with a stand-in for each block's module"
+
   @preview
   Scenario: The wheel moves over the canvas without changing the frame's size
     Given the person has opened "Main.qml" in the documents list
