@@ -22,6 +22,13 @@ const childrenOf = (o) => {
 const scroller = () =>
   isFlickable(root) ? root : childrenOf(root).find((c) => isFlickable(c) && c.width === root.width && c.height === root.height);
 
+// The element a Flickable scrolls in: the outermost below its own.
+const viewportOf = (flick) => {
+  const node = flick.$node;
+  if (!(node instanceof Element)) return app.querySelector("qq-flick");
+  return node.localName === "qq-flick" ? node : node.querySelector("qq-flick");
+};
+
 // How tall the root's content is: its scroller's content, else what the
 // root says of itself.
 const contentHeight = (flick) => {
@@ -53,6 +60,11 @@ const fit = () => {
     if (flick) {
       if (!windowed) flick.contentY = 0;
       flick.interactive = windowed;
+      // ljos-web keeps a reader's wheel in a Flickable's element even when
+      // it does not scroll (`overscroll-behavior`), so the page's element
+      // is marked for index.html to let the wheel on to the document.
+      const viewport = viewportOf(flick);
+      if (viewport) viewport.toggleAttribute("data-ljos-page", !windowed);
     }
   } finally {
     fitting = false;
