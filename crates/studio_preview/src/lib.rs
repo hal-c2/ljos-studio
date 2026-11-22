@@ -145,6 +145,42 @@ impl NativeHost {
         }
     }
 
+    /// Waits until what a scroll or a swipe set moving has stopped, for at
+    /// most `SETTLE_MS`. `until_rest` alone does not say so: the pinned
+    /// inspector counts neither a Flickable's glide nor its fling as
+    /// animating, and tells of them only as a wake one frame away. So it is
+    /// at rest when the inspector says so and no wake is due that soon.
+    fn settle(&mut self) -> Result<(), PreviewError> {
+        let until = Instant::now() + Duration::from_millis(SETTLE_MS);
+        let mut told = self
+            .call(
+                "app_watch",
+                json!({ "until_rest": true, "wait_ms": SETTLE_MS }),
+            )?
+            .structured;
+        while !stopped(&told["rest"]) {
+            let left = until.saturating_duration_since(Instant::now());
+            if left.is_zero() {
+                break;
+            }
+            // Slept through on the inspector's side, not asked again and
+            // again: it answers when the app next goes to sleep differently,
+            // and gathers the frames that follow closely.
+            told = self
+                .call(
+                    "app_watch",
+                    json!({
+                        "topics": ["rests"],
+                        "since": { "rests": told["counts"]["rests"] },
+                        "wait_ms": u64::try_from(left.as_millis()).unwrap_or(SETTLE_MS),
+                        "settle_ms": GATHER_MS,
+                    }),
+                )?
+                .structured;
+        }
+        Ok(())
+    }
+
     /// Calls a tool that aims at the centre of the object it is given, on
     /// the topmost object under the point whose centre can be reached.
     /// `app_scroll` and `app_touch` take no point of their own, and the
@@ -414,14 +450,24 @@ impl PreviewHost for NativeHost {
     }
 
     fn read(&mut self, id: &str, names: &[String]) -> Result<Map<String, Value>, PreviewError> {
+        // `all`: a property still at its default has a value too.
         let answer = self
-            .call("app_inspect", json!({ "target": locator(id) }))
+            .call("app_inspect", json!({ "target": locator(id), "all": true }))
             .map_err(|e| no_object(e, id))?;
         let mut out = Map::new();
-        let rows = answer.structured["properties"]
-            .as_array()
-            .cloned()
-            .unwrap_or_default();
+        let mut rows = rows_of(&answer.structured);
+        // Every property can be more than one answer holds, which drops the
+        // last of them: those that were set are then read by themselves.
+        if answer.structured["truncated"] == true
+            && names
+                .iter()
+                .any(|n| !rows.iter().any(|r| r["name"] == n.as_str()))
+        {
+            let set = self
+                .call("app_inspect", json!({ "target": locator(id) }))
+                .map_err(|e| no_object(e, id))?;
+            rows.extend(rows_of(&set.structured));
+        }
         for name in names {
             let row = rows.iter().find(|r| r["name"] == name.as_str());
             out.insert(name.clone(), row.map_or(Value::Null, value_of));
@@ -501,10 +547,7 @@ impl PreviewHost for NativeHost {
         // where the content came to rest, as a person looks once it stops.
         // A fling that outlasts the bound is read where it has got to.
         if matches!(input, Input::Scroll { .. } | Input::Swipe { .. }) {
-            self.call(
-                "app_watch",
-                json!({ "until_rest": true, "wait_ms": SETTLE_MS }),
-            )?;
+            self.settle()?;
         }
         Ok(())
     }
@@ -946,6 +989,11 @@ fn number_of(answer: &Value, name: &str) -> Option<f64> {
 
 /// How long a scroll or a swipe waits at most for the content to stop.
 const SETTLE_MS: u64 = 3000;
+/// How long a settle gathers the rests between a glide's frames.
+const GATHER_MS: u64 = 50;
+/// The frame a moving Flickable asks for next is this near, in whole
+/// milliseconds rounded up (60 Hz).
+const FRAME_MS: u64 = 17;
 /// How many of the objects under a point `call_under` tries.
 const AIM_DEPTH: usize = 32;
 
@@ -989,6 +1037,16 @@ fn no_object(e: PreviewError, id: &str) -> PreviewError {
     }
 }
 
+/// Whether an `app_watch` rest says nothing on screen moves any more.
+fn stopped(rest: &Value) -> bool {
+    rest["at_rest"] == true && rest["wake_in_ms"].as_u64().is_none_or(|ms| ms > FRAME_MS)
+}
+
+/// The property rows of an `app_inspect` answer.
+fn rows_of(answer: &Value) -> Vec<Value> {
+    answer["properties"].as_array().cloned().unwrap_or_default()
+}
+
 /// A property row of `app_inspect` as JSON. The inspector shows values as
 /// text for people; the row's declared type says how to read it back.
 fn value_of(row: &Value) -> Value {
@@ -996,12 +1054,32 @@ fn value_of(row: &Value) -> Value {
         return n.clone();
     }
     let text = row["value"].as_str();
+    // What nobody has set has no value yet where its default is none: a
+    // `var`, or a reference to an object.
+    if row["provenance"] == "default"
+        && row["type"] != "string"
+        && matches!(text, Some("undefined" | "null"))
+    {
+        return Value::Null;
+    }
     match (row["type"].as_str(), text) {
         (Some("bool"), Some("true")) => Value::Bool(true),
         (Some("bool"), Some("false")) => Value::Bool(false),
+        (Some("int" | "real" | "double"), Some(text)) => {
+            number_in(text).unwrap_or_else(|| Value::String(text.to_owned()))
+        }
         (_, Some(text)) => Value::String(text.to_owned()),
         _ => row["value"].clone(),
     }
+}
+
+/// The number `text` writes, whole where it is written whole. None for
+/// what JSON has no number for (`NaN`, `Infinity`).
+fn number_in(text: &str) -> Option<Value> {
+    if let Ok(whole) = text.parse::<i64>() {
+        return Some(whole.into());
+    }
+    serde_json::Number::from_f64(text.parse().ok()?).map(Value::Number)
 }
 
 /// What a reload's answer says the preview did since the one `reported`
@@ -1062,6 +1140,41 @@ mod tests {
             { "depth": 1, "bounds": [0, 6000, 0, 0] },
         ]);
         assert_eq!(lowest_edge(rows.as_array().unwrap()), 2000.0);
+    }
+
+    #[test]
+    fn a_number_is_read_as_its_declared_type_says() {
+        let read = |ty: &str, text: &str| value_of(&json!({ "type": ty, "value": text }));
+        assert_eq!(read("real", "1200"), json!(1200));
+        assert_eq!(read("real", "0"), json!(0));
+        assert_eq!(read("real", "60.5"), json!(60.5));
+        assert_eq!(read("int", "-3"), json!(-3));
+        assert_eq!(read("real", "NaN"), json!("NaN"));
+        // Text that looks like a number is still text.
+        assert_eq!(read("string", "1200"), json!("1200"));
+    }
+
+    #[test]
+    fn what_nobody_set_is_its_default_or_none() {
+        let read = |ty: &str, text: &str| {
+            value_of(&json!({ "type": ty, "value": text, "provenance": "default" }))
+        };
+        assert_eq!(read("real", "0"), json!(0));
+        assert_eq!(read("bool", "false"), json!(false));
+        assert_eq!(read("string", ""), json!(""));
+        assert_eq!(read("var", "undefined"), Value::Null);
+        assert_eq!(read("Item", "null"), Value::Null);
+    }
+
+    #[test]
+    fn a_glide_is_not_at_rest_though_the_inspector_says_so() {
+        let rest = |at_rest: bool, wake: Value| json!({ "at_rest": at_rest, "wake_in_ms": wake });
+        assert!(!stopped(&rest(true, json!(16))));
+        assert!(!stopped(&rest(true, json!(0))));
+        assert!(!stopped(&rest(false, Value::Null)));
+        assert!(stopped(&rest(true, Value::Null)));
+        // A timer due later moves nothing by itself.
+        assert!(stopped(&rest(true, json!(500))));
     }
 
     #[test]
