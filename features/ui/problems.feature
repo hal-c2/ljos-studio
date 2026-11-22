@@ -7,11 +7,12 @@
 @ui @preview @native
 Feature: The built-in shell shows what is wrong in the preview
   A person who breaks a binding sees it in the window they already have: a
-  badge with how many problems the preview has, over a corner of the
-  canvas. A click on it opens the list of them, each with where it is, and
+  badge with how many problems the preview has, at the foot of the left
+  panels. A click on it opens the list of them, each with where it is, and
   choosing one shows its object. The list stays open or closed as the person
   left it. With no problems there is neither badge nor list. Half-typed text
-  is a problem too, so nothing in the window moves as one comes and goes. It
+  is a problem too, so neither the code nor the frame moves as one comes and
+  goes. While the left panels are folded the toolbar has a button to them. It
   is a panel of the shell like the others, so a person's copy of the shell
   may restyle it.
 

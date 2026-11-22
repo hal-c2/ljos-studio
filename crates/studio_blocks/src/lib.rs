@@ -473,6 +473,10 @@ struct Queue {
     follow_wanted: bool,
     /// What stops the thread waiting on the preview, while there is one.
     following: Option<Arc<Stop>>,
+    /// The thread waiting on what the previewed app logs.
+    logging: Option<Arc<Stop>>,
+    /// A refresh wanted one while it waited: its preview may be another.
+    log_wanted: bool,
     /// The lists last set, by the property's name.
     given: HashMap<&'static str, Json>,
     /// The last picture of the document on each target it was shown on, by
@@ -483,10 +487,13 @@ struct Queue {
 }
 
 impl Drop for Queue {
-    /// `followPicture(false)` is not called on a Workspace going away, and the
-    /// thread would go on waiting on the preview for it.
+    /// `followPicture(false)` is not called on a Workspace going away, and
+    /// its threads would go on waiting on the preview for it.
     fn drop(&mut self) {
-        if let Some(stop) = self.following.take() {
+        for stop in [self.following.take(), self.logging.take()]
+            .into_iter()
+            .flatten()
+        {
             stop.stop();
         }
     }
@@ -958,6 +965,8 @@ fn finish(engine: &Engine, ws: ObjectId, done: Done) {
 /// How long one wait on the preview lasts; a stop ends it earlier.
 const FOLLOW_WAIT_MS: u64 = 30_000;
 const LOOK_AT_MOST_EVERY_MS: u64 = 100;
+/// The longest `app_watch` takes: a quiet app's log costs a call an hour.
+const LOG_WAIT_MS: u64 = 3_600_000;
 
 /// Ends a following thread's wait on the preview as soon as it is told, not
 /// when the wait runs out: for an app at rest that is half a minute, in which
@@ -1101,6 +1110,89 @@ fn follow(engine: &Engine, ws: ObjectId) {
         let mut q = queue.borrow_mut();
         if q.following.as_ref().is_some_and(|s| Arc::ptr_eq(s, &mine)) {
             q.following = None;
+        }
+    }
+}
+
+/// Starts waiting on what the previewed app logs, if not already waiting: a
+/// warning of a timer's or a click's is told by no write. Nothing polls,
+/// the wait answers when the app has logged.
+fn watch_log(engine: &Engine, ws: ObjectId) {
+    let Some(queue) = queue_of(engine, ws) else {
+        return;
+    };
+    let context = engine.extension::<Context>();
+    let Some(weak) = context.server.borrow().as_ref().map(Arc::downgrade) else {
+        return;
+    };
+    let stop = Stop::new();
+    {
+        let mut q = queue.borrow_mut();
+        q.log_wanted = q.logging.is_some();
+        if q.log_wanted {
+            return;
+        }
+        q.logging = Some(Arc::clone(&stop));
+    }
+    let post = Platform::of(engine).poster();
+    let mine = Arc::clone(&stop);
+    // Not `studio-picture-`: those are the threads that follow a picture.
+    let spawned = std::thread::Builder::new()
+        .name("studio-log-watch".to_owned())
+        .spawn(move || {
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .ok();
+            let mut since = None;
+            while let Some(runtime) = runtime.as_ref().filter(|_| !stop.is_stopped()) {
+                // The server is held to begin a wait, never through one.
+                let Some(Ok(waiting)) = weak
+                    .upgrade()
+                    .map(|server| server.logged(since, LOG_WAIT_MS))
+                else {
+                    break;
+                };
+                let count = runtime.block_on(async {
+                    tokio::select! {
+                        count = waiting => count.ok(),
+                        () = stop.woken.notified() => None,
+                    }
+                });
+                let Some(count) = count else {
+                    break;
+                };
+                if since != Some(count) {
+                    since = Some(count);
+                    let Some(server) = weak.upgrade() else {
+                        break;
+                    };
+                    server.pull_problems();
+                }
+                // However often it logs, no more than a person can see.
+                std::thread::sleep(Duration::from_millis(LOOK_AT_MOST_EVERY_MS));
+            }
+            // No preview to wait on. One that came meanwhile asked while
+            // this waited; otherwise the next one's refresh starts it again.
+            post.send(move |engine| {
+                let again = queue_of(engine, ws).is_some_and(|queue| {
+                    let mut q = queue.borrow_mut();
+                    let mine = q.logging.as_ref().is_some_and(|s| Arc::ptr_eq(s, &stop));
+                    if mine {
+                        q.logging = None;
+                    }
+                    mine && std::mem::take(&mut q.log_wanted)
+                });
+                if again {
+                    watch_log(engine, ws);
+                }
+            });
+        });
+    if spawned.is_err() {
+        // No thread to wait on: the next refresh tries again.
+        let mut q = queue.borrow_mut();
+        if q.logging.as_ref().is_some_and(|s| Arc::ptr_eq(s, &mine)) {
+            q.logging = None;
         }
     }
 }
@@ -1430,6 +1522,9 @@ fn publish(engine: &Engine, ws: ObjectId, view: View, seen: u64) {
         let _ = cx.set(Workspace::SETTLING, true);
     }
     follow(engine, ws);
+    if view.preview.is_some() {
+        watch_log(engine, ws);
+    }
     // A picture is fetched once for each generation the preview applies.
     if let Some(generation) = wanted {
         let queued = queue

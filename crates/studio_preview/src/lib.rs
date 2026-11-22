@@ -370,22 +370,40 @@ impl RestWatch for Rests {
         }
         Ok(())
     }
+
+    fn logged(
+        &self,
+        since: Option<u64>,
+        wait_ms: u64,
+    ) -> std::pin::Pin<Box<dyn Future<Output = Result<u64, PreviewError>> + Send>> {
+        let mut args = json!({ "topics": ["logs"], "wait_ms": wait_ms });
+        if let Some(since) = since {
+            args["since"] = json!({ "logs": since });
+        }
+        let asking = self.0.asking("app_watch", args);
+        Box::pin(async move {
+            watched(asking.await)?.structured["counts"]["logs"]
+                .as_u64()
+                .ok_or_else(|| PreviewError::Transport("app_watch gave no logs".to_owned()))
+        })
+    }
 }
 
 fn rest_of(answer: Result<Answer, Fault>) -> Result<Rest, PreviewError> {
-    match answer {
-        Ok(answer) => {
-            let told = &answer.structured;
-            Ok(Rest {
-                rests: told["counts"]["rests"]
-                    .as_u64()
-                    .ok_or_else(|| PreviewError::Transport("app_watch gave no rests".to_owned()))?,
-                wake_in_ms: told["rest"]["wake_in_ms"].as_u64(),
-            })
-        }
-        Err(Fault::Refused { code, message }) => Err(PreviewError::Refused { code, message }),
-        Err(Fault::Transport(message)) => Err(PreviewError::Transport(message)),
-    }
+    let told = watched(answer)?.structured;
+    Ok(Rest {
+        rests: told["counts"]["rests"]
+            .as_u64()
+            .ok_or_else(|| PreviewError::Transport("app_watch gave no rests".to_owned()))?,
+        wake_in_ms: told["rest"]["wake_in_ms"].as_u64(),
+    })
+}
+
+fn watched(answer: Result<Answer, Fault>) -> Result<Answer, PreviewError> {
+    answer.map_err(|fault| match fault {
+        Fault::Refused { code, message } => PreviewError::Refused { code, message },
+        Fault::Transport(message) => PreviewError::Transport(message),
+    })
 }
 
 impl PreviewHost for NativeHost {

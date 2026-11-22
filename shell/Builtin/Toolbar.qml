@@ -13,6 +13,8 @@ ToolBar {
     property bool leftOpen: true
     property bool rightOpen: true
     property bool codeOpen: true
+    // How many problems the left panels hold, for when they are folded.
+    property int problems: 0
     // The window shows the export panel when this is called.
     signal exportRequested
 
@@ -45,7 +47,11 @@ ToolBar {
             text: "Left panels"
             checkable: true
             checked: bar.leftOpen
-            onClicked: bar.leftOpen = checked
+            // The click ends the binding, and the problems' button opens too.
+            onClicked: {
+                bar.leftOpen = checked
+                checked = Qt.binding(() => bar.leftOpen)
+            }
         }
         Label {
             text: bar.workspace.doc === "" ? "Ljós Studio" : bar.workspace.doc
@@ -105,6 +111,16 @@ ToolBar {
 
         Item {
             Layout.fillWidth: true
+            // In the space, so the targets stay in the middle as it comes.
+            TextButton {
+                visible: !bar.leftOpen && bar.problems > 0
+                anchors.right: parent.right
+                anchors.verticalCenter: parent.verticalCenter
+                width: Math.min(implicitWidth, parent.width)
+                text: "Problems: " + bar.problems
+                Accessible.name: "Problems in the left panels"
+                onClicked: bar.leftOpen = true
+            }
         }
 
         IconButton {
