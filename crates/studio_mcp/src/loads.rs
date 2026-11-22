@@ -111,12 +111,12 @@ pub(crate) fn toolkit_imports(
                 toolkit::names(uri).is_some_and(|types| types.iter().any(|name| name == ty))
             })
             .collect();
-        let known: BTreeSet<&str> = offered
-            .iter()
-            .copied()
-            .chain(measured_in(ty))
-            .chain(project.exporters(ty))
-            .collect();
+        // Inserted one by one: chained, the project's names would have to
+        // live as long as the table's.
+        let mut known: BTreeSet<&str> = project.exporters(ty).into_iter().collect();
+        for uri in offered.iter().copied().chain(measured_in(ty)) {
+            known.insert(uri);
+        }
         if known.len() > 1 {
             return Err(several_have(doc, ty, &known));
         }

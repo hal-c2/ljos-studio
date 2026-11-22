@@ -18,7 +18,7 @@ use studio_core::{Interaction, flows::handler_name};
 use crate::{Studio, blocks, preview};
 
 /// An object's handle with the first and last line it is written on.
-type Span = (String, usize, usize);
+type Written = (String, usize, usize);
 
 /// One object of the open document, in order.
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -559,7 +559,7 @@ impl Studio {
 
     /// The preview's problems, each on the object written on its line.
     pub(crate) fn problems(&mut self, lines: &[LogLine]) -> Vec<Problem> {
-        let mut trees: std::collections::HashMap<String, Option<Vec<Span>>> =
+        let mut trees: std::collections::HashMap<String, Option<Vec<Written>>> =
             std::collections::HashMap::new();
         lines
             .iter()
@@ -596,7 +596,7 @@ impl Studio {
     /// Each object of `doc` with the lines it is written on: handle, first
     /// line, last line, one-based. `None` for a file that is no document
     /// the session can read.
-    fn spans(&mut self, doc: &str) -> Option<Vec<Span>> {
+    fn spans(&mut self, doc: &str) -> Option<Vec<Written>> {
         let text = self.session.text(doc).ok()?.0.to_owned();
         let (tree, _) = self.session.tree(doc).ok()?;
         let line_of = |at: usize| text[..at.min(text.len())].matches('\n').count() + 1;
@@ -685,7 +685,7 @@ impl Studio {
 
 /// The object written on `line` that no other object written there is in:
 /// the one that starts last among those around it.
-fn innermost(spans: &[Span], line: u32) -> Option<String> {
+fn innermost(spans: &[Written], line: u32) -> Option<String> {
     let line = line as usize;
     spans
         .iter()
