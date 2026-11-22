@@ -6,4 +6,5 @@ import QtQuick
 
 Item {
     property Workspace workspace
+    property string target
 }

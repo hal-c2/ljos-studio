@@ -77,6 +77,9 @@ export const Workspace = defineType("Workspace", QtObject, {
     playing: typed(kinds.bool, false),
     toolkit: [],
     rootStates: [],
+    // A page does not list the session's tools yet, so its command palette
+    // has the shell's own rows only.
+    tools: [],
     // The page's preview is the page's own, so nothing here is ever waiting
     // on a picture to settle.
     settling: typed(kinds.bool, false),

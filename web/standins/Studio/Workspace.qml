@@ -37,6 +37,7 @@ QtObject {
     property bool playing
     readonly property var toolkit
     readonly property var rootStates
+    readonly property var tools
 
     signal answered(string tool, var answer, var asked)
     signal refused(string tool, var error, var asked)
