@@ -484,7 +484,7 @@ Feature: A project is exported for ljos-web to build a site from
 
     Scenario: A native bundle still holds every file, since an app may read one by a path it makes
       Given the file "notes.txt":
-        """
+        """text
         Ideas for the next page
         """
       When the agent calls the tool "export" with:
