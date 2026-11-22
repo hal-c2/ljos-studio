@@ -36,7 +36,9 @@ Feature: The canvas is a surface without edges that pans and zooms
     And the person has opened "Main.qml" in the documents list
 
   Scenario: Space and a drag move the view by as much as the hand moved
-    When the person holds "Space" and drags in the frame "Desktop" from 60, 40 to 100, 70
+    When the person holds "Space"
+    And the person drags with the hand in the frame "Desktop" from 60, 40 by 40, 30
+    And the person lets go of "Space"
     Then the frame "Desktop" has moved by 40, 30
     And the frame "Desktop" has kept its size
 
