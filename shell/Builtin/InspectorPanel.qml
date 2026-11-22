@@ -1347,6 +1347,9 @@ Panel {
                                 height: strut.across ? (strut.on ? 2 : 1) : parent.height
                                 color: strut.on ? Colors.link : Colors.surfacePressed
                                 Behavior on color {
+                                    // Only as its pin is clicked: showing another object's pins is no
+                                    // move, and would have a window nobody touches ask for frames.
+                                    enabled: pinButton.hovered
                                     ColorAnimation {
                                         duration: Motion.enterSmallFrequent
                                         easing.type: Easing.BezierSpline
@@ -1355,6 +1358,7 @@ Panel {
                                 }
                             }
                             IconButton {
+                                id: pinButton
                                 anchors.centerIn: parent
                                 icon_: strut.modelData.icon
                                 text: strut.modelData.label

@@ -55,6 +55,9 @@ ComboBox {
         border.width: box.visualFocus ? 2 : 0
         border.color: Colors.focusRing
         Behavior on color {
+            // Only under the pointer: what Studio changes by itself shows at once,
+            // so a window nobody touches asks for no frames.
+            enabled: box.hovered
             ColorAnimation {
                 duration: Motion.enterSmallFrequent
                 easing.type: Easing.BezierSpline

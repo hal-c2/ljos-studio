@@ -501,6 +501,9 @@ Popup {
                             border.width: kindButton.checked ? 1 : 0
                             border.color: Colors.surfacePressed
                             Behavior on color {
+                                // Only under the pointer: what Studio changes by itself shows at once,
+                                // so a window nobody touches asks for no frames.
+                                enabled: kindButton.hovered
                                 ColorAnimation {
                                     duration: Motion.enterSmallFrequent
                                     easing.type: Easing.BezierSpline
