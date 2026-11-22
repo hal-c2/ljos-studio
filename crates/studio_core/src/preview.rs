@@ -208,10 +208,7 @@ impl LogLine {
 /// `file:line: rest` (a column after the line too), where the file is a
 /// QML or script file, by path or URL.
 pub fn place_of(text: &str) -> Option<(&str, u32, &str)> {
-    let end = [".qml:", ".js:", ".mjs:"]
-        .iter()
-        .filter_map(|ext| text.find(ext).map(|at| at + ext.len() - 1))
-        .min()?;
+    let end = file_ends(text).min()?;
     let file = &text[..end];
     // Words before a file make a sentence, not a place. A file URL is one
     // whatever spaces it has (Ljós writes them as they are), up to a `: `.
@@ -219,7 +216,21 @@ pub fn place_of(text: &str) -> Option<(&str, u32, &str)> {
     if file.is_empty() || spaced || file.contains(": ") {
         return None;
     }
-    let rest = &text[end + 1..];
+    let (line, rest) = line_and_words(&text[end + 1..])?;
+    Some((file, line, rest))
+}
+
+/// Where a file's name may end in `text`: at each colon after an extension,
+/// as a name may hold one itself (`Odd.qml:Card.qml`).
+fn file_ends(text: &str) -> impl Iterator<Item = usize> + '_ {
+    [".qml:", ".js:", ".mjs:"].into_iter().flat_map(move |ext| {
+        text.match_indices(ext)
+            .map(move |(at, _)| at + ext.len() - 1)
+    })
+}
+
+/// `line[:column]: words`, what follows a file's name and its colon.
+fn line_and_words(rest: &str) -> Option<(u32, &str)> {
     let digits = rest.find(|c: char| !c.is_ascii_digit())?;
     let line = rest[..digits].parse().ok()?;
     let mut rest = &rest[digits..];
@@ -230,7 +241,7 @@ pub fn place_of(text: &str) -> Option<(&str, u32, &str)> {
     {
         rest = &after[n..];
     }
-    Some((file, line, rest.strip_prefix(':')?.trim_start()))
+    Some((line, rest.strip_prefix(':')?.trim_start()))
 }
 
 /// Where `message` says it is, among the files below `root` too: Ljós names
@@ -256,23 +267,31 @@ pub fn place_among<'a>(
     if let Some((file, rest)) = script_place(message, is_file) {
         return Some((file, None, rest));
     }
+    // The one name that is a file is the one meant, wherever it ends. Of
+    // two, neither is picked over the other.
+    let mut named = file_ends(message).filter(|&end| is_file(&message[..end]));
+    if let (Some(end), None) = (named.next(), named.next())
+        && let Some(place) = place_after(message, end)
+    {
+        return Some(place);
+    }
     if let Some((file, line, rest)) = place_of(message) {
         return Some((file.to_owned(), Some(line), rest));
     }
-    let end = [".qml:", ".js:", ".mjs:"]
-        .iter()
-        .filter_map(|ext| message.find(ext).map(|at| at + ext.len() - 1))
-        .min()?;
-    let (file, rest) = message.split_at(end);
-    if !is_file(file) {
+    let end = file_ends(message).min()?;
+    if !is_file(&message[..end]) {
         return None;
     }
+    place_after(message, end)
+}
+
+/// The place in `message` of the file whose name ends at `end`.
+fn place_after(message: &str, end: usize) -> Option<(String, Option<u32>, &str)> {
+    let (file, rest) = message.split_at(end);
     if let Some(words) = rest.strip_prefix(": ") {
         return Some((file.to_owned(), None, words));
     }
-    // The line is read from the path's last word on, which has no space.
-    let last = file.rsplit(char::is_whitespace).next()?;
-    let (_, line, words) = place_of(&message[end - last.len()..])?;
+    let (line, words) = line_and_words(rest.strip_prefix(':')?)?;
     Some((file.to_owned(), Some(line), words))
 }
 
