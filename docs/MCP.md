@@ -851,7 +851,8 @@ inner object with an id (`label.text: "Hi"` written as `text: "Hi"` on
 component and `labelText: "Hi"` on the instance, so a second instance can say
 something else. The file keeps the literal as the default. Objects inside a
 delegate, a `Repeater`, a `Loader` and the like are not exposed: there is one
-of them per row, not one per instance. `aliases` names these too.
+of them per row, not one per instance. Nor is an `objectName`, which is not
+shown. `aliases` names these too.
 
 Words are told apart by how they are written, without types: a property named
 like an inner id reads as a use and is refused, never rewritten silently. The

@@ -421,6 +421,10 @@ fn exposed(node: &Node, tree: &[Node], outward: &mut Outward) -> Vec<String> {
             {
                 continue;
             }
+            // A name to find it by, which is not shown.
+            if b.name == "objectName" {
+                continue;
+            }
             let known = outward
                 .aliases
                 .iter()

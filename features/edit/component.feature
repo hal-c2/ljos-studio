@@ -172,6 +172,29 @@ Feature: An object becomes a component of the project
     And the file "Two.qml" does not contain "anchors"
     And the file "Two.qml" contains "color: \"blue\""
 
+  Scenario: An inner object's objectName is not shown, so it is no alias
+    Given the file "Named.qml":
+      """qml
+      import QtQuick
+
+      Item {
+          Rectangle {
+              id: card
+              Text {
+                  id: label
+                  objectName: "label"
+                  text: "Hi"
+              }
+          }
+      }
+      """
+    When the agent calls the tool "node_arrange" with:
+      """json
+      {"action": "component_extract", "doc": "Named.qml", "nodes": [{"id": "card"}], "name": "Card"}
+      """
+    Then the answer's "/aliases" is ["labelText"]
+    And the file "Named.qml" does not contain "labelObjectName"
+
   Scenario: A property read from outside becomes an alias, only where it has to
     Given the file "Reads.qml":
       """qml
