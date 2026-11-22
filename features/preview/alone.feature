@@ -138,6 +138,54 @@ Feature: A component or a store opened alone shows something
       """
     Then the file "Blocks/.HabitCard.preview.qml" contains "// Mine"
 
+  Scenario: A file a person writes in the stand-in's place while it runs is left alone
+    Given the file "Main.qml":
+      """qml
+      import QtQuick
+
+      Text { text: "Home" }
+      """
+    And the agent has called the tool "preview_open" with:
+      """json
+      {"doc": "Blocks/HabitCard.qml"}
+      """
+    When somebody writes the file "Blocks/.HabitCard.preview.qml":
+      """qml
+      // Mine
+      """
+    And the agent calls the tool "preview_open" with:
+      """json
+      {"doc": "Main.qml"}
+      """
+    Then the file "Blocks/.HabitCard.preview.qml" contains "// Mine"
+
+  Scenario: A document that no longer requires a property is previewed as itself
+    Given the file "Note.qml":
+      """qml
+      import QtQuick
+
+      Text {
+          required property string note
+          text: note
+      }
+      """
+    And the agent has called the tool "preview_open" with:
+      """json
+      {"doc": "Note.qml"}
+      """
+    When somebody writes the file "Note.qml":
+      """qml
+      import QtQuick
+
+      Text { text: "Plain" }
+      """
+    And the agent calls the tool "preview_open" with:
+      """json
+      {"doc": "Note.qml"}
+      """
+    Then the preview shows "Plain"
+    And the file ".Note.preview.qml" does not exist
+
   Scenario: A document that comes to require a property is previewed again
     Given the file "Note.qml":
       """qml
