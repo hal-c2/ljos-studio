@@ -283,7 +283,7 @@ Feature: The inspector shows colours and every declared property
 
     Examples:
       | kind                                | row   | typed         | written                |
-      | a colour's name in a colour row     | color | white         | color: \"white\"         |
+      | a colour's name in a colour row     | color | white         | color: \\"white\\"       |
       | a role over a literal colour        | color | Colors.accent | color: Colors.accent   |
       | a role over a literal number        | width | Spacing.md    | width: Spacing.md      |
       | an expression over a literal number | width | parent.width  | width: parent.width    |
