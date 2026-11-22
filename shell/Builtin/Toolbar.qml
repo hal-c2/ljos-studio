@@ -25,7 +25,7 @@ ToolBar {
         workspace.dispatch("preview_open", {doc: workspace.doc, target: target, state: state})
     }
 
-    implicitHeight: 48
+    implicitHeight: 44
     padding: 0
     background: Rectangle {
         color: Colors.canvas
@@ -136,10 +136,10 @@ ToolBar {
         // How it is shown: on live or mocked data, in which look, with its code.
         Well {
             // One name, read and seen alike; whether it is on is its check.
-            IconButton {
+            TextButton {
                 readonly property bool mocked: bar.preview !== null && bar.preview.state === "mocked"
-                icon_: "data"
                 text: "Mocked data"
+                Accessible.name: text
                 checkable: true
                 checked: mocked
                 Accessible.description: mocked ? "The canvas runs on the project's mocks"

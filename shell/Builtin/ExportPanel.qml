@@ -439,7 +439,7 @@ Popup {
         // The two kinds as one segmented switch; each is still a radio
         // button to a reader.
         Rectangle {
-            implicitHeight: 32
+            implicitHeight: 36
             radius: 8
             color: Colors.surfaceHover
             Layout.fillWidth: true
@@ -458,6 +458,13 @@ Popup {
                     delegate: RadioButton {
                         id: kindButton
                         required property var modelData
+                        // Runs out on the first frame, when what its user set has arrived:
+                        // fades are for what changes after that.
+                        Timer {
+                            id: opening
+                            interval: 0
+                            running: true
+                        }
                         text: modelData.text
                         Accessible.name: text
                         checked: modelData.kind === "native"
@@ -501,9 +508,8 @@ Popup {
                             border.width: kindButton.checked ? 1 : 0
                             border.color: Colors.surfacePressed
                             Behavior on color {
-                                // Only under the pointer: what Studio changes by itself shows at once,
-                                // so a window nobody touches asks for no frames.
-                                enabled: kindButton.hovered
+                                // Not into what it opens as: nothing has moved then.
+                                enabled: !opening.running
                                 ColorAnimation {
                                     duration: Motion.enterSmallFrequent
                                     easing.type: Easing.BezierSpline

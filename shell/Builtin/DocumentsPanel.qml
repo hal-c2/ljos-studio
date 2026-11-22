@@ -96,17 +96,17 @@ Panel {
                 Accessible.name: "New document's name"
                 onAccepted: newButton.clicked()
             }
-            IconButton {
+            TextButton {
                 id: newButton
-                icon_: "plus"
-                text: "New document"
+                text: "New"
+                Accessible.name: "New document"
                 enabled: nameField.text !== ""
                 onClicked: panel.make(nameField.text)
             }
-            IconButton {
+            TextButton {
                 id: newBlock
-                icon_: "component"
-                text: "New block"
+                text: "Block"
+                Accessible.name: "New block"
                 enabled: nameField.text !== ""
                 onClicked: panel.make(nameField.text, true)
             }

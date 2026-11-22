@@ -1,9 +1,10 @@
-// The line a field keeps under it for what was refused there. It is its
-// height whether it says anything or not, so a refusal moves nothing below
-// it, and the person's next click lands where they aimed. The words are cut
-// to the line and read whole as its name; what the refusal offers instead
-// sits at its end as links, named in full for a reader ("Bind width to
-// cube") and short for the eye.
+// What was refused in the row above it. It takes the gap between two rows
+// and no more, whether it says anything or not, so a refusal moves nothing
+// and the person's next click lands where they aimed. The words hang from
+// the gap over the top of what follows, cut to a line and read whole as
+// their name. What the refusal offers instead is a button as high as any
+// other, centred on the gap: it reaches the middle of neither row, so each
+// of those is still clicked where it is aimed at.
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
@@ -15,55 +16,72 @@ Item {
     // An offer's whole name, empty for none.
     property string bindSays: ""
     property string textSays: ""
+    // What holds one lifts itself by this: the words lie over the next row.
+    readonly property bool saying: text !== "" || bindSays !== "" || textSays !== ""
     signal bindAsked()
     signal textAsked()
 
-    // A caption's line, and no more: the rows keep their pitch.
-    implicitHeight: 14
+    implicitHeight: Spacing.xxs
+    z: saying ? 1 : 0
 
-    // Small, in the link's ink: an offer, quieter than the field's own buttons.
-    component Link: AbstractButton {
-        id: link
+    component Offer: AbstractButton {
+        id: offer
         hoverEnabled: true
-        implicitWidth: words.implicitWidth
-        implicitHeight: 14
+        implicitWidth: Math.max(28, words.implicitWidth + 2 * Spacing.xs)
+        implicitHeight: 28
         padding: 0
         contentItem: Text {
             id: words
-            text: link.text
+            text: offer.text
             color: Colors.link
             font.pixelSize: Typography.captionSize
             font.weight: Typography.bodyStrongWeight
-            font.underline: link.hovered || link.visualFocus
+            font.underline: offer.hovered || offer.visualFocus
+            horizontalAlignment: Text.AlignHCenter
             verticalAlignment: Text.AlignVCenter
             Accessible.ignored: true
         }
-        background: null
+        background: Rectangle {
+            radius: 6
+            color: Colors.surfaceRaised
+            border.width: offer.visualFocus ? 2 : 1
+            border.color: offer.visualFocus ? Colors.focusRing : Colors.border
+        }
     }
 
-    RowLayout {
-        anchors.fill: parent
-        spacing: Spacing.xs
+    Rectangle {
+        visible: note.text !== ""
+        width: note.width - (offers.width > 0 ? offers.width + Spacing.xxs : 0)
+        height: 14
+        radius: 3
+        color: Colors.surface
 
         Label {
-            visible: note.text !== ""
+            anchors.fill: parent
             text: note.text
             color: Colors.danger
             font.pixelSize: Typography.captionSize
             elide: Text.ElideRight
             verticalAlignment: Text.AlignVCenter
-            Layout.fillWidth: true
-            Layout.fillHeight: true
             Accessible.role: Accessible.StaticText
             Accessible.name: note.text
         }
-        Link {
+    }
+    Row {
+        id: offers
+        visible: note.bindSays !== "" || note.textSays !== ""
+        anchors.right: parent.right
+        y: (note.height - 28) / 2
+        width: visible ? implicitWidth : 0
+        spacing: 2
+
+        Offer {
             visible: note.bindSays !== ""
             text: "Bind"
             Accessible.name: note.bindSays
             onClicked: note.bindAsked()
         }
-        Link {
+        Offer {
             visible: note.textSays !== ""
             text: "As text"
             Accessible.name: note.textSays

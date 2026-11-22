@@ -189,6 +189,13 @@ Panel {
                     id: node
                     required property string modelData
                     readonly property string name: panel.stateName(modelData)
+                    // Runs out on the first frame, when what its user set has arrived:
+                    // fades are for what changes after that.
+                    Timer {
+                        id: opening
+                        interval: 0
+                        running: true
+                    }
                     y: panel.nodeY(modelData) - panel.nodeHeight / 2
                     width: graph.nodeWidth
                     height: panel.nodeHeight
@@ -198,9 +205,8 @@ Panel {
                     border.width: 1
                     border.color: Colors.surfacePressed
                     Behavior on color {
-                        // Under the pointer or while the flow plays: otherwise at once,
-                        // so a window nobody touches asks for no frames.
-                        enabled: showState.hovered || panel.playing !== null
+                        // Not into what it opens as: nothing has moved then.
+                        enabled: !opening.running
                         ColorAnimation {
                             duration: Motion.enterSmallFrequent
                             easing.type: Easing.BezierSpline
@@ -296,9 +302,9 @@ Panel {
                     Accessible.role: Accessible.StaticText
                     Accessible.name: "Flow edge " + edge.modelData.label
                 }
-                IconButton {
-                    icon_: "trash"
-                    text: "Remove flow " + edge.modelData.label
+                TextButton {
+                    text: "Remove"
+                    Accessible.name: "Remove flow " + edge.modelData.label
                     onClicked: {
                         if (edge.modelData.kind !== "interaction") {
                             panel.edit({action: "remove_transition", from: edge.modelData.from, to: edge.modelData.to})

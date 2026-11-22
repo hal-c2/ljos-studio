@@ -15,6 +15,13 @@ ToolButton {
     // Draws no icon and still takes the press: an item at opacity 0 takes
     // none, so a finger, which never hovers, could not reach it.
     property bool quiet: false
+    // Runs out on the first frame, when what its user set has arrived:
+    // fades are for what changes after that.
+    Timer {
+        id: opening
+        interval: 0
+        running: true
+    }
     display: AbstractButton.IconOnly
     implicitWidth: 28
     implicitHeight: 28
@@ -80,9 +87,8 @@ ToolButton {
         border.width: button.visualFocus ? 2 : 0
         border.color: Colors.focusRing
         Behavior on color {
-            // Only under the pointer: what Studio changes by itself shows at once,
-            // so a window nobody touches asks for no frames.
-            enabled: button.hovered
+            // Not into what it opens as: nothing has moved then.
+            enabled: !opening.running
             ColorAnimation {
                 duration: Motion.enterSmallFrequent
                 easing.type: Easing.BezierSpline
