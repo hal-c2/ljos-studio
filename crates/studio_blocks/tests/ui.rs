@@ -7,7 +7,7 @@
 use std::cell::Cell;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, mpsc};
+use std::sync::{Arc, Mutex, PoisonError, mpsc};
 use std::time::Duration;
 
 use cucumber::{World, gherkin::Step, given, then, when};
@@ -58,6 +58,10 @@ struct UiWorld {
     no_places: bool,
     picture_ms: Arc<AtomicU64>,
     placed_ms: Arc<AtomicU64>,
+    /// How long the preview takes over each turn of the wheel, and the turns
+    /// it was given.
+    scroll_ms: Arc<AtomicU64>,
+    scrolls: Arc<Mutex<Vec<Scrolled>>>,
     /// Where a step left the hand holding the canvas.
     held: Option<Point>,
 }
@@ -68,7 +72,49 @@ struct NoPlaces(NativeHost);
 /// A preview that spends what a step says (in ms) over each picture, and over
 /// saying where its objects are: a stand-in for a slow machine, so that what
 /// is about the order of things does not rest on how fast this build is.
-struct SlowPictures(NativeHost, Arc<AtomicU64>, Arc<AtomicU64>);
+struct SlowPictures(NativeHost, Arc<AtomicU64>, Arc<AtomicU64>, Scrolling);
+
+/// A turn of the wheel the running app was given: how far, and whether what
+/// it moved still moved when the next call reached the preview (`None` till
+/// one did). A call that waited for the page to stop finds it stopped.
+#[derive(Debug, Clone, Copy)]
+struct Scrolled {
+    dy: f64,
+    still_moved: Option<bool>,
+}
+
+/// What `SlowPictures` spends over each turn of the wheel, the turns it was
+/// given, and how to look at the last one's motion.
+struct Scrolling {
+    ms: Arc<AtomicU64>,
+    record: Arc<Mutex<Vec<Scrolled>>>,
+    unjudged: Option<(usize, Box<dyn RestWatch>)>,
+}
+
+/// The longest a frame waits for the next, in ms (60 Hz): a preview that
+/// wakes as soon as that is drawing what still moves.
+const FRAME_MS: u64 = 17;
+
+impl Scrolling {
+    /// The next call has reached the preview: says whether the last turn's
+    /// motion went on till now.
+    fn look(&mut self) {
+        let Some((at, watch)) = self.unjudged.take() else {
+            return;
+        };
+        let moves = watch
+            .wait(None, 0)
+            .is_ok_and(|rest| rest.wake_in_ms.is_some_and(|ms| ms <= FRAME_MS));
+        if let Some(turn) = self
+            .record
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get_mut(at)
+        {
+            turn.still_moved = Some(moves);
+        }
+    }
+}
 
 impl PreviewHost for SlowPictures {
     fn scene(
@@ -83,6 +129,7 @@ impl PreviewHost for SlowPictures {
     }
 
     fn reload(&mut self) -> Result<Reload, PreviewError> {
+        self.3.look();
         self.0.reload()
     }
 
@@ -91,19 +138,23 @@ impl PreviewHost for SlowPictures {
     }
 
     fn resize(&mut self, size: Size) -> Result<(), PreviewError> {
+        self.3.look();
         self.0.resize(size)
     }
 
     fn screenshot(&mut self, max_side: u32) -> Result<Picture, PreviewError> {
+        self.3.look();
         std::thread::sleep(Duration::from_millis(self.1.load(Ordering::SeqCst)));
         self.0.screenshot(max_side)
     }
 
     fn outline(&mut self) -> Result<String, PreviewError> {
+        self.3.look();
         self.0.outline()
     }
 
     fn placed(&mut self, ids: &[String], types: &[String]) -> Result<Vec<Placed>, PreviewError> {
+        self.3.look();
         std::thread::sleep(Duration::from_millis(self.2.load(Ordering::SeqCst)));
         self.0.placed(ids, types)
     }
@@ -117,22 +168,27 @@ impl PreviewHost for SlowPictures {
         id: &str,
         names: &[String],
     ) -> Result<serde_json::Map<String, Json>, PreviewError> {
+        self.3.look();
         self.0.read(id, names)
     }
 
     fn write(&mut self, id: &str, name: &str, value: Json) -> Result<(), PreviewError> {
+        self.3.look();
         self.0.write(id, name, value)
     }
 
     fn logs(&mut self, since: u64) -> Result<(Vec<LogLine>, u64), PreviewError> {
+        self.3.look();
         self.0.logs(since)
     }
 
     fn pick(&mut self, x: f64, y: f64) -> Result<Option<Declared>, PreviewError> {
+        self.3.look();
         self.0.pick(x, y)
     }
 
     fn alive(&mut self) -> Result<(), PreviewError> {
+        self.3.look();
         self.0.alive()
     }
 
@@ -145,14 +201,28 @@ impl PreviewHost for SlowPictures {
     }
 
     fn click(&mut self, at: &Click) -> Result<(), PreviewError> {
+        self.3.look();
         self.0.click(at)
     }
 
     fn input(&mut self, input: &Input) -> Result<(), PreviewError> {
-        self.0.input(input)
+        self.3.look();
+        let Input::Scroll { dy, .. } = *input else {
+            return self.0.input(input);
+        };
+        std::thread::sleep(Duration::from_millis(self.3.ms.load(Ordering::SeqCst)));
+        self.0.input(input)?;
+        let mut record = self.3.record.lock().unwrap_or_else(PoisonError::into_inner);
+        record.push(Scrolled {
+            dy,
+            still_moved: None,
+        });
+        self.3.unjudged = self.0.rest_watch().map(|watch| (record.len() - 1, watch));
+        Ok(())
     }
 
     fn extent(&mut self) -> Result<f64, PreviewError> {
+        self.3.look();
         self.0.extent()
     }
 }
@@ -271,6 +341,8 @@ impl UiWorld {
             no_places: false,
             picture_ms: Arc::default(),
             placed_ms: Arc::default(),
+            scroll_ms: Arc::default(),
+            scrolls: Arc::default(),
             held: None,
         }
     }
@@ -351,6 +423,8 @@ impl UiWorld {
         let no_places = self.no_places;
         let picture_ms = Arc::clone(&self.picture_ms);
         let placed_ms = Arc::clone(&self.placed_ms);
+        let scroll_ms = Arc::clone(&self.scroll_ms);
+        let scrolls = Arc::clone(&self.scrolls);
         let studio = Studio::open(self.dir.path())
             .map_err(|e| e.to_string())?
             .with_previews(Arc::new(move |dir| {
@@ -362,6 +436,11 @@ impl UiWorld {
                         host,
                         Arc::clone(&picture_ms),
                         Arc::clone(&placed_ms),
+                        Scrolling {
+                            ms: Arc::clone(&scroll_ms),
+                            record: Arc::clone(&scrolls),
+                            unjudged: None,
+                        },
                     ))
                 }
             }));
@@ -3502,6 +3581,11 @@ fn slow_pictures(w: &mut UiWorld, ms: u64) {
     w.picture_ms.store(ms, Ordering::SeqCst);
 }
 
+#[given(regex = r"^the preview takes (\d+) ms over each turn of the wheel$")]
+fn slow_scrolls(w: &mut UiWorld, ms: u64) {
+    w.scroll_ms.store(ms, Ordering::SeqCst);
+}
+
 #[given(regex = r"^the preview takes (\d+) ms to say where its objects are$")]
 fn slow_places(w: &mut UiWorld, ms: u64) {
     w.placed_ms.store(ms, Ordering::SeqCst);
@@ -4349,6 +4433,63 @@ fn wheel_down_over_frame(w: &mut UiWorld, target: String, x: f64, y: f64) -> Ste
         .map_err(drive_error)?;
     window.stage.drive().advance(1000).map_err(drive_error)?;
     window.rest()
+}
+
+// A frame apart, as a hand turns it: each turn is the shell's own call.
+#[when(
+    regex = r#"^the person turns the wheel down over the frame "([^"]+)" at (\d+), (\d+) ten times$"#
+)]
+fn wheel_down_ten_times(w: &mut UiWorld, target: String, x: f64, y: f64) -> StepResult {
+    let window = w.window()?;
+    let at = frame_point(window, &target, x, y)?;
+    for _ in 0..10 {
+        window
+            .stage
+            .drive()
+            .wheel(at, Wheel::Notches(0.0, -1.0))
+            .map_err(drive_error)?;
+        window.stage.drive().advance(17).map_err(drive_error)?;
+    }
+    window.stage.drive().advance(1000).map_err(drive_error)?;
+    window.rest()
+}
+
+#[then(regex = r"^the running app was given the (\d+) turns in at most (\d+) scrolls$")]
+fn turns_in_scrolls(w: &mut UiWorld, turns: f64, most: usize) -> StepResult {
+    let scrolls = w
+        .scrolls
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .clone();
+    let given: f64 = scrolls.iter().map(|s| -s.dy).sum();
+    if (given - turns).abs() > 1e-9 || scrolls.len() > most {
+        return Err(format!(
+            "the running app was given {given} turns in {} scrolls: {scrolls:?}",
+            scrolls.len()
+        ));
+    }
+    Ok(())
+}
+
+#[then("no scroll waited for the page to stop")]
+fn no_scroll_waited(w: &mut UiWorld) -> StepResult {
+    let scrolls = w
+        .scrolls
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .clone();
+    let judged: Vec<bool> = scrolls.iter().filter_map(|s| s.still_moved).collect();
+    if judged.is_empty() {
+        return Err(format!(
+            "no call reached the preview after a scroll: {scrolls:?}"
+        ));
+    }
+    if judged.contains(&false) {
+        return Err(format!(
+            "a call reached the preview only once the page had stopped: {scrolls:?}"
+        ));
+    }
+    Ok(())
 }
 
 #[given(regex = r#"^the person has typed the text "(.*)"$"#)]

@@ -11,8 +11,9 @@ Feature: A long page shows whole on the canvas and plays as it would on the devi
   the fold and what is there can be picked. In play mode the frame is the
   device: the wheel over it and a drag in it scroll the app, not the
   canvas, and keys pressed and text typed reach the app, so a form can be
-  filled in. Each is a `preview_open` or `preview_state` call an agent
-  could make.
+  filled in. Turns of the wheel that come while one is going in reach the
+  app together, and none waits for the page to stop. Each is a
+  `preview_open` or `preview_state` call an agent could make.
 
   Background:
     Given the file "Main.qml":
@@ -73,6 +74,14 @@ Feature: A long page shows whole on the canvas and plays as it would on the devi
     When the person turns the wheel down over the frame "Desktop" at 600, 400
     Then the running app's "page" has "contentY" above 0
     And the frame "Desktop" is back where it was
+
+  Scenario: In play mode turns of the wheel don't wait for the page to stop
+    Given the person has clicked the button "Play"
+    And the preview takes 3000 ms over each turn of the wheel
+    When the person turns the wheel down over the frame "Desktop" at 600, 400 ten times
+    Then the running app was given the 10 turns in at most 2 scrolls
+    And no scroll waited for the page to stop
+    And the running app's "page" has "contentY" above 0
 
   Scenario: In play mode a drag in the frame flicks the app
     Given the person has clicked the button "Play"
