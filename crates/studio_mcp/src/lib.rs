@@ -37,7 +37,8 @@ use std::{
 };
 
 use ljos_mcp_core::{
-    CallCtx, ErrorCode, McpSurface, ServerMeta, SurfaceError, ToolFuture, ToolRegistry, ToolReply,
+    CallCtx, DEFAULT_RESULT_BYTES, ErrorCode, McpSurface, ServerMeta, SurfaceError, ToolDef,
+    ToolFuture, ToolRegistry, ToolReply, cap_result,
 };
 #[cfg(feature = "native")]
 use ljos_mcp_core::{
@@ -519,7 +520,16 @@ impl StudioServer {
         let mark = preview::lock(&previews).events.len();
         let mut out = self.tools.call(name, ctx, args).0.map(ToolReply::from);
         match &mut out {
-            Ok(reply) => self.tell_problems(&previews, mark, reply),
+            Ok(reply) => {
+                let per_copy = self
+                    .tools
+                    .check(name, ctx)
+                    .map_or(DEFAULT_RESULT_BYTES / 2, ToolDef::per_copy_bytes);
+                self.tell_problems(&previews, mark, per_copy, reply);
+                if name == "preview_events" {
+                    without_problems_cursor(&mut reply.structured);
+                }
+            }
             Err(e) => self.say_missing(name, ctx, e),
         }
         lock(&self.studio).hidden_now();
@@ -619,6 +629,7 @@ impl StudioServer {
         &self,
         previews: &Mutex<preview::Previews>,
         mark: usize,
+        per_copy: usize,
         reply: &mut ToolReply,
     ) {
         use studio_core::preview::PreviewEvent;
@@ -635,17 +646,10 @@ impl StudioServer {
             if !reloaded || p.problems.is_empty() {
                 return;
             }
-            p.problems.clone()
+            preview_tools::most_urgent_first(p.problems.clone())
         };
         let problems = lock(&self.studio).problems(&lines);
-        if let Some(out) = reply.structured.as_object_mut() {
-            let told: Vec<_> = problems
-                .iter()
-                .take(TOLD_PROBLEMS)
-                .map(view::Problem::answered)
-                .collect();
-            out.insert("warnings".to_owned(), serde_json::Value::Array(told));
-        }
+        tell_warnings(&mut reply.structured, &problems, per_copy);
     }
 
     /// For a window, which lists what is wrong as it happens: how often the
@@ -707,6 +711,112 @@ impl StudioServer {
         let def = self.tools.check("preview_screenshot", ctx)?;
         let per_copy = def.per_copy_bytes();
         preview_tools::screenshot(&self.studio, args, picturing).map(|r| r.capped(per_copy))
+    }
+}
+
+/// Adds as many of the first [`TOLD_PROBLEMS`] as there is room for, each
+/// whole, and counts the rest. An edit's `changes` give theirs to the first
+/// error, as that it broke the app matters more than their echo, and to the
+/// count: what else the edit says is never cut for either.
+fn tell_warnings(answer: &mut serde_json::Value, problems: &[view::Problem], per_copy: usize) {
+    let Some(out) = answer.as_object_mut() else {
+        return;
+    };
+    let mut told: Vec<_> = problems
+        .iter()
+        .take(TOLD_PROBLEMS)
+        .map(view::Problem::answered)
+        .collect();
+    let error_first = problems.first().is_some_and(|p| p.severity == "error");
+    loop {
+        let omitted = problems.len() - told.len();
+        if omitted > 0 {
+            out.insert("warnings_omitted".to_owned(), json!(omitted));
+        }
+        if told.is_empty() {
+            out.remove("warnings");
+            break;
+        }
+        out.insert("warnings".to_owned(), json!(told));
+        if preview_tools::json_bytes(&*out) <= per_copy {
+            return;
+        }
+        if told.len() == 1 && error_first && fits_without_changes(out, per_copy) {
+            break;
+        }
+        // The least urgent first, so no warning stays where an error didn't.
+        told.pop();
+    }
+    if preview_tools::json_bytes(&*out) <= per_copy {
+        return;
+    }
+    if out.get("changes").is_some_and(|c| c.is_array()) {
+        shorten_changes(out, per_copy);
+    }
+    // An answer with no changes to give: the registry's cut, whose cursor
+    // mustn't be the one before it.
+    if preview_tools::json_bytes(&*answer) > per_copy {
+        if let Some(out) = answer.as_object_mut()
+            && out.contains_key("truncated_field")
+        {
+            out.remove("next_cursor");
+        }
+        *answer = cap_result(std::mem::take(answer), per_copy);
+    }
+}
+
+/// Whether an edit's answer fits with none of its changes: one that doesn't
+/// isn't cut for what it couldn't hold anyway.
+fn fits_without_changes(out: &serde_json::Map<String, serde_json::Value>, per_copy: usize) -> bool {
+    if !out.get("changes").is_some_and(|c| c.is_array()) {
+        return false;
+    }
+    let mut least = out.clone();
+    least.insert("changes".to_owned(), json!([]));
+    least.insert("truncated".to_owned(), json!(true));
+    least.insert("truncated_field".to_owned(), json!("changes"));
+    preview_tools::json_bytes(&least) <= per_copy
+}
+
+/// Brings an edit's answer under `per_copy` by its changes' text alone,
+/// and by their number only once no text is left.
+fn shorten_changes(out: &mut serde_json::Map<String, serde_json::Value>, per_copy: usize) {
+    out.insert("truncated".to_owned(), json!(true));
+    out.insert("truncated_field".to_owned(), json!("changes"));
+    loop {
+        let over = preview_tools::json_bytes(&*out).saturating_sub(per_copy);
+        if over == 0 {
+            return;
+        }
+        let Some(serde_json::Value::Array(changes)) = out.get_mut("changes") else {
+            return;
+        };
+        let longest = changes
+            .iter_mut()
+            .filter_map(|change| match change.get_mut("text") {
+                Some(serde_json::Value::String(text)) if !text.is_empty() => Some(text),
+                _ => None,
+            })
+            .max_by_key(|text| text.len());
+        if let Some(text) = longest {
+            // A byte of text is at least one of JSON.
+            let keep = text.floor_char_boundary(text.len().saturating_sub(over));
+            text.truncate(keep);
+        } else if changes.pop().is_some() {
+            out.remove("next_cursor");
+        } else {
+            return;
+        }
+    }
+}
+
+/// `next` is where `preview_events` resumes, and no cursor fetches problems:
+/// the registry's count of those it kept would be read as one.
+fn without_problems_cursor(answer: &mut serde_json::Value) {
+    if let Some(out) = answer.as_object_mut()
+        && out.get("truncated_field").is_some_and(|f| f == "problems")
+    {
+        out.remove("next_cursor");
     }
 }
 
@@ -837,7 +947,16 @@ impl StudioServer {
         // Another caller's edit may have broken or fixed something meanwhile.
         let problems = preview_tools::known_problems(&self.studio);
         if let Some(out) = reply.structured.as_object_mut() {
-            out.remove("problems");
+            // With what the look said of them: its cut, and the warnings
+            // among them.
+            for key in ["problems", "warnings", "warnings_omitted"] {
+                out.remove(key);
+            }
+            if out.get("truncated_field").is_some_and(|f| f == "problems") {
+                for key in ["truncated", "truncated_field", "next_cursor"] {
+                    out.remove(key);
+                }
+            }
             if !problems.is_empty() {
                 out.insert("problems".to_owned(), json!(problems));
             }
@@ -851,6 +970,10 @@ impl StudioServer {
             }
             (_, None) => {}
         }
+        // The registry capped the look; this is the answer.
+        let per_copy = self.tools.check("preview_events", ctx)?.per_copy_bytes();
+        let mut reply = reply.capped(per_copy);
+        without_problems_cursor(&mut reply.structured);
         Ok(reply)
     }
 }

@@ -273,6 +273,10 @@ pub struct View {
     /// What is wrong in the running preview now, in every file it runs;
     /// empty when nothing is, or no preview runs.
     pub problems: Vec<Problem>,
+    /// The preview had more than `problems` holds. Named as the workspace's
+    /// property is, which `web/Workspace.js` gives by this name.
+    #[serde(rename = "problemsDropped")]
+    pub problems_dropped: bool,
 }
 
 /// An object another writer holds.
@@ -355,8 +359,12 @@ impl Studio {
             })
             .collect();
         view.preview = preview_of(&preview::lock(&self.previews));
-        let lines = preview::lock(&self.previews).problems.clone();
+        let (lines, dropped) = {
+            let previews = preview::lock(&self.previews);
+            (previews.problems.clone(), previews.dropped)
+        };
         view.problems = self.problems(&lines);
+        view.problems_dropped = dropped;
         if let Some(p) = &mut view.preview {
             let shown = shown(&preview::lock(&self.previews));
             p.variant = shown

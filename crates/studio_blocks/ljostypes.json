@@ -307,6 +307,18 @@
               "notify": "problemsChanged"
             },
             {
+              "name": "problemsDropped",
+              "type": "bool",
+              "kind": "value",
+              "list": false,
+              "readonly": true,
+              "final": true,
+              "required": false,
+              "constant": false,
+              "group": false,
+              "notify": "problemsDroppedChanged"
+            },
+            {
               "name": "done",
               "type": "var",
               "kind": "value",
