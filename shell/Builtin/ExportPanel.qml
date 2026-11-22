@@ -655,7 +655,8 @@ Popup {
             TextButton {
                 text: "Write bundle"
                 Accessible.name: text
-                enabled: panel.entry !== "" && !panel.busy
+                // A build reads the bundle this would replace.
+                enabled: panel.entry !== "" && !panel.busy && !panel.building
                 highlighted: true
                 onClicked: panel.run(false)
             }
