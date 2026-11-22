@@ -14,7 +14,7 @@ use std::path::{Path, PathBuf};
 
 use serde_json::Value;
 use studio_core::{
-    Step, Store,
+    Session, Step, Store,
     outline::{self, Member, MemberKind, Node},
 };
 
@@ -70,6 +70,17 @@ pub(crate) struct Standing {
     file: Option<PathBuf>,
 }
 
+impl Standing {
+    /// Takes the file out through the project's store, which alone reaches
+    /// it in a project without a directory. A person's file there stays.
+    pub fn leave(&self, store: &dyn Store) {
+        if store.read(&self.path).is_ok_and(|text| is_studios(&text)) {
+            // Already gone is as good.
+            let _ = store.remove(&self.path);
+        }
+    }
+}
+
 impl Drop for Standing {
     fn drop(&mut self) {
         if let Some(file) = &self.file {
@@ -85,6 +96,23 @@ impl Drop for Standing {
 /// Whether `text` is a harness Studio wrote, and so its to replace or remove.
 pub(crate) fn is_studios(text: &str) -> bool {
     text.starts_with(MARK)
+}
+
+/// The project's documents without what Studio itself stands in for one. A
+/// store lists a hidden `.qml` file as any other, and a person's is theirs.
+pub(crate) fn documents(session: &Session) -> Vec<String> {
+    let store = session.store();
+    let mut documents = session.documents();
+    documents.retain(|path| !stands_in(store, path));
+    documents
+}
+
+/// Whether the file at `path` is a harness Studio wrote.
+fn stands_in(store: &dyn Store, path: &str) -> bool {
+    let file = path.rsplit('/').next().unwrap_or(path);
+    file.starts_with('.')
+        && file.ends_with(".preview.qml")
+        && store.read(path).is_ok_and(|text| is_studios(&text))
 }
 
 fn short(ty: &str) -> &str {
@@ -488,6 +516,32 @@ mod tests {
         };
         drop(h.standing(Some(dir.path())));
         assert_eq!(std::fs::read_to_string(&file).unwrap(), "// Mine\n");
+    }
+
+    #[test]
+    fn only_studios_stand_in_is_no_document() {
+        let store = store(&[
+            (".Card.preview.qml", MARK),
+            ("b/.Card.preview.qml", "// Mine\n"),
+            (".hidden.qml", MARK),
+        ]);
+        assert!(stands_in(&store, ".Card.preview.qml"));
+        assert!(!stands_in(&store, "b/.Card.preview.qml"));
+        assert!(!stands_in(&store, ".hidden.qml"));
+    }
+
+    #[test]
+    fn without_a_directory_the_store_takes_the_file_out() {
+        let store = store(&[("Own.qml", MARK), ("Theirs.qml", "// Mine\n")]);
+        for path in ["Own.qml", "Theirs.qml"] {
+            let h = Harness {
+                path: path.to_owned(),
+                text: MARK.to_owned(),
+            };
+            h.standing(None).leave(&store);
+        }
+        assert!(!store.exists("Own.qml"));
+        assert!(store.exists("Theirs.qml"));
     }
 
     #[test]

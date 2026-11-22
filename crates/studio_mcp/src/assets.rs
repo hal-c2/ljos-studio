@@ -180,7 +180,7 @@ pub(crate) fn remove(studio: &Studio, name: &str) -> Result<String, SurfaceError
         ));
     }
     // A script a document imports says urls as well as a document does.
-    let mut files = studio.session.documents();
+    let mut files = crate::harness::documents(&studio.session);
     files.extend(SCRIPTS.iter().flat_map(|extension| store.list(extension)));
     let users: Vec<String> = files
         .into_iter()
