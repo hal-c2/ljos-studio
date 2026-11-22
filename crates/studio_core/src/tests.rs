@@ -1245,6 +1245,24 @@ fn statements_one_after_another_are_a_handlers_block() {
         handler_body("if (a) {\n    b()\n}\n\nc()"),
         "{\n    if (a) {\n        b()\n    }\n\n    c()\n}"
     );
+    assert_eq!(handler_body("    a()\n    b()"), "{\n    a()\n    b()\n}");
+    assert_eq!(
+        handler_body("\n  if (a) {\n    b()\n  }\n  c()\n"),
+        "{\n    if (a) {\n      b()\n    }\n    c()\n}"
+    );
+    assert_eq!(
+        handler_body("Qt.openUrlExternally(\"https://x\"); close()"),
+        "{ Qt.openUrlExternally(\"https://x\"); close() }"
+    );
+    assert_eq!(
+        handler_body("open(\"https://x\"); close() // both"),
+        "{\n    open(\"https://x\"); close() // both\n}"
+    );
+    assert_eq!(
+        handler_body("    a = `x`\n    b()"),
+        "{\n    a = `x`\n    b()\n}"
+    );
+    // Only what is written here: qml_edit reindents it when it sets it.
     assert_eq!(handler_body("a = `x\n  y`; b()"), "{\na = `x\n  y`; b()\n}");
     // One expression that happens to hold a `;` is left as it is.
     assert_eq!(

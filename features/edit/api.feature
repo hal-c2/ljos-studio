@@ -165,6 +165,29 @@ Feature: An agent changes a component's API
               }
       """
 
+  Scenario: An evenly indented handler is written level
+    When the agent calls the tool "binding_set" with:
+      """json
+      {"doc": "HabitCard.qml", "node": {"id": "area"}, "name": "onClicked", "value": "    card.flip()\n    card.toggled(card.done)"}
+      """
+    Then the file "HabitCard.qml" contains:
+      """qml
+              onClicked: {
+                  card.flip()
+                  card.toggled(card.done)
+              }
+      """
+
+  Scenario: A URL in a string is no comment
+    When the agent calls the tool "binding_set" with:
+      """json
+      {"doc": "HabitCard.qml", "node": {"id": "area"}, "name": "onClicked", "value": "Qt.openUrlExternally(\"https://example.org\"); card.flip()"}
+      """
+    Then the file "HabitCard.qml" contains:
+      """qml
+              onClicked: { Qt.openUrlExternally("https://example.org"); card.flip() }
+      """
+
   Scenario: A handler is changed and taken out by its name
     Given the agent has called the tool "binding_set" with:
       """json
