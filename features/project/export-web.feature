@@ -597,7 +597,7 @@ Feature: A project is exported for ljos-web to build a site from
       Then the agent is refused with "invalid_argument"
       And the refusal's "/details/kind" is "needs_build"
       And the refusal's "/details/argument" is "<argument>"
-      And the refusal's "/message" contains "needs"
+      And the refusal's message matches "^`<argument>` needs `.build.: true`"
       And the file "build/web/ljos-site.json" does not exist
 
       Examples:
@@ -615,7 +615,7 @@ Feature: A project is exported for ljos-web to build a site from
         """
       Then the agent is refused with "invalid_argument"
       And the refusal's "/details/kind" is "needs_build"
-      And the refusal's "/message" contains "web"
+      And the refusal's message matches "^`open` needs `.build.: true` and `.target.: .web.`"
       And the file "build/native/ljos-bundle.json" does not exist
 
     Scenario: Only a web export is built

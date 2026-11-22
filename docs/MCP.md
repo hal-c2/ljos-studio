@@ -675,7 +675,9 @@ manifest holds it). Its `icon` and `image` are paths of the project's
 files: one that is not a file of the site is refused (`invalid_argument`,
 `page_file`, `details.path`), as is a `site.json` that is not a page
 (`page`) and a `page` or `build` for `native` (`page_target`,
-`build_target`).
+`build_target`). `open`, `ljos_web` and `qmlc` are a build's: without
+`build: true` they are refused (`needs_build`, `details.argument`) before
+anything is written, never ignored.
 
 `build: true` (needs `run`) builds the site from the bundle it just wrote
 into `<out>-site` (`build/web-site`) and serves it on this machine over

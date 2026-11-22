@@ -163,6 +163,18 @@ struct ExportArgs {
     qmlc: Option<String>,
 }
 
+impl ExportArgs {
+    fn only_a_build_uses(&self) -> Option<&'static str> {
+        [
+            ("open", self.open),
+            ("ljos_web", self.ljos_web.is_some()),
+            ("qmlc", self.qmlc.is_some()),
+        ]
+        .into_iter()
+        .find_map(|(argument, given)| given.then_some(argument))
+    }
+}
+
 /// What a browser's tab, a search result and a shared link show of a site.
 /// Its pictures are files of the site, by path relative to the project.
 #[derive(Clone, Debug, Default, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
@@ -1350,6 +1362,22 @@ fn export(studio: &Mutex<Studio>, ctx: &CallCtx, a: ExportArgs) -> Result<Export
             kind,
             format!("only a web export is {what}: give `\"target\": \"web\"`"),
         ));
+    }
+    // `tools/list` has no room to say that these go with `build`, and
+    // ignoring them would answer a success and no site.
+    if !a.build
+        && let Some(argument) = a.only_a_build_uses()
+    {
+        let target = if web {
+            ""
+        } else {
+            " and `\"target\": \"web\"`"
+        };
+        return Err(SurfaceError::new(
+            ErrorCode::InvalidArgument,
+            format!("`{argument}` needs `\"build\": true`{target}: only a build uses it"),
+        )
+        .with_details(json!({ "kind": "needs_build", "argument": argument })));
     }
     // Building runs ljos-web's compiler and bundler, which are programs.
     if a.build && !ctx.caps.contains(Cap::Run) {
