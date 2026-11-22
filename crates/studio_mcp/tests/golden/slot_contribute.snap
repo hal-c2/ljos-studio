@@ -9,7 +9,7 @@ expression: value
     "open_world": false,
     "read_only": false
   },
-  "description": "Write a Contribution to a block's slot, showing QML `text` or a `block` (imports added once); or `remove` one. Refuses a slot no block offers (`blocks_list`).",
+  "description": "Write a Contribution of QML `text` or a `block` to a block's slot (imports added once), or `remove` one. Refuses a slot no block offers (`blocks_list`).",
   "inputSchema": {
     "$defs": {
       "Address": {
@@ -22,7 +22,7 @@ expression: value
     },
     "properties": {
       "block": {
-        "description": "Or a block from `blocks_list`, `Module.Name`, shown bare.",
+        "description": "Or a `Module.Name` from `blocks_list`, shown bare.",
         "type": "string"
       },
       "doc": {
@@ -35,7 +35,7 @@ expression: value
         "type": "integer"
       },
       "mode": {
-        "description": "How it joins what the slot holds; the runtime's default when left out.",
+        "description": "How it joins the slot; default the runtime's.",
         "enum": [
           "append",
           "prepend",
@@ -43,20 +43,24 @@ expression: value
         ],
         "type": "string"
       },
+      "node": {
+        "$ref": "#/$defs/Address",
+        "description": "Or the instance to skin alone."
+      },
       "order": {
-        "description": "Its place among the slot's contributions.",
+        "description": "Place among the slot's contributions.",
         "type": "integer"
       },
       "parent": {
         "$ref": "#/$defs/Address",
-        "description": "Where the `Contribution` goes; the root when left out."
+        "description": "Where it goes; default the root."
       },
       "remove": {
         "$ref": "#/$defs/Address",
-        "description": "Take this `Contribution` out instead."
+        "description": "Contribution to take out instead."
       },
       "slot": {
-        "description": "The slot, as `blocks_list` lists it (`controls`).",
+        "description": "As in `blocks_list` (`controls`).",
         "type": "string"
       },
       "text": {

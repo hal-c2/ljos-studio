@@ -9,7 +9,7 @@ expression: value
     "open_world": false,
     "read_only": false
   },
-  "description": "Remove an object with its comments. Its handle then answers `stale_ref` until undo.",
+  "description": "Remove an object with its comments, or its `member`. An object's handle is `stale_ref` until undo.",
   "inputSchema": {
     "properties": {
       "doc": {
@@ -21,6 +21,10 @@ expression: value
       "generation": {
         "description": "The generation read; a `path` needs it (handles and ids are moved past others' edits).",
         "type": "integer"
+      },
+      "member": {
+        "description": "The member's name.",
+        "type": "string"
       },
       "node": {
         "additionalProperties": {
