@@ -14,6 +14,10 @@ const VITE = `
 import { copyFileSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 export async function build({ root, build: { outDir } }) {
+  if (process.env.STANDIN_FAIL) {
+    const summary = "\\x1b[31mBuild failed with 1 error:\\n\\n[plugin ljos-web]\\x1b[39m";
+    throw Object.assign(new Error(summary), { errors: [{ message: process.env.STANDIN_FAIL }] });
+  }
   rmSync(outDir, { recursive: true, force: true });
   mkdirSync(join(outDir, "assets"), { recursive: true });
   copyFileSync(join(root, "index.html"), join(outDir, "index.html"));
@@ -28,7 +32,7 @@ function put(at, text) {
 }
 
 // A project with an export in `build/web`, and a build of it.
-function project(t, page = {}) {
+function project(t, page = {}, imports = []) {
   const root = mkdtempSync(join(tmpdir(), "ljos-site-test-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const bundle = join(root, "build", "web");
@@ -38,7 +42,7 @@ function project(t, page = {}) {
     put(join(bundle, path), text);
     return { path, bytes: Buffer.byteLength(text) };
   });
-  const manifest = { format: "ljos-site", version: 1, target: "web", entry: "Main.qml", files, imports: [], modules: [], page, ljos_web: "0".repeat(40) };
+  const manifest = { format: "ljos-site", version: 1, target: "web", entry: "Main.qml", files, imports, modules: [], page, ljos_web: "0".repeat(40) };
   put(join(bundle, "ljos-site.json"), JSON.stringify(manifest));
   const site = join(root, "build", "web-site");
   const build = (env = {}) => {
@@ -123,4 +127,21 @@ test("a stamp that does not list the site's files vouches for nothing", (t) => {
   put(join(site, ".ljos-site-build"), "0".repeat(40));
   assert.equal(build().status, 1);
   assert.ok(existsSync(join(site, "assets/app.js")));
+});
+
+test("a build that fails says the bundler's first error, uncoloured", (t) => {
+  const { build } = project(t);
+  const ran = build({ STANDIN_FAIL: "\x1b[31m[plugin ljos-web]\x1b[39m\n\nShell.qml:3: no module Nowhere" });
+  assert.equal(ran.status, 1);
+  assert.match(ran.stdout, /^fail ljos-web could not build the site: \[plugin ljos-web\] Shell\.qml:3: no module Nowhere$/m);
+});
+
+test("Ljos.Design is built from the QML the builder was given", (t) => {
+  const { root, build } = project(t, {}, ["Ljos.Design"]);
+  const without = build();
+  assert.equal(without.status, 1);
+  assert.match(without.stdout, /^fail .*Ljos\.Design.* no QML of$/m);
+  put(join(root, "work", "standins", "Ljos", "Design", "qmldir"), "module Ljos.Design\n");
+  const given = build();
+  assert.equal(given.status, 0, given.stdout + given.stderr);
 });

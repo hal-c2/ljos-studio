@@ -662,12 +662,13 @@ instead (DESIGN.md S6, the site contract), which a site builder reads:
 | `ljos_web` | The ljos-web commit they were checked against |
 | `page` | The page's `title`, `description`, `icon` (the tab's) and `image` (a shared link's), when it has any |
 
-It has no `run`. A site holds only what its code reaches: every document,
-script and `qmldir`, the theme, the page's pictures, and each other file a
+It has no `run`. A site holds only what its code reaches and what was
+brought in as an asset: every document, script and `qmldir`, the theme, the
+page's pictures, everything below `assets/`, and each other file a
 string in the code names (`"images/logo.svg"`), or a directory or the
 start of a path a name is made from (`"icons/" + name + ".svg"` keeps
 `icons/`). Every other file is in `left_out` with "nothing the site's code
-names", so a picture nobody uses is not shipped.
+names", so a picture outside `assets/` that nobody uses is not shipped.
 
 `page` is kept in the project's `site.json` (written by a real export that
 is given one, read by one that is not; it is in `left_out` itself, since the

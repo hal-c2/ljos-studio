@@ -1146,12 +1146,13 @@ terminal. `features/ui/export.feature`, `features/project/export-web.feature`,
     window's height after a few fits.
   - Breakpoints read `root.width` as before.
 - **Honest counts.** A site holds what its code reaches: documents,
-  scripts and qmldirs whole, the theme, the page's pictures, and files a
+  scripts and qmldirs whole, the theme, the page's pictures, the imported
+  assets (`assets/`, kept as every bundle keeps them), and files a
   string names (a directory or path prefix keeps what is below it). The
   rest is in `left_out` ("nothing the site's code names"). The answer's
   `writes` counts the files and the manifest, so the panel's "Would
   write 4 files" is the "Wrote 4 files" that follows, and a picture
-  nothing names is not shipped.
+  nothing names is not shipped unless it was imported.
 - **The panel** (`shell/Builtin/ExportPanel.qml`). For the web it has
   fields for the page (Title, Description, Icon, Shared) and the ljos-web
   folder, all filled from the dry run's `manifest.page` until edited. Its

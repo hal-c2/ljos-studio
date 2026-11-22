@@ -19,10 +19,12 @@ esac
 
 find_ljos_web
 find_qmlc
+find_design_qml
 work="$(own_target)/export-web"
 rm -rf "$work"
-mkdir -p "$work/node_modules/@solidjs"
+mkdir -p "$work/node_modules/@solidjs" "$work/standins"
 cp "$studio_root"/web/site/{build.mjs,index.html,main.js,vite.config.js} "$work/"
+cp -R "$LJOS_DESIGN/Ljos" "$work/standins/"
 modules="$LJOS_WEB/examples/web/node_modules"
 for module in ljos-web solid-js vite @solidjs/web; do
   ln -s "$(physical "$modules/$module")" "$work/node_modules/$module"

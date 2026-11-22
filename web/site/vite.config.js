@@ -19,9 +19,12 @@ export default defineConfig({
       // The project's own modules are found by their qmldirs below the
       // bundle, wherever its entry is.
       args: ["--root", site],
-      // Ljós's controls and Ljos.Design, ljos-web's own copy of them, as
-      // Studio's preview draws them, whatever Qt is installed: a site is
-      // built alike wherever Studio runs.
+      // ljos-web has no QML of Ljos.Design: whoever runs the builder puts
+      // Ljós's here.
+      standins: [path("./standins")],
+      // Ljós's controls, ljos-web's own copy of them, as Studio's preview
+      // draws them, whatever Qt is installed: a site is built alike wherever
+      // Studio runs.
       styles: "ljos",
     }),
   ],

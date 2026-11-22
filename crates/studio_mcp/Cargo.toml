@@ -22,6 +22,8 @@ base64.workspace = true
 studio_core = { path = "../studio_core", default-features = false }
 ljos_mcp_core.workspace = true
 ljos_blocks.workspace = true
+# Writes Ljos.Design's QML for a site's builder.
+ljos_design.workspace = true
 # File events from the kernel: nothing polls.
 notify = { workspace = true, optional = true }
 # Paths a window reads layers by.

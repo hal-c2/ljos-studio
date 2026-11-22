@@ -14,7 +14,7 @@ use studio_core::Store;
 
 use crate::{Studio, place_tools::refused, store_error};
 
-const DIR: &str = "assets";
+pub(crate) const DIR: &str = "assets";
 /// Far above a picture a window shows; a mistaken path stops here, before
 /// it is read into memory.
 const MOST_BYTES: u64 = 64 * 1024 * 1024;
