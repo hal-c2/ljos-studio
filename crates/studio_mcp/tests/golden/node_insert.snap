@@ -50,7 +50,7 @@ expression: value
         "type": "string"
       },
       "slot": {
-        "description": "Name of a `Slot` to declare (imports Ljos.Blocks); `text` is its default.",
+        "description": "New `Slot`'s name (imports Ljos.Blocks); `text`: its default.",
         "type": "string"
       },
       "text": {

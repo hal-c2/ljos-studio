@@ -23,7 +23,7 @@ expression: value
         "type": "integer"
       },
       "member": {
-        "description": "The member's name.",
+        "description": "Member name.",
         "type": "string"
       },
       "node": {
