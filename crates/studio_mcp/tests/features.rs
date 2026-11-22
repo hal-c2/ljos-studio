@@ -71,6 +71,8 @@ struct StudioWorld {
     /// Of two calls at once: whether the second answered before the first,
     /// and what the preview said of its motion when it had.
     overlap: Option<(bool, Result<bool, String>)>,
+    /// The hold of a build the scenario says is running.
+    building: Option<studio_mcp::export::BeingBuilt>,
 }
 
 /// Told, once an input is in, a way to see whether what it moved still moves.
@@ -263,6 +265,7 @@ impl StudioWorld {
             clock: Arc::default(),
             input_heard: Arc::default(),
             overlap: None,
+            building: None,
         }
     }
 
@@ -717,6 +720,18 @@ fn second_calls_with(w: &mut StudioWorld, name: String, tool: String, step: &Ste
         w.answer()?;
     }
     Ok(())
+}
+
+#[given(regex = r#"^a site is being built from "([^"]+)"$"#)]
+fn being_built(w: &mut StudioWorld, bundle: String) -> StepResult {
+    let root = w.dir.path().canonicalize().map_err(|e| e.to_string())?;
+    w.building = Some(studio_mcp::export::BeingBuilt::hold(root.join(bundle)));
+    Ok(())
+}
+
+#[when(regex = r"^the build ends$")]
+fn build_ends(w: &mut StudioWorld) {
+    w.building = None;
 }
 
 #[when(regex = r"^(\d+) seconds pass with no call$")]

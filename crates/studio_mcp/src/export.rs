@@ -20,7 +20,7 @@ use std::{
     collections::{BTreeMap, BTreeSet, HashMap},
     fs,
     path::{Component, Path, PathBuf},
-    sync::{Arc, Mutex},
+    sync::{Arc, LazyLock, Mutex, PoisonError},
 };
 
 use crate::schema::Answers;
@@ -1349,6 +1349,42 @@ fn through_links<'a>(
     Ok(copy.out)
 }
 
+/// The bundles builds read, or wait their turn to read.
+static BEING_BUILT: LazyLock<Mutex<Vec<PathBuf>>> = LazyLock::new(Mutex::default);
+
+/// A build's hold on the bundle it reads. The project is let go of while a
+/// site builds, so without it another export could change what gets built.
+#[doc(hidden)]
+pub struct BeingBuilt(PathBuf);
+
+impl BeingBuilt {
+    pub fn hold(bundle: PathBuf) -> Self {
+        BEING_BUILT
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push(bundle.clone());
+        Self(bundle)
+    }
+
+    /// Whether replacing `bundle` would change what a build reads.
+    fn holds(bundle: &Path) -> bool {
+        BEING_BUILT
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .iter()
+            .any(|held| held.starts_with(bundle) || bundle.starts_with(held))
+    }
+}
+
+impl Drop for BeingBuilt {
+    fn drop(&mut self) {
+        let mut held = BEING_BUILT.lock().unwrap_or_else(PoisonError::into_inner);
+        if let Some(at) = held.iter().position(|bundle| *bundle == self.0) {
+            held.swap_remove(at);
+        }
+    }
+}
+
 fn export(studio: &Mutex<Studio>, ctx: &CallCtx, a: ExportArgs) -> Result<ExportOut, SurfaceError> {
     let web = a.target == Target::Web;
     if !web && (a.build || a.page.is_some()) {
@@ -1414,6 +1450,13 @@ fn export(studio: &Mutex<Studio>, ctx: &CallCtx, a: ExportArgs) -> Result<Export
         may_replace(&root, &root.join(&out))?;
         Copied::default()
     } else {
+        if BeingBuilt::holds(&root.join(&out)) {
+            return Err(SurfaceError::new(
+                ErrorCode::Busy,
+                format!("a site is being built from `{out}`: export there again when it is done"),
+            )
+            .with_details(json!({ "kind": "build_running" })));
+        }
         if let Some(page) = &a.page {
             let mut text = serde_json::to_string_pretty(page).expect("a page is JSON");
             text.push('\n');
@@ -1433,7 +1476,9 @@ fn export(studio: &Mutex<Studio>, ctx: &CallCtx, a: ExportArgs) -> Result<Export
         write(&root, &root.join(&out), &manifest)?
     };
     let ms = studio_core::preview::ms(studio.timer.now().saturating_sub(started));
-    // A build takes as long as ljos-web does; the project is not held for it.
+    // A build takes as long as ljos-web does; the project is not held for
+    // it, only the bundle, from before anyone else can export.
+    let _held = (a.build && !a.dry_run).then(|| BeingBuilt::hold(root.join(&out)));
     drop(studio);
     let build = match tools {
         None => None,
