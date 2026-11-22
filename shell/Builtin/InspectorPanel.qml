@@ -2058,8 +2058,16 @@ Panel {
                     Layout.fillWidth: true
                     spacing: Spacing.xxs
 
-                    Item {
+                    // In the room left of the two buttons and as high as they
+                    // are: what is refused of a new property covers nothing.
+                    Note {
+                        text: panel.says("new")
+                        bindSays: panel.offersBind("new")
+                        textSays: panel.offersText("new")
+                        onBindAsked: panel.takeOffer(false)
+                        onTextAsked: panel.takeOffer(true)
                         Layout.fillWidth: true
+                        Layout.preferredHeight: add.implicitHeight
                     }
                     TextButton {
                         id: add
@@ -2074,14 +2082,6 @@ Panel {
                         enabled: newName.text !== ""
                         onClicked: panel.fromRow(() => panel.bind(newName.text, newValue.text))
                     }
-                }
-                Note {
-                    text: panel.says("new")
-                    bindSays: panel.offersBind("new")
-                    textSays: panel.offersText("new")
-                    onBindAsked: panel.takeOffer(false)
-                    onTextAsked: panel.takeOffer(true)
-                    Layout.fillWidth: true
                 }
             }
 
