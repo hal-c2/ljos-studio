@@ -1,9 +1,11 @@
-// What is wrong in the running preview: a count, and the warnings and
-// errors its last reload (or the app since) logged, each on the object
+// What is wrong in the running preview: a count, and on a click the warnings
+// and errors its last reload (or the app since) logged, each on the object
 // written on its line. Choosing one shows its document and selects that
 // object, the `node_select` an agent makes. The list is the workspace's
 // `problems`, kept by Studio: it empties as each problem is fixed, so the
-// panel keeps no state about them. A skin may restyle or move it freely.
+// panel keeps only whether the person opened it. It comes and goes as they
+// type, so place it where that moves nothing. A skin may restyle or move it
+// freely.
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
@@ -15,11 +17,14 @@ Pane {
     required property Workspace workspace
     // How many rows show before the list scrolls.
     property int rows: 4
+    // How wide it is open: a message wraps in it.
+    property int listWidth: 360
 
     readonly property var problems: workspace.problems ?? []
     readonly property int count: problems.length
     readonly property int errors: problems.filter(p => p.severity === "error").length
-    property bool open: true
+    // The person's: neither opened by a problem nor closed when the last goes.
+    property bool open: false
 
     function where(p) {
         if (p.file === undefined || p.file === "")
@@ -35,19 +40,21 @@ Pane {
             workspace.dispatch("node_select", {doc: doc, nodes: [{node: p.node}]})
     }
 
-    padding: 0
+    visible: count > 0
+    padding: 1
+    implicitWidth: (open ? listWidth : header.implicitWidth) + 2 * padding
+    implicitHeight: column.implicitHeight + 2 * padding
     Accessible.role: Accessible.Pane
     Accessible.name: count === 0 ? "No problems in the preview" : count === 1 ? "1 problem in the preview" : count + " problems in the preview"
     background: Rectangle {
-        color: Colors.surface
-        Rectangle {
-            width: parent.width
-            height: 1
-            color: Colors.border
-        }
+        radius: 8
+        color: Colors.surfaceRaised
+        border.width: 1
+        border.color: Colors.border
     }
 
     ColumnLayout {
+        id: column
         anchors.fill: parent
         spacing: 0
 
@@ -59,8 +66,9 @@ Pane {
             rightPadding: Spacing.sm
             enabled: panel.count > 0
             onClicked: panel.open = !panel.open
-            Accessible.name: panel.Accessible.name
+            Accessible.name: panel.open ? "Hide the problems" : "Show the problems"
             background: Rectangle {
+                radius: 7
                 color: header.down ? Colors.surfacePressed : header.hovered ? Colors.surfaceHover : "transparent"
             }
             contentItem: RowLayout {
@@ -100,7 +108,11 @@ Pane {
             model: panel.problems
             boundsBehavior: Flickable.StopAtBounds
             Layout.fillWidth: true
+            // Less where the panel is given less, and it scrolls.
+            Layout.fillHeight: true
+            Layout.minimumHeight: 0
             Layout.preferredHeight: Math.min(contentHeight, panel.rows * 44)
+            Layout.maximumHeight: Math.min(contentHeight, panel.rows * 44)
             ScrollBar.vertical: ScrollBar {}
 
             delegate: ItemDelegate {
