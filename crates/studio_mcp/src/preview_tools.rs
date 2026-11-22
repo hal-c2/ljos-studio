@@ -680,7 +680,7 @@ fn state_input(studio: &Mutex<Studio>, a: StateArgs, waits: bool) -> Result<Acte
         }
         if click.is_none() && inputs.is_empty() && typing.is_none() {
             return Err(SurfaceError::invalid_argument(
-                "give the `node` to read, input (a click, scroll, swipe, press or type), or both",
+                "give at least one of: the `node` to read, a click, a `scroll`, a `swipe`, keys to `press`, text to `type`",
             ));
         }
         if let Err(e) =

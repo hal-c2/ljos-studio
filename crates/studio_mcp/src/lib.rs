@@ -488,7 +488,10 @@ impl StudioServer {
         args: serde_json::Value,
     ) -> Result<ToolReply, SurfaceError> {
         let _calling = Calling::new(ctx);
-        self.telling_an_end(|| self.answer(name, ctx, args))
+        // Writes tell the watchers as they happen (`follow`); these change
+        // what a window shows without writing.
+        let shown = SHOWN_WITHOUT_WRITING.contains(&name);
+        self.telling(shown, || self.answer(name, ctx, args))
     }
 
     fn answer(
@@ -509,29 +512,26 @@ impl StudioServer {
         }
         lock(&self.studio).hidden_now();
         lock(&self.studio).breakpoint_now();
-        // Writes tell the watchers as they happen (`follow`); these change
-        // what a window shows without writing.
-        if out.is_ok() && SHOWN_WITHOUT_WRITING.contains(&name) {
-            lock(&self.studio).watchers.tell();
-        }
         out
     }
 }
 
 impl StudioServer {
-    /// A client's call and a window's picture are answered through here. A
-    /// refused one may still have ended the preview (its process was gone,
-    /// or it was closed for one that did not start), which the windows show
-    /// until told. A refusal that ended nothing tells them nothing.
-    fn telling_an_end<T>(
+    /// A client's call and a window's picture are answered through here.
+    /// The windows are told once: of what a `shown` call changed when it
+    /// answers, and of a preview any call ended, refused or answered (its
+    /// process was gone as its log was read, say), which they show until
+    /// told. A call that did neither tells them nothing.
+    fn telling<T>(
         &self,
+        shown: bool,
         call: impl FnOnce() -> Result<T, SurfaceError>,
     ) -> Result<T, SurfaceError> {
         let previews = lock(&self.studio).previews.clone();
         let ends = preview::lock(&previews).ends;
         let out = call();
         let ended = preview::lock(&previews).ends != ends;
-        if ended && out.is_err() {
+        if ended || (shown && out.is_ok()) {
             lock(&self.studio).watchers.tell();
         }
         out
@@ -634,7 +634,7 @@ impl StudioServer {
         args: serde_json::Value,
     ) -> Result<(ToolReply, Option<view::PictureOf>), SurfaceError> {
         let _calling = Calling::new(ctx);
-        self.telling_an_end(|| {
+        self.telling(false, || {
             let def = self.tools.check("preview_screenshot", ctx)?;
             let per_copy = def.per_copy_bytes();
             preview_tools::shown_screenshot(&self.studio, args, preview_tools::Picturing::AsShown)

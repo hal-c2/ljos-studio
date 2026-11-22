@@ -288,7 +288,7 @@ Feature: A shell under edit runs in a preview
         {}
         """
       Then the agent is refused with "invalid_argument"
-      And the refusal's message matches "^give at least one of: the `node` to read, a click, text to `type`$"
+      And the refusal's message matches "^give at least one of: the `node` to read, a click, a `scroll`, a `swipe`, keys to `press`, text to `type`$"
 
     Scenario: A mocked block's state is set from outside
       Given the agent has called the tool "preview_open" with:
