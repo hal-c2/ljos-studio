@@ -563,6 +563,9 @@ const NATIVE_ONLY = new Map([
   ['then ^the directory outside the project holds only "([^"]*)"$', "storage holds no links (@disk)"],
   ['then ^the answer\'s "(/[^"]*)" names the ljos-web commit Studio is pinned to$', "a bundle is written to disk (@disk)"],
   ['then ^a site builder held to the contract builds "([^"]+)", starting at "([^"]+)"$', "a bundle is written to disk (@disk)"],
+  ['given ^the empty directory "([^"]+)"$', "storage holds no empty directory (@disk)"],
+  ['given ^a site is being built from "([^"]+)"$', "a site is built on disk (@disk)"],
+  ["when ^the build ends$", "a site is built on disk (@disk)"],
 ]);
 const WEB_ONLY = new Set(['given ^storage refuses to keep "([^"]+)"$', "when ^storage keeps files again$"]);
 
