@@ -86,10 +86,14 @@ fn main() -> anyhow::Result<()> {
     let server = Arc::new(StudioServer::new(studio));
     if args.mcp {
         let server = Arc::into_inner(server).expect("nothing else holds the server yet");
-        tokio::runtime::Builder::new_current_thread()
+        let served = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()?
-            .block_on(studio_mcp::serve_stdio(server, caps))?;
+            .block_on(studio_mcp::serve_stdio(server, caps));
+        // As at the window's end: the signal thread still holds the preview,
+        // and what it wrote into the project goes when it closes.
+        close_preview();
+        served?;
         return Ok(());
     }
     // Held until the window closes; dropping it stops the endpoint and

@@ -1097,3 +1097,149 @@ fn what_qml6_loads_a_string_for_is_what_a_type_takes() {
         assert!(!crate::outline::takes_string(ty), "{ty} takes none");
     }
 }
+
+const CARD: &str = "import QtQuick
+
+Rectangle {
+    id: card
+    property string title: \"Read\"
+    property bool done: false; signal toggled(bool done)
+
+    function flip() {
+        card.done = !card.done
+    }
+
+    MouseArea { onClicked: card.flip() }
+}
+";
+
+fn replace(name: &str, text: Option<&str>) -> Op {
+    Op::ReplaceMember {
+        node: Address::Id("card".into()),
+        name: name.into(),
+        text: text.map(str::to_owned),
+    }
+}
+
+#[test]
+fn the_members_are_the_objects_declared_api_in_order() {
+    let at = CARD.find("Rectangle").unwrap();
+    let members = outline::members(CARD, at);
+    let named: Vec<_> = members.iter().map(|m| (m.kind, m.name.as_str())).collect();
+    assert_eq!(
+        named,
+        [
+            (MemberKind::Property, "title"),
+            (MemberKind::Property, "done"),
+            (MemberKind::Signal, "toggled"),
+            (MemberKind::Function, "flip"),
+        ]
+    );
+    assert_eq!(members[0].ty.as_deref(), Some("string"));
+    assert_eq!(members[0].value.as_deref(), Some("\"Read\""));
+    assert_eq!(members[2].params.as_deref(), Some("bool done"));
+    assert_eq!(
+        &CARD[members[3].start..members[3].start + 13],
+        "function flip"
+    );
+    // The handler is the MouseArea's, not the card's.
+    let area = CARD.find("MouseArea").unwrap();
+    let handlers = outline::members(CARD, area);
+    assert_eq!(handlers.len(), 1);
+    assert_eq!(handlers[0].kind, MemberKind::Handler);
+    assert!(outline::is_handler("onClicked"));
+    assert!(!outline::is_handler("one"));
+}
+
+#[test]
+fn a_member_is_rewritten_where_it_is_and_undo_gives_it_back() {
+    let mut s = session_of(CARD);
+    s.edit(
+        "Main.qml",
+        None,
+        &replace("title", Some("property string name: \"Walk\"")),
+        false,
+    )
+    .unwrap();
+    let text = s.text("Main.qml").unwrap().0.to_owned();
+    assert!(
+        text.contains("    property string name: \"Walk\"\n    property bool done"),
+        "{text}"
+    );
+    assert!(!text.contains("title"), "{text}");
+    s.undo().unwrap();
+    assert_eq!(s.text("Main.qml").unwrap().0, CARD);
+}
+
+#[test]
+fn a_function_of_several_lines_takes_the_members_indent() {
+    let mut s = session_of(CARD);
+    let text = "function toggle() {\n    card.done = !card.done\n}";
+    s.edit("Main.qml", None, &replace("flip", Some(text)), false)
+        .unwrap();
+    let now = s.text("Main.qml").unwrap().0;
+    assert!(
+        now.contains("    function toggle() {\n        card.done = !card.done\n    }\n"),
+        "{now}"
+    );
+}
+
+#[test]
+fn one_of_two_members_on_a_line_is_taken_out_with_its_semicolon() {
+    let mut s = session_of(CARD);
+    s.edit("Main.qml", None, &replace("done", None), false)
+        .unwrap();
+    let now = s.text("Main.qml").unwrap().0;
+    assert!(now.contains("\n    signal toggled(bool done)\n"), "{now}");
+    s.edit("Main.qml", None, &replace("title", None), false)
+        .unwrap();
+    let now = s.text("Main.qml").unwrap().0;
+    assert!(now.contains("    id: card\n    signal toggled"), "{now}");
+}
+
+#[test]
+fn a_member_it_lacks_or_a_name_it_has_is_refused() {
+    let mut s = session_of(CARD);
+    let err = s
+        .edit("Main.qml", None, &replace("colour", None), false)
+        .unwrap_err();
+    match err {
+        Error::NoMember { name, members, .. } => {
+            assert_eq!(name, "colour");
+            assert_eq!(members, ["title", "done", "toggled", "flip"]);
+        }
+        other => panic!("{other:?}"),
+    }
+    let err = s
+        .edit(
+            "Main.qml",
+            None,
+            &replace("title", Some("property bool done")),
+            false,
+        )
+        .unwrap_err();
+    assert!(matches!(err, Error::Invalid(_)), "{err:?}");
+    let err = s
+        .edit(
+            "Main.qml",
+            None,
+            &replace("title", Some("Rectangle {}")),
+            false,
+        )
+        .unwrap_err();
+    assert!(matches!(err, Error::Invalid(_)), "{err:?}");
+    assert_eq!(s.text("Main.qml").unwrap().0, CARD);
+}
+
+#[test]
+fn statements_one_after_another_are_a_handlers_block() {
+    assert_eq!(handler_body("card.flip()"), "card.flip()");
+    assert_eq!(handler_body("a(); b()"), "{ a(); b() }");
+    assert_eq!(handler_body("{ a(); b() }"), "{ a(); b() }");
+    assert_eq!(handler_body("a()\nb()"), "{\n    a()\n    b()\n}");
+    // One expression that happens to hold a `;` is left as it is.
+    assert_eq!(
+        handler_body("console.log(\"a; b\")"),
+        "console.log(\"a; b\")"
+    );
+}

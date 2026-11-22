@@ -131,6 +131,9 @@ pub(crate) struct Open {
     /// and a window that stays one width never changes it, so it is shown as
     /// `shown` is; and `shown` wins over it.
     pub breakpoint: Option<(String, String)>,
+    /// The file the preview runs in the document's place, when it needs one
+    /// to show anything (`harness`). After `host`, so it goes after it.
+    pub harness: Option<crate::harness::Standing>,
 }
 
 pub(crate) struct Previews {
@@ -682,6 +685,7 @@ mod tests {
                 clicks: 0,
                 shown: None,
                 breakpoint: None,
+                harness: None,
             }),
             ..Previews::new(Arc::new(Still))
         };

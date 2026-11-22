@@ -18,7 +18,8 @@ pub(crate) struct Extracted {
     pub(crate) edit: EditOut,
     pub(crate) component: String,
     pub(crate) aliases: Vec<String>,
-    pub(crate) name_unsure: bool,
+    /// Why Studio cannot vouch for the name, when it cannot.
+    pub(crate) name_unsure: Option<String>,
 }
 
 fn check_name(name: &str) -> Result<(), SurfaceError> {
@@ -372,12 +373,77 @@ fn alias_insertion(
     }
 }
 
+/// The strings the object's inner objects show, each made an alias of the
+/// new type so the instance says them and another instance can say others:
+/// `label.text: "Hi"` becomes `property alias labelText: label.text`, and
+/// the instance `labelText: "Hi"`. The file keeps the value too, as what an
+/// instance that sets none shows. Only an object with an id can be aliased,
+/// and only one made once with the component: one in a delegate is made by
+/// its view, as often as it likes.
+fn exposed(node: &Node, tree: &[Node], outward: &mut Outward) -> Vec<String> {
+    const VIEWS: &[&str] = &[
+        "Component",
+        "Repeater",
+        "ListView",
+        "GridView",
+        "PathView",
+        "TableView",
+        "Instantiator",
+        "Loader",
+    ];
+    let mut taken: Vec<String> = node
+        .properties
+        .iter()
+        .cloned()
+        .chain(node.bindings.iter().map(|b| b.name.clone()))
+        .chain(outward.aliases.iter().map(|(name, ..)| name.clone()))
+        .collect();
+    let mut set = Vec::new();
+    for inner in tree
+        .iter()
+        .filter(|n| n.start > node.start && n.end <= node.end)
+    {
+        let Some(id) = &inner.id else { continue };
+        let steps = &inner.path.0[node.path.0.len()..];
+        let made_once = steps.iter().all(|s| matches!(s, Step::Child(_)))
+            && tree.iter().all(|outer| {
+                !(outer.start > node.start
+                    && outer.start < inner.start
+                    && inner.end <= outer.end
+                    && VIEWS.contains(&outer.ty.rsplit('.').next().unwrap_or(&outer.ty)))
+            });
+        if !made_once {
+            continue;
+        }
+        for b in &inner.bindings {
+            let string = b.value.starts_with('"') || b.value.starts_with('\'');
+            if !b.literal || b.declared || !string || b.name.contains('.') || b.value.contains('\n')
+            {
+                continue;
+            }
+            let known = outward
+                .aliases
+                .iter()
+                .position(|(_, i, p)| i == id && *p == b.name);
+            let index = known.unwrap_or_else(|| {
+                let alias = fresh_id(&format!("{id}{}", capitalised(&b.name)), &taken);
+                taken.push(alias.clone());
+                outward.aliases.push((alias, id.clone(), b.name.clone()));
+                outward.aliases.len() - 1
+            });
+            set.push(format!("{}: {}", outward.aliases[index].0, b.value));
+        }
+    }
+    set
+}
+
 fn instance_text(
     text: &str,
     node: &Node,
     name: &str,
     id: Option<&str>,
     kept: &[Range<usize>],
+    set: &[String],
 ) -> String {
     let members: Vec<String> = id
         .map(|id| format!("id: {id}"))
@@ -386,6 +452,7 @@ fn instance_text(
             kept.iter()
                 .map(|k| text[k.clone()].trim_end_matches([';', ' ']).to_owned()),
         )
+        .chain(set.iter().cloned())
         .collect();
     if members.is_empty() {
         format!("{name} {{}}")
@@ -447,7 +514,11 @@ pub(crate) fn extract(
     // An import is found before the file beside the document: the instance
     // would be the other type, and the object gone from what shows.
     let store = studio.session.store();
-    let answer = crate::signals::Names::of(store, doc, &text, &[]).map(|n| n.type_is(name, ""));
+    let names = crate::signals::Names::of(store, doc, &text, &[]);
+    let answer = names.as_ref().map(|n| n.type_is(name, ""));
+    let name_unsure = (answer == Some(crate::signals::TypeIs::Unsure))
+        .then(|| names.as_ref().map(|n| n.unsure_why(name)))
+        .flatten();
     if answer == Some(crate::signals::TypeIs::Known) {
         return Err(refused(
             "name_taken",
@@ -464,10 +535,11 @@ pub(crate) fn extract(
         .collect();
     let kept = outline::place_members(&text, node.start);
     check_reads_in(&text, &node, &tree, &kept)?;
-    let outward = uses_from_outside(&text, &node, &tree, &kept)?;
+    let mut outward = uses_from_outside(&text, &node, &tree, &kept)?;
+    let set = exposed(&node, &tree, &mut outward);
     let taken: Vec<String> = tree.iter().filter_map(|n| n.id.clone()).collect();
     let id = node.id.clone().or_else(|| {
-        (!outward.aliases.is_empty()).then(|| {
+        (!outward.rewrites.is_empty()).then(|| {
             let mut stem = name.to_owned();
             stem[..1].make_ascii_lowercase();
             fresh_id(&stem, &taken)
@@ -477,7 +549,7 @@ pub(crate) fn extract(
     let new_text = component_text(&text, &node, &kept, &outward, root);
     let mut changes: Vec<(Range<usize>, String)> = vec![(
         node.start..node.end,
-        instance_text(&text, &node, name, id.as_deref(), &kept),
+        instance_text(&text, &node, name, id.as_deref(), &kept, &set),
     )];
     changes.extend(outward.rewrites.iter().map(|(range, index)| {
         let instance = id.as_deref().unwrap_or_default();
@@ -508,6 +580,6 @@ pub(crate) fn extract(
         edit: outcome.into(),
         component,
         aliases: outward.aliases.into_iter().map(|(name, ..)| name).collect(),
-        name_unsure: answer == Some(crate::signals::TypeIs::Unsure),
+        name_unsure,
     })
 }

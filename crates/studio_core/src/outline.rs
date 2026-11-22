@@ -421,6 +421,146 @@ pub fn place_members(source: &str, start: usize) -> Vec<std::ops::Range<usize>> 
         .collect()
 }
 
+/// What kind of member of its object's API a [`Member`] is.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MemberKind {
+    Property,
+    Signal,
+    Function,
+    /// A signal handler, `onClicked: ...`.
+    Handler,
+}
+
+/// One member an object declares or handles: its API as a designer edits
+/// it. Plain bindings are not members; they are its `bindings`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct Member {
+    pub kind: MemberKind,
+    pub name: String,
+    /// A property's type as written (`string`, `list<Contribution>`, `alias`).
+    #[serde(rename = "type", skip_serializing_if = "Option::is_none")]
+    pub ty: Option<String>,
+    /// A property's default, a handler's or function's body, as written.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub value: Option<String>,
+    /// A signal's or function's parameters as written, without parentheses.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub params: Option<String>,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub readonly: bool,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub required: bool,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub default: bool,
+    /// Its byte range: the member whole, as written.
+    pub start: usize,
+    pub end: usize,
+}
+
+/// Whether `name` is a signal handler's: `on` and a capital.
+pub fn is_handler(name: &str) -> bool {
+    name.strip_prefix("on")
+        .is_some_and(|rest| rest.starts_with(|c: char| c.is_ascii_uppercase()))
+}
+
+/// The properties, signals, functions and handlers the object starting at
+/// `start` writes, in order.
+pub fn members(source: &str, start: usize) -> Vec<Member> {
+    let allocator = Allocator::default();
+    let parsed = qml_syntax::parse(&allocator, source);
+    let Some(object) = object_at(&parsed.document.root, start) else {
+        return Vec::new();
+    };
+    let value_text = |value: &QmlBindingValue<'_>| match value {
+        QmlBindingValue::Expression(e) => Some(qml_syntax::text(source, e.span()).to_owned()),
+        QmlBindingValue::Statement(s) => Some(qml_syntax::text(source, s.span()).to_owned()),
+        QmlBindingValue::Object(o) => Some(qml_syntax::text(source, o.span).to_owned()),
+        QmlBindingValue::Objects(list) => {
+            array_span(source, list).map(|span| qml_syntax::text(source, span).to_owned())
+        }
+    };
+    let blank = |kind, name: String, start: u32, end: u32| Member {
+        kind,
+        name,
+        ty: None,
+        value: None,
+        params: None,
+        readonly: false,
+        required: false,
+        default: false,
+        start: start as usize,
+        end: end as usize,
+    };
+    object
+        .members
+        .iter()
+        .filter_map(|member| match member {
+            QmlMember::Property(p) => Some(Member {
+                ty: p
+                    .type_name
+                    .as_ref()
+                    .map(|t| qml_syntax::text(source, t.span).to_owned()),
+                value: p.value.as_ref().and_then(value_text),
+                readonly: p.is_readonly,
+                required: p.is_required,
+                default: p.is_default,
+                ..blank(
+                    MemberKind::Property,
+                    p.name.name.to_string(),
+                    p.span.start,
+                    p.span.end,
+                )
+            }),
+            QmlMember::Signal(s) => {
+                let text = qml_syntax::text(source, s.span);
+                let params = text
+                    .find('(')
+                    .zip(text.rfind(')'))
+                    .filter(|(open, close)| open < close)
+                    .map(|(open, close)| text[open + 1..close].trim().to_owned());
+                Some(Member {
+                    params,
+                    ..blank(
+                        MemberKind::Signal,
+                        s.name.name.to_string(),
+                        s.span.start,
+                        s.span.end,
+                    )
+                })
+            }
+            QmlMember::Function(f) => {
+                let name = f.name()?.to_string();
+                let params = qml_syntax::text(source, f.params.span);
+                let params = params
+                    .strip_prefix('(')
+                    .and_then(|p| p.strip_suffix(')'))
+                    .unwrap_or(params)
+                    .trim()
+                    .to_owned();
+                Some(Member {
+                    params: Some(params),
+                    value: f
+                        .body
+                        .as_ref()
+                        .map(|b| qml_syntax::text(source, b.span).to_owned()),
+                    ..blank(MemberKind::Function, name, f.span.start, f.span.end)
+                })
+            }
+            QmlMember::Binding(b) if is_handler(&b.name.to_string()) => Some(Member {
+                value: value_text(&b.value),
+                ..blank(
+                    MemberKind::Handler,
+                    b.name.to_string(),
+                    b.span.start,
+                    b.span.end,
+                )
+            }),
+            _ => None,
+        })
+        .collect()
+}
+
 /// Where the id of the object starting at `start` is written.
 pub fn id_member(source: &str, start: usize) -> Option<std::ops::Range<usize>> {
     let allocator = Allocator::default();

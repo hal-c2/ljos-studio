@@ -272,7 +272,7 @@ headless). Its shell is QML under `shell/`, and it binds one block,
   `text`), `inspector` (the selected object's bindings: `name`, `value`),
   `states` (the selected object's states: `name`, `when`, `changes`),
   `palette` (the project's blocks: `module`, `name`, `summary`,
-  `category`, `slots`), `done` and `undone` (history labels), `preview`
+  `category`, `slots`, `doc`: the document it is written in), `done` and `undone` (history labels), `preview`
   (`target`, `picture`, `width`, `height`, `generation`, `variant`: the
   root's state the preview's width turns on), `error`.
 - **Its one action**, `dispatch(tool, args)`, takes a Studio tool's name
@@ -336,6 +336,14 @@ and the self-reskin are the other half.
   block is selected, a field and a "Contribute to controls" button for
   each. Every control has an accessible role and name, and the scenarios
   (`features/ui/variants.feature`) find them by those.
+
+  `shell/Builtin/BlockActions.qml` shows, while the open document is a
+  block, its slots, a "Slot name" field with "Add slot" (`node_insert` with
+  `slot`, into the selected object or the root) and "Make a shell"
+  (`document_new` with `shell`, writing `<Block>Shell.qml` and opening it).
+  It uses only `Ljos.Design` roles; where it stands is the shell's layout.
+  `shell/Builtin/ProjectEntry.qml` opens a project of several documents on
+  `Main.qml`, its entry, on the window's first look.
 
 DECISION: the frame names the root's state whose `when` is exactly a
 breakpoint's condition for the frame's width. Studio does not evaluate

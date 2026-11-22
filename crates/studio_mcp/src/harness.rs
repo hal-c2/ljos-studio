@@ -1,0 +1,477 @@
+//! What a document opened alone needs before it shows anything.
+//!
+//! A delegate or a component that wants `required property`s set fails to
+//! load as an entry: nothing sets them. A store (a block that holds a model
+//! and functions) loads, and shows an empty window. Either one is previewed
+//! through a harness: a file beside it that makes one instance, with sample
+//! values for what it requires, and, for a store, a sheet of what it offers
+//! read live from that instance. The harness is a dot-file, which Studio's
+//! lists, its watcher and an export all pass over, while `ljos run` takes
+//! it as an entry like any other; the component's directory is its own, so
+//! it sees the same types and imports.
+
+use std::path::{Path, PathBuf};
+
+use serde_json::Value;
+use studio_core::{
+    Step, Store,
+    outline::{self, Member, MemberKind, Node},
+};
+
+/// Sample values given once for a document, by its path and then by
+/// property name, each a JSON value.
+pub(crate) const SAMPLES: &str = ".studio/samples.json";
+
+/// How each harness starts, which tells Studio's file from a person's.
+const MARK: &str = "// Studio's preview of ";
+
+/// Types that show nothing: an object holding only these is a store.
+const SHOW_NOTHING: &[&str] = &[
+    "QtObject",
+    "ListModel",
+    "JsonListModel",
+    "Timer",
+    "Connections",
+    "Instantiator",
+    "Binding",
+    "Settings",
+    "WorkerScript",
+    "Component",
+    "Contribution",
+    "ItemSelectionModel",
+    "FontLoader",
+    "Shortcut",
+];
+
+/// What a harness stands in for a document with: its path and its text.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) struct Harness {
+    pub path: String,
+    pub text: String,
+}
+
+impl Harness {
+    /// This harness as written into the project at `dir`.
+    pub fn standing(&self, dir: Option<&Path>) -> Standing {
+        Standing {
+            path: self.path.clone(),
+            file: dir.map(|dir| dir.join(&self.path)),
+        }
+    }
+}
+
+/// A written harness. Its file goes when this does, so that each way a
+/// preview ends (another one, a crash, another project, Studio closing)
+/// takes it along: not all of those have the project's store in hand.
+#[derive(Debug)]
+pub(crate) struct Standing {
+    pub path: String,
+    /// None in a project without a directory, which only its store reaches.
+    file: Option<PathBuf>,
+}
+
+impl Drop for Standing {
+    fn drop(&mut self) {
+        if let Some(file) = &self.file {
+            // Already gone is as good.
+            let _ = std::fs::remove_file(file);
+        }
+    }
+}
+
+fn short(ty: &str) -> &str {
+    ty.rsplit('.').next().unwrap_or(ty)
+}
+
+/// The harness `doc` is previewed through, or `None` when it shows itself.
+pub(crate) fn harness(store: &dyn Store, doc: &str) -> Option<Harness> {
+    let (dir, file) = match doc.rsplit_once('/') {
+        Some((dir, file)) => (Some(dir), file),
+        None => (None, doc),
+    };
+    let name = file.strip_suffix(".qml")?;
+    if !name.starts_with(|c: char| c.is_ascii_uppercase())
+        || !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+    {
+        return None;
+    }
+    let text = store.read(doc).ok()?;
+    let nodes = outline::outline(&text)?;
+    let root = nodes.first()?;
+    let root_ty = short(&root.ty);
+    if matches!(root_ty, "Window" | "ApplicationWindow") {
+        return None;
+    }
+    let members = outline::members(&text, root.start);
+    let samples = samples(store, doc);
+    let sets = sets(&members, &samples);
+    let store_like = shows_nothing(&nodes, root, &members, is_block(store, dir, file));
+    let requires = members
+        .iter()
+        .any(|m| m.kind == MemberKind::Property && m.required);
+    let text = if store_like {
+        sheet(name, &members, &sets)
+    } else if requires {
+        instance(name, root, &sets)
+    } else {
+        return None;
+    };
+    let path = match dir {
+        Some(dir) => format!("{dir}/.{name}.preview.qml"),
+        None => format!(".{name}.preview.qml"),
+    };
+    // A file of that name that Studio did not write is the person's.
+    if store.exists(&path) && !store.read(&path).is_ok_and(|old| old.starts_with(MARK)) {
+        return None;
+    }
+    Some(Harness { path, text })
+}
+
+/// Whether the `qmldir` beside the file declares it a block.
+fn is_block(store: &dyn Store, dir: Option<&str>, file: &str) -> bool {
+    let qmldir = dir.map_or_else(|| "qmldir".to_owned(), |dir| format!("{dir}/qmldir"));
+    store.read(&qmldir).is_ok_and(|text| {
+        text.lines().any(|line| {
+            let words: Vec<&str> = line.split_whitespace().collect();
+            matches!(words.as_slice(), ["#", "block", _, _, f, ..] if *f == file)
+        })
+    })
+}
+
+/// A root that shows nothing: a type that never does, or a block that is a
+/// plain `Item` with no size, whose children show nothing either, which
+/// offers something. A document that is no block is left to show itself:
+/// an app's root may well start out so.
+fn shows_nothing(nodes: &[Node], root: &Node, members: &[Member], block: bool) -> bool {
+    let ty = short(&root.ty);
+    if SHOW_NOTHING.contains(&ty) {
+        return true;
+    }
+    let sized = root.bindings.iter().any(|b| {
+        matches!(
+            b.name.as_str(),
+            "width" | "height" | "implicitWidth" | "implicitHeight"
+        ) || b.name.starts_with("anchors")
+    });
+    let children_show_nothing = nodes
+        .iter()
+        .filter(|n| matches!(n.path.0.as_slice(), [Step::Child(_)]))
+        .all(|n| SHOW_NOTHING.contains(&short(&n.ty)));
+    block
+        && ty == "Item"
+        && !sized
+        && children_show_nothing
+        && members.iter().any(|m| m.kind != MemberKind::Handler)
+}
+
+fn samples(store: &dyn Store, doc: &str) -> serde_json::Map<String, Value> {
+    store
+        .read(SAMPLES)
+        .ok()
+        .and_then(|text| serde_json::from_str::<Value>(&text).ok())
+        .and_then(|all| all.get(doc).and_then(Value::as_object).cloned())
+        .unwrap_or_default()
+}
+
+/// What the harness sets on the instance: a sample given for any declared
+/// property, else a value of its type for a required one.
+fn sets(members: &[Member], samples: &serde_json::Map<String, Value>) -> Vec<(String, String)> {
+    members
+        .iter()
+        .filter(|m| m.kind == MemberKind::Property && !m.readonly)
+        .filter(|m| m.ty.as_deref() != Some("alias") || samples.contains_key(&m.name))
+        .filter_map(|m| {
+            let value = match samples.get(&m.name) {
+                Some(given) => written(given),
+                None if m.required => typed(m.ty.as_deref().unwrap_or("var"), &m.name),
+                None => return None,
+            };
+            Some((m.name.clone(), value))
+        })
+        .collect()
+}
+
+fn written(value: &Value) -> String {
+    match value {
+        // An object literal in a binding is read as a block without these.
+        Value::Object(_) => format!("({value})"),
+        _ => value.to_string(),
+    }
+}
+
+/// `dueDate` as a person would title it: "Due date".
+fn titled(name: &str) -> String {
+    let mut out = String::new();
+    for (i, c) in name.chars().enumerate() {
+        if i == 0 {
+            out.extend(c.to_uppercase());
+        } else if c.is_ascii_uppercase() {
+            out.push(' ');
+            out.extend(c.to_lowercase());
+        } else if c == '_' {
+            out.push(' ');
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
+/// A value of `ty` that shows: a property's name for a text, small numbers.
+fn typed(ty: &str, name: &str) -> String {
+    match ty {
+        "string" | "var" | "variant" => Value::String(titled(name)).to_string(),
+        "bool" => "false".to_owned(),
+        "int" if name == "index" => "0".to_owned(),
+        "int" => "3".to_owned(),
+        "real" | "double" | "number" => "0.5".to_owned(),
+        "color" => "\"#6750a4\"".to_owned(),
+        "url" => "\"\"".to_owned(),
+        "date" => "new Date()".to_owned(),
+        _ if ty.starts_with("list<") => "[]".to_owned(),
+        _ => "null".to_owned(),
+    }
+}
+
+fn instance(name: &str, root: &Node, sets: &[(String, String)]) -> String {
+    // A delegate sizes itself by its view, which a harness has not got: it
+    // is given a card's size, as one with no size at all is.
+    let own = |side: &str, implicit: &str| {
+        root.bindings.iter().any(|b| {
+            b.name == implicit
+                || (b.name == side
+                    && ![
+                        "ListView.",
+                        "GridView.",
+                        "PathView.",
+                        "TableView.",
+                        "parent",
+                    ]
+                    .iter()
+                    .any(|view| b.value.contains(view)))
+        })
+    };
+    let mut body = String::new();
+    if !own("width", "implicitWidth") {
+        body.push_str("        width: 320\n");
+    }
+    if !own("height", "implicitHeight") {
+        body.push_str("        height: 72\n");
+    }
+    for (property, value) in sets {
+        body.push_str(&format!("        {property}: {value}\n"));
+    }
+    format!(
+        "{MARK}{name}.qml opened alone, with sample values.\n\
+         import QtQuick\n\n\
+         Item {{\n    width: subject.width\n    height: subject.height\n\n    \
+         {name} {{\n        id: subject\n{body}    }}\n}}\n"
+    )
+}
+
+fn quoted(text: &str) -> String {
+    Value::String(text.to_owned()).to_string()
+}
+
+fn sheet(name: &str, members: &[Member], sets: &[(String, String)]) -> String {
+    let set: String = sets
+        .iter()
+        .map(|(property, value)| format!("        {property}: {value}\n"))
+        .collect();
+    let mut lines = Vec::new();
+    let heading = |lines: &mut Vec<String>, kind: MemberKind, title: &str| {
+        let of_kind: Vec<&Member> = members.iter().filter(|m| m.kind == kind).collect();
+        if of_kind.is_empty() {
+            return;
+        }
+        lines.push(format!(
+            "        Text {{ text: {}; font.bold: true; topPadding: 8; color: \"#1c1b1f\"; Accessible.role: Accessible.StaticText }}",
+            quoted(title)
+        ));
+        for m in of_kind {
+            let line = match kind {
+                MemberKind::Property => format!(
+                    "{} + root.shown(subject.{})",
+                    quoted(&format!(
+                        "{}{}: ",
+                        m.name,
+                        m.ty.as_deref()
+                            .map(|ty| format!(" ({ty})"))
+                            .unwrap_or_default()
+                    )),
+                    m.name
+                ),
+                MemberKind::Signal | MemberKind::Function => quoted(&format!(
+                    "{}({})",
+                    m.name,
+                    m.params.as_deref().unwrap_or_default()
+                )),
+                MemberKind::Handler => return,
+            };
+            lines.push(format!(
+                "        Text {{ text: {line}; color: \"#1c1b1f\"; width: parent.width; wrapMode: Text.Wrap; Accessible.role: Accessible.StaticText }}"
+            ));
+        }
+    };
+    heading(&mut lines, MemberKind::Property, "Properties");
+    heading(&mut lines, MemberKind::Function, "Functions");
+    heading(&mut lines, MemberKind::Signal, "Signals");
+    let lines = lines.join("\n");
+    let title = quoted(name);
+    format!(
+        "{MARK}{name}.qml opened alone: it shows nothing itself,\n\
+         // so this is what it offers, read from a live instance.\n\
+         import QtQuick\n\n\
+         Rectangle {{\n    id: root\n    width: 420\n    height: sheet.implicitHeight + 32\n    \
+         color: \"#f6f6f8\"\n\n    \
+         function shown(value) {{\n        \
+         if (value === null || value === undefined)\n            return String(value)\n        \
+         if (value.count !== undefined)\n            return value.count + \" rows\"\n        \
+         return String(value)\n    }}\n\n    \
+         {name} {{\n        id: subject\n{set}    }}\n\n    \
+         Column {{\n        id: sheet\n        x: 16\n        y: 16\n        \
+         width: parent.width - 32\n        spacing: 4\n\n        \
+         Text {{ text: {title}; font.pixelSize: 20; font.bold: true; color: \"#1c1b1f\"; Accessible.role: Accessible.StaticText }}\n        \
+         Text {{ text: \"Shows nothing itself. What it offers:\"; color: \"#5f5d66\"; Accessible.role: Accessible.StaticText }}\n\
+         {lines}\n    }}\n}}\n"
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use studio_core::MemStore;
+
+    use super::*;
+
+    fn store(files: &[(&str, &str)]) -> MemStore {
+        let store = MemStore::default();
+        for (path, text) in files {
+            store.write(path, text).unwrap();
+        }
+        store
+    }
+
+    #[test]
+    fn a_component_that_requires_properties_is_given_samples() {
+        let store = store(&[(
+            "Blocks/Card.qml",
+            "import QtQuick\nRectangle {\n    required property string title\n    \
+             required property bool done\n    property int count: 1\n}\n",
+        )]);
+        let h = harness(&store, "Blocks/Card.qml").unwrap();
+        assert_eq!(h.path, "Blocks/.Card.preview.qml");
+        assert!(h.text.contains("        width: 320\n        height: 72\n"));
+        assert!(h.text.contains("title: \"Title\"\n"));
+        assert!(h.text.contains("done: false\n"));
+        assert!(!h.text.contains("count:"));
+        assert!(outline::outline(&h.text).is_some());
+    }
+
+    #[test]
+    fn samples_given_once_win() {
+        let store = store(&[
+            (
+                "Card.qml",
+                "import QtQuick\nItem {\n    implicitWidth: 10\n    \
+                 required property string title\n    property int count\n}\n",
+            ),
+            (
+                SAMPLES,
+                r#"{"Card.qml": {"title": "Read a book", "count": 4}}"#,
+            ),
+        ]);
+        let h = harness(&store, "Card.qml").unwrap();
+        assert!(h.text.contains("title: \"Read a book\"\n"));
+        assert!(h.text.contains("count: 4\n"));
+        assert!(!h.text.contains("width: 320"));
+        assert!(h.text.contains("height: 72"));
+    }
+
+    #[test]
+    fn a_delegate_sized_by_its_view_gets_a_size() {
+        let store = store(&[(
+            "Row.qml",
+            "import QtQuick\nItem {\n    width: ListView.view.width\n    height: 40\n    \
+             required property string name\n}\n",
+        )]);
+        let h = harness(&store, "Row.qml").unwrap();
+        assert!(h.text.contains("width: 320"));
+        assert!(!h.text.contains("height: 72"));
+    }
+
+    #[test]
+    fn a_store_shows_what_it_offers() {
+        let store = store(&[
+            (
+                "Blocks/qmldir",
+                "module Blocks\n# block HabitStore 1.0 HabitStore.qml\n",
+            ),
+            (
+                "Blocks/HabitStore.qml",
+                "import QtQuick\nItem {\n    property alias habits: model\n    \
+             signal added(string title)\n    ListModel { id: model }\n    \
+             function add(title) { model.append({ title: title }) }\n}\n",
+            ),
+        ]);
+        let h = harness(&store, "Blocks/HabitStore.qml").unwrap();
+        assert!(h.text.contains("HabitStore {\n        id: subject\n    }"));
+        assert!(h.text.contains("root.shown(subject.habits)"));
+        assert!(h.text.contains("\"add(title)\""));
+        assert!(h.text.contains("\"added(string title)\""));
+        assert!(outline::outline(&h.text).is_some());
+    }
+
+    #[test]
+    fn what_shows_itself_has_no_harness() {
+        let store = store(&[
+            ("Main.qml", "import QtQuick\nItem {\n    Rectangle {}\n}\n"),
+            (
+                "Win.qml",
+                "import QtQuick\nWindow {\n    required property int n\n}\n",
+            ),
+            (
+                "lower.qml",
+                "import QtQuick\nItem {\n    required property int n\n}\n",
+            ),
+            ("Empty.qml", "import QtQuick\nItem {}\n"),
+            (
+                "Holds.qml",
+                "import QtQuick\nItem {\n    property int n\n}\n",
+            ),
+        ]);
+        for doc in ["Main.qml", "Win.qml", "lower.qml", "Empty.qml", "Holds.qml"] {
+            assert_eq!(harness(&store, doc), None, "{doc}");
+        }
+    }
+
+    #[test]
+    fn only_studios_own_file_is_replaced() {
+        let card = "import QtQuick\nItem {\n    required property int n\n}\n";
+        let own = store(&[("Card.qml", card)]);
+        let h = harness(&own, "Card.qml").unwrap();
+        assert!(h.text.starts_with(MARK));
+        own.write(&h.path, &h.text).unwrap();
+        assert_eq!(harness(&own, "Card.qml"), Some(h));
+        let theirs = store(&[("Card.qml", card), (".Card.preview.qml", "// Mine\n")]);
+        assert_eq!(harness(&theirs, "Card.qml"), None);
+    }
+
+    #[test]
+    fn a_standing_harness_takes_its_file_along() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join(".Card.preview.qml");
+        std::fs::write(&file, MARK).unwrap();
+        let h = Harness {
+            path: ".Card.preview.qml".to_owned(),
+            text: MARK.to_owned(),
+        };
+        drop(h.standing(Some(dir.path())));
+        assert!(!file.exists());
+    }
+
+    #[test]
+    fn names_are_titled() {
+        assert_eq!(titled("dueDate"), "Due date");
+        assert_eq!(titled("title"), "Title");
+    }
+}

@@ -331,6 +331,41 @@ impl<'s> Names<'s> {
         }
     }
 
+    /// Why [`type_is`](Self::type_is) answers `Unsure` for `ty`, in words an
+    /// agent or a person can act on.
+    pub(crate) fn unsure_why(&self, ty: &str) -> String {
+        let named = |import: &Import| match import {
+            Import::Module { uri, .. } => format!("`{uri}`"),
+            Import::Path { path, .. } => format!("`\"{path}\"`"),
+        };
+        let unread: Vec<String> = self
+            .scope
+            .imports
+            .iter()
+            .filter(|import| self.unread(import))
+            .map(named)
+            .collect();
+        if !unread.is_empty() {
+            return format!(
+                "Studio has no description of {}, which this document imports: it may have a \
+                 type `{ty}`, and an instance would then be that type, not the new file. The \
+                 preview shows which; a name no module would use is safer.",
+                unread.join(", ")
+            );
+        }
+        let all: Vec<String> = self.scope.imports.iter().map(named).collect();
+        format!(
+            "Studio never saw qml6 try the name `{ty}` against {}, so it cannot say none of them \
+             has it. If one has, the instance is that type, not the new file. The preview shows \
+             which; a name no module would use is safer.",
+            if all.is_empty() {
+                "the toolkit".to_owned()
+            } else {
+                all.join(", ")
+            }
+        )
+    }
+
     /// Whether the document imports a module whose types nothing here knows.
     fn undescribed(&self) -> bool {
         self.scope.imports.iter().any(|import| self.unread(import))

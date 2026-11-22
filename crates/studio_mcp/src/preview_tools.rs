@@ -319,10 +319,35 @@ fn open(studio: &Mutex<Studio>, a: OpenArgs) -> Result<OpenOut, SurfaceError> {
             return Err(preview_error(e));
         }
     }
-    let reuse = previews.open.as_ref().is_some_and(|o| o.doc == a.doc);
+    let store = studio.session.store();
+    let harness = crate::harness::harness(store, &a.doc);
+    // One that has come to need a harness cannot load where it runs.
+    let reuse = previews
+        .open
+        .as_ref()
+        .is_some_and(|o| o.doc == a.doc && (harness.is_none() || o.harness.is_some()));
     let mut state_kept = true;
+    let write_harness = |h: &crate::harness::Harness| {
+        if store.read(&h.path).ok().as_deref() == Some(h.text.as_str()) {
+            return Ok(());
+        }
+        store.write(&h.path, &h.text).map_err(|e| {
+            SurfaceError::new(
+                ErrorCode::Internal,
+                format!("the preview's harness `{}`: {e}", h.path),
+            )
+        })
+    };
     if reuse {
         let open = previews.open.as_mut().expect("checked");
+        // What the document requires may have changed since: the running
+        // harness follows it, as the preview follows the document.
+        if let Some(h) = harness
+            .as_ref()
+            .filter(|h| open.harness.as_ref().is_some_and(|s| s.path == h.path))
+        {
+            write_harness(h)?;
+        }
         let mut reloads = Vec::new();
         let same = open.screen == size && open.fit == fit;
         let was = open.fit;
@@ -360,15 +385,22 @@ fn open(studio: &Mutex<Studio>, a: OpenArgs) -> Result<OpenOut, SurfaceError> {
         // One preview at a time: the last one ends before the next starts.
         if let Some(mut last) = previews.open.take() {
             last.host.close();
+            if let Some(standing) = &last.harness {
+                // The store's to remove where the project has no directory.
+                let _ = store.remove(&standing.path);
+            }
         }
+        let standing = match &harness {
+            Some(h) => {
+                write_harness(h)?;
+                Some(h.standing(dir.as_deref()))
+            }
+            None => None,
+        };
+        let entry = harness.as_ref().map_or(a.doc.as_str(), |h| h.path.as_str());
         let mut host = hosts.make(dir.as_deref()).expect("checked: it runs here");
-        host.open(&preview::spec(
-            studio.session.store(),
-            &a.doc,
-            size,
-            &aliases,
-        ))
-        .map_err(preview_error)?;
+        host.open(&preview::spec(store, entry, size, &aliases))
+            .map_err(preview_error)?;
         previews.log_mark = 0;
         previews.events.push(PreviewEvent::Opened {
             entry: a.doc.clone(),
@@ -393,6 +425,7 @@ fn open(studio: &Mutex<Studio>, a: OpenArgs) -> Result<OpenOut, SurfaceError> {
             clicks: 0,
             shown: None,
             breakpoint: None,
+            harness: standing,
         });
         previews.write_hidden();
         let open = previews.open.as_mut().expect("just opened");

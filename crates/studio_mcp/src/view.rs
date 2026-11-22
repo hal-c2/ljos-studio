@@ -92,6 +92,8 @@ pub struct Offered {
     pub category: String,
     /// The slots it offers, by name.
     pub slots: Vec<String>,
+    /// The document it is written in; empty for a native block.
+    pub doc: String,
 }
 
 /// A role of `Ljos.Design` as the tokens panel lists it: what the window
@@ -308,6 +310,10 @@ impl Studio {
                 summary: b.summary.clone().unwrap_or_default(),
                 category: b.category.clone().unwrap_or_default(),
                 slots: b.slots.iter().map(|s| s.name.clone()).collect(),
+                doc: match &b.origin {
+                    ljos_blocks::Origin::Qml { file } => file.clone(),
+                    ljos_blocks::Origin::Rust => String::new(),
+                },
             })
             .collect();
         view.preview = preview_of(&preview::lock(&self.previews));

@@ -1025,6 +1025,7 @@ Feature: A tool does not write what would not load or would not show
       """
     Then the file "Sprocket.qml" contains "Rectangle"
     And the answer's "/name_unsure" is true
+    And the answer's "/name_unsure_why" contains "Sprocket"
 
   Scenario: A paste that needs what no plain import brings is refused
     Given the agent has called the tool "node_arrange" with:

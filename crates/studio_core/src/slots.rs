@@ -42,6 +42,31 @@ pub fn contribution(
     delegate: &str,
     unit: &str,
 ) -> Result<String, Error> {
+    written(Some(slot), mode, order, delegate, unit)
+}
+
+/// The `Contribution` an instance of a block gives its own slot as the
+/// slot property's value: it names no `slot`, so no other block's slot of
+/// that name shows it.
+///
+/// # Errors
+/// As [`contribution`].
+pub fn own(
+    mode: Option<Mode>,
+    order: Option<i64>,
+    delegate: &str,
+    unit: &str,
+) -> Result<String, Error> {
+    written(None, mode, order, delegate, unit)
+}
+
+fn written(
+    slot: Option<&str>,
+    mode: Option<Mode>,
+    order: Option<i64>,
+    delegate: &str,
+    unit: &str,
+) -> Result<String, Error> {
     let delegate = delegate.trim();
     let allocator = Allocator::default();
     let parsed = qml_syntax::parse(&allocator, delegate);
@@ -62,10 +87,13 @@ pub fn contribution(
             "the delegate is one object, with no imports".to_owned(),
         ));
     }
-    let mut out = format!(
-        "Contribution {{\n{unit}slot: {}\n",
-        crate::Literal::String(slot.to_owned()).to_qml()
-    );
+    let mut out = String::from("Contribution {\n");
+    if let Some(slot) = slot {
+        out.push_str(&format!(
+            "{unit}slot: {}\n",
+            crate::Literal::String(slot.to_owned()).to_qml()
+        ));
+    }
     if let Some(mode) = mode {
         out.push_str(&format!("{unit}mode: {}\n", mode.qml()));
     }

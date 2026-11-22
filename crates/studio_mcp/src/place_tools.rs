@@ -162,6 +162,10 @@ struct ArrangeOut {
     /// this name. If one has, the instance is that type, and not the new file.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     name_unsure: bool,
+    /// `component_extract`, with `name_unsure`: why Studio cannot tell, and
+    /// what to do about it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    name_unsure_why: Option<String>,
     /// `paste`: what it imported for what it holds.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     imported: Vec<String>,
@@ -1084,7 +1088,8 @@ fn arrange(studio: &mut Studio, a: ArrangeArgs) -> Result<ArrangeOut, SurfaceErr
                 edit: Some(made.edit),
                 component: Some(made.component),
                 aliases: made.aliases,
-                name_unsure: made.name_unsure,
+                name_unsure: made.name_unsure.is_some(),
+                name_unsure_why: made.name_unsure,
                 ..ArrangeOut::default()
             })
         }
