@@ -15,7 +15,8 @@
 // <what>` as each part starts, `done <bytes>` at the end, and `fail <what
 // went wrong, in plain words>` before it stops. Anything else is detail.
 
-import { copyFileSync, cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { copyFileSync, cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, normalize, resolve, sep } from "node:path";
 
 const here = import.meta.dirname;
@@ -29,10 +30,53 @@ const fail = (what, detail) => {
 if (!bundleArg || !outArg) fail("build.mjs needs the export's directory and where the site goes");
 const bundle = resolve(bundleArg);
 const out = resolve(outArg);
-// A site this builder wrote says so; anything else there is somebody's.
+// A site this builder wrote lists what it wrote; anything else there, and
+// what was changed since, is somebody's.
 const STAMP = ".ljos-site-build";
 
+// What is below `dir` but its stamp: a file by its contents, a directory by
+// being one. A link is neither, and is never followed.
+function contents(dir, below = "", found = new Map()) {
+  for (const e of readdirSync(join(dir, below), { withFileTypes: true })) {
+    const path = below + e.name;
+    if (path === STAMP && e.isFile()) continue;
+    if (e.isDirectory()) {
+      found.set(`${path}/`, "directory");
+      contents(dir, `${path}/`, found);
+    } else if (e.isFile()) {
+      found.set(path, createHash("sha256").update(readFileSync(join(dir, path))).digest("hex"));
+    } else {
+      found.set(path, "other");
+    }
+  }
+  return found;
+}
+
+// Why the site at `dir` may not be replaced, if it may not.
+function notOurs(dir) {
+  const there = lstatSync(dir, { throwIfNoEntry: false });
+  if (!there) return null;
+  const other = "holds something other than a site Studio built";
+  if (!there.isDirectory()) return other;
+  const found = contents(dir);
+  if (!lstatSync(join(dir, STAMP), { throwIfNoEntry: false })?.isFile()) return found.size ? other : null;
+  let wrote;
+  try {
+    wrote = new Map(Object.entries(JSON.parse(readFileSync(join(dir, STAMP), "utf8")).files));
+  } catch {
+    return `does not say which files the builder wrote (${STAMP})`;
+  }
+  const theirs = [...found].filter(([path, what]) => wrote.get(path) !== what).map(([path]) => path);
+  if (!theirs.length) return null;
+  const more = theirs.length > 3 ? ` and ${theirs.length - 3} more` : "";
+  return `holds what the builder did not write, or not as it is now (${theirs.slice(0, 3).join(", ")}${more})`;
+}
+
 step("Reading the export");
+const keeps = (why) => fail(`${out} ${why}: move that out or choose another place`);
+// Asked before the build, which takes a while, and again before the swap.
+const kept = notOurs(out);
+if (kept) keeps(kept);
 let manifest;
 try {
   manifest = JSON.parse(readFileSync(join(bundle, "ljos-site.json"), "utf8"));
@@ -99,7 +143,8 @@ if (page.image) {
 const template = readFileSync(join(here, "index.html"), "utf8");
 writeFileSync(
   join(here, "index.html"),
-  template.replace(/<title>[^<]*<\/title>/, `<title>${html(title)}</title>\n    ${head.join("\n    ")}`),
+  // A function, since a string's `$&` and the like stand for parts of the match.
+  template.replace(/<title>[^<]*<\/title>/, () => `<title>${html(title)}</title>\n    ${head.join("\n    ")}`),
 );
 
 step("Compiling and bundling with ljos-web");
@@ -126,15 +171,23 @@ for (const at of [page.icon, page.image]) {
 
 step(`Writing the site to ${out}`);
 const there = lstatSync(out, { throwIfNoEntry: false });
-if (there && (!there.isDirectory() || (!existsSync(join(out, STAMP)) && readdirSync(out).length > 0))) {
-  fail(`${out} holds something other than a site Studio built; choose another place`);
-}
-writeFileSync(join(dist, STAMP), `${manifest.ljos_web}\n`);
+const stamp = { ljos_web: manifest.ljos_web, files: Object.fromEntries(contents(dist)) };
+writeFileSync(join(dist, STAMP), `${JSON.stringify(stamp, null, 2)}\n`);
 mkdirSync(dirname(out), { recursive: true });
 // The site before is set aside in a directory made for it: any name chosen
 // here could be a directory of the person's.
 const aside = there ? mkdtempSync(`${out}.old-`) : null;
-if (aside) renameSync(out, join(aside, "site"));
+if (aside) {
+  const before = join(aside, "site");
+  renameSync(out, before);
+  // Looked at where nobody is writing to it any more, as it is removed there.
+  const added = notOurs(before);
+  if (added) {
+    renameSync(before, out);
+    rmdirSync(aside);
+    keeps(added);
+  }
+}
 try {
   renameSync(dist, out);
 } catch {

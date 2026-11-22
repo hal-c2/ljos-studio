@@ -25,7 +25,7 @@ use std::{
 use ljos_mcp_core::{ErrorCode, SurfaceError};
 use serde_json::json;
 
-use crate::export::{BuildOut, BuildStep};
+use crate::export::{BuildOut, BuildStep, SITE_WORK};
 
 /// What a build runs: an ljos-web checkout whose packages are installed,
 /// its compiler and node.
@@ -52,9 +52,6 @@ const BUILDER: &[(&str, &str)] = &[
         include_str!("../../../web/site/vite.config.js"),
     ),
 ];
-
-/// Where a build works, below the project's `build/`.
-const WORK: &str = "build/.site-work";
 
 /// What a build needs, or what of it is missing in plain words. `ljos_web`
 /// and `qmlc` are a person's choice, relative to the project; without them
@@ -240,7 +237,7 @@ pub fn build(
 ) -> Result<BuildOut, SurfaceError> {
     let _one = BUILDING.lock().unwrap_or_else(|e| e.into_inner());
     let site = format!("{out}{}", crate::export::SITE_SUFFIX);
-    let work = root.join(WORK);
+    let work = root.join(SITE_WORK);
     let log = work.join("build.log");
     for at in std::iter::once(root.join(&site)).chain(written_in(&work)) {
         if crate::export::leads_elsewhere(root, &at) {
@@ -670,7 +667,7 @@ mod tests {
             qmlc: dir.path().join("none"),
             node: dir.path().join("none"),
         };
-        for at in written_in(Path::new(WORK)) {
+        for at in written_in(Path::new(SITE_WORK)) {
             let root = tempfile::tempdir().unwrap();
             let theirs = tempfile::tempdir().unwrap();
             let link = root.path().join(&at);

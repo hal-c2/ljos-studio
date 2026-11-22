@@ -1069,7 +1069,7 @@ site" below): Studio's interim builder is a task
 (`export:web:build`) over ljos-web's own compiler and plugin, not code in a
 crate, so it is gone when request 30 lands; it copies only the listed files,
 asks for Qt only when the site imports the controls, and replaces only a
-site it built (a `.ljos-site-build` stamp). DECISION: the pin moves to
+site it built (a `.ljos-site-build` stamp, which lists what it wrote). DECISION: the pin moves to
 bf49026, against which the module list and the site were checked; `mise run
 web:shell` passes on it. DECISION: a document is parsed, not outlined, to
 know it parses, which also gives its imports: one parse per document for
