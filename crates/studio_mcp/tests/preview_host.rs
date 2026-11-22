@@ -113,6 +113,11 @@ impl PreviewHost for Recorder {
     fn alias(&mut self, module: &str, dir: Option<&str>) -> Result<Reload, PreviewError> {
         self.note(format!("alias {module} {}", dir.unwrap_or("-")))?;
         let mut seen = self.0.lock().unwrap();
+        if std::mem::take(&mut seen.fail_next) {
+            return Ok(Reload::Failed {
+                message: "Shell.qml:4: expected a property".to_owned(),
+            });
+        }
         seen.generation += 1;
         Ok(Reload::Applied {
             generation: seen.generation,
@@ -1001,6 +1006,41 @@ fn a_preview_that_does_not_open_takes_the_last_ones_problems_with_it() {
     let after = f.call("preview_events", json!({})).unwrap();
     assert_eq!(after["open"], false);
     assert!(after.get("problems").is_none(), "{after}");
+}
+
+#[test]
+fn no_problems_are_held_once_no_preview_is_open_however_it_ended() {
+    for how in ["a reload", "a mock switch", "closed"] {
+        let f = Fixture::new();
+        f.call("preview_open", json!({ "doc": "Shell.qml" }))
+            .unwrap();
+        if how == "closed" {
+            let close = f.server.studio().lock().unwrap().preview_closer();
+            close();
+        } else {
+            f.seen.lock().unwrap().fail_next = true;
+            f.fail("logs", ended());
+            if how == "a reload" {
+                f.call(
+                    "binding_set",
+                    json!({ "doc": "Shell.qml", "generation": 1, "node": { "path": "root/1" }, "name": "text", "value": "\"y\"" }),
+                )
+                .unwrap();
+            } else {
+                // What this answers is the next test's.
+                let _ = f.call(
+                    "preview_open",
+                    json!({ "doc": "Shell.qml", "state": "mocked" }),
+                );
+            }
+        }
+        f.fail("open Other.qml", PreviewError::Start("no".to_owned()));
+        f.call("preview_open", json!({ "doc": "Other.qml" }))
+            .unwrap_err();
+        let after = f.call("preview_events", json!({})).unwrap();
+        assert_eq!(after["open"], false, "{how}");
+        assert!(after.get("problems").is_none(), "{how}: {after}");
+    }
 }
 
 #[test]
