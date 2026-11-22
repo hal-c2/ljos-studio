@@ -12,6 +12,7 @@ mod inspector;
 mod state_dir;
 
 use std::{
+    collections::HashMap,
     fs::File,
     path::{Path, PathBuf},
     process::{Command, Stdio},
@@ -821,6 +822,10 @@ impl NativeHost {
         let mut lines = Vec::new();
         let mut read = 0;
         let mut hidden_below = None;
+        // A row names an object by its own type, and a document's root by
+        // the document. One object of each type in each file is asked what
+        // that type is, so a component made of a text is read as one.
+        let mut texts = HashMap::new();
         for row in rows {
             let depth = row["depth"].as_u64().unwrap_or(0);
             if hidden_below.is_some_and(|hidden| depth > hidden) {
@@ -851,10 +856,17 @@ impl NativeHost {
             // one card of a list from the next.
             let mut says = String::new();
             let ty = row["type"].as_str().unwrap_or("object");
-            if matches!(ty, "Text" | "Label") && read < MOST_READ {
-                read += 1;
-                if let Some(handle) = row["handle"].as_str() {
-                    let answer = self.call("app_inspect", json!({ "target": handle }))?;
+            let key = (ty.to_owned(), file.clone());
+            let known = texts.get(&key).copied();
+            if known != Some(false)
+                && read < MOST_READ
+                && let Some(handle) = row["handle"].as_str()
+            {
+                let answer = self.call("app_inspect", json!({ "target": handle }))?;
+                let text = known.unwrap_or_else(|| is_text(&answer.structured));
+                texts.insert(key, text);
+                if text {
+                    read += 1;
                     let rows = answer.structured["properties"].as_array();
                     if let Some(text) = rows
                         .and_then(|rows| rows.iter().find(|r| r["name"] == "text"))
@@ -1106,6 +1118,16 @@ fn stopped(rest: &Value) -> bool {
 /// The property rows of an `app_inspect` answer.
 fn rows_of(answer: &Value) -> Vec<Value> {
     answer["properties"].as_array().cloned().unwrap_or_default()
+}
+
+/// Whether an `app_inspect` answer is of a text, by its type or one it is
+/// made from.
+fn is_text(answer: &Value) -> bool {
+    answer["types"].as_array().is_some_and(|types| {
+        types
+            .iter()
+            .any(|ty| matches!(ty.as_str(), Some("Text" | "Label")))
+    })
 }
 
 /// A property row of `app_inspect` as JSON. The inspector shows values as
