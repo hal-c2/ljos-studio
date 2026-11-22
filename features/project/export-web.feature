@@ -673,6 +673,53 @@ Feature: A project is exported for ljos-web to build a site from
       And the file "build/web/keep.txt" exists
       And the file "build/web/ljos-site.json" does not exist
 
+    Scenario Outline: A build's own output is held before there is one
+      Given a site is being built from "build/web"
+      When the agent calls the tool "export" with:
+        """json
+        {"entry": "Shell.qml", "target": "<target>", "out": "<out>"}
+        """
+      Then the agent is refused with "busy"
+      And the refusal's "/details/kind" is "build_running"
+      And the file "<out>" does not exist
+
+      Examples:
+        | target | out                  |
+        | web    | build/web-site       |
+        | web    | build/web-site/inner |
+        | web    | build/WEB-site       |
+        | native | build/web-site       |
+
+    Scenario: A build's own output is held when it is an empty directory
+      Given the empty directory "build/web-site"
+      And a site is being built from "build/web"
+      When the agent calls the tool "export" with:
+        """json
+        {"entry": "Shell.qml", "target": "web", "out": "build/web-site"}
+        """
+      Then the agent is refused with "busy"
+      And the refusal's "/details/kind" is "build_running"
+      And the file "build/web-site/ljos-site.json" does not exist
+
+    Scenario: A directory over a build's own output is held with it
+      Given a site is being built from "build/group/web"
+      When the agent calls the tool "export" with:
+        """json
+        {"entry": "Shell.qml", "target": "web", "out": "build/group"}
+        """
+      Then the agent is refused with "busy"
+      And the file "build/group/ljos-site.json" does not exist
+
+    Scenario: A build's output is let go of with its build
+      Given a site is being built from "build/web"
+      When the build ends
+      And the agent calls the tool "export" with:
+        """json
+        {"entry": "Shell.qml", "target": "web", "out": "build/web-site"}
+        """
+      Then the answer's "/written" is true
+      And the file "build/web-site/ljos-site.json" exists
+
     Scenario: Only a web export is built
       Given the studio tools are connected with the capabilities "inspect, mutate, fs, run"
       When the agent calls the tool "export" with:
