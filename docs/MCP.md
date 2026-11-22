@@ -707,6 +707,8 @@ It does hold its bundle: a real export to it, or to a directory over or
 below it, is refused until the build is done (`busy`, `build_running`), so
 the site built is the one the answer's `manifest` lists. DECISION: refused
 rather than queued, so an export never waits minutes with the project held.
+DECISION: the hold ignores letter case, as some file systems do: while
+`build/web` is being built, `build/WEB` is refused on every system.
 
 A bundle is written beside its place and swapped in, so it is never half
 of two exports. Refusals: `capability_denied` without `fs`; `not_found`
