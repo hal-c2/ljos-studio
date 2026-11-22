@@ -12,7 +12,7 @@ const TEXT: &str = include_str!(concat!(env!("OUT_DIR"), "/toolkit.txt"));
 
 /// Offered whatever the document imports: most objects come from these, and
 /// `node_insert` adds the import of the one placed.
-const ALWAYS: [&str; 5] = [
+pub(crate) const ALWAYS: [&str; 5] = [
     "QtQuick",
     "QtQuick.Layouts",
     "QtQuick.Controls",

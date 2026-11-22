@@ -29,6 +29,7 @@ QtObject {
     readonly property var tokens
     readonly property var comments
     readonly property var leases
+    readonly property var problems
     readonly property bool settling
     readonly property bool blank
     readonly property var chosen

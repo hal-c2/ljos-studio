@@ -574,12 +574,13 @@ the ljos-web requests below.
   through `Studio.stored(path, text)` (`WebStore::stored`): storage got it
   from elsewhere, as another tab's write would be, and reads see it as
   `FsStore`'s see a file written into the directory.
-- **The web preview's rate**: `WebPreviewHost` says it answers 150 calls a
+- **The web preview's rate**: `WebPreviewHost` says it answers 300 calls a
   second (`studio_web::host::CALLS_PER_SECOND`), so a burst reloads a page
-  60 times a second, once a display frame at 60 Hz. The bridge has no
-  limiter to stay under; the number is Studio's own pace. It is above
-  Ljós's inspector default (20, 8 reloads a second) and below the native
-  preview's 200 because a page's preview draws on the shell's own thread,
+  60 times a second, once a display frame at 60 Hz; each reload is two
+  calls, the reload and the read of what it logged, which is how an edit's
+  answer carries its `warnings`. The bridge has no limiter to stay under;
+  the number is Studio's own pace. It is above Ljós's inspector default
+  (20, 4 reloads a second) and below the native preview's 400 because a page's preview draws on the shell's own thread,
   where a reload no frame shows costs the shell a frame.
 - **The shell on ljos-web** (item 5, below): `Studio.Workspace` has a
   hand-written face (`web/Workspace.js`) that publishes

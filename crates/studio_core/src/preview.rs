@@ -170,6 +170,48 @@ pub struct LogLine {
     pub file: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub line: Option<u32>,
+    /// Said by the compiler as it read the file, before the program ran:
+    /// what it says of a line wins over what running the line did.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub compiler: bool,
+}
+
+impl LogLine {
+    /// A warning or worse: what a window lists among the preview's problems.
+    pub fn is_problem(&self) -> bool {
+        matches!(
+            self.level.as_str(),
+            "warning" | "warn" | "error" | "critical" | "fatal"
+        )
+    }
+}
+
+/// `file:line: rest` (a column after the line too), where the file is a
+/// QML or script file, by path or URL.
+pub fn place_of(text: &str) -> Option<(&str, u32, &str)> {
+    let end = [".qml:", ".js:", ".mjs:"]
+        .iter()
+        .filter_map(|ext| text.find(ext).map(|at| at + ext.len() - 1))
+        .min()?;
+    let file = &text[..end];
+    // Words before a file make a sentence, not a place. A file URL is one
+    // whatever spaces it has (Ljós writes them as they are), up to a `: `.
+    let spaced = file.contains(char::is_whitespace) && !file.starts_with("file://");
+    if file.is_empty() || spaced || file.contains(": ") {
+        return None;
+    }
+    let rest = &text[end + 1..];
+    let digits = rest.find(|c: char| !c.is_ascii_digit())?;
+    let line = rest[..digits].parse().ok()?;
+    let mut rest = &rest[digits..];
+    // The column, which a window does not show.
+    if let Some(after) = rest.strip_prefix(':')
+        && let Some(n) = after.find(|c: char| !c.is_ascii_digit())
+        && n > 0
+    {
+        rest = &after[n..];
+    }
+    Some((file, line, rest.strip_prefix(':')?.trim_start()))
 }
 
 /// A PNG of the preview.
@@ -411,6 +453,17 @@ pub trait PreviewHost: Send {
         })
     }
 
+    /// Types `text` as a person does, into the object with `id` or, with
+    /// `None`, wherever the keyboard's focus is. A host that takes no input
+    /// refuses.
+    fn type_text(&mut self, text: &str, id: Option<&str>) -> Result<(), PreviewError> {
+        let _ = (text, id);
+        Err(PreviewError::Refused {
+            code: "unsupported".to_owned(),
+            message: "this preview takes no input".to_owned(),
+        })
+    }
+
     /// How far down (logical pixels) what the preview shows reaches: the
     /// lowest edge of anything drawn, scrolled out of view or not. What is
     /// exactly the window's size follows the window, not the page, and is
@@ -421,6 +474,16 @@ pub trait PreviewHost: Send {
         Err(PreviewError::Refused {
             code: "unsupported".to_owned(),
             message: "this preview does not say how tall its content is".to_owned(),
+        })
+    }
+
+    /// Shows the app in the system's dark or light appearance, as a person
+    /// who switched it would see it. A host that cannot refuses.
+    fn appearance(&mut self, dark: bool) -> Result<(), PreviewError> {
+        let _ = dark;
+        Err(PreviewError::Refused {
+            code: "unsupported".to_owned(),
+            message: "this preview cannot switch its appearance".to_owned(),
         })
     }
 

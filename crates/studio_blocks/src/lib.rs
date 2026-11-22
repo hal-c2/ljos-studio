@@ -223,6 +223,12 @@ pub struct Workspace {
     /// names the holder in `held`; the window's edit of it is refused.
     #[qml(readonly, notify)]
     pub leases: Json,
+    /// What is wrong in the running preview now: `severity` (`warning` or
+    /// `error`), `message`, `file`, `line` (0 when not known) and `node`,
+    /// the handle of the object written on that line (empty when not
+    /// known). It empties as the problems are fixed.
+    #[qml(readonly, notify)]
+    pub problems: Json,
     /// What the person's undo and redo would take back and do again,
     /// latest last; an agent's edits are its own to undo.
     #[qml(readonly, notify)]
@@ -305,6 +311,7 @@ impl Default for Workspace {
             done: none(),
             undone: none(),
             leases: none(),
+            problems: none(),
             preview: Json::Null,
             error: String::new(),
             problem: String::new(),
@@ -1371,6 +1378,13 @@ fn publish(engine: &Engine, ws: ObjectId, view: View, seen: u64) {
         Workspace::LEASES,
         "LEASES",
         to_json(&view.leases),
+        &queue,
+    );
+    give(
+        &cx,
+        Workspace::PROBLEMS,
+        "PROBLEMS",
+        to_json(&view.problems),
         &queue,
     );
     if let Some(ms) = view.leases.iter().map(|l| l.ends_in_ms).min() {

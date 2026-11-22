@@ -80,6 +80,30 @@ Feature: An agent opens a project and reads and makes its documents
     And the answer's "/nodes/1/bindings" lists "font.pixelSize: 3"
     And the answer's "/generation" is 1
 
+  Scenario: A document's tree names what each object declares
+    Given the file "Picker.qml":
+      """qml
+      import QtQuick
+
+      Item {
+          property int index: 0
+          property string label
+          signal picked(int index)
+          signal cleared
+          function pick(i) { index = i }
+          Item {}
+      }
+      """
+    When the agent calls the tool "document_tree" with:
+      """json
+      {"doc": "Picker.qml"}
+      """
+    Then the answer's "/nodes/0/properties" lists "index, label"
+    And the answer's "/nodes/0/signals" lists "picked(int index), cleared()"
+    And the answer's "/nodes/0/functions" lists "pick"
+    And the answer's "/nodes/1/properties" is absent
+    And the answer's "/nodes/1/signals" is absent
+
   Scenario: A long tree comes in pages
     When the agent calls the tool "document_tree" with:
       """json

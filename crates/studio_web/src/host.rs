@@ -21,15 +21,16 @@ use crate::{
 
 /// The calls a second a preview page is said to answer.
 ///
-/// DECISION: 150. The bridge has no limiter and no `Retry-After` to stay
+/// DECISION: 300. The bridge has no limiter and no `Retry-After` to stay
 /// under (each call blocks the worker until the page answers), so this is
-/// only Studio's own pace: two fifths of it are reloads in a burst, 60 a
-/// second, one a display frame at 60 Hz. More than Ljós's inspector default
-/// (20), which would show a person's typing 8 times a second; less than
-/// the native preview's 200, because a page's preview draws on the thread
+/// only Studio's own pace: two fifths of it are reloads in a burst and the
+/// reads of what each logged, 60 reloads a second, one a display frame at
+/// 60 Hz. More than Ljós's inspector default (20), which would show a
+/// person's typing 4 times a second; less than the native preview's 400,
+/// because a page's preview draws on the thread
 /// the shell draws on, so a reload no frame can show costs the shell a
 /// frame, where natively it costs another process.
-pub const CALLS_PER_SECOND: u32 = 150;
+pub const CALLS_PER_SECOND: u32 = 300;
 
 /// Why a page gave no answer.
 #[derive(Debug, thiserror::Error)]
@@ -366,6 +367,7 @@ pub(crate) mod tests {
                             message: "ready".into(),
                             file: None,
                             line: None,
+                            compiler: false,
                         })
                         .collect(),
                     next: 1,
