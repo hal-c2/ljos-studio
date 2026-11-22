@@ -208,17 +208,42 @@ Popup {
         // Of two that fit as well, the shorter is the closer.
         return total - h.length / 100
     }
+
+    // Whether `hay` holds each of `words`, in order, each starting one of its
+    // words: at the start, after a space or one of _-.·, or a capital after a
+    // small letter, as "Animation" in "FrameAnimation".
+    function startsWords(words, hay) {
+        const h = hay.toLowerCase()
+        let at = 0
+        for (const w of words) {
+            let found = h.indexOf(w, at)
+            while (found > 0 && !/[\s_\-.·]/.test(hay[found - 1])
+                   && !(/[a-z]/.test(hay[found - 1]) && /[A-Z]/.test(hay[found])))
+                found = h.indexOf(w, found + 1)
+            if (found < 0)
+                return false
+            at = found + w.length
+        }
+        return true
+    }
     readonly property var rows: {
         const needle = query.text.trim().toLowerCase()
+        const words = needle.split(/\s+/).filter(w => w !== "")
         const used = recent
-        const scored = []
+        let scored = []
         for (const a of actions) {
             const s = needle === "" ? 0 : score(needle, a.name)
             if (s < 0)
                 continue
             const lately = used.indexOf(a.name)
-            scored.push({a: a, s: s + (lately >= 0 ? 4 - lately / used.length : 0), lately: lately})
+            scored.push({a: a, s: s + (lately >= 0 ? 4 - lately / used.length : 0), lately: lately,
+                         words: words.length > 0 && startsWords(words, a.name)})
         }
+        // "fit" means the rows with a word that starts so, not every name
+        // that has an f, an i and a t somewhere; letters alone, as "zm100",
+        // still find by their order when no row has such words.
+        if (scored.some(p => p.words))
+            scored = scored.filter(p => p.words)
         scored.sort((p, q) => {
             if (needle === "") {
                 // Lately used first, in the order used; then as listed.
