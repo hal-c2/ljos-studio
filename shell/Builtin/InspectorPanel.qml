@@ -688,9 +688,14 @@ Panel {
         const typed = colour ? '"' + trimmed + '"' : trimmed
         // One of the property's own values is written as it is too.
         const literal = workspace.literal(typed) || choices(name).indexOf(typed) >= 0
-        // A bare word is the one guess left: text, or a name mistyped. One
-        // that names nothing the file has is asked about, not written.
-        if (!literal && /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(typed) && !names(typed)) {
+        // Two guesses are left, and both are asked about, not written. A bare
+        // word that names nothing the file has is text, or a name mistyped.
+        // Figures run together where text may stand are how QML writes a date,
+        // point, size, rect or vector as text (`2020-01-02`, `1,2`, `1x2`):
+        // as an expression they are another value, or none.
+        const unnamed = /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(typed) && !names(typed)
+        const figures = heldText && /^[+-]?\d+(\.\d+)?((, *|[-:xT])[+-]?\d+(\.\d+)?)+Z?$/.test(typed)
+        if (!literal && (unnamed || figures)) {
             // The field goes back to what the file says; what was typed is
             // kept for the offers under the refusal, which is what they write.
             offered = {name: name, value: typed, asText: heldText}
