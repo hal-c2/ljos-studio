@@ -9,24 +9,51 @@ expression: value
     "open_world": false,
     "read_only": false
   },
-  "description": "Write a bundle that runs without Studio: QML, theme, assets and own modules, never mocks or `.studio/`. `native`: `ljos-bundle.json` says how `ljos run` starts it. `web`: ljos-web builds from `ljos-site.json`. `dry_run` writes nothing.",
+  "description": "Write a bundle that runs without Studio: QML, theme, assets and own modules, never mocks or `.studio/`. `native`: `ljos-bundle.json` says how `ljos run` starts it. `web`: `ljos-site.json` is what ljos-web builds from with `build` (needs `run`). `dry_run` says what it would hold, writes nothing.",
   "inputSchema": {
     "properties": {
+      "build": {
+        "type": "boolean"
+      },
       "dry_run": {
-        "description": "Say what the bundle would hold; write nothing.",
         "type": "boolean"
       },
       "entry": {
         "description": "The document the app starts with, usually its shell (`Shell.qml`).",
         "type": "string"
       },
+      "ljos_web": {
+        "type": "string"
+      },
+      "open": {
+        "type": "boolean"
+      },
       "out": {
-        "description": "Below the project's `build/`; default `build/<target>`. A bundle there is replaced.",
+        "description": "Below `build/`, default `build/<target>`; replaced.",
+        "type": "string"
+      },
+      "page": {
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "icon": {
+            "type": "string"
+          },
+          "image": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "qmlc": {
         "type": "string"
       },
       "target": {
         "default": "native",
-        "description": "`native` (default) or `web`.",
         "enum": [
           "native",
           "web"
@@ -43,6 +70,7 @@ expression: value
   "name": "export",
   "outputSchema": {
     "properties": {
+      "build": {},
       "bytes": {
         "type": "integer"
       },
@@ -62,6 +90,9 @@ expression: value
       "replaces": {
         "type": "boolean"
       },
+      "writes": {
+        "type": "integer"
+      },
       "written": {
         "type": "boolean"
       }
@@ -71,6 +102,7 @@ expression: value
       "path",
       "files",
       "bytes",
+      "writes",
       "manifest",
       "written",
       "replaces",

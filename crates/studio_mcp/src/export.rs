@@ -137,11 +137,11 @@ impl Target {
 struct ExportArgs {
     // A `///` here is bytes every session pays for in `tools/list`, which
     // has a cap: what else these take is in MCP.md.
-    /// The first document.
+    /// The document the app starts with, usually its shell (`Shell.qml`).
     entry: String,
     #[serde(default)]
     target: Target,
-    /// Below `build/`; replaced.
+    /// Below `build/`, default `build/<target>`; replaced.
     out: Option<String>,
     // Says what the bundle would hold; writes nothing.
     #[serde(default)]
@@ -1621,7 +1621,7 @@ pub(crate) fn add(registry: ToolRegistry, studio: &Arc<Mutex<Studio>>) -> ToolRe
     registry.with(
         ToolDef::new::<ExportArgs>(
             "export",
-            "Write a bundle that runs without Studio, never mocks or `.studio/`: for `ljos run`, or `web` to `build` with ljos-web. `dry_run` only checks.",
+            "Write a bundle that runs without Studio: QML, theme, assets and own modules, never mocks or `.studio/`. `native`: `ljos-bundle.json` says how `ljos run` starts it. `web`: `ljos-site.json` is what ljos-web builds from with `build` (needs `run`). `dry_run` says what it would hold, writes nothing.",
         )
         .answers::<ExportOut>()
         .requires(Cap::Fs)
