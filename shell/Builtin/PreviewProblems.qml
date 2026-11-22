@@ -75,6 +75,8 @@ Pane {
                 // The count, coloured as the worst of them.
                 Rectangle {
                     visible: panel.count > 0
+                    Accessible.role: Accessible.StaticText
+                    Accessible.name: "Problem count: " + panel.count
                     radius: height / 2
                     color: panel.errors > 0 ? Colors.danger : Colors.warning
                     implicitHeight: badge.implicitHeight + Spacing.xxs * 2
