@@ -14,6 +14,9 @@ project="$(own_target)/export-web-project"
 rm -rf "$project"
 mkdir -p "$project"
 cp -R "$studio_root/web/site/project/." "$project/"
+# Given the project had the file "build/web-site.old/keep.txt" before it was exported
+mkdir -p "$project/build/web-site.old"
+echo mine >"$project/build/web-site.old/keep.txt"
 # And it is exported with the tool "export", the target "web" and "build": true
 cargo run --quiet -p studio_mcp --example export -- "$project" Shell.qml web --build >/dev/null
 node "$studio_root/web/site.mjs" "$project/build/web-site" "$project"

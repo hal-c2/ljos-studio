@@ -54,6 +54,9 @@ QtObject {
     function follow(tool: string, args: var) {
     }
 
+    function aside(tool: string, args: var) {
+    }
+
     function followPicture(on: bool) {
     }
 

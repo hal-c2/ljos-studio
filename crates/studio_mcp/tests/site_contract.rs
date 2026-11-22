@@ -249,6 +249,30 @@ fn a_native_bundle() {
 }
 
 #[test]
+fn a_page_picture_that_is_not_listed() {
+    refused(
+        |d| {
+            let mut m = manifest(d);
+            m["page"] = json!({"title": "Hi", "icon": "images/icon.png"});
+            set_manifest(d, &m);
+        },
+        "is not a listed file",
+    );
+}
+
+#[test]
+fn a_page_with_a_field_the_contract_does_not_have() {
+    refused(
+        |d| {
+            let mut m = manifest(d);
+            m["page"] = json!({"title": "Hi", "keywords": "media"});
+            set_manifest(d, &m);
+        },
+        "not the contract's",
+    );
+}
+
+#[test]
 fn a_field_the_contract_does_not_have() {
     refused(
         |d| {

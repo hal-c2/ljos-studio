@@ -15,7 +15,7 @@
 // <what>` as each part starts, `done <bytes>` at the end, and `fail <what
 // went wrong, in plain words>` before it stops. Anything else is detail.
 
-import { copyFileSync, cpSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { copyFileSync, cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, normalize, resolve, sep } from "node:path";
 
 const here = import.meta.dirname;
@@ -125,21 +125,23 @@ for (const at of [page.icon, page.image]) {
 }
 
 step(`Writing the site to ${out}`);
-if (existsSync(out) && !existsSync(join(out, STAMP)) && readdirSync(out).length > 0) {
+const there = lstatSync(out, { throwIfNoEntry: false });
+if (there && (!there.isDirectory() || (!existsSync(join(out, STAMP)) && readdirSync(out).length > 0))) {
   fail(`${out} holds something other than a site Studio built; choose another place`);
 }
 writeFileSync(join(dist, STAMP), `${manifest.ljos_web}\n`);
 mkdirSync(dirname(out), { recursive: true });
-const old = `${out}.old`;
-rmSync(old, { recursive: true, force: true });
-if (existsSync(out)) renameSync(out, old);
+// The site before is set aside in a directory made for it: any name chosen
+// here could be a directory of the person's.
+const aside = there ? mkdtempSync(`${out}.old-`) : null;
+if (aside) renameSync(out, join(aside, "site"));
 try {
   renameSync(dist, out);
 } catch {
   // Another file system: copied, then the work directory's is left.
   cpSync(dist, out, { recursive: true });
 }
-rmSync(old, { recursive: true, force: true });
+if (aside) rmSync(aside, { recursive: true, force: true });
 const weigh = (dir) =>
   readdirSync(dir, { withFileTypes: true }).reduce(
     (sum, e) => sum + (e.isDirectory() ? weigh(join(dir, e.name)) : e.name === STAMP ? 0 : statSync(join(dir, e.name)).size),

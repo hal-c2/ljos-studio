@@ -4,7 +4,10 @@
 // the bundle would hold, what is left out and why, and whether it replaces
 // a bundle already there are on screen before the person writes anything.
 // What the panel shows is the last answer or refusal of `export`; it keeps
-// no other state about the project.
+// no other state about the project. A site's page (title, description,
+// pictures) is the project's `site.json`, which an export with a `page`
+// writes; "Build and open" is the same call with `build` and `open`, run
+// aside from the window's queue since a build takes as long as ljos-web.
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
@@ -29,6 +32,19 @@ Popup {
     // Whether the answer in view was a real export, not a dry run.
     readonly property bool wrote: answer !== null && answer.written
 
+    // Whether the person changed the page's fields since the panel opened:
+    // until then the export reads the project's site.json, and the fields
+    // show what it says.
+    property bool pageEdited: false
+    // A build: running, and what the last one answered, or why it failed.
+    property bool building: false
+    property var built: null
+    property string buildRefusal: ""
+    // Whether the last check found what a build needs.
+    property bool buildReady: false
+    // Where the site's links are made: a block a page uses as any other.
+    readonly property string linkBlock: "Site/Link.qml"
+
     readonly property string target: web.checked ? "web" : "native"
     readonly property string entry: workspace.documents.indexOf(chosen) >= 0 ? chosen : ""
 
@@ -43,14 +59,98 @@ Popup {
         return docs.length > 0 ? docs[0] : ""
     }
 
+    // The page as the fields say it, each field left empty left out.
+    function page() {
+        const p = {}
+        const fields = {title: title, description: description, icon: icon, image: image}
+        for (const key in fields) {
+            const text = fields[key].text.trim()
+            if (text !== "")
+                p[key] = text
+        }
+        return p
+    }
+
+    function args(dry) {
+        const a = {entry: entry, target: target, dry_run: dry}
+        if (out.text.trim() !== "")
+            a.out = out.text.trim()
+        if (target === "web") {
+            if (pageEdited)
+                a.page = page()
+            if (builder.text.trim() !== "")
+                a.ljos_web = builder.text.trim()
+            // A check says whether a build would find what it needs.
+            if (dry)
+                a.build = true
+        }
+        return a
+    }
+
     function run(dry) {
         if (entry === "")
             return
+        // What a build made is of the export before this one.
+        built = null
+        buildRefusal = ""
         waiting += 1
-        const args = {entry: entry, target: target, dry_run: dry}
-        if (out.text.trim() !== "")
-            args.out = out.text.trim()
-        workspace.dispatch("export", args)
+        workspace.dispatch("export", args(dry))
+    }
+
+    // Exports, builds and opens the site in the person's browser.
+    function build() {
+        if (entry === "" || building)
+            return
+        const a = args(false)
+        a.build = true
+        a.open = true
+        building = true
+        built = null
+        buildRefusal = ""
+        workspace.aside("export", a)
+    }
+
+    // The block a page's links are made of: on the web an `a` the browser
+    // follows, in an app a tap that opens the address in the browser.
+    function addLink() {
+        workspace.dispatch("document_new", {doc: linkBlock, block: true, text: [
+            "import QtQuick",
+            "import Ljos.Design",
+            "",
+            "// A link: on the web an `a` with this `href`, which the browser follows and",
+            "// a crawler or a screen reader reads as a link; in an app, a tap opens the",
+            "// address in the person's browser.",
+            "Text {",
+            "    id: link",
+            "    property url href",
+            "    text: \"Link\"",
+            "    color: Colors.link",
+            "    font.underline: hover.hovered",
+            "    Accessible.role: Accessible.Link",
+            "    Accessible.name: link.text",
+            "    HoverHandler {",
+            "        id: hover",
+            "        cursorShape: Qt.PointingHandCursor",
+            "    }",
+            "    TapHandler {",
+            "        // On the web the page's `a` is followed by the browser itself.",
+            "        enabled: Qt.platform.os !== \"wasm\"",
+            "        onTapped: Qt.openUrlExternally(link.href)",
+            "    }",
+            "}",
+            ""].join("\n")})
+    }
+
+    // The fields say what the project's site.json says until the person
+    // changes one.
+    function showPage(a) {
+        if (pageEdited || a === null || !a.manifest || a.manifest.target !== "web")
+            return
+        const p = a.manifest.page || {}
+        title.text = p.title || ""
+        description.text = p.description || ""
+        icon.text = p.icon || ""
+        image.text = p.image || ""
     }
 
     function check() {
@@ -60,6 +160,10 @@ Popup {
     function show() {
         answer = null
         refusal = ""
+        pageEdited = false
+        built = null
+        buildRefusal = ""
+        buildReady = false
         chosen = defaultEntry()
         open()
         check()
@@ -79,7 +183,15 @@ Popup {
         if (a === null)
             return []
         const m = a.manifest
-        const rows = ["Entry " + m.entry]
+        const rows = ["Entry " + m.entry, "Manifest " + manifestName(a)]
+        if (m.page) {
+            const p = m.page
+            rows.push("Page " + (p.title || "with no title") + (p.description ? ": " + p.description : ""))
+            if (p.icon)
+                rows.push("Icon " + p.icon)
+            if (p.image)
+                rows.push("Picture for shared links " + p.image)
+        }
         for (const f of m.files)
             rows.push("File " + f.path + " (" + size(f.bytes) + ")")
         for (const b of m.blocks)
@@ -95,11 +207,48 @@ Popup {
         return rows
     }
 
+    function manifestName(a) {
+        return a.manifest.target === "web" ? "ljos-site.json" : "ljos-bundle.json"
+    }
+
+    // As many files as the export writes: the project's and its manifest.
     function summary(a) {
         if (a === null)
             return busy ? "Checking…" : ""
-        return (a.written ? "Wrote " : "Would write ") + a.files
-            + (a.files === 1 ? " file" : " files") + ", " + size(a.bytes) + ", to " + a.out
+        return (a.written ? "Wrote " : "Would write ") + a.writes + " files to " + a.out + ": "
+            + a.files + " of the project's (" + size(a.bytes)
+            + ") and " + manifestName(a)
+    }
+
+    // Whether the export (and, for a site, a build) can go ahead, as the
+    // last check found.
+    function verdict(a) {
+        if (a === null || a.written || refusal !== "")
+            return ""
+        if (a.manifest.target !== "web")
+            return "Ready to write"
+        const b = a.build
+        if (!b)
+            return "Ready to write"
+        if (b.ready)
+            return "Ready to write and to build: Build and open uses the ljos-web in " + b.ljos_web
+        return "Ready to write; to build the site here Studio needs: " + b.missing.join("; ")
+    }
+
+    // What the build is doing or did, in plain words.
+    function buildSays() {
+        if (building)
+            return "Building the site with ljos-web…"
+        if (built === null)
+            return ""
+        return "Built the site, " + size(built.bytes) + ", into " + built.site + ". It is served at "
+            + built.url + (built.opened ? ", which your browser was asked to open" : "")
+    }
+
+    function buildSteps() {
+        if (building || built === null)
+            return []
+        return (built.steps || []).map(s => s.what + " (" + Math.round(s.ms) + " ms)")
     }
 
     // A word as a shell reads it, for a line the person pastes.
@@ -114,14 +263,16 @@ Popup {
         if (a === null || !a.written)
             return ""
         if (a.manifest.run)
-            return "Start it with: " + a.manifest.run.map(quoted).join(" ") + "  (in " + a.path + ")"
-        return "Build the site with: mise run export:web:build " + quoted(a.path)
+            return "Start it with: " + a.manifest.run.map(quoted).join(" ") + "  (in " + quoted(a.path) + ")"
+        if (a.build)
+            return ""
+        return "Build and open makes the site from it and opens it in your browser"
     }
 
     parent: Overlay.overlay
     anchors.centerIn: Overlay.overlay
     width: Math.min(640, parent.width - Spacing.lg * 2)
-    height: Math.min(560, parent.height - Spacing.lg * 2)
+    height: Math.min(target === "web" ? 720 : 560, parent.height - Spacing.lg * 2)
     modal: true
     focus: true
     padding: Spacing.sm
@@ -146,18 +297,37 @@ Popup {
             panel.chosen = panel.defaultEntry()
             panel.check()
         }
-        function onAnswered(tool, answer) {
+        function onAnswered(tool, answer, asked) {
             if (tool !== "export")
                 return
+            if (asked.build === true && asked.dry_run !== true) {
+                panel.building = false
+                panel.built = answer.build
+                panel.refusal = ""
+                panel.answer = answer
+                return
+            }
             panel.waiting -= 1
             panel.refusal = ""
             panel.answer = answer
+            if (asked.dry_run === true)
+                panel.buildReady = answer.build !== undefined && answer.build.ready === true
+            panel.showPage(answer)
         }
-        function onRefused(tool, error) {
+        function onRefused(tool, error, asked) {
             if (tool !== "export")
                 return
+            if (asked.build === true && asked.dry_run !== true) {
+                panel.building = false
+                const d = error.details || {}
+                panel.buildRefusal = error.message
+                    + (d.step ? ". It stopped at: " + d.step : "")
+                    + (d.log ? ". What ljos-web said is in " + d.log : "")
+                return
+            }
             panel.waiting -= 1
             panel.answer = null
+            panel.buildReady = false
             panel.refusal = error.message
         }
     }
@@ -198,14 +368,20 @@ Popup {
                 Accessible.name: text
                 checked: true
                 ButtonGroup.group: kinds
-                onClicked: panel.check()
+                onClicked: {
+                    panel.buildReady = false
+                    panel.check()
+                }
             }
             RadioButton {
                 id: web
                 text: "Web site"
                 Accessible.name: text
                 ButtonGroup.group: kinds
-                onClicked: panel.check()
+                onClicked: {
+                    panel.buildReady = false
+                    panel.check()
+                }
             }
         }
 
@@ -214,6 +390,8 @@ Popup {
             Label {
                 text: "Entry"
                 color: Colors.text
+                // As wide as the page's widest label, so the fields line up.
+                Layout.preferredWidth: widest.implicitWidth
             }
             ComboBox {
                 id: entries
@@ -233,6 +411,7 @@ Popup {
             Label {
                 text: "Into"
                 color: Colors.text
+                Layout.preferredWidth: widest.implicitWidth
             }
             Field {
                 id: out
@@ -249,12 +428,110 @@ Popup {
             }
         }
 
+        // The site's page: what a browser's tab, a search result and a
+        // shared link show of it, and the ljos-web it is built with.
+        GridLayout {
+            visible: panel.target === "web"
+            columns: 2
+            columnSpacing: Spacing.xs
+            rowSpacing: Spacing.xxs
+            Layout.fillWidth: true
+
+            Label {
+                text: "Title"
+                color: Colors.text
+            }
+            Field {
+                id: title
+                placeholderText: "the entry's name"
+                Accessible.name: "Page title"
+                Layout.fillWidth: true
+                onTextEdited: panel.pageEdited = true
+                onAccepted: panel.check()
+            }
+            Label {
+                id: widest
+                text: "Description"
+                color: Colors.text
+            }
+            Field {
+                id: description
+                placeholderText: "what a search result says of the page"
+                Accessible.name: "Page description"
+                Layout.fillWidth: true
+                onTextEdited: panel.pageEdited = true
+                onAccepted: panel.check()
+            }
+            Label {
+                text: "Icon"
+                color: Colors.text
+            }
+            Field {
+                id: icon
+                placeholderText: "a picture of the project, as images/icon.svg"
+                Accessible.name: "Page icon"
+                Layout.fillWidth: true
+                onTextEdited: {
+                    panel.pageEdited = true
+                    settle.restart()
+                }
+                onAccepted: {
+                    settle.stop()
+                    panel.check()
+                }
+            }
+            Label {
+                text: "Picture"
+                color: Colors.text
+            }
+            Field {
+                id: image
+                placeholderText: "the picture a shared link shows"
+                Accessible.name: "Page picture for shared links"
+                Layout.fillWidth: true
+                onTextEdited: {
+                    panel.pageEdited = true
+                    settle.restart()
+                }
+                onAccepted: {
+                    settle.stop()
+                    panel.check()
+                }
+            }
+            Label {
+                text: "ljos-web"
+                color: Colors.text
+            }
+            Field {
+                id: builder
+                placeholderText: "found by itself"
+                Accessible.name: "ljos-web folder"
+                Layout.fillWidth: true
+                onTextEdited: settle.restart()
+                onAccepted: {
+                    settle.stop()
+                    panel.check()
+                }
+            }
+        }
+
         Label {
             objectName: "exportSummary"
             text: panel.summary(panel.answer)
             visible: text !== ""
             color: Colors.text
             font.weight: Typography.bodyStrongWeight
+            wrapMode: Text.Wrap
+            Accessible.role: Accessible.StaticText
+            Accessible.name: text
+            Layout.fillWidth: true
+        }
+
+        Label {
+            objectName: "exportVerdict"
+            text: panel.verdict(panel.answer)
+            visible: text !== ""
+            color: Colors.text
             wrapMode: Text.Wrap
             Accessible.role: Accessible.StaticText
             Accessible.name: text
@@ -305,6 +582,34 @@ Popup {
         }
 
         Label {
+            objectName: "exportBuild"
+            text: panel.buildSays()
+            visible: text !== ""
+            color: Colors.text
+            font.weight: Typography.bodyStrongWeight
+            wrapMode: Text.Wrap
+            Accessible.role: Accessible.StaticText
+            Accessible.name: text
+            Layout.fillWidth: true
+        }
+
+        // Why the build stopped, in the builder's words.
+        Label {
+            objectName: "exportBuildRefusal"
+            text: panel.buildRefusal
+            visible: text !== ""
+            color: Colors.textOnDanger
+            wrapMode: Text.Wrap
+            padding: Spacing.xs
+            Accessible.role: Accessible.AlertMessage
+            Accessible.name: text
+            background: Rectangle {
+                color: Colors.danger
+            }
+            Layout.fillWidth: true
+        }
+
+        Label {
             objectName: "exportNext"
             text: panel.next(panel.answer)
             visible: text !== ""
@@ -318,7 +623,7 @@ Popup {
         ListView {
             objectName: "exportFiles"
             clip: true
-            model: panel.lines(panel.answer)
+            model: panel.buildSteps().concat(panel.lines(panel.answer))
             Accessible.role: Accessible.List
             Accessible.name: "Bundle contents"
             Layout.fillWidth: true
@@ -353,14 +658,28 @@ Popup {
                 onClicked: panel.run(false)
             }
             TextButton {
+                text: "Build and open"
+                Accessible.name: text
+                visible: panel.target === "web"
+                enabled: panel.entry !== "" && !panel.busy && !panel.building && panel.buildReady
+                onClicked: panel.build()
+            }
+            TextButton {
                 text: "Copy path"
                 Accessible.name: text
                 enabled: panel.wrote
                 onClicked: {
-                    clip.text = panel.answer.path
+                    clip.text = panel.built !== null ? panel.built.path : panel.answer.path
                     clip.selectAll()
                     clip.copy()
                 }
+            }
+            TextButton {
+                text: "Add a Link block"
+                Accessible.name: text
+                visible: panel.target === "web"
+                enabled: panel.workspace.documents.indexOf(panel.linkBlock) < 0
+                onClicked: panel.addLink()
             }
             Item {
                 Layout.fillWidth: true

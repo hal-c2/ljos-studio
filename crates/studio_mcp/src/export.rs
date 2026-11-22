@@ -25,7 +25,9 @@ use std::{
 
 use crate::schema::Answers;
 use ljos_blocks::read_qmldir;
-use ljos_mcp_core::{Cap, ErrorCode, SurfaceError, ToolAnnotations, ToolDef, ToolRegistry, typed};
+use ljos_mcp_core::{
+    CallCtx, Cap, ErrorCode, SurfaceError, ToolAnnotations, ToolDef, ToolRegistry, typed,
+};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -143,6 +145,46 @@ struct ExportArgs {
     /// Say what the bundle would hold; write nothing.
     #[serde(default)]
     dry_run: bool,
+    /// The site's title, description and pictures (web): written into the
+    /// project's `site.json`, which is read when this is not given.
+    page: Option<Page>,
+    /// Build the site from the bundle with ljos-web, into `<out>-site`, and
+    /// serve it on this machine (web; needs `run`). With `dry_run`, only say
+    /// whether a build would find what it needs.
+    #[serde(default)]
+    build: bool,
+    /// Open the built site in the browser.
+    #[serde(default)]
+    open: bool,
+    /// The ljos-web folder to build with, when Studio does not find one.
+    ljos_web: Option<String>,
+    /// The `qmlc` to build with, when Studio does not find one.
+    qmlc: Option<String>,
+}
+
+/// What a browser's tab, a search result and a shared link show of a site.
+/// Its pictures are files of the site, by path relative to the project.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct Page {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    /// The tab's icon.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon: Option<String>,
+    /// The picture a shared link shows.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub image: Option<String>,
+}
+
+impl Page {
+    fn pictures(&self) -> impl Iterator<Item = &str> {
+        [self.icon.as_deref(), self.image.as_deref()]
+            .into_iter()
+            .flatten()
+    }
 }
 
 /// What a bundle holds; written beside it as `ljos-bundle.json`, or for
@@ -182,6 +224,9 @@ pub struct Manifest {
     /// The ljos-web commit the imports were checked against (web).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ljos_web: Option<String>,
+    /// The page's title, description and pictures (web).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub page: Option<Page>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
@@ -227,13 +272,57 @@ struct ExportOut {
     /// copies of links it could not hold as links included.
     files: usize,
     bytes: u64,
+    /// What a real export writes: the files and the manifest.
+    writes: usize,
     manifest: Manifest,
     /// False for a dry run.
     written: bool,
     /// Whether `out` held a bundle of either kind before this call, which
     /// a real export replaces: what a person is told before they write it.
     replaces: bool,
+    /// The export's own time; a build's steps say theirs.
     ms: f64,
+    /// What `build` found, or built and where it is served.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    build: Option<BuildOut>,
+}
+
+#[derive(Serialize, JsonSchema, Default)]
+pub struct BuildOut {
+    /// Whether ljos-web's compiler, runtime and bundler and node were found.
+    pub ready: bool,
+    /// What a build lacks, in plain words.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub missing: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ljos_web: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub qmlc: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub node: Option<String>,
+    /// The built site's directory, relative to the project.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub site: Option<String>,
+    /// `site` as an absolute path.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    /// Where this machine serves it, for a browser.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bytes: Option<u64>,
+    /// What the build did, in order, and how long each part took.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub steps: Vec<BuildStep>,
+    /// Whether a browser was asked to open `url`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub opened: Option<bool>,
+}
+
+#[derive(Clone, Debug, Serialize, JsonSchema)]
+pub struct BuildStep {
+    pub what: String,
+    pub ms: f64,
 }
 
 fn refused(code: ErrorCode, kind: &str, message: impl Into<String>) -> SurfaceError {
@@ -416,6 +505,7 @@ fn plan(
     studio: &Studio,
     entry: &str,
     target: Target,
+    page: Option<&Page>,
 ) -> Result<Manifest, SurfaceError> {
     let store = studio.session.store();
     if !entry.ends_with(".qml") || !store.exists(entry) {
@@ -581,6 +671,16 @@ fn plan(
         .any(|f| f.path == theme_path)
         .then_some(theme_path);
     let web = target == Target::Web;
+    let (files, left_out, page) = if web {
+        let page = match page {
+            Some(page) => Some(page.clone()),
+            None => site_page(root, &files)?,
+        };
+        let (files, left_out) = reached(root, files, left_out, theme.as_deref(), page.as_ref())?;
+        (files, left_out, page)
+    } else {
+        (files, left_out, None)
+    };
     let manifest = Manifest {
         format: if web { SITE_FORMAT } else { FORMAT }.to_owned(),
         version: if web { SITE_VERSION } else { VERSION },
@@ -599,8 +699,244 @@ fn plan(
         modules: web.then_some(module_dirs),
         imports,
         ljos_web: web.then(|| LJOS_WEB.to_owned()),
+        page,
     };
     Ok(manifest)
+}
+
+/// The project's page of its site, at its top.
+pub const SITE_PAGE: &str = "site.json";
+const PAGE_WHY: &str =
+    "the page's title, description and pictures, which the manifest's page holds";
+const UNNAMED_WHY: &str = "nothing the site's code names";
+
+/// The page `site.json` gives, if the project has one among its files.
+fn site_page(root: &Path, files: &[FileEntry]) -> Result<Option<Page>, SurfaceError> {
+    if !files.iter().any(|f| f.path == SITE_PAGE) {
+        return Ok(None);
+    }
+    let full = root.join(SITE_PAGE);
+    let text = fs::read_to_string(&full).map_err(|e| io(&full, &e))?;
+    serde_json::from_str(&text).map(Some).map_err(|e| {
+        refused(
+            ErrorCode::InvalidArgument,
+            "page",
+            format!("`{SITE_PAGE}` is not a page of the site ({e}); mend it or give `page`"),
+        )
+    })
+}
+
+/// Whether a file is the site's code, which is kept whole: a page may load
+/// another by a name it makes, and the builder compiles what imports name.
+fn is_code(path: &str) -> bool {
+    let name = file_name(path);
+    name == "qmldir"
+        || name == "ljostypes.json"
+        || [".qml", ".js", ".mjs", ".ts", ".mts"]
+            .iter()
+            .any(|ext| name.ends_with(ext))
+}
+
+/// The site's files: its code, its theme, the page's pictures, and the files
+/// its code names by a string (`"images/logo.svg"`, or a directory or the
+/// start of a path a name is made from: `"icons/" + name + ".svg"`); every
+/// other file is left out, saying why, as is `site.json`, which the
+/// manifest's page holds. A picture of the page must be one of the files.
+fn reached(
+    root: &Path,
+    files: Vec<FileEntry>,
+    mut left_out: Vec<LeftOut>,
+    theme: Option<&str>,
+    page: Option<&Page>,
+) -> Result<(Vec<FileEntry>, Vec<LeftOut>), SurfaceError> {
+    if let Some(page) = page {
+        for picture in page.pictures() {
+            if picture == SITE_PAGE || !files.iter().any(|f| f.path == picture) {
+                return Err(SurfaceError::new(
+                    ErrorCode::InvalidArgument,
+                    format!("the page's picture `{picture}` is not a file of the site"),
+                )
+                .with_details(json!({ "kind": "page_file", "path": picture })));
+            }
+        }
+    }
+    let paths: Vec<&str> = files.iter().map(|f| f.path.as_str()).collect();
+    let mut keep: BTreeSet<String> = paths
+        .iter()
+        .copied()
+        .filter(|p| is_code(p))
+        .chain(theme)
+        .chain(page.into_iter().flat_map(Page::pictures))
+        .map(str::to_owned)
+        .collect();
+    for doc in paths.iter().copied().filter(|p| is_code(p)) {
+        let full = root.join(doc);
+        let text = fs::read_to_string(&full).map_err(|e| io(&full, &e))?;
+        let dir = doc.rsplit_once('/').map_or("", |(dir, _)| dir);
+        let named = if file_name(doc) == "qmldir" {
+            text.split_whitespace().map(str::to_owned).collect()
+        } else {
+            literals(&text)
+        };
+        for literal in &named {
+            keep.extend(
+                named_by(&paths, dir, literal)
+                    .into_iter()
+                    .map(str::to_owned),
+            );
+        }
+    }
+    let (kept, unnamed): (Vec<FileEntry>, Vec<FileEntry>) = files
+        .into_iter()
+        .partition(|f| f.path != SITE_PAGE && keep.contains(f.path.as_str()));
+    for file in unnamed {
+        let why = if file.path == SITE_PAGE {
+            PAGE_WHY
+        } else {
+            UNNAMED_WHY
+        };
+        left_out.push(LeftOut {
+            path: file.path,
+            why: why.to_owned(),
+        });
+    }
+    left_out.sort_by(|a, b| a.path.cmp(&b.path));
+    Ok((kept, left_out))
+}
+
+/// The files of `paths` a string in a document in `dir` names: the file it
+/// is, or every file below the directory it is, or, for one with a `/` in
+/// it, every file whose path starts with it. Read against the document's
+/// directory and against the project's, as a QML `url` and a JavaScript
+/// path are. Addresses elsewhere (`https://`, `data:`, `qrc:`) name none.
+fn named_by<'p>(paths: &[&'p str], dir: &str, literal: &str) -> Vec<&'p str> {
+    let literal = literal.split(['?', '#']).next().unwrap_or("");
+    if literal.is_empty() || literal.contains(':') || literal.contains('\n') || literal.len() > 1024
+    {
+        return Vec::new();
+    }
+    // `"icons/"` names a directory; `"icons/" + name` the files it starts.
+    let partial = literal.contains('/') && !literal.ends_with('/');
+    let (literal, from_top) = match literal.strip_prefix('/') {
+        Some(rest) => (rest, true),
+        None => (literal, false),
+    };
+    let mut bases = vec![""];
+    if !from_top && !dir.is_empty() {
+        bases.insert(0, dir);
+    }
+    let mut named = Vec::new();
+    for base in bases {
+        let Some(at) = normal(base, literal) else {
+            continue;
+        };
+        if at.is_empty() {
+            continue;
+        }
+        let below = format!("{at}/");
+        named.extend(paths.iter().copied().filter(|p| {
+            *p == at || p.starts_with(&below) || (partial && p.starts_with(at.as_str()))
+        }));
+    }
+    named
+}
+
+/// `literal` read from `base`, with `.` and `..` gone; `None` for a path out
+/// of the project.
+fn normal(base: &str, literal: &str) -> Option<String> {
+    let mut parts: Vec<&str> = base.split('/').filter(|p| !p.is_empty()).collect();
+    for part in literal.split('/') {
+        match part {
+            "" | "." => {}
+            ".." => {
+                parts.pop()?;
+            }
+            part => parts.push(part),
+        }
+    }
+    Some(parts.join("/"))
+}
+
+/// The strings of a QML or JavaScript text: `'...'`, `"..."` and the text
+/// of a template between its `${...}`s, comments skipped. A regular
+/// expression is read as code, which at worst keeps a file more.
+fn literals(text: &str) -> Vec<String> {
+    let chars: Vec<char> = text.chars().collect();
+    let mut out = Vec::new();
+    let mut at = 0;
+    code(&chars, &mut at, &mut out, false);
+    out
+}
+
+/// Reads code from `at` until its end, or, `nested`, the `}` that closes a
+/// template's `${`.
+fn code(chars: &[char], at: &mut usize, out: &mut Vec<String>, nested: bool) {
+    let mut depth = 0usize;
+    while let Some(&c) = chars.get(*at) {
+        *at += 1;
+        match c {
+            '/' if chars.get(*at) == Some(&'/') => {
+                while chars.get(*at).is_some_and(|&c| c != '\n') {
+                    *at += 1;
+                }
+            }
+            '/' if chars.get(*at) == Some(&'*') => {
+                *at += 1;
+                while *at < chars.len() && !(chars[*at] == '*' && chars.get(*at + 1) == Some(&'/'))
+                {
+                    *at += 1;
+                }
+                *at = (*at + 2).min(chars.len());
+            }
+            '\'' | '"' => out.push(quoted(chars, at, c)),
+            '`' => template(chars, at, out),
+            '{' => depth += 1,
+            '}' if nested && depth == 0 => return,
+            '}' => depth = depth.saturating_sub(1),
+            _ => {}
+        }
+    }
+}
+
+fn quoted(chars: &[char], at: &mut usize, quote: char) -> String {
+    let mut text = String::new();
+    while let Some(&c) = chars.get(*at) {
+        *at += 1;
+        match c {
+            '\\' => {
+                if let Some(&next) = chars.get(*at) {
+                    *at += 1;
+                    text.push(next);
+                }
+            }
+            c if c == quote || c == '\n' => break,
+            c => text.push(c),
+        }
+    }
+    text
+}
+
+fn template(chars: &[char], at: &mut usize, out: &mut Vec<String>) {
+    let mut text = String::new();
+    while let Some(&c) = chars.get(*at) {
+        *at += 1;
+        match c {
+            '\\' => {
+                if let Some(&next) = chars.get(*at) {
+                    *at += 1;
+                    text.push(next);
+                }
+            }
+            '`' => break,
+            '$' if chars.get(*at) == Some(&'{') => {
+                *at += 1;
+                out.push(std::mem::take(&mut text));
+                code(chars, at, out, true);
+            }
+            c => text.push(c),
+        }
+    }
+    out.push(text);
 }
 
 /// `files` and, under each link's name, the files of the directory it
@@ -710,7 +1046,7 @@ fn out_dir(root: &Path, out: Option<&str>, target: Target) -> Result<String, Sur
 /// Whether a part of `full` below `root` that exists is a link. One out of
 /// the project is somebody else's directory; even one that stays in it
 /// would put the bundle where the walk reads the design from.
-fn leads_elsewhere(root: &Path, full: &Path) -> bool {
+pub(crate) fn leads_elsewhere(root: &Path, full: &Path) -> bool {
     let mut at = full;
     while at != root {
         if fs::symlink_metadata(at).is_ok_and(|m| m.file_type().is_symlink()) {
@@ -1000,7 +1336,24 @@ fn through_links<'a>(
     Ok(copy.out)
 }
 
-fn export(studio: &Mutex<Studio>, a: ExportArgs) -> Result<ExportOut, SurfaceError> {
+fn export(studio: &Mutex<Studio>, ctx: &CallCtx, a: ExportArgs) -> Result<ExportOut, SurfaceError> {
+    let web = a.target == Target::Web;
+    if !web && (a.build || a.page.is_some()) {
+        let (what, kind) = if a.build {
+            ("built", "build_target")
+        } else {
+            ("given a page", "page_target")
+        };
+        return Err(refused(
+            ErrorCode::InvalidArgument,
+            kind,
+            format!("only a web export is {what}: give `\"target\": \"web\"`"),
+        ));
+    }
+    // Building runs ljos-web's compiler and bundler, which are programs.
+    if a.build && !ctx.caps.contains(Cap::Run) {
+        return Err(ljos_mcp_core::denied("export", Cap::Run, ctx));
+    }
     let studio = lock(studio);
     let started = studio.timer.now();
     let Some(root) = studio.dir() else {
@@ -1011,28 +1364,118 @@ fn export(studio: &Mutex<Studio>, a: ExportArgs) -> Result<ExportOut, SurfaceErr
         ));
     };
     let root = root.canonicalize().map_err(|e| io(&root, &e))?;
-    let manifest = plan(&root, &studio, &a.entry, a.target)?;
+    let mut manifest = plan(&root, &studio, &a.entry, a.target, a.page.as_ref())?;
     let out = out_dir(&root, a.out.as_deref(), a.target)?;
     let path = root.join(&out);
     let replaces = holds_bundle(&path);
     let path = path.to_string_lossy().into_owned();
+    // What a build would lack is said before anything is written.
+    let tools = a.build.then(|| site_tools(&root, &a));
+    if let Some(Err(missing)) = &tools
+        && !a.dry_run
+    {
+        return Err(SurfaceError::new(
+            ErrorCode::Unavailable,
+            format!("Studio cannot build the site: {}", missing.join("; ")),
+        )
+        .with_details(json!({ "kind": "no_site_builder", "missing": missing })));
+    }
     let copied = if a.dry_run {
         // What the write would refuse, the dry run says first.
         may_replace(&root, &root.join(&out))?;
         Copied::default()
     } else {
+        if let Some(page) = &a.page {
+            let mut text = serde_json::to_string_pretty(page).expect("a page is JSON");
+            text.push('\n');
+            studio
+                .session
+                .store()
+                .write_bytes(SITE_PAGE, text.as_bytes())
+                .map_err(crate::store_error)?;
+            if !manifest.left_out.iter().any(|l| l.path == SITE_PAGE) {
+                manifest.left_out.push(LeftOut {
+                    path: SITE_PAGE.to_owned(),
+                    why: PAGE_WHY.to_owned(),
+                });
+                manifest.left_out.sort_by(|a, b| a.path.cmp(&b.path));
+            }
+        }
         write(&root, &root.join(&out), &manifest)?
+    };
+    let ms = studio_core::preview::ms(studio.timer.now().saturating_sub(started));
+    // A build takes as long as ljos-web does; the project is not held for it.
+    drop(studio);
+    let build = match tools {
+        None => None,
+        Some(lookup) if a.dry_run => Some(match lookup {
+            Ok(tools) => found(&tools),
+            Err(missing) => BuildOut {
+                missing,
+                ..BuildOut::default()
+            },
+        }),
+        Some(Ok(tools)) => Some(build_site(&root, &out, &tools, a.open)?),
+        Some(Err(_)) => unreachable!("refused above"),
     };
     Ok(ExportOut {
         out,
         path,
         files: manifest.files.len() + copied.files,
         bytes: manifest.files.iter().map(|f| f.bytes).sum::<u64>() + copied.bytes,
+        writes: manifest.files.len() + copied.files + 1,
         manifest,
         written: !a.dry_run,
         replaces,
-        ms: studio_core::preview::ms(studio.timer.now().saturating_sub(started)),
+        ms,
+        build,
     })
+}
+
+#[cfg(feature = "native")]
+type Tools = crate::site_build::Toolchain;
+#[cfg(not(feature = "native"))]
+type Tools = std::convert::Infallible;
+
+#[cfg(feature = "native")]
+fn site_tools(root: &Path, a: &ExportArgs) -> Result<Tools, Vec<String>> {
+    crate::site_build::find(root, a.ljos_web.as_deref(), a.qmlc.as_deref())
+}
+
+#[cfg(not(feature = "native"))]
+fn site_tools(_: &Path, a: &ExportArgs) -> Result<Tools, Vec<String>> {
+    // A browser's Studio is given no folder to build with.
+    let _ = (&a.ljos_web, &a.qmlc);
+    Err(vec![
+        "a site is built only where Studio runs on the machine, not in a browser".to_owned(),
+    ])
+}
+
+#[cfg(feature = "native")]
+fn found(tools: &Tools) -> BuildOut {
+    let at = |p: &Path| Some(p.to_string_lossy().into_owned());
+    BuildOut {
+        ready: true,
+        ljos_web: at(&tools.ljos_web),
+        qmlc: at(&tools.qmlc),
+        node: at(&tools.node),
+        ..BuildOut::default()
+    }
+}
+
+#[cfg(not(feature = "native"))]
+fn found(tools: &Tools) -> BuildOut {
+    match *tools {}
+}
+
+#[cfg(feature = "native")]
+fn build_site(root: &Path, out: &str, tools: &Tools, open: bool) -> Result<BuildOut, SurfaceError> {
+    crate::site_build::build(root, out, tools, open)
+}
+
+#[cfg(not(feature = "native"))]
+fn build_site(_: &Path, _: &str, tools: &Tools, _: bool) -> Result<BuildOut, SurfaceError> {
+    match *tools {}
 }
 
 pub(crate) fn add(registry: ToolRegistry, studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
@@ -1040,7 +1483,7 @@ pub(crate) fn add(registry: ToolRegistry, studio: &Arc<Mutex<Studio>>) -> ToolRe
     registry.with(
         ToolDef::new::<ExportArgs>(
             "export",
-            "Write a bundle that runs without Studio: QML, theme, assets and own modules, never mocks or `.studio/`. `native`: `ljos-bundle.json` says how `ljos run` starts it. `web`: ljos-web builds from `ljos-site.json`. `dry_run` writes nothing.",
+            "Write a bundle that runs without Studio: QML, theme, assets and own modules, never mocks or `.studio/`. `native`: `ljos-bundle.json` says how `ljos run` starts it. `web`: `ljos-site.json` is what ljos-web builds from, holding the code and only the files it names; `page` sets the title, description and pictures (kept in `site.json`); `build` (needs `run`) builds the site into `<out>-site` and answers its path and a URL this machine serves it on, `open` opens it. `dry_run` writes nothing and, with `build`, says what a build lacks.",
         )
         .answers::<ExportOut>()
         .requires(Cap::Fs)
@@ -1050,7 +1493,7 @@ pub(crate) fn add(registry: ToolRegistry, studio: &Arc<Mutex<Studio>>) -> ToolRe
             idempotent: true,
             open_world: false,
         }),
-        typed(move |_, a: ExportArgs| export(&studio, a)),
+        typed(move |ctx, a: ExportArgs| export(&studio, ctx, a)),
     )
 }
 
@@ -1081,6 +1524,7 @@ mod tests {
             modules: None,
             imports: None,
             ljos_web: None,
+            page: None,
         }
     }
 
@@ -1313,5 +1757,119 @@ mod tests {
         ] {
             assert!(out.join(path).is_file(), "{path}");
         }
+    }
+
+    #[test]
+    fn the_strings_of_code_are_read_and_its_comments_are_not() {
+        let text = r#"
+            // "commented.png"
+            /* 'also.png' */
+            Image { source: "a.png"; property string b: 'b\'s.png' }
+            function f(n) { return `icons/${n ? "on" : 'off'}.svg` }
+            var url = "https://example.com/x.png" // "after.png"
+        "#;
+        assert_eq!(
+            literals(text),
+            [
+                "a.png",
+                "b's.png",
+                "icons/",
+                "on",
+                "off",
+                ".svg",
+                "https://example.com/x.png"
+            ]
+        );
+    }
+
+    #[test]
+    fn a_string_names_a_file_a_directory_or_the_start_of_a_path() {
+        let paths = [
+            "Pages/Home.qml",
+            "Pages/hero.png",
+            "icons/play.svg",
+            "icons/stop.svg",
+            "images/logo.svg",
+            "images/logo.png",
+            "iconsets/x.svg",
+        ];
+        assert_eq!(named_by(&paths, "Pages", "hero.png"), ["Pages/hero.png"]);
+        assert_eq!(
+            named_by(&paths, "Pages", "../images/logo.svg"),
+            ["images/logo.svg"]
+        );
+        assert_eq!(
+            named_by(&paths, "Pages", "/icons/play.svg?v=2"),
+            ["icons/play.svg"]
+        );
+        assert_eq!(
+            named_by(&paths, "", "icons/"),
+            ["icons/play.svg", "icons/stop.svg"]
+        );
+        assert_eq!(
+            named_by(&paths, "", "images/logo"),
+            ["images/logo.svg", "images/logo.png"]
+        );
+        assert!(named_by(&paths, "", "icons").len() == 2);
+        assert!(named_by(&paths, "", "../outside.png").is_empty());
+        assert!(named_by(&paths, "", "qrc:/icons/play.svg").is_empty());
+        assert!(named_by(&paths, "", "logo").is_empty());
+        assert!(named_by(&paths, "", "").is_empty());
+    }
+
+    #[test]
+    fn a_site_keeps_its_code_its_theme_its_pictures_and_what_is_named() {
+        let project = tempfile::tempdir().unwrap();
+        let root = project.path().canonicalize().unwrap();
+        let write = |path: &str, text: &str| {
+            let at = root.join(path);
+            fs::create_dir_all(at.parent().unwrap()).unwrap();
+            fs::write(at, text).unwrap();
+        };
+        write("Shell.qml", "Image { source: \"images/logo.svg\" }");
+        write("lib/util.js", "// nothing named");
+        write("images/logo.svg", "");
+        write("images/icon.png", "");
+        write("images/unused.svg", "");
+        write("theme.json", "{}");
+        write("site.json", "{}");
+        let (files, _, left_out) = walk(&root).unwrap();
+        let page = Page {
+            icon: Some("images/icon.png".to_owned()),
+            ..Page::default()
+        };
+        let (kept, left_out) = reached(
+            &root,
+            files.clone(),
+            left_out,
+            Some("theme.json"),
+            Some(&page),
+        )
+        .unwrap();
+        let kept: Vec<&str> = kept.iter().map(|f| f.path.as_str()).collect();
+        assert_eq!(
+            kept,
+            [
+                "Shell.qml",
+                "images/icon.png",
+                "images/logo.svg",
+                "lib/util.js",
+                "theme.json"
+            ]
+        );
+        let left: Vec<(&str, &str)> = left_out
+            .iter()
+            .map(|l| (l.path.as_str(), l.why.as_str()))
+            .collect();
+        assert_eq!(
+            left,
+            [("images/unused.svg", UNNAMED_WHY), ("site.json", PAGE_WHY)]
+        );
+        let elsewhere = Page {
+            image: Some("../secret.png".to_owned()),
+            ..Page::default()
+        };
+        let refusal = reached(&root, files, Vec::new(), None, Some(&elsewhere)).unwrap_err();
+        assert_eq!(refusal.to_value()["error"]["details"]["kind"], "page_file");
     }
 }
