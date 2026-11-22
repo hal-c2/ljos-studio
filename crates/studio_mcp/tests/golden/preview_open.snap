@@ -9,15 +9,15 @@ expression: value
     "open_world": false,
     "read_only": false
   },
-  "description": "Run a document (a shell) in a preview for a target (desktop, tablet, phone) with live blocks or the mock modules; `fit: \"content\"` makes it as tall as its page. On the open preview it changes size, fit or state in place; `state_kept` says whether the app's state survived.",
+  "description": "Run a document in a preview for a target with live blocks or the mock modules. On the open preview it changes size, fit or state in place; `state_kept` says whether the app's state survived.",
   "inputSchema": {
     "properties": {
       "doc": {
-        "description": "The document to run, usually a shell (`Shell.qml`).",
+        "description": "The document, usually `Shell.qml`.",
         "type": "string"
       },
       "fit": {
-        "description": "`content` makes the preview as tall as what the document lays out (never shorter than the screen), again after each reload; `screen` the screen's height. Default: the open preview's, else `screen`.",
+        "description": "`content`: as tall as the page.",
         "enum": [
           "screen",
           "content"
@@ -25,7 +25,7 @@ expression: value
         "type": "string"
       },
       "size": {
-        "description": "A size in logical pixels instead of a target's.",
+        "description": "Logical pixels, instead of a target's.",
         "properties": {
           "height": {
             "maximum": 8192,
@@ -51,7 +51,7 @@ expression: value
         "type": "string"
       },
       "target": {
-        "description": "The screen to lay it out for (default: the open preview's, else `desktop`).",
+        "description": "Default: the open preview's, else `desktop`.",
         "enum": [
           "desktop",
           "tablet",
