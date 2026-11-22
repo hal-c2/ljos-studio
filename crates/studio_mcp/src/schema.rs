@@ -6,8 +6,8 @@
 //! An answer's schema keeps its fields and their types and no more, since the
 //! answer shows the rest; its full shape stays in the types, and the scenarios
 //! hold every answer to that (`answer_schema`). A field an answer does not
-//! always have is named and not typed, and a type used once is written where
-//! it is used.
+//! always have is named and not typed unless the tool says otherwise
+//! (`answers_typing`), and a type used once is written where it is used.
 
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
@@ -24,16 +24,25 @@ pub(crate) trait Answers {
     /// `ToolDef::output`, for the list: `O` is what the tool answers.
     #[must_use]
     fn answers<O: JsonSchema>(self) -> Self;
+
+    /// `answers`, with `typed` listed by type though an answer may leave them
+    /// out: what a caller reads it has to know the shape of beforehand.
+    #[must_use]
+    fn answers_typing<O: JsonSchema>(self, typed: &[&str]) -> Self;
 }
 
 impl Answers for ToolDef {
-    fn answers<O: JsonSchema>(mut self) -> Self {
+    fn answers<O: JsonSchema>(self) -> Self {
+        self.answers_typing::<O>(&[])
+    }
+
+    fn answers_typing<O: JsonSchema>(mut self, typed: &[&str]) -> Self {
         let mut input = (*self.input_schema).clone();
         trim(&mut input);
         inline_single_use(&mut input);
         self.input_schema = Arc::new(input);
         let full = full_schema::<O>();
-        self.output_schema = Some(Arc::new(fields_only(&full)));
+        self.output_schema = Some(Arc::new(fields_only(&full, typed)));
         ANSWERS
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -279,7 +288,7 @@ fn trim_value(value: &mut Value) {
     }
 }
 
-fn fields_only(schema: &Map<String, Value>) -> Map<String, Value> {
+fn fields_only(schema: &Map<String, Value>, typed: &[&str]) -> Map<String, Value> {
     let mut out = Map::new();
     out.insert("type".to_owned(), json!("object"));
     let Some(Value::Object(fields)) = schema.get("properties") else {
@@ -295,7 +304,7 @@ fn fields_only(schema: &Map<String, Value>) -> Map<String, Value> {
     let fields: Map<String, Value> = fields
         .iter()
         .map(|(name, field)| {
-            let field = if required.contains(&name.as_str()) {
+            let field = if required.contains(&name.as_str()) || typed.contains(&name.as_str()) {
                 field_only(field)
             } else {
                 Value::Object(Map::new())
@@ -353,6 +362,32 @@ mod tests {
         assert_eq!(
             schema["properties"]["either"]["type"],
             json!(["string", "number"])
+        );
+    }
+
+    #[test]
+    fn a_typed_field_keeps_its_type_though_it_may_be_left_out() {
+        let Value::Object(schema) = json!({
+            "properties": {
+                "next": {"type": "integer"},
+                "problems": {"type": "array", "items": true, "default": []},
+                "rests": {"type": ["integer", "null"]}
+            },
+            "required": ["next"]
+        }) else {
+            unreachable!()
+        };
+        assert_eq!(
+            Value::Object(fields_only(&schema, &["problems"])),
+            json!({
+                "type": "object",
+                "properties": {
+                    "next": {"type": "integer"},
+                    "problems": {"type": "array"},
+                    "rests": {}
+                },
+                "required": ["next"]
+            })
         );
     }
 
