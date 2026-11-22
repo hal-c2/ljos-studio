@@ -9,34 +9,38 @@ expression: value
     "open_world": false,
     "read_only": false
   },
-  "description": "Create a QML document from `text`, or from a JSON file's records (`data`). Refused if it exists or does not parse. `block` declares it in the `qmldir` beside it. Undo removes it.",
+  "description": "Create a QML document from `text`, a JSON file's records (`data`) or a `shell` of a block. Refused if it exists or does not parse. Undo removes it.",
   "inputSchema": {
     "properties": {
       "block": {
-        "description": "Also declare it a functional block in the `qmldir` beside it.",
+        "description": "Also declare it a block in the `qmldir` beside it.",
         "type": "boolean"
       },
       "data": {
-        "description": "A project JSON file of records: a `JsonListModel` of it, or with `model: \"list\"` a `ListModel` copy. Not with `text`.",
+        "description": "A project JSON file of records. Not with `text`.",
         "type": "string"
       },
       "doc": {
-        "description": "A new `.qml` path relative to the project.",
+        "description": "A new `.qml` path.",
         "type": "string"
       },
       "dry_run": {
         "type": "boolean"
       },
       "model": {
-        "description": "How `data` is kept: `json` (the default), or `list`.",
+        "description": "`json` (default): a `JsonListModel` of it; `list`: a `ListModel` copy.",
         "enum": [
           "json",
           "list"
         ],
         "type": "string"
       },
+      "shell": {
+        "description": "`Module.Name`: skin that block's slots.",
+        "type": "string"
+      },
       "text": {
-        "description": "Its text; an empty `Item` importing QtQuick when left out.",
+        "description": "Its text; default an empty QtQuick `Item`.",
         "type": "string"
       }
     },
