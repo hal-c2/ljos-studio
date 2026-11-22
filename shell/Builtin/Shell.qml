@@ -194,12 +194,14 @@ Item {
         }
 
         // The person's own last refusal, until the next gesture is answered.
+        // Text that doesn't parse is the problems' to say: as a row here it
+        // would move the code view on every half-typed word.
         Label {
             objectName: "status"
             Accessible.role: Accessible.StatusBar
             Accessible.name: "Status"
             padding: Spacing.xs
-            text: workspace.error !== "" ? workspace.error : workspace.problem
+            text: workspace.error
             color: Colors.text
             font.pixelSize: Typography.captionSize
             background: Rectangle {

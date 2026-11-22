@@ -20,7 +20,15 @@ Pane {
     // How wide it is open: a message wraps in it.
     property int listWidth: 360
 
-    readonly property var problems: workspace.problems ?? []
+    // And why the open document doesn't parse, where no error says it: one
+    // broken when it was opened has had no preview to say so.
+    readonly property var problems: {
+        const said = workspace.problems ?? []
+        const doc = workspace.doc
+        if (workspace.problem === "" || said.some(p => p.severity === "error" && ((p.file ?? "") === "" || p.file === doc)))
+            return said
+        return said.concat([{severity: "error", message: workspace.problem, file: doc, line: 0, node: ""}])
+    }
     readonly property int count: problems.length
     readonly property int errors: problems.filter(p => p.severity === "error").length
     // The person's: neither opened by a problem nor closed when the last goes.
