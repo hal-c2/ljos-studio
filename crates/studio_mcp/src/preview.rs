@@ -163,6 +163,8 @@ pub(crate) struct Previews {
     pub problems: Vec<LogLine>,
     /// Counts changes to `problems`.
     pub problems_seq: u64,
+    /// Counts the previews that ended, for a call to see that it ended one.
+    pub ends: u64,
     /// Each of `problems` with the text of its line when it was told, or
     /// `None` when that text could not be read. Neither the compiler nor
     /// the app says a problem again while its line is unchanged (Ljós tells
@@ -417,6 +419,7 @@ impl Previews {
             log_mark: 0,
             problems: Vec::new(),
             problems_seq: 0,
+            ends: 0,
             held: Vec::new(),
             root: None,
             timer,
@@ -719,7 +722,9 @@ impl Previews {
             self.problems.clear();
             self.problems_seq += 1;
         }
-        self.open.take()
+        let open = self.open.take();
+        self.ends += u64::from(open.is_some());
+        open
     }
 
     /// What every host call's error goes through: one that says the preview

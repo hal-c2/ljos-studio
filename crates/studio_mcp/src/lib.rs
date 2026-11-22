@@ -488,6 +488,15 @@ impl StudioServer {
         args: serde_json::Value,
     ) -> Result<ToolReply, SurfaceError> {
         let _calling = Calling::new(ctx);
+        self.telling_an_end(|| self.answer(name, ctx, args))
+    }
+
+    fn answer(
+        &self,
+        name: &str,
+        ctx: &CallCtx,
+        args: serde_json::Value,
+    ) -> Result<ToolReply, SurfaceError> {
         if name == "preview_screenshot" {
             return self.picture(ctx, args, preview_tools::Picturing::Latest);
         }
@@ -510,6 +519,24 @@ impl StudioServer {
 }
 
 impl StudioServer {
+    /// A client's call and a window's picture are answered through here. A
+    /// refused one may still have ended the preview (its process was gone,
+    /// or it was closed for one that did not start), which the windows show
+    /// until told. A refusal that ended nothing tells them nothing.
+    fn telling_an_end<T>(
+        &self,
+        call: impl FnOnce() -> Result<T, SurfaceError>,
+    ) -> Result<T, SurfaceError> {
+        let previews = lock(&self.studio).previews.clone();
+        let ends = preview::lock(&previews).ends;
+        let out = call();
+        let ended = preview::lock(&previews).ends != ends;
+        if ended && out.is_err() {
+            lock(&self.studio).watchers.tell();
+        }
+        out
+    }
+
     /// serde's "missing field `action`" said as what the tool needs, with
     /// the values it takes when its schema lists them: the field's name
     /// alone leaves an agent reading the schema again.
@@ -607,10 +634,12 @@ impl StudioServer {
         args: serde_json::Value,
     ) -> Result<(ToolReply, Option<view::PictureOf>), SurfaceError> {
         let _calling = Calling::new(ctx);
-        let def = self.tools.check("preview_screenshot", ctx)?;
-        let per_copy = def.per_copy_bytes();
-        preview_tools::shown_screenshot(&self.studio, args, preview_tools::Picturing::AsShown)
-            .map(|(reply, shown)| (reply.capped(per_copy), shown))
+        self.telling_an_end(|| {
+            let def = self.tools.check("preview_screenshot", ctx)?;
+            let per_copy = def.per_copy_bytes();
+            preview_tools::shown_screenshot(&self.studio, args, preview_tools::Picturing::AsShown)
+                .map(|(reply, shown)| (reply.capped(per_copy), shown))
+        })
     }
 
     fn picture(
