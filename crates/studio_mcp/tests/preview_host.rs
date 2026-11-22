@@ -2315,6 +2315,34 @@ fn a_full_answer_still_counts_the_warnings_it_left_out() {
 }
 
 #[test]
+fn an_error_too_long_for_an_emptied_change_is_counted_and_takes_none_of_it() {
+    let f = writable();
+    let copy = DEFAULT_RESULT_BYTES / 2;
+    {
+        let mut seen = f.seen.lock().unwrap();
+        seen.fail_next = true;
+        // Less than a copy, and more than one has left beside the edit's other fields.
+        seen.failure = format!("Main.qml:4: {}", "e".repeat(copy - 100));
+    }
+    let value = format!("\"{}\"", "x".repeat(copy - 1000));
+    let out = f
+        .call(
+            "binding_set",
+            json!({ "doc": "Main.qml", "node": { "id": "root" }, "name": "width", "value": value }),
+        )
+        .unwrap();
+    assert_within_the_cap(&out);
+    assert!(
+        told_of(&out, to_tell(&f)).is_empty(),
+        "what didn't fit was told"
+    );
+    assert_eq!(
+        out["changes"][0]["text"], value,
+        "the change was cut for an error it can't make room for"
+    );
+}
+
+#[test]
 fn an_answer_cut_twice_names_both_cuts() {
     let f = warned_without_end();
     let since = f
