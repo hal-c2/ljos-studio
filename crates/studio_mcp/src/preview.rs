@@ -594,13 +594,14 @@ impl Previews {
         }
     }
 
-    /// A new preview: nothing it logged has been read.
-    pub fn opened(&mut self) {
+    /// A new preview: nothing it logged has been read. The error is that it
+    /// ended as that was read.
+    pub fn opened(&mut self) -> Result<(), PreviewError> {
         self.log_mark = 0;
         self.held.clear();
-        if let Ok(lines) = self.read_logs() {
-            self.start_problems(None, &lines);
-        }
+        let lines = self.read_logs()?;
+        self.start_problems(None, &lines);
+        Ok(())
     }
 
     /// The text of `line` of `file` as the preview reads it now.
@@ -655,8 +656,9 @@ impl Previews {
         }
     }
 
-    /// What a reload asked for at `started` (the timer's time) did.
-    pub fn record(&mut self, reload: Reload, started: Duration) {
+    /// What a reload asked for at `started` (the timer's time) did. The
+    /// error is that the preview ended as its logs were read.
+    pub fn record(&mut self, reload: Reload, started: Duration) -> Result<(), PreviewError> {
         let failed = match reload {
             Reload::Applied { generation } => {
                 self.events.push(PreviewEvent::Reloaded {
@@ -670,11 +672,11 @@ impl Previews {
                 self.events.push(PreviewEvent::ReloadFailed { message });
                 Some(failed)
             }
-            Reload::Unchanged => return,
+            Reload::Unchanged => return Ok(()),
         };
-        if let Ok(lines) = self.read_logs() {
-            self.start_problems(failed, &lines);
-        }
+        let lines = self.read_logs()?;
+        self.start_problems(failed, &lines);
+        Ok(())
     }
 
     /// Reads the host's new log lines into the events.
@@ -1010,7 +1012,8 @@ mod tests {
                     message: message.to_owned(),
                 },
                 Duration::ZERO,
-            );
+            )
+            .unwrap();
             assert_eq!(p.problems.len(), 1, "{:?}", p.problems);
             let said = p.problems[0].clone();
             (said.file, said.line, said.message)

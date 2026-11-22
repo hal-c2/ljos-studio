@@ -394,7 +394,7 @@ fn open(studio: &Mutex<Studio>, a: OpenArgs) -> Result<OpenOut, SurfaceError> {
             .any(|reload| matches!(reload, Reload::Applied { .. }));
         state_kept = !(restarted && open.host.restarts_on_switch());
         for reload in reloads {
-            previews.record(reload, started_at);
+            previews.record(reload, started_at).map_err(preview_error)?;
         }
         changed.map_err(|e| preview_error(previews.failed(e)))?;
         if restarted {
@@ -470,15 +470,21 @@ fn open(studio: &Mutex<Studio>, a: OpenArgs) -> Result<OpenOut, SurfaceError> {
         previews.root = studio.dir();
         // What was wrong as it started: the compiler's warnings, and what
         // running the first text logged.
-        previews.opened();
-        let open = previews.open.as_mut().expect("just opened");
+        previews.opened().map_err(preview_error)?;
+        let open = previews
+            .open
+            .as_mut()
+            .ok_or_else(|| preview_error(PreviewError::NotOpen))?;
         if let Err(e) = open.refit() {
             open.undo_fit(Fit::Screen, size);
             return Err(preview_error(previews.failed(e)));
         }
     }
     if let Some(appearance) = a.appearance {
-        let open = previews.open.as_mut().expect("opened above");
+        let open = previews
+            .open
+            .as_mut()
+            .ok_or_else(|| preview_error(PreviewError::NotOpen))?;
         if let Err(e) = open.host.appearance(matches!(appearance, Appearance::Dark)) {
             return Err(preview_error(previews.failed(e)));
         }
