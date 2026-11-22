@@ -20,8 +20,8 @@ use ljos_mcp_core::{CallCtx, Cap, CapSet};
 use ljos_runtime::SystemClock;
 use serde_json::Value as Json;
 use studio_core::preview::{
-    Click, Declared, LogLine, Picture, Placed, PreviewError, PreviewHost, PreviewSpec, Reload,
-    RestWatch, Size,
+    Click, Declared, Input, LogLine, Picture, Placed, PreviewError, PreviewHost, PreviewSpec,
+    Reload, RestWatch, Size,
 };
 use studio_mcp::{Studio, StudioServer};
 use studio_preview::NativeHost;
@@ -146,6 +146,14 @@ impl PreviewHost for SlowPictures {
 
     fn click(&mut self, at: &Click) -> Result<(), PreviewError> {
         self.0.click(at)
+    }
+
+    fn input(&mut self, input: &Input) -> Result<(), PreviewError> {
+        self.0.input(input)
+    }
+
+    fn extent(&mut self) -> Result<f64, PreviewError> {
+        self.0.extent()
     }
 }
 
@@ -4143,8 +4151,12 @@ fn frames_labelled(w: &mut UiWorld, want: String) -> StepResult {
         let below = if window.frame(&frame.0).is_ok() {
             window.frame(&frame.0)?
         } else {
-            ljos_drive::find(window.engine(), &[window.root], &format!("beside {}", frame.0))
-                .map_err(|_| format!("no frame beside for {}", frame.0))?
+            ljos_drive::find(
+                window.engine(),
+                &[window.root],
+                &format!("beside {}", frame.0),
+            )
+            .map_err(|_| format!("no frame beside for {}", frame.0))?
         };
         let label = ljos_drive::find_below(window.engine(), below, "frameLabel")
             .ok_or_else(|| format!("the frame {} has no label", frame.0))?;
@@ -4212,9 +4224,11 @@ fn target_size(name: &str) -> Result<(f64, f64), String> {
 
 fn zoom_field(window: &Window) -> Result<AccessibleNode, String> {
     let tree = window.tree();
-    find(&tree, &|n| n.name == "Zoom" && n.key.is_some() && n.role != "button")
-        .cloned()
-        .ok_or_else(|| format!("no zoom field; the window holds {}", names(&tree)))
+    find(&tree, &|n| {
+        n.name == "Zoom" && n.key.is_some() && n.role != "button"
+    })
+    .cloned()
+    .ok_or_else(|| format!("no zoom field; the window holds {}", names(&tree)))
 }
 
 #[given(regex = r#"^the person has entered "([^"]*)" in the zoom field$"#)]
@@ -4248,6 +4262,161 @@ fn handles_on_screen(w: &mut UiWorld, width: f64, height: f64) -> StepResult {
     ((on_screen - width).abs() < 0.5 && (on_screen - height).abs() < 0.5)
         .then_some(())
         .ok_or_else(|| format!("the handles are {on_screen} across on the screen"))
+}
+
+/// The shown handles and the selection's outline, as boxes in the
+/// overlay's pixels.
+type Box4 = (f64, f64, f64, f64);
+
+fn handles_and_outline(window: &Window) -> Result<(Vec<Box4>, Box4), String> {
+    let engine = window.engine();
+    let frame = window.frame("Desktop")?;
+    let read = |o: ObjectId| {
+        let n = |name: &str| engine.read_by_name(o, name).to_number();
+        (n("x"), n("y"), n("width"), n("height"))
+    };
+    let outline = ljos_drive::find_below(engine, frame, "selectionOutline")
+        .ok_or("the canvas has no selection outline")?;
+    let mut handles = Vec::new();
+    let mut stack = vec![frame];
+    while let Some(o) = stack.pop() {
+        if !engine.is_alive(o) {
+            continue;
+        }
+        if engine.read_by_name(o, "objectName").to_js_string() == "resizeHandle"
+            && engine.read_by_name(o, "visible").to_boolean()
+        {
+            handles.push(read(o));
+        }
+        stack.extend(engine.children(o));
+    }
+    if handles.is_empty() {
+        return Err("the canvas shows no resize handles".to_owned());
+    }
+    Ok((handles, read(outline)))
+}
+
+#[then("the canvas's resize handles leave the selection uncovered")]
+fn handles_outside(w: &mut UiWorld) -> StepResult {
+    let window = w.window()?;
+    let (handles, (x, y, width, height)) = handles_and_outline(window)?;
+    // Touching the outline is not covering what is inside it.
+    let covers = |&(hx, hy, hw, hh): &Box4| {
+        hx < x + width - 0.5 && hx + hw > x + 0.5 && hy < y + height - 0.5 && hy + hh > y + 0.5
+    };
+    match handles.iter().find(|h| covers(h)) {
+        None => Ok(()),
+        Some(h) => Err(format!(
+            "a handle at {h:?} covers the selection at {:?}",
+            (x, y, width, height)
+        )),
+    }
+}
+
+#[then("the canvas's resize handles sit on the selection's corners")]
+fn handles_on_corners(w: &mut UiWorld) -> StepResult {
+    let window = w.window()?;
+    let (handles, (x, y, width, height)) = handles_and_outline(window)?;
+    let corners = [
+        (x, y),
+        (x + width, y),
+        (x, y + height),
+        (x + width, y + height),
+    ];
+    let centred = |&(cx, cy): &(f64, f64)| {
+        handles.iter().any(|&(hx, hy, hw, hh)| {
+            (hx + hw / 2.0 - cx).abs() < 0.5 && (hy + hh / 2.0 - cy).abs() < 0.5
+        })
+    };
+    match corners.iter().find(|c| !centred(c)) {
+        None => Ok(()),
+        Some(c) => Err(format!(
+            "no handle sits on the corner {c:?}; the handles: {handles:?}"
+        )),
+    }
+}
+
+// --------------------------------------------- the running app, in play
+
+#[when(regex = r#"^the person turns the wheel down over the frame "([^"]+)" at (\d+), (\d+)$"#)]
+fn wheel_down_over_frame(w: &mut UiWorld, target: String, x: f64, y: f64) -> StepResult {
+    let window = w.window()?;
+    let at = frame_point(window, &target, x, y)?;
+    window
+        .stage
+        .drive()
+        .wheel(at, Wheel::Notches(0.0, -1.0))
+        .map_err(drive_error)?;
+    window.stage.drive().advance(1000).map_err(drive_error)?;
+    window.rest()
+}
+
+#[given(regex = r#"^the person has typed the text "(.*)"$"#)]
+#[when(regex = r#"^the person types the text "(.*)"$"#)]
+fn types_text(w: &mut UiWorld, text: String) -> StepResult {
+    let window = w.window()?;
+    window
+        .stage
+        .drive()
+        .type_text(&unescape(&text))
+        .map_err(drive_error)?;
+    window.rest()
+}
+
+// Focus without a click, as `tabs_and_types` gives it.
+#[given("the person has put the keyboard in the code view")]
+fn keyboard_in_code(w: &mut UiWorld) -> StepResult {
+    let window = w.window()?;
+    let code = window.code()?;
+    let item = window
+        .stage
+        .scene
+        .accessible_item(code.key.ok_or("the code view has no key")?)
+        .ok_or("the code view is not an item")?;
+    let engine = window.engine().clone();
+    engine
+        .invoke_by_name(item, "forceActiveFocus", &[])
+        .map_err(|e| e.to_string())?;
+    window.rest()
+}
+
+/// What the running app has for `name` on the object with `id`, as an
+/// agent reads it.
+fn running_value(w: &mut UiWorld, id: &str, name: &str) -> Result<Json, String> {
+    let window = w.window()?;
+    let ctx = CallCtx::new(CapSet::of([Cap::Inspect]));
+    let args = serde_json::json!({ "node": { "id": id }, "read": [name] });
+    let reply = window
+        .server
+        .call("preview_state", &ctx, args)
+        .map_err(|e| format!("the preview was not read: {}", e.to_value()))?;
+    Ok(reply.structured["state"][name].clone())
+}
+
+#[then(regex = r#"^the running app's "([^"]+)" has "([^"]+)" above (-?[0-9.]+)$"#)]
+fn running_above(w: &mut UiWorld, id: String, name: String, floor: f64) -> StepResult {
+    let got = running_value(w, &id, &name)?;
+    got.as_f64()
+        .is_some_and(|n| n > floor)
+        .then_some(())
+        .ok_or_else(|| format!("`{id}.{name}` is {got}, not above {floor}"))
+}
+
+#[then(regex = r#"^the running app's "([^"]+)" has "([^"]+)" (-?[0-9.]+)$"#)]
+fn running_number(w: &mut UiWorld, id: String, name: String, want: f64) -> StepResult {
+    let got = running_value(w, &id, &name)?;
+    got.as_f64()
+        .is_some_and(|n| (n - want).abs() < 1e-9)
+        .then_some(())
+        .ok_or_else(|| format!("`{id}.{name}` is {got}, not {want}"))
+}
+
+#[then(regex = r#"^the running app's "([^"]+)" has "([^"]+)" "(.*)"$"#)]
+fn running_text(w: &mut UiWorld, id: String, name: String, want: String) -> StepResult {
+    let got = running_value(w, &id, &name)?;
+    (got.as_str() == Some(want.as_str()))
+        .then_some(())
+        .ok_or_else(|| format!("`{id}.{name}` is {got}, not {want:?}"))
 }
 
 // ------------------------------------------------- the command palette
@@ -4310,10 +4479,13 @@ fn palette_shortcut(w: &mut UiWorld, name: String, want: String) -> StepResult {
 #[then(regex = r#"^the command palette lists "([^"]+)"$"#)]
 fn palette_lists(w: &mut UiWorld, want: String) -> StepResult {
     let rows = palette_rows(w.window()?)?;
-    rows.iter().any(|r| r.name == want).then_some(()).ok_or_else(|| {
-        let shown: Vec<&str> = rows.iter().map(|r| r.name.as_str()).collect();
-        format!("the palette lists {shown:?}")
-    })
+    rows.iter()
+        .any(|r| r.name == want)
+        .then_some(())
+        .ok_or_else(|| {
+            let shown: Vec<&str> = rows.iter().map(|r| r.name.as_str()).collect();
+            format!("the palette lists {shown:?}")
+        })
 }
 
 #[when("the person pans the canvas with the middle button")]

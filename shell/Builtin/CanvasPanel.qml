@@ -274,8 +274,20 @@ Panel {
     readonly property string fitKey: arrangement + " " + surface.width + "x" + surface.height + " " + frameLabels
     onFitKeyChanged: Qt.callLater(refit)
     function refit() {
-        if (fitted)
+        // A frame asked to fit its content glides to show it whole once its
+        // new height is known, from wherever the view was.
+        if (fitWhenSized !== "" && fitWhenSized !== liveFrame.width + "x" + liveFrame.height) {
+            fitWhenSized = ""
+            fit("live", jumpTime)
+        } else if (fitted) {
             fit(fitting, 0)
+        }
+    }
+    // The live frame's size when "Fit content" was pressed, until it changes.
+    property string fitWhenSized: ""
+    function fitContent(on) {
+        fitWhenSized = liveFrame.width + "x" + liveFrame.height
+        workspace.dispatch("preview_open", {doc: workspace.doc, fit: on ? "content" : "screen"})
     }
     onSideBySideChanged: Qt.callLater(() => fit("all", jumpTime))
 
@@ -357,9 +369,42 @@ Panel {
                 return Qt.point(dy, 0)
             return Qt.point(dx, dy)
         }
+        // In play mode the frame is the device: the wheel over it scrolls
+        // the app, in the notches `app_scroll` takes, and one call carries
+        // what a turn of the event loop gathered.
+        property var playWheel: null
+        function playScroll(event, horizontal) {
+            const x = event.x / panel.zoom - panel.liveFrame.x + panel.viewX
+            const y = event.y / panel.zoom + panel.viewY
+            if (!panel.playing || x < 0 || y < 0 || x > panel.liveFrame.width || y > panel.liveFrame.height)
+                return false
+            const px = event.pixelDelta
+            const ang = event.angleDelta
+            const byPixels = px.x !== 0 || px.y !== 0
+            let dx = byPixels ? px.x / 72 : ang.x / 120
+            let dy = byPixels ? px.y / 72 : ang.y / 120
+            if (horizontal && dx === 0) {
+                dx = dy
+                dy = 0
+            }
+            const was = playWheel
+            playWheel = was !== null
+                ? {x: was.x, y: was.y, dx: was.dx + dx, dy: was.dy + dy}
+                : {x: x, y: y, dx: dx, dy: dy}
+            Qt.callLater(sendPlayWheel)
+            return true
+        }
+        function sendPlayWheel() {
+            const wheel = playWheel
+            playWheel = null
+            if (wheel !== null && (wheel.dx !== 0 || wheel.dy !== 0))
+                panel.workspace.dispatch("preview_state", {scroll: wheel})
+        }
         WheelHandler {
             acceptedModifiers: Qt.NoModifier
             onWheel: (event) => {
+                if (surface.playScroll(event, false))
+                    return
                 const d = surface.wheelDelta(event, false)
                 panel.panBy(d.x, d.y)
             }
@@ -367,6 +412,8 @@ Panel {
         WheelHandler {
             acceptedModifiers: Qt.ShiftModifier
             onWheel: (event) => {
+                if (surface.playScroll(event, true))
+                    return
                 const d = surface.wheelDelta(event, true)
                 panel.panBy(d.x, d.y)
             }
@@ -562,6 +609,16 @@ Panel {
                                   ? "Edit " + target + " layout"
                                   : target.charAt(0).toUpperCase() + target.slice(1) + " layout"
                             onClicked: panel.layoutAsked(target, frame.modelData.variant)
+                        }
+                        // Where the running app's errors and warnings say how
+                        // many they are, beside the frame they belong to.
+                        Item {
+                            id: problemsSpot
+                            objectName: "problemsSpot"
+                            anchors.verticalCenter: parent.verticalCenter
+                            visible: children.length > 0
+                            width: childrenRect.width
+                            height: childrenRect.height
                         }
                     }
                     Label {
@@ -859,6 +916,19 @@ Panel {
             icon_: "fit"
             text: "Fit"
             onClicked: panel.fitNow()
+        }
+        Hairline {}
+        // As tall as the page, so what scrolls below the fold shows and can
+        // be picked; again for the screen's height.
+        IconButton {
+            icon_: "fitContent"
+            text: "Fit content"
+            checkable: true
+            checked: panel.preview !== null && panel.preview.fit === "content"
+            onClicked: {
+                panel.fitContent(checked)
+                checked = Qt.binding(() => panel.preview !== null && panel.preview.fit === "content")
+            }
         }
     }
     // Whole per cents but where they would all round the same: 2.5 % and 6400 %.

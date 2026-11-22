@@ -104,6 +104,9 @@ Popup {
             out.push(row("Zoom out", "Ctrl+-", "One step back, about the middle", () => cv.zoomBy(-1)))
             out.push(row(cv.sideBySide ? "Show one frame" : "Show the frames side by side", "",
                          "Every target's frame on the canvas", () => { cv.sideBySide = !cv.sideBySide }))
+            out.push(preview.fit === "content"
+                     ? row("Fit the screen", "", "The frame as tall as its target's screen", () => cv.fitContent(false))
+                     : row("Fit content", "", "The frame as tall as the page, to see below the fold", () => cv.fitContent(true)))
             out.push(row("Select tool", "V", "Click to pick, drag to move", () => cv.useTool("select")))
             out.push(row("Hand tool", "H", "Drag to move the view", () => cv.useTool("hand")))
             out.push(row("Draw rectangle", "R", "Drag out a Rectangle", () => cv.useTool("Rectangle")))

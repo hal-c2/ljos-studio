@@ -28,6 +28,7 @@ var paths = {
     up: "M8 13 V3 M4 7 L8 3 L12 7",
     down: "M8 3 V13 M4 9 L8 13 L12 9",
     fit: "M2 5 V2 H5 M11 2 H14 V5 M14 11 V14 H11 M5 14 H2 V11",
+    fitContent: "M3 2 H13 M3 14 H13 M8 4.5 V11.5 M6 6.5 L8 4.5 L10 6.5 M6 9.5 L8 11.5 L10 9.5",
     actual: "M4 13 V3 L2.5 4.5 M12 13 V3 L10.5 4.5 M7.5 6 V6.5 M7.5 10 V10.5",
     export: "M8 10 V2 M5 5 L8 2 L11 5 M3 9 V14 H13 V9",
     sidebarLeft: "M2 3 H14 V13 H2 Z M6 3 V13",

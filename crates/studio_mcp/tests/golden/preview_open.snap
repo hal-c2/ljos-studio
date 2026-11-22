@@ -9,11 +9,19 @@ expression: value
     "open_world": false,
     "read_only": false
   },
-  "description": "Run a document (a shell) in a preview for a target (desktop, tablet, phone) with live blocks or the mock modules. On the open preview it changes size or state in place; `state_kept` says whether the app's state survived.",
+  "description": "Run a document (a shell) in a preview for a target (desktop, tablet, phone) with live blocks or the mock modules; `fit: \"content\"` makes it as tall as its page. On the open preview it changes size, fit or state in place; `state_kept` says whether the app's state survived.",
   "inputSchema": {
     "properties": {
       "doc": {
         "description": "The document to run, usually a shell (`Shell.qml`).",
+        "type": "string"
+      },
+      "fit": {
+        "description": "`content` makes the preview as tall as what the document lays out (never shorter than the screen), again after each reload; `screen` the screen's height. Default: the open preview's, else `screen`.",
+        "enum": [
+          "screen",
+          "content"
+        ],
         "type": "string"
       },
       "size": {
@@ -64,6 +72,7 @@ expression: value
       "doc": {
         "type": "string"
       },
+      "fit": {},
       "mocked": {
         "type": "array"
       },
@@ -84,6 +93,7 @@ expression: value
       "doc",
       "size",
       "state",
+      "fit",
       "mocked",
       "started",
       "state_kept",

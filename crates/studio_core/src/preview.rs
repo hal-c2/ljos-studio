@@ -210,6 +210,22 @@ pub enum Click {
     Point { x: f64, y: f64 },
 }
 
+/// Input other than a click, as a person's hands give it.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Input {
+    /// The wheel turned at this point (logical pixels), in notches: a
+    /// negative `dy` shows what is further down.
+    Scroll { x: f64, y: f64, dx: f64, dy: f64 },
+    /// A finger put down at this point and moved by `dx`, `dy` pixels,
+    /// then lifted.
+    Swipe { x: f64, y: f64, dx: f64, dy: f64 },
+    /// Keys pressed and released in turn, each a name with any modifiers
+    /// (`"Enter"`, `"Ctrl+A"`), separated by spaces.
+    Press(String),
+    /// Text typed into whatever has the keyboard.
+    Type(String),
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum PreviewError {
     #[error("no preview is open")]
@@ -360,6 +376,26 @@ pub trait PreviewHost: Send {
         Err(PreviewError::Refused {
             code: "unsupported".to_owned(),
             message: "this preview takes no input".to_owned(),
+        })
+    }
+
+    /// Scrolls, swipes, presses keys or types, as a person does: the app's
+    /// own handlers answer it. A host that takes no input refuses.
+    fn input(&mut self, input: &Input) -> Result<(), PreviewError> {
+        let _ = input;
+        Err(PreviewError::Refused {
+            code: "unsupported".to_owned(),
+            message: "this preview takes no input".to_owned(),
+        })
+    }
+
+    /// How far down (logical pixels) what the preview shows reaches: the
+    /// lowest edge of anything drawn, scrolled out of view or not. A host
+    /// that cannot tell refuses.
+    fn extent(&mut self) -> Result<f64, PreviewError> {
+        Err(PreviewError::Refused {
+            code: "unsupported".to_owned(),
+            message: "this preview does not say how tall its content is".to_owned(),
         })
     }
 

@@ -129,6 +129,9 @@ pub struct Previewed {
     /// The root's state whose `when` is the breakpoint of the preview's
     /// width, as `state_edit` writes it; empty when none is.
     pub variant: String,
+    /// `screen` or `content`: whether the height is the screen's or what
+    /// the document lays out.
+    pub fit: String,
 }
 
 /// The open document's flow, a graph whose nodes are its root's states.
@@ -642,6 +645,11 @@ fn preview_of(previews: &preview::Previews) -> Option<Previewed> {
         }
         .to_owned(),
         variant: String::new(),
+        fit: match open.fit {
+            preview::Fit::Screen => "screen",
+            preview::Fit::Content => "content",
+        }
+        .to_owned(),
     })
 }
 
