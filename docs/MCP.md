@@ -708,8 +708,17 @@ not: a real export to either, or to a directory over or below either, is
 refused until the build is done (`busy`, `build_running`), so the site built
 is the one the answer's `manifest` lists and has its place. DECISION: refused
 rather than queued, so an export never waits minutes with the project held.
-DECISION: the hold ignores letter case, as some file systems do: while
-`build/web` is being built, `build/WEB` is refused on every system.
+A build waits likewise for a held directory that lies where its own site
+would go. DECISION: the hold ignores letter case, as some file systems do:
+while `build/web` is being built, `build/WEB` is refused on every system.
+
+A build replaces only what it wrote: the site's `.ljos-site-build` lists
+each file with its hash, and a build that finds anything else there, or a
+file changed since, fails naming it and leaves the site as it was.
+DECISION: refused rather than merged, so no site is half somebody's. No
+export is written into a built site (`invalid_argument`, `inside_site`) or
+into `build/.site-work`, where builds work, in any letter case
+(`path_denied`, `work_directory`); a dry run says both.
 
 A bundle is written beside its place and swapped in, so it is never half
 of two exports. Refusals: `capability_denied` without `fs`; `not_found`

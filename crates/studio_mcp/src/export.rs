@@ -1044,6 +1044,15 @@ fn out_dir(root: &Path, out: Option<&str>, target: Target) -> Result<String, Sur
             format!("`{out}` is not below the project's `{BUILD}/`, where bundles are written"),
         ));
     }
+    if folded(&path).starts_with(folded(Path::new(SITE_WORK))) {
+        return Err(refused(
+            ErrorCode::PathDenied,
+            "work_directory",
+            format!(
+                "`{out}` is where Studio builds sites, emptied by each build; choose another `out`"
+            ),
+        ));
+    }
     let full = root.join(&path);
     if leads_elsewhere(root, &full) {
         return Err(SurfaceError::new(
@@ -1100,6 +1109,23 @@ fn may_replace(root: &Path, out: &Path) -> Result<(), SurfaceError> {
             format!(
                 "`{}` goes through a link now; bundles are written to the project's own `{BUILD}/`",
                 out.display()
+            ),
+        ));
+    }
+    // A build replaces a site whole, and what is inside it with it.
+    if let Some(site) = out
+        .ancestors()
+        .skip(1)
+        .take_while(|at| *at != root)
+        .find(|at| fs::symlink_metadata(at.join(SITE_STAMP)).is_ok_and(|m| m.file_type().is_file()))
+    {
+        return Err(refused(
+            ErrorCode::InvalidArgument,
+            "inside_site",
+            format!(
+                "`{}` is inside the site built at `{}`; choose another `out`",
+                out.display(),
+                site.display()
             ),
         ));
     }
@@ -1352,6 +1378,19 @@ fn through_links<'a>(
 /// What a bundle's name has after it as the name of the site built from it.
 pub(crate) const SITE_SUFFIX: &str = "-site";
 
+/// Where a build works, below the project's `build/`.
+pub(crate) const SITE_WORK: &str = "build/.site-work";
+
+/// What the builder leaves at the root of a site it wrote.
+const SITE_STAMP: &str = ".ljos-site-build";
+
+/// The site built from `bundle`.
+fn site_of(bundle: &Path) -> PathBuf {
+    let mut site = bundle.as_os_str().to_owned();
+    site.push(SITE_SUFFIX);
+    PathBuf::from(site)
+}
+
 /// What builds read and write, or wait their turn to.
 static BEING_BUILT: LazyLock<Mutex<Vec<PathBuf>>> = LazyLock::new(Mutex::default);
 
@@ -1371,9 +1410,8 @@ pub struct BeingBuilt([PathBuf; 2]);
 impl BeingBuilt {
     pub fn hold(bundle: PathBuf) -> Self {
         let bundle = folded(&bundle);
-        let mut site = bundle.clone().into_os_string();
-        site.push(SITE_SUFFIX);
-        let both = [bundle, PathBuf::from(site)];
+        let site = site_of(&bundle);
+        let both = [bundle, site];
         BEING_BUILT
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
@@ -1468,11 +1506,13 @@ fn export(studio: &Mutex<Studio>, ctx: &CallCtx, a: ExportArgs) -> Result<Export
         may_replace(&root, &root.join(&out))?;
         Copied::default()
     } else {
-        if BeingBuilt::holds(&root.join(&out)) {
+        let bundle = root.join(&out);
+        // A build replaces its site, where the bundle of one waiting can lie.
+        if BeingBuilt::holds(&bundle) || (a.build && BeingBuilt::holds(&site_of(&bundle))) {
             return Err(SurfaceError::new(
                 ErrorCode::Busy,
                 format!(
-                    "`{out}` overlaps a site build that is running: export there again when it is done"
+                    "`{out}`, or the site built from it, overlaps a site build that is running: export there again when it is done"
                 ),
             )
             .with_details(json!({ "kind": "build_running" })));
