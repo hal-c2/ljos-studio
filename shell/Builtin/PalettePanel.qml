@@ -307,108 +307,8 @@ Panel {
                 Accessible.name: text
             }
 
-            Repeater {
-                model: panel.groups
-                delegate: Column {
-                    id: group
-                    required property var modelData
-                    width: parent.width
-                    spacing: Spacing.xxs
-
-                    Label {
-                        text: group.modelData.name
-                        color: Colors.textMuted
-                        font.pixelSize: Typography.captionSize
-                        font.weight: Typography.bodyStrongWeight
-                        topPadding: Spacing.sm
-                        bottomPadding: 2
-                        leftPadding: Spacing.xxs
-                        Accessible.role: Accessible.StaticText
-                        Accessible.name: group.modelData.name
-                    }
-                    Flow {
-                        width: parent.width
-                        spacing: Spacing.xxs
-
-                        Repeater {
-                            model: group.modelData.types
-                            delegate: AbstractButton {
-                                id: tile
-                                required property var modelData
-                                text: modelData.name
-                                Accessible.name: "Place " + modelData.name
-                                Accessible.description: modelData.module
-                                Accessible.role: Accessible.Button
-                                enabled: panel.target !== ""
-                                width: (group.width - 2 * Spacing.xxs) / 3
-                                height: 76
-                                hoverEnabled: true
-                                ToolTip.visible: hovered
-                                ToolTip.text: "Place " + modelData.name + " (" + (modelData.module || "this project") + ")"
-                                ToolTip.delay: 500
-                                background: Rectangle {
-                                    radius: 8
-                                    color: tile.down ? Colors.surfacePressed
-                                        : tile.hovered ? Colors.surfaceHover : "transparent"
-                                    border.width: tile.visualFocus ? 2 : 0
-                                    border.color: Colors.focusRing
-                                    Behavior on color {
-                                        // Only under the pointer: what Studio changes by itself shows at once,
-                                        // so a window nobody touches asks for no frames.
-                                        enabled: tile.hovered
-                                        ColorAnimation {
-                                            duration: Motion.enterSmallFrequent
-                                            easing.type: Easing.BezierSpline
-                                            easing.bezierCurve: Motion.easeOut
-                                        }
-                                    }
-                                }
-                                contentItem: Column {
-                                    spacing: Spacing.xxs
-                                    topPadding: Spacing.xxs
-                                    // A small piece of canvas with the thing on it, as it will look placed.
-                                    Rectangle {
-                                        anchors.horizontalCenter: parent.horizontalCenter
-                                        width: parent.width - Spacing.xs
-                                        height: 44
-                                        radius: 6
-                                        color: Colors.canvas
-                                        border.width: 1
-                                        border.color: tile.hovered ? Colors.border : Colors.surfacePressed
-                                        TypeSketch {
-                                            anchors.centerIn: parent
-                                            kind: panel.typeIcon(tile.modelData.name)
-                                            ink: tile.enabled ? Colors.text : Colors.textDisabled
-                                        }
-                                    }
-                                    Text {
-                                        width: parent.width
-                                        leftPadding: 2
-                                        rightPadding: 2
-                                        text: tile.modelData.name
-                                        color: tile.enabled ? Colors.text : Colors.textDisabled
-                                        font.pixelSize: Typography.captionSize
-                                        horizontalAlignment: Text.AlignHCenter
-                                        elide: Text.ElideRight
-                                    }
-                                }
-                                onClicked: {
-                                    const place = {
-                                        doc: panel.workspace.doc,
-                                        parent: {node: panel.target},
-                                        text: panel.starter(modelData.name)
-                                    }
-                                    if (modelData.module !== "")
-                                        place.import = modelData.module
-                                    panel.workspace.dispatch("node_insert", place)
-                                    panel.placed({name: modelData.name, module: modelData.module})
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
+            // Before the toolkit's types: the project's own pictures and the way
+            // to bring one in, which a screenful of tiles would put out of sight.
             Section {
                 id: assetsSection
                 title: "Assets"
@@ -517,6 +417,108 @@ Panel {
                         onClicked: {
                             panel.workspace.dispatch("project_open", {asset: "import", file: incoming.text})
                             incoming.text = ""
+                        }
+                    }
+                }
+            }
+
+            Repeater {
+                model: panel.groups
+                delegate: Column {
+                    id: group
+                    required property var modelData
+                    width: parent.width
+                    spacing: Spacing.xxs
+
+                    Label {
+                        text: group.modelData.name
+                        color: Colors.textMuted
+                        font.pixelSize: Typography.captionSize
+                        font.weight: Typography.bodyStrongWeight
+                        topPadding: Spacing.sm
+                        bottomPadding: 2
+                        leftPadding: Spacing.xxs
+                        Accessible.role: Accessible.StaticText
+                        Accessible.name: group.modelData.name
+                    }
+                    Flow {
+                        width: parent.width
+                        spacing: Spacing.xxs
+
+                        Repeater {
+                            model: group.modelData.types
+                            delegate: AbstractButton {
+                                id: tile
+                                required property var modelData
+                                text: modelData.name
+                                Accessible.name: "Place " + modelData.name
+                                Accessible.description: modelData.module
+                                Accessible.role: Accessible.Button
+                                enabled: panel.target !== ""
+                                width: (group.width - 2 * Spacing.xxs) / 3
+                                height: 76
+                                hoverEnabled: true
+                                ToolTip.visible: hovered
+                                ToolTip.text: "Place " + modelData.name + " (" + (modelData.module || "this project") + ")"
+                                ToolTip.delay: 500
+                                background: Rectangle {
+                                    radius: 8
+                                    color: tile.down ? Colors.surfacePressed
+                                        : tile.hovered ? Colors.surfaceHover : "transparent"
+                                    border.width: tile.visualFocus ? 2 : 0
+                                    border.color: Colors.focusRing
+                                    Behavior on color {
+                                        // Only under the pointer: what Studio changes by itself shows at once,
+                                        // so a window nobody touches asks for no frames.
+                                        enabled: tile.hovered
+                                        ColorAnimation {
+                                            duration: Motion.enterSmallFrequent
+                                            easing.type: Easing.BezierSpline
+                                            easing.bezierCurve: Motion.easeOut
+                                        }
+                                    }
+                                }
+                                contentItem: Column {
+                                    spacing: Spacing.xxs
+                                    topPadding: Spacing.xxs
+                                    // A small piece of canvas with the thing on it, as it will look placed.
+                                    Rectangle {
+                                        anchors.horizontalCenter: parent.horizontalCenter
+                                        width: parent.width - Spacing.xs
+                                        height: 44
+                                        radius: 6
+                                        color: Colors.canvas
+                                        border.width: 1
+                                        border.color: tile.hovered ? Colors.border : Colors.surfacePressed
+                                        TypeSketch {
+                                            anchors.centerIn: parent
+                                            kind: panel.typeIcon(tile.modelData.name)
+                                            ink: tile.enabled ? Colors.text : Colors.textDisabled
+                                        }
+                                    }
+                                    Text {
+                                        width: parent.width
+                                        leftPadding: 2
+                                        rightPadding: 2
+                                        text: tile.modelData.name
+                                        color: tile.enabled ? Colors.text : Colors.textDisabled
+                                        font.pixelSize: Typography.captionSize
+                                        horizontalAlignment: Text.AlignHCenter
+                                        elide: Text.ElideRight
+                                    }
+                                }
+                                onClicked: {
+                                    const place = {
+                                        doc: panel.workspace.doc,
+                                        parent: {node: panel.target},
+                                        text: panel.starter(modelData.name)
+                                    }
+                                    if (modelData.module !== "")
+                                        place.import = modelData.module
+                                    panel.workspace.dispatch("node_insert", place)
+                                    panel.placed({name: modelData.name, module: modelData.module})
+                                }
+                            }
                         }
                     }
                 }
