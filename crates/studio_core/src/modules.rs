@@ -104,20 +104,38 @@ pub fn join(dir: &str, file: &str) -> Option<String> {
 
 /// Each capitalised name `text` reads a member of (`Colors.accent`,
 /// `Layout.fillWidth`), once for each time, leaving out strings and comments.
+/// What a template literal holds in `${}` is code.
 pub fn member_uses(text: &str) -> Vec<&str> {
     let bytes = text.as_bytes();
     let word = |b: u8| b.is_ascii_alphanumeric() || b == b'_' || b == b'$';
     let mut out = Vec::new();
+    // For each `${` the scan is inside, the braces opened since.
+    let mut substitutions = Vec::new();
     let mut i = 0;
     while i < bytes.len() {
         match bytes[i] {
+            b'`' => i = past_template_words(bytes, i + 1, &mut substitutions),
+            b'{' => {
+                if let Some(open) = substitutions.last_mut() {
+                    *open += 1;
+                }
+                i += 1;
+            }
+            b'}' => {
+                i += 1;
+                match substitutions.pop() {
+                    Some(0) => i = past_template_words(bytes, i, &mut substitutions),
+                    Some(open) => substitutions.push(open - 1),
+                    None => {}
+                }
+            }
             b'/' if bytes.get(i + 1) == Some(&b'/') => {
                 i = text[i..].find('\n').map_or(bytes.len(), |n| i + n);
             }
             b'/' if bytes.get(i + 1) == Some(&b'*') => {
                 i = text[i + 2..].find("*/").map_or(bytes.len(), |n| i + n + 4);
             }
-            quote @ (b'"' | b'\'' | b'`') => {
+            quote @ (b'"' | b'\'') => {
                 i += 1;
                 while i < bytes.len() && bytes[i] != quote {
                     i += if bytes[i] == b'\\' { 2 } else { 1 };
@@ -138,6 +156,24 @@ pub fn member_uses(text: &str) -> Vec<&str> {
         }
     }
     out
+}
+
+/// Where code starts again after a template literal's words at `from`: past
+/// the backtick that closes it, or past a `${`, which is then one more open.
+fn past_template_words(bytes: &[u8], from: usize, substitutions: &mut Vec<usize>) -> usize {
+    let mut i = from;
+    while let Some(&byte) = bytes.get(i) {
+        match byte {
+            b'`' => return i + 1,
+            b'\\' => i += 2,
+            b'$' if bytes.get(i + 1) == Some(&b'{') => {
+                substitutions.push(0);
+                return i + 2;
+            }
+            _ => i += 1,
+        }
+    }
+    bytes.len()
 }
 
 /// Whether `name`, in the document `doc` whose text is `text`, is or may be
