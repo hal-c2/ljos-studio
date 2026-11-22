@@ -639,6 +639,40 @@ Feature: A project is exported for ljos-web to build a site from
       Then the answer's "/written" is true
       And the file "build/web/ljos-site.json" exists
 
+    Scenario Outline: A bundle a build reads is the same bundle however it is spelled
+      Given a site is being built from "build/web"
+      When the agent calls the tool "export" with:
+        """json
+        {"entry": "Shell.qml", "target": "web", "out": "<out>"}
+        """
+      Then the agent is refused with "<code>"
+      And the file "build/web/ljos-site.json" does not exist
+
+      Examples:
+        | out             | code        |
+        | build/./web     | busy        |
+        | build//web/     | busy        |
+        | build/web/.     | busy        |
+        | build/web/inner | busy        |
+        | build/WEB       | busy        |
+        | ./build/web     | path_denied |
+        | build/x/../web  | path_denied |
+
+    Scenario: A link to a bundle a build reads is no way into it
+      Given the file "build/web/keep.txt":
+        """
+        kept
+        """
+      And "build/alias" links to "build/web" in the project
+      And a site is being built from "build/web"
+      When the agent calls the tool "export" with:
+        """json
+        {"entry": "Shell.qml", "target": "web", "out": "build/alias"}
+        """
+      Then the agent is refused with "path_denied"
+      And the file "build/web/keep.txt" exists
+      And the file "build/web/ljos-site.json" does not exist
+
     Scenario: Only a web export is built
       Given the studio tools are connected with the capabilities "inspect, mutate, fs, run"
       When the agent calls the tool "export" with:
