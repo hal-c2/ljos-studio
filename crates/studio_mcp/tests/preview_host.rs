@@ -1126,6 +1126,30 @@ fn a_refused_call_that_ended_the_preview_tells_the_windows() {
 }
 
 #[test]
+fn an_answered_call_that_ended_the_preview_tells_the_windows() {
+    let f = Fixture::new();
+    f.call("preview_open", json!({ "doc": "Shell.qml" }))
+        .unwrap();
+    while f.told.try_recv().is_ok() {}
+    f.fail("logs", ended());
+    let read = f.call("preview_events", json!({})).unwrap();
+    assert_eq!(read["open"], false, "{read}");
+    f.told
+        .try_recv()
+        .expect("no window was told the preview ended");
+}
+
+#[test]
+fn an_answered_read_that_ended_nothing_tells_no_window() {
+    let f = Fixture::new();
+    f.call("preview_open", json!({ "doc": "Shell.qml" }))
+        .unwrap();
+    while f.told.try_recv().is_ok() {}
+    f.call("preview_events", json!({})).unwrap();
+    assert!(f.told.try_recv().is_err(), "a window was told of a read");
+}
+
+#[test]
 fn a_refused_call_that_changed_nothing_tells_no_window() {
     for how in [
         "no such document",

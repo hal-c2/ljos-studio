@@ -96,10 +96,13 @@ Feature: An edit brings the imports what it writes needs
       """
 
     Examples:
-      | name         | value                          |
-      | color        | Colors.accent                  |
-      | radius       | Spacing.sm                     |
-      | border.color | dark ? Colors.border : \\"red\\" |
+      | name         | value                                      |
+      | color        | Colors.accent                              |
+      | radius       | Spacing.sm                                 |
+      | border.color | dark ? Colors.border : \\"red\\"             |
+      | color        | `${Colors.accent}`                         |
+      | objectName   | `inset ${({a: 1}).a + Spacing.sm}`         |
+      | color        | `${dark ? `${Colors.border}` : 'red'}`     |
 
   Scenario: An object put with a design colour brings the design module
     When the agent calls the tool "node_insert" with:
@@ -127,10 +130,13 @@ Feature: An edit brings the imports what it writes needs
     Then the file "Plain.qml" does not contain "Ljos.Design"
 
     Examples:
-      | name       | value                  |
-      | objectName | \\"Colors.accent\\"    |
-      | width      | card.Colors.size       |
-      | width      | /* Colors.accent */ 10 |
+      | name       | value                          |
+      | objectName | \\"Colors.accent\\"            |
+      | width      | card.Colors.size               |
+      | width      | /* Colors.accent */ 10         |
+      | objectName | `Colors.accent`                |
+      | objectName | `${'Colors.accent'}`           |
+      | objectName | `${card.width} Colors.accent`  |
 
   Scenario Outline: A file that names the module already keeps its imports
     Given the file "Named.qml":
