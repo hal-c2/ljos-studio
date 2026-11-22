@@ -722,6 +722,11 @@ fn second_calls_with(w: &mut StudioWorld, name: String, tool: String, step: &Ste
     Ok(())
 }
 
+#[given(regex = r#"^the empty directory "([^"]+)"$"#)]
+fn empty_directory(w: &mut StudioWorld, name: String) -> StepResult {
+    std::fs::create_dir_all(w.dir.path().join(name)).map_err(|e| e.to_string())
+}
+
 #[given(regex = r#"^a site is being built from "([^"]+)"$"#)]
 fn being_built(w: &mut StudioWorld, bundle: String) -> StepResult {
     let root = w.dir.path().canonicalize().map_err(|e| e.to_string())?;
