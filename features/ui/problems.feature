@@ -198,3 +198,48 @@ Feature: The built-in shell shows what is wrong in the preview
     Then the window shows the person's shell
     And the window says "Faults"
     And the window says "Problem count: 1"
+
+  Scenario: The problems cover none of the canvas
+    Given Studio's window shows the project
+    And the person has opened "App.qml" in the documents list
+    When the person replaces "\"black\"" with "transparent" in the code view
+    Then the window has a pane "1 problem in the preview"
+    And the problems cover none of the canvas
+    When the person clicks "Show the problems"
+    Then the problems cover none of the canvas
+
+  Scenario: With the left panels folded a button still leads to the problems
+    Given Studio's window shows the project
+    And the person has opened "App.qml" in the documents list
+    When the person replaces "\"black\"" with "transparent" in the code view
+    And the person clicks "Left panels"
+    Then the window has a button "Problems in the left panels"
+    When the person clicks "Problems in the left panels"
+    And the person clicks "Show the problems"
+    Then the window says "warning: `transparent` is not a name in sight: it is looked up when the program runs, App.qml:11"
+    When the person clicks "Left panels"
+    Then the window has a button "Problems in the left panels"
+
+  # Nothing writes or asks once the window shows the document: the app's own
+  # timer logs.
+  Scenario: A warning the app logs after it started reaches the window
+    Given the file "Late.qml":
+      """qml
+      import QtQuick
+
+      Item {
+          width: 200; height: 120
+
+          Timer {
+              interval: 1500
+              running: true
+              onTriggered: {
+                  const gone = null
+                  gone.back()
+              }
+          }
+      }
+      """
+    And Studio's window shows the project
+    When the person opens "Late.qml" in the documents list
+    Then the window counts 1 problem within 10 seconds

@@ -6,6 +6,7 @@ use std::sync::{Arc, Mutex};
 
 use ljos_mcp_core::{CallCtx, Cap, CapSet};
 use serde_json::{Map, Value, json};
+use studio_core::MemStore;
 use studio_core::preview::{
     Click, Declared, Extent, Input, LogLine, Picture, PreviewError, PreviewHost, PreviewSpec,
     Reload, Rest, RestWatch, Size,
@@ -19,6 +20,10 @@ struct Seen {
     reloads: Vec<std::time::Instant>,
     generation: u64,
     fail_next: bool,
+    /// What a failed reload says; empty leaves it the one of most tests.
+    failure: String,
+    /// What the app logged after it started, read once.
+    later: Vec<LogLine>,
     /// Calls that answer with an error, by how the call's note starts; each
     /// answers once.
     errors: Vec<(String, PreviewError)>,
@@ -100,9 +105,11 @@ impl PreviewHost for Recorder {
         let mut seen = self.0.lock().unwrap();
         seen.reloads.push(std::time::Instant::now());
         if std::mem::take(&mut seen.fail_next) {
-            return Ok(Reload::Failed {
-                message: "Shell.qml:4: expected a property".to_owned(),
-            });
+            let message = match seen.failure.as_str() {
+                "" => "Shell.qml:4: expected a property".to_owned(),
+                said => said.to_owned(),
+            };
+            return Ok(Reload::Failed { message });
         }
         seen.generation += 1;
         Ok(Reload::Applied {
@@ -172,7 +179,7 @@ impl PreviewHost for Recorder {
                 compiler: false,
             }]
         } else {
-            Vec::new()
+            std::mem::take(&mut self.0.lock().unwrap().later)
         };
         Ok((lines, 1))
     }
@@ -1918,4 +1925,175 @@ fn a_read_after_a_scroll_reads_nothing_when_its_object_was_replaced_while_it_set
         !calls.iter().any(|c| c.starts_with("read ")),
         "read the other object: {calls:?}"
     );
+}
+#[test]
+fn a_refused_open_that_changed_the_preview_tells_the_windows() {
+    for how in [
+        "a resize, then a refused mock",
+        "started, then a refused look",
+    ] {
+        let f = Fixture::new();
+        let args = if how.starts_with("a resize") {
+            f.call("preview_open", json!({ "doc": "Shell.qml" }))
+                .unwrap();
+            f.fail("alias", refused());
+            json!({ "doc": "Shell.qml", "target": "phone", "state": "mocked" })
+        } else {
+            // The host can't switch its look, and says so once it has started.
+            json!({ "doc": "Shell.qml", "appearance": "dark" })
+        };
+        while f.told.try_recv().is_ok() {}
+        f.call("preview_open", args).unwrap_err();
+        f.told
+            .try_recv()
+            .unwrap_or_else(|_| panic!("no window was told: {how}"));
+        assert!(f.told.try_recv().is_err(), "told more than once: {how}");
+    }
+}
+
+fn warned(message: &str) -> LogLine {
+    LogLine {
+        level: "warning".to_owned(),
+        message: message.to_owned(),
+        file: None,
+        line: None,
+        compiler: false,
+    }
+}
+
+#[test]
+fn a_warning_logged_later_reaches_the_windows_without_a_call() {
+    let f = Fixture::new();
+    f.call("preview_open", json!({ "doc": "Shell.qml" }))
+        .unwrap();
+    let logged = f.events().len();
+    f.seen.lock().unwrap().later.push(warned("logged later"));
+    while f.told.try_recv().is_ok() {}
+    f.server.pull_problems();
+    f.told
+        .try_recv()
+        .expect("no window was told of the warning");
+    f.server.pull_problems();
+    assert!(f.told.try_recv().is_err(), "a window was told of no news");
+
+    let out = f.call("preview_events", json!({})).unwrap();
+    assert_eq!(out["problems"][1]["message"], "logged later", "{out}");
+    let events = out["events"].as_array().unwrap();
+    assert!(
+        events[logged..]
+            .iter()
+            .any(|e| e["message"] == "logged later"),
+        "the events lost the line: {out}"
+    );
+}
+
+#[test]
+fn an_app_that_warns_without_end_has_bounded_problems() {
+    let f = Fixture::new();
+    f.call("preview_open", json!({ "doc": "Shell.qml" }))
+        .unwrap();
+    for round in 0..12 {
+        f.seen.lock().unwrap().later = (0..100).map(|i| warned(&format!("{round}.{i}"))).collect();
+        f.server.pull_problems();
+    }
+    let out = f.call("preview_events", json!({})).unwrap();
+    assert_eq!(out["problems"].as_array().unwrap().len(), 1024);
+}
+
+/// The error a write to `doc` leaves when its reload fails saying `says`.
+fn failure_of(f: &StudioServer, seen: &Mutex<Seen>, doc: &str, says: &str) -> Value {
+    let ctx = CallCtx::new(CapSet::of([Cap::Inspect, Cap::Mutate, Cap::Run]));
+    let call = |tool: &str, args: Value| {
+        f.call(tool, &ctx, args)
+            .map(|r| r.structured)
+            .unwrap_or_else(|e| panic!("{tool}: {}", e.to_value()))
+    };
+    {
+        let mut seen = seen.lock().unwrap();
+        seen.fail_next = true;
+        seen.failure = says.to_owned();
+    }
+    call(
+        "binding_set",
+        json!({ "doc": doc, "node": { "id": "root" }, "name": "width", "value": "2" }),
+    );
+    let out = call("preview_events", json!({}));
+    out["problems"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|p| p["severity"] == "error")
+        .unwrap_or_else(|| panic!("no error: {out}"))
+        .clone()
+}
+
+const ROOTED: &str = "import QtQuick\n\nItem {\n    id: root\n    width: 1\n}\n";
+
+#[test]
+fn a_failure_in_a_project_of_no_directory_names_its_document() {
+    for (doc, says, words, line) in [
+        (
+            "Main.qml",
+            "Main.qml: the file is empty",
+            "the file is empty",
+            0,
+        ),
+        (
+            "My App.qml",
+            "My App.qml:4: expected a property",
+            "expected a property",
+            4,
+        ),
+    ] {
+        let seen = Arc::new(Mutex::new(Seen::default()));
+        let store = MemStore::new([(doc.to_owned(), ROOTED.to_owned())]);
+        let timer = Arc::new(studio_mcp::timer::ThreadTimer::default());
+        let studio = Studio::with_store(Box::new(store), timer).with_preview_hosts(Arc::new({
+            let seen = seen.clone();
+            move || Box::new(Recorder(seen.clone()))
+        }));
+        let server = StudioServer::new(studio);
+        let ctx = CallCtx::new(CapSet::of([Cap::Inspect, Cap::Run]));
+        server
+            .call("preview_open", &ctx, json!({ "doc": doc }))
+            .unwrap_or_else(|e| panic!("{}", e.to_value()));
+        let error = failure_of(&server, &seen, doc, says);
+        assert_eq!(error["file"], doc, "{error}");
+        assert_eq!(error["message"], words, "{error}");
+        if line > 0 {
+            assert_eq!(error["line"], line, "{error}");
+            assert!(error["node"].is_string(), "{error}");
+        }
+    }
+}
+
+#[test]
+fn a_failure_in_a_mocked_module_names_the_mocks_file() {
+    let f = Fixture::with(|dir| {
+        std::fs::write(dir.join("Main.qml"), ROOTED).unwrap();
+    });
+    f.call(
+        "preview_open",
+        json!({ "doc": "Main.qml", "state": "mocked" }),
+    )
+    .unwrap();
+    let says = ".aliases/App.Media/Player.qml:4: expected a property";
+    let error = failure_of(&f.server, &f.seen, "Main.qml", says);
+    assert_eq!(error["file"], "mocks/App/Media/Player.qml", "{error}");
+    assert!(error["node"].is_string(), "{error}");
+}
+
+#[cfg(unix)]
+#[test]
+fn a_failure_named_by_a_link_names_the_document_itself() {
+    let f = Fixture::with(|dir| {
+        std::fs::write(dir.join("Main.qml"), ROOTED).unwrap();
+        std::os::unix::fs::symlink("Main.qml", dir.join("Link.qml")).unwrap();
+    });
+    f.call("preview_open", json!({ "doc": "Main.qml" }))
+        .unwrap();
+    let says = "Link.qml:4: expected a property";
+    let error = failure_of(&f.server, &f.seen, "Main.qml", says);
+    assert_eq!(error["file"], "Main.qml", "{error}");
+    assert!(error["node"].is_string(), "{error}");
 }
