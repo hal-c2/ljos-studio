@@ -18,6 +18,7 @@
 import { createHash } from "node:crypto";
 import { copyFileSync, cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, normalize, resolve, sep } from "node:path";
+import { stripVTControlCharacters } from "node:util";
 
 const here = import.meta.dirname;
 const [bundleArg, outArg] = process.argv.slice(2);
@@ -93,8 +94,9 @@ for (const m of modules) if (!listed.has(m.qmldir)) fail(`${m.module}'s ${m.qmld
 for (const at of [page.icon, page.image]) if (at && !listed.has(at)) fail(`the page's picture ${at} is not one of its files`);
 
 // What this ljos-web exports: `./QtQuick/Layouts` is the module
-// QtQuick.Layouts. The controls and Ljos.Design are QML it compiles, from
-// its own copy of Ljós's or from Qt's, so they are not exported.
+// QtQuick.Layouts. The controls are QML it compiles, from its own copy of
+// Ljós's or from Qt's, so they are not exported. Ljos.Design it has not: the
+// QML of that is put in `standins` by whoever runs this.
 const runtime = join(here, "node_modules", "ljos-web");
 const exported = new Set(
   Object.keys(JSON.parse(readFileSync(join(runtime, "package.json"), "utf8")).exports)
@@ -103,7 +105,9 @@ const exported = new Set(
 );
 const own = existsSync(join(runtime, "controls"));
 for (const module of imports) {
-  if (module === "QtQuick.Controls" || module.startsWith("QtQuick.Controls.") || module === "Ljos.Design") {
+  if (module === "Ljos.Design") {
+    if (!existsSync(join(here, "standins", "Ljos", "Design", "qmldir"))) fail(`it imports ${module}, which the builder was given no QML of`);
+  } else if (module === "QtQuick.Controls" || module.startsWith("QtQuick.Controls.")) {
     if (!own && !process.env.QT_INSTALL_QML) fail(`it imports ${module}, which this ljos-web has no QML of; use a newer ljos-web`);
   } else if (!exported.has(module)) {
     fail(`it imports ${module}, which this ljos-web does not have`);
@@ -159,7 +163,12 @@ const dist = join(here, "dist");
 try {
   await vite.build({ root: here, configFile: join(here, "vite.config.js"), logLevel: "warn", build: { outDir: dist, emptyOutDir: true } });
 } catch (e) {
-  const said = String(e.message ?? e).trim().split("\n");
+  // The bundler's own message is a coloured summary that ends at the name
+  // of the plugin: what went wrong is in the first of its errors.
+  const said = stripVTControlCharacters(String(e.errors?.[0]?.message ?? e.message ?? e))
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
   fail(`ljos-web could not build the site: ${said.slice(0, 3).join(" ")}`, e.stack);
 }
 // The page's pictures are named by the head, which Vite does not read.

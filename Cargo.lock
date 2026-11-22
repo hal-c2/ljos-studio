@@ -5611,6 +5611,7 @@ dependencies = [
  "cucumber",
  "insta",
  "ljos_blocks",
+ "ljos_design",
  "ljos_mcp_core",
  "notify",
  "png",

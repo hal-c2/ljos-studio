@@ -22,6 +22,7 @@ use std::{
     time::{Duration, Instant},
 };
 
+use ljos_design::module;
 use ljos_mcp_core::{ErrorCode, SurfaceError};
 use serde_json::json;
 
@@ -52,6 +53,18 @@ const BUILDER: &[(&str, &str)] = &[
         include_str!("../../../web/site/vite.config.js"),
     ),
 ];
+
+/// Where `vite.config.js` looks for the QML modules Studio gives the builder.
+const STANDINS: &str = "standins";
+
+/// `Ljos.Design` as Ljós builds it in, which ljos-web has no QML of: each
+/// file by its path in the work directory, and its text.
+fn design() -> impl Iterator<Item = (PathBuf, String)> {
+    let dir = Path::new(STANDINS).join(module::DIRECTORY);
+    module::files(module::Seeds::Hues)
+        .into_iter()
+        .map(move |file| (dir.join(file.name), file.text))
+}
 
 /// What a build needs, or what of it is missing in plain words. `ljos_web`
 /// and `qmlc` are a person's choice, relative to the project; without them
@@ -349,6 +362,7 @@ fn written_in(work: &Path) -> Vec<PathBuf> {
         .into_iter()
         .chain(BUILDER.iter().map(|(name, _)| *name))
         .map(|name| work.join(name))
+        .chain(design().map(|(name, _)| work.join(name)))
         .collect()
 }
 
@@ -357,6 +371,12 @@ fn prepare(work: &Path, tools: &Toolchain) -> Result<(), String> {
     let plain = |e: std::io::Error, at: &Path| format!("{}: {e}", at.display());
     fs::create_dir_all(work.join("node_modules/@solidjs")).map_err(|e| plain(e, work))?;
     for (name, text) in BUILDER {
+        let at = work.join(name);
+        fs::write(&at, text).map_err(|e| plain(e, &at))?;
+    }
+    let modules = work.join(STANDINS).join(module::DIRECTORY);
+    fs::create_dir_all(&modules).map_err(|e| plain(e, &modules))?;
+    for (name, text) in design() {
         let at = work.join(name);
         fs::write(&at, text).map_err(|e| plain(e, &at))?;
     }

@@ -32,7 +32,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
-use crate::{Studio, blocks, lock, preview};
+use crate::{Studio, assets, blocks, lock, preview};
 
 /// The manifest's name, at the bundle's root.
 pub const MANIFEST: &str = "ljos-bundle.json";
@@ -306,6 +306,7 @@ pub struct BuildOut {
     pub ready: bool,
     /// What a build lacks, in plain words.
     #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[schemars(default)]
     pub missing: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ljos_web: Option<String>,
@@ -326,6 +327,7 @@ pub struct BuildOut {
     pub bytes: Option<u64>,
     /// What the build did, in order, and how long each part took.
     #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[schemars(default)]
     pub steps: Vec<BuildStep>,
     /// Whether a browser was asked to open `url`.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -750,8 +752,9 @@ fn is_code(path: &str) -> bool {
             .any(|ext| name.ends_with(ext))
 }
 
-/// The site's files: its code, its theme, the page's pictures, and the files
-/// its code names by a string (`"images/logo.svg"`, or a directory or the
+/// The site's files: its code, its theme, the page's pictures, what was
+/// brought in as an asset (asked for, so shipped before anything names it),
+/// and the files its code names by a string (`"images/logo.svg"`, or a directory or the
 /// start of a path a name is made from: `"icons/" + name + ".svg"`); every
 /// other file is left out, saying why, as is `site.json`, which the
 /// manifest's page holds. A picture of the page must be one of the files.
@@ -774,10 +777,11 @@ fn reached(
         }
     }
     let paths: Vec<&str> = files.iter().map(|f| f.path.as_str()).collect();
+    let imported = format!("{}/", assets::DIR);
     let mut keep: BTreeSet<String> = paths
         .iter()
         .copied()
-        .filter(|p| is_code(p))
+        .filter(|p| is_code(p) || p.starts_with(&imported))
         .chain(theme)
         .chain(page.into_iter().flat_map(Page::pictures))
         .map(str::to_owned)
