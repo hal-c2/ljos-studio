@@ -270,7 +270,7 @@ impl Studio {
 
     /// The session as a window showing `doc` sees it now.
     pub fn view(&mut self, doc: &str) -> View {
-        let documents = self.session.documents();
+        let documents = crate::harness::documents(&self.session);
         let mut view = View {
             blank: documents.is_empty() && self.session.blank(),
             documents,

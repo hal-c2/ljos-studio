@@ -848,7 +848,7 @@ fn found(doc: &str, handle: String, node: &Node) -> Found {
 fn info(studio: &Studio) -> ProjectInfo {
     ProjectInfo {
         project: studio.project().to_owned(),
-        documents: studio.session.documents(),
+        documents: crate::harness::documents(&studio.session),
         assets: None,
         asset: None,
         removed: None,
@@ -901,7 +901,7 @@ fn project_open(
         }
         None => {}
     }
-    out.documents = studio.session.documents();
+    out.documents = crate::harness::documents(&studio.session);
     Ok(out)
 }
 
@@ -1958,7 +1958,7 @@ fn edits(studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
                     let mut studio = lock(&studio);
                     let docs = match &a.doc {
                         Some(doc) => vec![studio.session.canonical(doc).map_err(error)?],
-                        None => studio.session.documents(),
+                        None => crate::harness::documents(&studio.session),
                     };
                     // A file the project reaches by two names is searched once.
                     let mut seen = std::collections::BTreeSet::new();

@@ -107,6 +107,7 @@ Feature: A component or a store opened alone shows something
     Then the preview shows "Home"
     And the file "Blocks/.HabitCard.preview.qml" does not exist
 
+  @native
   Scenario: The stand-in goes when another project is opened
     Given the agent has called the tool "preview_open" with:
       """json
@@ -118,6 +119,7 @@ Feature: A component or a store opened alone shows something
       """
     Then the file "Blocks/.HabitCard.preview.qml" does not exist
 
+  @native
   Scenario: A preview that does not start leaves no stand-in
     Given previews run the program "no-such-ljos"
     When the agent calls the tool "preview_open" with:
@@ -137,6 +139,23 @@ Feature: A component or a store opened alone shows something
       {"doc": "Blocks/HabitCard.qml"}
       """
     Then the file "Blocks/.HabitCard.preview.qml" contains "// Mine"
+
+  Scenario: A person's file in the stand-in's place breaks no other document's preview
+    Given the file "Blocks/.HabitCard.preview.qml":
+      """qml
+      // Mine
+      """
+    And the file "Main.qml":
+      """qml
+      import QtQuick
+
+      Text { text: "Home" }
+      """
+    When the agent calls the tool "preview_open" with:
+      """json
+      {"doc": "Main.qml"}
+      """
+    Then the preview shows "Home"
 
   Scenario: A file a person writes in the stand-in's place while it runs is left alone
     Given the file "Main.qml":

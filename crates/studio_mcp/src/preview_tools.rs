@@ -387,14 +387,7 @@ fn open(studio: &Mutex<Studio>, a: OpenArgs) -> Result<OpenOut, SurfaceError> {
         if let Some(mut last) = previews.open.take() {
             last.host.close();
             if let Some(standing) = &last.harness {
-                // The store's to remove where the project has no directory.
-                let path = &standing.path;
-                if store
-                    .read(path)
-                    .is_ok_and(|text| crate::harness::is_studios(&text))
-                {
-                    let _ = store.remove(path);
-                }
+                standing.leave(store);
             }
         }
         let standing = match &harness {
@@ -406,8 +399,12 @@ fn open(studio: &Mutex<Studio>, a: OpenArgs) -> Result<OpenOut, SurfaceError> {
         };
         let entry = harness.as_ref().map_or(a.doc.as_str(), |h| h.path.as_str());
         let mut host = hosts.make(dir.as_deref()).expect("checked: it runs here");
-        host.open(&preview::spec(store, entry, size, &aliases))
-            .map_err(preview_error)?;
+        if let Err(e) = host.open(&preview::spec(store, entry, size, &aliases)) {
+            if let Some(standing) = &standing {
+                standing.leave(store);
+            }
+            return Err(preview_error(e));
+        }
         previews.log_mark = 0;
         previews.events.push(PreviewEvent::Opened {
             entry: a.doc.clone(),

@@ -55,6 +55,26 @@ export function forQmlc(files, aliases = []) {
   return shown;
 }
 
+// The files and entry qmlc is given to run `entry`. qmlc names a component by
+// its file's stem, as it is, so an entry whose stem is no JavaScript name
+// (`.Card.preview.qml`, Studio's stand-in) would compile to a syntax error: it
+// is shown beside itself under a name that is one.
+export function entryForQmlc(files, entry) {
+  const at = entry.lastIndexOf("/") + 1;
+  const stem = entry.slice(at).replace(/\.qml$/, "");
+  if (!entry.endsWith(".qml") || !(entry in files) || /^[A-Za-z_$][\w$]*$/.test(stem)) return { files, entry };
+  let name = stem.replace(/[^\w$]/g, "_").replace(/^(?=\d)/, "_");
+  while (`${entry.slice(0, at)}${name}.qml` in files) name += "_";
+  const named = `${entry.slice(0, at)}${name}.qml`;
+  const { [entry]: text, ...others } = files;
+  return { files: { ...others, [named]: text }, entry: named };
+}
+
+// What is compiled before a frame imports the entry: what an app can reach,
+// which a hidden file is not (`ljos run` reads none it is not given).
+export const compiledFirst = (files) =>
+  Object.keys(files).filter((path) => path.endsWith(".qml") && !path.slice(path.lastIndexOf("/") + 1).startsWith("."));
+
 // `record` keeps every error the compiler answers, for a runner that reads
 // them; a person's server, typing into a refused compile, keeps none.
 export async function start({ app, port = 0, record = false }) {
@@ -107,7 +127,8 @@ export async function start({ app, port = 0, record = false }) {
     if (!Array.isArray(aliases) || !aliases.every((a) => /^\w+(\.\w+)*$/.test(a?.module) && inside(a?.dir))) {
       return { status: 400, answer: { error: "an alias is a module name and a directory inside the project" } };
     }
-    files = forQmlc(files, aliases);
+    const asked = entry;
+    ({ files, entry } = entryForQmlc(forQmlc(files, aliases), entry));
     const n = ++compiles;
     const dir = join(projects, String(n));
     for (const [path, text] of Object.entries(files)) {
@@ -119,11 +140,13 @@ export async function start({ app, port = 0, record = false }) {
     // Asked here, so what the compiler says comes back as it said it, not as
     // the browser's "failed to fetch a module".
     try {
-      for (const path of Object.keys(files).filter((p) => p.endsWith(".qml"))) {
+      for (const path of compiledFirst(files)) {
         await vite.transformRequest(`/projects/${n}/${path}`);
       }
     } catch (e) {
-      const error = String(e?.message ?? e).split(dir + "/").join("");
+      let error = String(e?.message ?? e).split(dir + "/").join("");
+      // Said of the file the project has.
+      if (entry !== asked) error = error.split(entry).join(asked);
       if (record) compiled.push(error);
       return { status: 200, answer: { error } };
     }

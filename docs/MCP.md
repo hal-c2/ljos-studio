@@ -387,7 +387,9 @@ leave out. It goes when the preview ends (another one, a crash, another
 project, Studio closing); only a killed Studio leaves one, which the next
 preview of that component replaces. A file of that name Studio did not write
 is left alone, and the component then previews as itself. The document is not
-changed.
+changed. In a browser, where only the store reaches the file, it goes when
+another preview opens or this one does not start; one whose preview ended
+otherwise stays hidden until that component is previewed again.
 
 - DECISION: only a block a qmldir declares is taken for a store when its root
   is an `Item`, so an app's own `Item` documents preview as they are.
