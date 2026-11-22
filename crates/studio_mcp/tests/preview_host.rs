@@ -1044,6 +1044,38 @@ fn no_problems_are_held_once_no_preview_is_open_however_it_ended() {
 }
 
 #[test]
+fn a_preview_that_ends_as_it_opens_answers_ended() {
+    for (reused, appearance) in [(false, false), (false, true), (true, false), (true, true)] {
+        let case = format!("reused {reused}, appearance {appearance}");
+        let f = Fixture::new();
+        let mut args = json!({ "doc": "Shell.qml" });
+        if reused {
+            f.call("preview_open", args.clone()).unwrap();
+            // A change in place, whose logs are read.
+            args["state"] = json!("mocked");
+        }
+        if appearance {
+            args["appearance"] = json!("dark");
+        }
+        f.fail("logs", ended());
+        let refused = f.call("preview_open", args).expect_err(&case);
+        assert_eq!(refused["details"]["kind"], "ended", "{case}");
+        assert_eq!(
+            refused["message"], "the preview has ended: the process exited",
+            "{case}"
+        );
+        let after = f.call("preview_events", json!({})).unwrap();
+        assert_eq!(after["open"], false, "{case}");
+        let kinds = event_kinds(after["events"].as_array().unwrap());
+        assert_eq!(
+            kinds.iter().filter(|k| *k == "ended").count(),
+            1,
+            "{case}: {kinds:?}"
+        );
+    }
+}
+
+#[test]
 fn a_burst_shows_once_the_budget_allows_with_nobody_looking() {
     let f = Fixture::new();
     f.call("preview_open", json!({ "doc": "Shell.qml" }))
