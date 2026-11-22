@@ -618,6 +618,27 @@ Feature: A project is exported for ljos-web to build a site from
       And the refusal's message matches "^`open` needs `.build.: true` and `.target.: .web.`"
       And the file "build/native/ljos-bundle.json" does not exist
 
+    Scenario: What a build is reading is not written over
+      Given a site is being built from "build/web"
+      When the agent calls the tool "export" with:
+        """json
+        {"entry": "Shell.qml", "target": "web", "page": {"title": "Second"}}
+        """
+      Then the agent is refused with "busy"
+      And the refusal's "/details/kind" is "build_running"
+      And the file "build/web/ljos-site.json" does not exist
+      And the file "site.json" does not exist
+
+    Scenario: A bundle is written again once its build has ended
+      Given a site is being built from "build/web"
+      When the build ends
+      And the agent calls the tool "export" with:
+        """json
+        {"entry": "Shell.qml", "target": "web"}
+        """
+      Then the answer's "/written" is true
+      And the file "build/web/ljos-site.json" exists
+
     Scenario: Only a web export is built
       Given the studio tools are connected with the capabilities "inspect, mutate, fs, run"
       When the agent calls the tool "export" with:
