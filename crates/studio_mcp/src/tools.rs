@@ -1313,6 +1313,66 @@ fn contribute_op(studio: &Mutex<Studio>, a: &ContributeArgs) -> Result<Op, Surfa
     })
 }
 
+/// Words a type's name can lower to that an `id` cannot be.
+const NOT_IDS: &[&str] = &[
+    "alias",
+    "as",
+    "await",
+    "break",
+    "case",
+    "catch",
+    "class",
+    "component",
+    "const",
+    "continue",
+    "debugger",
+    "default",
+    "delete",
+    "do",
+    "else",
+    "enum",
+    "export",
+    "extends",
+    "false",
+    "finally",
+    "for",
+    "function",
+    "id",
+    "if",
+    "implements",
+    "import",
+    "in",
+    "instanceof",
+    "interface",
+    "let",
+    "new",
+    "null",
+    "on",
+    "package",
+    "parent",
+    "private",
+    "property",
+    "protected",
+    "public",
+    "readonly",
+    "required",
+    "return",
+    "signal",
+    "static",
+    "super",
+    "switch",
+    "this",
+    "throw",
+    "true",
+    "try",
+    "typeof",
+    "var",
+    "void",
+    "while",
+    "with",
+    "yield",
+];
+
 /// A shell of the block `qualified` at `doc`: an instance of it giving each
 /// of its slots a `Contribution` that replaces what the block shows, for a
 /// designer to restyle. The block's first string property is shown on it,
@@ -1350,6 +1410,10 @@ fn shell_text(studio: &Studio, doc: &str, qualified: &str) -> Result<String, Sur
         if let Some(first) = name.get(..1) {
             let lower = first.to_lowercase();
             name.replace_range(..1, &lower);
+        }
+        // `Switch` lowered is a keyword, and `Component` a word of QML's.
+        if NOT_IDS.contains(&name.as_str()) {
+            name.push_str("Block");
         }
         name
     };

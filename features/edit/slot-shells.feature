@@ -111,6 +111,32 @@ Feature: A block gets a slot, and a shell skins it
     And the file "HabitCardShell.qml" contains "mode: Contribution.Replace"
     And the file "HabitCardShell.qml" contains "text: habitCard.title"
 
+  Scenario: A shell of a block named like a word of the language still loads
+    Given the file "Blocks/qmldir":
+      """
+      module Blocks
+      # block Switch 1.0 Switch.qml Habits "On or off"
+      """
+    And the file "Blocks/Switch.qml":
+      """qml
+      import QtQuick
+
+      Item {
+          id: toggle
+          property string label: "On"
+      }
+      """
+    And the agent has called the tool "node_insert" with:
+      """json
+      {"doc": "Blocks/Switch.qml", "parent": {"id": "toggle"}, "slot": "face"}
+      """
+    When the agent calls the tool "document_new" with:
+      """json
+      {"doc": "SwitchShell.qml", "shell": "Blocks.Switch"}
+      """
+    Then the file "SwitchShell.qml" contains "id: switchBlock"
+    And the file "SwitchShell.qml" contains "text: switchBlock.label"
+
   Scenario: A block with no slots has no shell
     When the agent calls the tool "document_new" with:
       """json
