@@ -237,7 +237,8 @@ pub struct Workspace {
     pub comments: Json,
     /// The preview of `doc`, or `null`: `target`, `width`, `height`,
     /// `state`, `variant` (the root's state its breakpoint turns on, or
-    /// empty), `generation` (what it shows: 1, and one more each reload
+    /// empty), `fit` (`screen`, or `content` when as tall as what it lays
+    /// out), `generation` (what it shows: 1, and one more each reload
     /// it applied) and `picture` (the generation of the picture drawn; 0
     /// for none yet).
     #[qml(readonly, notify)]
@@ -1131,6 +1132,7 @@ fn publish(engine: &Engine, ws: ObjectId, view: View, seen: u64) {
             "generation": p.generation,
             "state": p.state,
             "variant": p.variant,
+            "fit": p.fit,
             "picture": picture,
             "shots": shots,
             "targets": target_rows(),

@@ -9,7 +9,7 @@ expression: value
     "open_world": false,
     "read_only": false
   },
-  "description": "Read an object in the preview: its QML state (`variant`), a block's published state (`set` assigns it when mocked), and the properties in `read`. `click` or `click_at` clicks first, as a person does, so a flow plays. Objects are found by `id`.",
+  "description": "Read an object in the preview: its QML state (`variant`), a block's published state (`set` assigns it when mocked), and the properties in `read`. First, as a person would: `click` or `click_at`, `scroll`, `swipe`, `press` keys, `type` text, so a flow plays. Objects are found by `id`.",
   "inputSchema": {
     "$defs": {
       "Address": {
@@ -17,6 +17,30 @@ expression: value
           "type": "string"
         },
         "description": "One of `node` (session handle), `id`, `path` (from `document_tree`; this text only).",
+        "type": "object"
+      },
+      "Wheel": {
+        "properties": {
+          "dx": {
+            "default": 0.0,
+            "type": "number"
+          },
+          "dy": {
+            "default": 0.0,
+            "type": "number"
+          },
+          "x": {
+            "description": "Where, in the preview's logical pixels.",
+            "type": "number"
+          },
+          "y": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "x",
+          "y"
+        ],
         "type": "object"
       }
     },
@@ -49,12 +73,20 @@ expression: value
         "$ref": "#/$defs/Address",
         "description": "The object to read, with an `id`; in the previewed document unless `doc` names another. Left out, the call only clicks."
       },
+      "press": {
+        "description": "Keys pressed in turn, after any scroll: `Enter`, `Ctrl+A`, several separated by a space.",
+        "type": "string"
+      },
       "read": {
         "description": "Properties of `node` to read into `state`, as the running app has them.",
         "items": {
           "type": "string"
         },
         "type": "array"
+      },
+      "scroll": {
+        "$ref": "#/$defs/Wheel",
+        "description": "The wheel turned at a point, after any click, in notches: a negative `dy` shows what is further down."
       },
       "set": {
         "additionalProperties": true,
@@ -63,6 +95,14 @@ expression: value
       },
       "show": {
         "description": "Show `node` in this QML state through reloads, until `\"\"`.",
+        "type": "string"
+      },
+      "swipe": {
+        "$ref": "#/$defs/Wheel",
+        "description": "A finger put down at a point and dragged by `dx`, `dy` pixels, then lifted."
+      },
+      "type": {
+        "description": "Text typed into what has the keyboard, last (a `click` gives a field the keyboard).",
         "type": "string"
       }
     },

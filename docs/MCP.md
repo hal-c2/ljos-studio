@@ -48,8 +48,8 @@ documents: export), `run` (start previews). They are granted at launch with
 | 16 | `slot_contribute` | Write a `Contribution` to a block's slot, or take one out | mutate |
 | 17 | `history` | List, undo or redo edits (each with its inverse changes and its author); undo and redo take the caller's own, `all` the newest | inspect to list; mutate to undo or redo |
 | 18 | `theme_set` | Read the tokens (`Ljos.Design` roles and the theme file, light and dark), or set one; the preview reloads live | mutate |
-| 19 | `preview_open` | Start a preview of a shell on a target (desktop, tablet, phone) or size with live or mocked state; on the open one, change size or state in place | run |
-| 20 | `preview_state` | Read an object's state and a block's published state in the preview; set it when the block is mocked; hold an object in a state of its own (`show`); click first | run |
+| 19 | `preview_open` | Start a preview of a shell on a target (desktop, tablet, phone) or size with live or mocked state, its height the screen's or its content's (`fit`); on the open one, change size, fit or state in place | run |
+| 20 | `preview_state` | Read an object's state and a block's published state in the preview; set it when the block is mocked; hold an object in a state of its own (`show`); click, scroll, swipe, press keys or type first | run |
 | 21 | `preview_screenshot` | A PNG of the preview (≤ 1280 px), or its outline as text | inspect |
 | 22 | `preview_events` | Since a cursor: opened, reloaded (with ms), reload failed, logs, ended; or wait until its app rests saying something new (`wait_ms`, past `rests`), answering when it wakes next (`wake_in_ms`) and asking the app nothing meanwhile | inspect |
 | 23 | `export` | Write a bundle that `ljos run` starts (`native`) or that ljos-web builds a site from (`web`): the project's QML, theme, assets and own modules with a manifest, never mocks or `.studio/` | fs |
@@ -394,6 +394,39 @@ fixture: a module under `mocks/` of the same name (`mocks/App/Data`)
 replaces the app's (`App/Data`), its document reading a JSON file of its
 own beside it, and the list's text is unchanged.
 
+`preview_state` also takes the rest of a person's hands, given after any
+click and in this order: `scroll: {x, y, dx?, dy?}` turns the wheel at
+the point by notches (a negative `dy` shows what is further down),
+`swipe: {x, y, dx?, dy?}` drags a finger from the point by pixels,
+`press` presses keys (`"Backspace"`, `"Ctrl+A"`, several separated by a
+space) and `type` types text into what has the keyboard, so a click on a
+field and `type` fill it in. They go through the inspector's
+`app_scroll`, `app_touch`, `app_press` and `app_type`; a scroll or a
+swipe answers once the content has stopped (at most 3 s), so `read` says
+where it came to rest. Any of them stands for the click when `node` is
+left out.
+
+`preview_open {fit: "content"}` makes the preview as tall as what the
+document lays out: the lowest edge of anything shown, scrolled out of
+view or not, measured at the screen's size, and never shorter than the
+screen (at most 8192). It is measured again after each reload, so a page
+that grows grows its preview, until `fit: "screen"` gives back the
+screen's height. A host that cannot say how tall its content is refuses
+(`not_actionable`, `refused`). The answer and the window's preview say
+`fit`.
+
+- DECISION: a fitted preview is measured at its screen's height every
+  time, not at the height it has: an item that fills the window (a
+  `Flickable` with `anchors.fill`) would otherwise always reach its
+  bottom, and a page that got shorter would keep a tall preview.
+- DECISION: `scroll` and `swipe` act on the topmost object under their
+  point whose centre is in the window, at that centre: `app_scroll` and
+  `app_touch` take an object and no point (unlike `app_click`). On a long
+  page that is the view that scrolls, not its content centred below the
+  fold. Two views side by side are told apart; a point inside one is not.
+- DECISION: `type` is plain text (`app_type`'s `text`); keys with a name
+  are `press`. Studio's window sends what is typed in play mode as one
+  call per turn of its event loop, not one per key.
 - DECISION: no new tool. Flows are `state_edit` actions beside states and
   transitions, which they move between; playing one is `preview_state`
   with a click, which reads the state the app reached; data is

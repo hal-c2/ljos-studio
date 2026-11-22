@@ -709,6 +709,17 @@ fn answer_is(w: &mut StudioWorld, pointer: String, want: String) -> StepResult {
         .ok_or_else(|| format!("`{pointer}` is {got}, not {want}"))
 }
 
+#[then(regex = r#"^the answer's "(/[^"]*)" is above (-?[0-9.]+)$"#)]
+fn answer_is_above(w: &mut StudioWorld, pointer: String, floor: f64) -> StepResult {
+    let got = at(w.answer()?, &pointer)?;
+    let number = got
+        .as_f64()
+        .ok_or_else(|| format!("`{pointer}` is {got}, not a number"))?;
+    (number > floor)
+        .then_some(())
+        .ok_or_else(|| format!("`{pointer}` is {number}, not above {floor}"))
+}
+
 #[then(regex = r#"^the answer's "(/[^"]*)" is:$"#)]
 fn answer_text_is(w: &mut StudioWorld, pointer: String, step: &Step) -> StepResult {
     let want = file_text(step)?;

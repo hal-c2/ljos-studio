@@ -16,12 +16,12 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 use studio_core::{
     Address,
-    preview::{Alias, Click, PreviewError, PreviewEvent, Reload, Size, Target, ms},
+    preview::{Alias, Click, Input, PreviewError, PreviewEvent, Reload, Size, Target, ms},
 };
 
 use crate::{
     Studio, blocks, error, lock,
-    preview::{self, Open, State},
+    preview::{self, Fit, Open, State},
 };
 
 /// Pictures are this many pixels on their longest side unless asked for
@@ -34,15 +34,16 @@ const EVENTS_PAGE: usize = 100;
 #[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct OpenArgs {
-    /// The document to run, usually a shell (`Shell.qml`).
+    /// The document, usually `Shell.qml`.
     doc: String,
-    /// The screen to lay it out for (default: the open preview's, else
-    /// `desktop`).
+    /// Default: the open preview's, else `desktop`.
     target: Option<Target>,
-    /// A size in logical pixels instead of a target's.
+    /// Logical pixels, instead of a target's.
     size: Option<Size>,
     /// `live` runs the app's blocks; `mocked` the mock modules (`mocks/`) in their place. Default: the open preview's, else `live`.
     state: Option<State>,
+    /// `content`: as tall as the page.
+    fit: Option<Fit>,
 }
 
 #[derive(Serialize, JsonSchema)]
@@ -52,6 +53,7 @@ struct OpenOut {
     target: Option<Target>,
     size: Size,
     state: State,
+    fit: Fit,
     /// The modules mock modules stand in for.
     mocked: Vec<String>,
     /// A new process was started; false when the open one was changed.
@@ -64,26 +66,43 @@ struct OpenOut {
 #[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct StateArgs {
-    /// The object to read, with an `id`; in the previewed document unless `doc` names another. Left out, the call only clicks.
+    /// The object to read, by `id`; in the previewed document unless `doc` names another.
     node: Option<Address>,
     doc: Option<String>,
     /// Show `node` in this QML state through reloads, until `""`.
     show: Option<String>,
-    /// Properties of `node` to read into `state`, as the running app has them.
+    /// Properties of `node` to read into `state`.
     #[serde(default)]
     read: Vec<String>,
     /// Values to assign to a block's state (mocked previews only).
     set: Option<Map<String, Value>>,
-    /// An object (with an `id`) to click first, after `set`, as a person does; its handlers answer.
+    /// An object to click first, after `set`.
     click: Option<Address>,
-    /// A point to click instead, exactly there: whatever is on top gets it.
+    /// A point to click instead: what is on top gets it.
     click_at: Option<ClickAt>,
+    /// Wheel notches; negative `dy` is down.
+    scroll: Option<Wheel>,
+    /// A drag, in pixels.
+    swipe: Option<Wheel>,
+    /// Keys: `Ctrl+A Enter`.
+    press: Option<String>,
+    #[serde(rename = "type")]
+    typed: Option<String>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct Wheel {
+    x: f64,
+    y: f64,
+    dx: Option<f64>,
+    dy: Option<f64>,
 }
 
 #[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct ClickAt {
-    /// The preview's logical pixels.
+    /// Logical pixels.
     x: f64,
     y: f64,
 }
@@ -252,8 +271,12 @@ fn open(studio: &Mutex<Studio>, a: OpenArgs) -> Result<OpenOut, SurfaceError> {
     let size = a
         .size
         .or_else(|| a.target.map(Target::size))
-        .or_else(|| previous.map(|o| o.size))
+        .or_else(|| previous.map(|o| o.screen))
         .unwrap_or_else(|| Target::Desktop.size());
+    let fit = a
+        .fit
+        .or_else(|| previous.map(|o| o.fit))
+        .unwrap_or_default();
     let target = if a.size.is_none() && target.is_none() && previous.is_none() {
         Some(Target::Desktop)
     } else {
@@ -293,6 +316,9 @@ fn open(studio: &Mutex<Studio>, a: OpenArgs) -> Result<OpenOut, SurfaceError> {
         let open = previews.open.as_mut().expect("checked");
         let mut reloads = Vec::new();
         let changed = change(open, size, target, state, &aliases, &mut reloads);
+        open.screen = size;
+        open.fit = fit;
+        let changed = changed.and_then(|()| open.refit());
         // A mock switched in starts the app again, with everything showing.
         let restarted = reloads
             .iter()
@@ -330,6 +356,8 @@ fn open(studio: &Mutex<Studio>, a: OpenArgs) -> Result<OpenOut, SurfaceError> {
             doc: a.doc.clone(),
             target,
             size,
+            screen: size,
+            fit,
             state,
             mocked: aliases.clone(),
             reloads: VecDeque::new(),
@@ -339,17 +367,38 @@ fn open(studio: &Mutex<Studio>, a: OpenArgs) -> Result<OpenOut, SurfaceError> {
             breakpoint: None,
         });
         previews.write_hidden();
+        let open = previews.open.as_mut().expect("just opened");
+        if let Err(e) = open.refit() {
+            return Err(preview_error(previews.failed(e)));
+        }
     }
+    let size = previews.open.as_ref().map_or(size, |o| o.size);
     Ok(OpenOut {
         doc: a.doc,
         target,
         size,
         state,
+        fit,
         mocked: aliases.into_iter().map(|m| m.module).collect(),
         started: !reuse,
         state_kept,
         ms: elapsed(),
     })
+}
+
+/// Gives the running app a click, then the other input, in that order, as
+/// a person's hands would: the click gives a field the keyboard first.
+fn act(open: &mut Open, click: Option<&Click>, inputs: &[Input]) -> Result<(), PreviewError> {
+    if let Some(click) = click {
+        open.host.click(click)?;
+        open.clicks += 1;
+    }
+    for input in inputs {
+        open.host.input(input)?;
+        // It changes the picture without a reload, as a click does.
+        open.clicks += 1;
+    }
+    Ok(())
 }
 
 fn state(studio: &Mutex<Studio>, a: StateArgs) -> Result<StateOut, SurfaceError> {
@@ -376,19 +425,39 @@ fn state(studio: &Mutex<Studio>, a: StateArgs) -> Result<StateOut, SurfaceError>
         (None, Some(at)) => Some(Click::Point { x: at.x, y: at.y }),
         (None, None) => None,
     };
+    let inputs: Vec<Input> = [
+        a.scroll.map(|w| Input::Scroll {
+            x: w.x,
+            y: w.y,
+            dx: w.dx.unwrap_or(0.0),
+            dy: w.dy.unwrap_or(0.0),
+        }),
+        a.swipe.map(|w| Input::Swipe {
+            x: w.x,
+            y: w.y,
+            dx: w.dx.unwrap_or(0.0),
+            dy: w.dy.unwrap_or(0.0),
+        }),
+        a.press.map(Input::Press),
+        a.typed.map(Input::Type),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
     let Some(address) = a.node else {
         if a.set.is_some() {
             return Err(SurfaceError::invalid_argument(
                 "`set` needs the `node` whose state it sets",
             ));
         }
-        let click = click.ok_or_else(|| {
-            SurfaceError::invalid_argument("give the `node` to read, a click, or both")
-        })?;
-        if let Err(e) = open.host.click(&click) {
+        if click.is_none() && inputs.is_empty() {
+            return Err(SurfaceError::invalid_argument(
+                "give the `node` to read, input (a click, scroll, swipe, press or type), or both",
+            ));
+        }
+        if let Err(e) = act(open, click.as_ref(), &inputs) {
             return Err(preview_error(previews.failed(e)));
         }
-        open.clicks += 1;
         return Ok(StateOut {
             block: None,
             id: None,
@@ -442,11 +511,8 @@ fn state(studio: &Mutex<Studio>, a: StateArgs) -> Result<StateOut, SurfaceError>
             }
         }
     }
-    if let Some(click) = click {
-        if let Err(e) = open.host.click(&click) {
-            return Err(preview_error(previews.failed(e)));
-        }
-        open.clicks += 1;
+    if let Err(e) = act(open, click.as_ref(), &inputs) {
+        return Err(preview_error(previews.failed(e)));
     }
     if let Some(show) = a.show {
         let known = show.is_empty()
@@ -788,7 +854,7 @@ pub(crate) fn add(registry: ToolRegistry, studio: &Arc<Mutex<Studio>>) -> ToolRe
         .with(
             ToolDef::new::<OpenArgs>(
                 "preview_open",
-                "Run a document (a shell) in a preview for a target (desktop, tablet, phone) with live blocks or the mock modules. On the open preview it changes size or state in place; `state_kept` says whether the app's state survived.",
+                "Run a document in a preview for a target with live blocks or the mock modules. On the open preview it changes size, fit or state in place; `state_kept` says whether the app's state survived.",
             )
             .answers::<OpenOut>()
             .requires(Cap::Run)
@@ -801,7 +867,7 @@ pub(crate) fn add(registry: ToolRegistry, studio: &Arc<Mutex<Studio>>) -> ToolRe
         .with(
             ToolDef::new::<StateArgs>(
                 "preview_state",
-                "Read an object in the preview: its QML state (`variant`), a block's published state (`set` assigns it when mocked), and the properties in `read`. `click` or `click_at` clicks first, as a person does, so a flow plays. Objects are found by `id`.",
+                "Read an object in the preview: its QML state (`variant`), a block's published state (`set` assigns it when mocked), and the properties in `read`. Input comes first, as a person's.",
             )
             .answers::<StateOut>()
             .requires(Cap::Run)

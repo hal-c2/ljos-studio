@@ -22,8 +22,8 @@ use ljos_child::Reaped;
 use serde_json::{Map, Value, json};
 use studio_core::place::Rect;
 use studio_core::preview::{
-    Click, Declared, LogLine, Picture, Placed, PreviewError, PreviewHost, PreviewSpec, Reload,
-    Rest, RestWatch, Size,
+    Click, Declared, Input, LogLine, Picture, Placed, PreviewError, PreviewHost, PreviewSpec,
+    Reload, Rest, RestWatch, Size,
 };
 use studio_core::scene3d::{Body, Camera, Scene, rotate};
 
@@ -143,6 +143,33 @@ impl NativeHost {
                 Err(PreviewError::Transport(message))
             }
         }
+    }
+
+    /// Calls a tool that aims at the centre of the object it is given, on
+    /// the topmost object under the point whose centre can be reached.
+    /// `app_scroll` and `app_touch` take no point of their own, and the
+    /// topmost there may be a long page's content, centred below the fold;
+    /// the view that scrolls it is under it. An aim that is refused has put
+    /// nothing in, so the next one is safe to try.
+    fn call_under(
+        &mut self,
+        tool: &str,
+        (x, y): (f64, f64),
+        mut args: Value,
+    ) -> Result<Answer, PreviewError> {
+        let mut first = None;
+        for nth in 0..AIM_DEPTH {
+            args["target"] = json!(format!("at={x},{y} >> nth={nth}"));
+            match self.call(tool, args.clone()) {
+                Err(PreviewError::Refused { code, message }) if code == "not_actionable" => {
+                    first.get_or_insert(PreviewError::Refused { code, message });
+                }
+                // Past the last object there, the first refusal says why.
+                Err(e @ PreviewError::Refused { .. }) => return Err(first.unwrap_or(e)),
+                done => return done,
+            }
+        }
+        Err(first.expect("AIM_DEPTH is not zero"))
     }
 
     fn start(&self, spec: &PreviewSpec) -> Result<Running, PreviewError> {
@@ -455,6 +482,40 @@ impl PreviewHost for NativeHost {
             Click::Point { x, y } => self.call("app_click", json!({ "at": [x, y] }))?,
         };
         Ok(())
+    }
+
+    fn input(&mut self, input: &Input) -> Result<(), PreviewError> {
+        match input {
+            Input::Scroll { x, y, dx, dy } => {
+                self.call_under("app_scroll", (*x, *y), json!({ "dx": dx, "dy": dy }))?
+            }
+            Input::Swipe { x, y, dx, dy } => self.call_under(
+                "app_touch",
+                (*x, *y),
+                json!({ "action": "swipe", "dx": dx, "dy": dy }),
+            )?,
+            Input::Press(keys) => self.call("app_press", json!({ "keys": keys }))?,
+            Input::Type(text) => self.call("app_type", json!({ "text": text }))?,
+        };
+        // A wheel's notch glides and a swipe flings: what is read next is
+        // where the content came to rest, as a person looks once it stops.
+        // A fling that outlasts the bound is read where it has got to.
+        if matches!(input, Input::Scroll { .. } | Input::Swipe { .. }) {
+            self.call(
+                "app_watch",
+                json!({ "until_rest": true, "wait_ms": SETTLE_MS }),
+            )?;
+        }
+        Ok(())
+    }
+
+    fn extent(&mut self) -> Result<f64, PreviewError> {
+        let listed = self.call("app_objects", json!({ "max": 5000 }))?;
+        let rows = listed.structured["objects"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default();
+        Ok(lowest_edge(&rows))
     }
 
     fn pick(&mut self, x: f64, y: f64) -> Result<Option<Declared>, PreviewError> {
@@ -883,6 +944,37 @@ fn number_of(answer: &Value, name: &str) -> Option<f64> {
         .or_else(|| row["value"].as_str()?.parse().ok())
 }
 
+/// How long a scroll or a swipe waits at most for the content to stop.
+const SETTLE_MS: u64 = 3000;
+/// How many of the objects under a point `call_under` tries.
+const AIM_DEPTH: usize = 32;
+
+/// The lowest edge of the shown items in `app_objects` rows, in window
+/// pixels: what a hidden item holds is not shown, so it does not count.
+fn lowest_edge(rows: &[Value]) -> f64 {
+    let mut lowest: f64 = 0.0;
+    let mut hidden_below = None;
+    for row in rows {
+        let depth = row["depth"].as_u64().unwrap_or(0);
+        if hidden_below.is_some_and(|hidden| depth > hidden) {
+            continue;
+        }
+        hidden_below = None;
+        if row["visible"] == false {
+            hidden_below = Some(depth);
+            continue;
+        }
+        let Some(bounds) = row["bounds"].as_array() else {
+            continue;
+        };
+        let number = |i: usize| bounds.get(i).and_then(Value::as_f64).unwrap_or(0.0);
+        if number(2) > 0.0 && number(3) > 0.0 {
+            lowest = lowest.max(number(1) + number(3));
+        }
+    }
+    lowest
+}
+
 /// The inspector's locator for the object with the QML `id`.
 fn locator(id: &str) -> String {
     format!("id={id}")
@@ -956,6 +1048,21 @@ fn tail(log: &Path) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_lowest_shown_edge_is_how_far_the_content_reaches() {
+        let rows = json!([
+            { "depth": 0, "bounds": [0, 0, 1280, 800] },
+            { "depth": 1, "bounds": [0, 0, 1280, 800] },
+            { "depth": 2, "bounds": [0, 1800, 400, 200] },
+            // Hidden, and so is what it holds.
+            { "depth": 1, "visible": false, "bounds": [0, 0, 10, 5000] },
+            { "depth": 2, "bounds": [0, 4000, 10, 900] },
+            // Empty boxes are not drawn.
+            { "depth": 1, "bounds": [0, 6000, 0, 0] },
+        ]);
+        assert_eq!(lowest_edge(rows.as_array().unwrap()), 2000.0);
+    }
 
     #[test]
     fn a_save_the_watcher_applied_first_is_reported_applied() {

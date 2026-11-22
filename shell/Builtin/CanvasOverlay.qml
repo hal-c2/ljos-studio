@@ -253,15 +253,31 @@ MouseArea {
         return {x: left, y: top, width: right - left, height: bottom - top}
     }
 
+    // Where handle `i` of `box` is centred on the screen. On an object too
+    // small for its handles they stand off its sides, so a small Text still
+    // shows what it says and the outline between them can be grabbed.
+    function handlePoint(box, i, zoom) {
+        const away = handleSize / 2 + 1
+        const crowded = 3 * handleSize
+        const fx = handleX[i]
+        const fy = handleY[i]
+        let x = (box.x + box.width * fx) * zoom
+        let y = (box.y + box.height * fy) * zoom
+        if (box.width * zoom < crowded && fx !== 0.5)
+            x += fx === 0 ? -away : away
+        if (box.height * zoom < crowded && fy !== 0.5)
+            y += fy === 0 ? -away : away
+        return Qt.point(x, y)
+    }
+
     function handleAt(x, y) {
         if (!resizable)
             return -1
         const box = selectedOne.window
         const reach = handleSize / 2 + 1
         for (let i = 0; i < 8; ++i) {
-            const hx = (box.x + box.width * handleX[i]) * zoom
-            const hy = (box.y + box.height * handleY[i]) * zoom
-            if (Math.abs(x - hx) <= reach && Math.abs(y - hy) <= reach)
+            const at = handlePoint(box, i, zoom)
+            if (Math.abs(x - at.x) <= reach && Math.abs(y - at.y) <= reach)
                 return i
         }
         return -1
@@ -701,8 +717,10 @@ MouseArea {
     onPressed: (mouse) => {
         forceActiveFocus()
         endDrop(true)
-        if (playing)
+        if (playing) {
+            pressedAt = Qt.point(mouse.x, mouse.y)
             return
+        }
         finishEditing(true)
         told = ""
         pressedAt = Qt.point(mouse.x, mouse.y)
@@ -784,6 +802,16 @@ MouseArea {
 
     onReleased: (mouse) => {
         if (playing) {
+            // A drag is a finger on the device: the app flicks, not the canvas.
+            if (Math.hypot(mouse.x - pressedAt.x, mouse.y - pressedAt.y) >= dragStart) {
+                workspace.dispatch("preview_state", {swipe: {
+                    x: pressedAt.x / zoom,
+                    y: pressedAt.y / zoom,
+                    dx: (mouse.x - pressedAt.x) / zoom,
+                    dy: (mouse.y - pressedAt.y) / zoom
+                }})
+                return
+            }
             const x = mouse.x / zoom
             const y = mouse.y / zoom
             // The app is clicked at the very point, as a person's pointer
@@ -821,16 +849,100 @@ MouseArea {
     // Text is written on the object it belongs to, as a person expects of text.
     onDoubleClicked: if (!playing && drawing === "") editSelected()
 
+    // Keys pressed in play, not yet sent: [{type}|{press}] in order.
+    property var playKeys: []
+
+    readonly property var keyNames: ({
+        [Qt.Key_Backspace]: "Backspace", [Qt.Key_Delete]: "Delete",
+        [Qt.Key_Return]: "Return", [Qt.Key_Enter]: "Enter",
+        [Qt.Key_Tab]: "Tab", [Qt.Key_Backtab]: "Tab", [Qt.Key_Space]: "Space",
+        [Qt.Key_Left]: "Left", [Qt.Key_Right]: "Right", [Qt.Key_Up]: "Up", [Qt.Key_Down]: "Down",
+        [Qt.Key_Home]: "Home", [Qt.Key_End]: "End",
+        [Qt.Key_PageUp]: "PageUp", [Qt.Key_PageDown]: "PageDown", [Qt.Key_Insert]: "Insert"
+    })
+
+    // A key for the running app as `app_press` names it, or "" for one it
+    // has no name for (a modifier alone).
+    function chordOf(event) {
+        let name = keyNames[event.key]
+        if (name === undefined) {
+            if ((event.key >= Qt.Key_A && event.key <= Qt.Key_Z) || (event.key >= Qt.Key_0 && event.key <= Qt.Key_9))
+                name = String.fromCharCode(event.key)
+            else if (event.key >= Qt.Key_F1 && event.key <= Qt.Key_F12)
+                name = "F" + (event.key - Qt.Key_F1 + 1)
+            else
+                return ""
+        }
+        const m = event.modifiers
+        const shift = (m & Qt.ShiftModifier) !== 0 || event.key === Qt.Key_Backtab
+        return ((m & Qt.ControlModifier) !== 0 ? "Ctrl+" : "")
+            + ((m & Qt.AltModifier) !== 0 ? "Alt+" : "")
+            + ((m & Qt.MetaModifier) !== 0 ? "Meta+" : "")
+            + (shift ? "Shift+" : "") + name
+    }
+
+    // Keys pressed in play go to the preview a turn of the event loop at a
+    // time, what was typed joined into one `type` and named keys into one
+    // `press`, so a fast typist is a few calls, in the order pressed.
+    function playKey(event) {
+        const commands = Qt.ControlModifier | Qt.AltModifier | Qt.MetaModifier
+        const text = event.text
+        let entry = null
+        if (text.length > 0 && text.charCodeAt(0) >= 32 && text.charCodeAt(0) !== 127
+                && (event.modifiers & commands) === 0) {
+            entry = {type: text}
+        } else {
+            const chord = chordOf(event)
+            if (chord === "")
+                return false
+            entry = {press: chord}
+        }
+        const queue = playKeys
+        const last = queue.length > 0 ? queue[queue.length - 1] : null
+        if (last !== null && entry.type !== undefined && last.type !== undefined)
+            last.type += entry.type
+        // `app_press` takes 16 keys at a time.
+        else if (last !== null && entry.press !== undefined && last.press !== undefined
+                 && last.press.split(" ").length < 16)
+            last.press += " " + entry.press
+        else
+            queue.push(entry)
+        playKeys = queue
+        Qt.callLater(sendPlayKeys)
+        return true
+    }
+
+    function sendPlayKeys() {
+        const queue = playKeys
+        playKeys = []
+        for (const entry of queue)
+            workspace.dispatch("preview_state", entry)
+    }
+
+    // Escape climbs to what holds the selection, as in the layers panel.
+    function selectParent() {
+        const here = workspace.layers.find(l => l.node === workspace.selected)
+        if (here === undefined || here.parent === "")
+            return false
+        workspace.dispatch("node_select", {doc: workspace.doc, nodes: [{node: here.parent}]})
+        return true
+    }
+
     Keys.onPressed: (event) => {
         // While playing, keys are the running prototype's, and no outline
-        // shows what an edit would hit.
+        // shows what an edit would hit. Escape is not: it is how a person
+        // gets the keyboard back.
         if (playing) {
-            event.accepted = false
+            event.accepted = event.key !== Qt.Key_Escape && playKey(event)
             return
         }
         if (event.key === Qt.Key_Escape && drawing !== "") {
             drawn()
             event.accepted = true
+            return
+        }
+        if (event.key === Qt.Key_Escape && (event.modifiers & (Qt.ControlModifier | Qt.ShiftModifier | Qt.AltModifier | Qt.MetaModifier)) === 0) {
+            event.accepted = selectParent()
             return
         }
         if (toolKey(event)) {
@@ -849,12 +961,6 @@ MouseArea {
             nudge(0, -step)
         else if (event.key === Qt.Key_Down && has)
             nudge(0, step)
-        else if (ctrl && event.key === Qt.Key_C && has)
-            workspace.dispatch("node_arrange", {action: "copy", doc: workspace.doc, nodes: selectedHandles()})
-        else if (ctrl && event.key === Qt.Key_V)
-            workspace.dispatch("node_arrange", {action: "paste", doc: workspace.doc, parent: {node: pasteParent()}})
-        else if (ctrl && event.key === Qt.Key_D && has)
-            workspace.dispatch("node_arrange", {action: "duplicate", doc: workspace.doc, nodes: selectedHandles()})
         else if (!ctrl && (event.key === Qt.Key_Delete || event.key === Qt.Key_Backspace)
                  && has)
             workspace.dispatch("node_arrange", {action: "remove", doc: workspace.doc, nodes: selectedHandles()})
@@ -978,6 +1084,32 @@ MouseArea {
             }
         }
     }
+    // Copy, paste and duplicate are the window's, so they work on what was
+    // chosen in the layers panel too, not only once the canvas has the
+    // keyboard; a field being typed in keeps them, and so does the app in
+    // play mode.
+    readonly property bool keysAreTheSelections: {
+        if (playing || workspace.doc === "")
+            return false
+        const focused = Window.activeFocusItem
+        return focused === null || focused.cursorPosition === undefined
+    }
+    Shortcut {
+        sequences: [StandardKey.Copy]
+        enabled: overlay.keysAreTheSelections && overlay.workspace.chosen.length > 0
+        onActivated: overlay.workspace.dispatch("node_arrange", {action: "copy", doc: overlay.workspace.doc, nodes: overlay.selectedHandles()})
+    }
+    Shortcut {
+        sequences: [StandardKey.Paste]
+        enabled: overlay.keysAreTheSelections
+        onActivated: overlay.workspace.dispatch("node_arrange", {action: "paste", doc: overlay.workspace.doc, parent: {node: overlay.pasteParent()}})
+    }
+    Shortcut {
+        sequences: ["Ctrl+D", "Meta+D"]
+        enabled: overlay.keysAreTheSelections && overlay.workspace.chosen.length > 0
+        onActivated: overlay.workspace.dispatch("node_arrange", {action: "duplicate", doc: overlay.workspace.doc, nodes: overlay.selectedHandles()})
+    }
+
     // Presses move the outline ahead of the preview, which is still showing
     // the file as it was: its boxes would take the outline back. They count
     // again once the presses and reloads have stopped.
@@ -1034,8 +1166,9 @@ MouseArea {
             readonly property var box: overlay.selectedOne !== null ? overlay.selectedOne.window : {x: 0, y: 0, width: 0, height: 0}
             width: overlay.handleSize
             height: overlay.handleSize
-            x: (box.x + box.width * overlay.handleX[index]) * overlay.zoom - width / 2
-            y: (box.y + box.height * overlay.handleY[index]) * overlay.zoom - height / 2
+            readonly property point at: overlay.handlePoint(box, index, overlay.zoom)
+            x: at.x - width / 2
+            y: at.y - height / 2
             color: Colors.surface
             border.color: Colors.accent
             border.width: 1

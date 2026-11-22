@@ -73,11 +73,35 @@ pub enum State {
     Mocked,
 }
 
+/// How tall a preview is: its screen's height, or as tall as what its
+/// document lays out (never shorter than the screen).
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Default,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    schemars::JsonSchema,
+)]
+#[serde(rename_all = "lowercase")]
+pub enum Fit {
+    #[default]
+    Screen,
+    Content,
+}
+
 pub(crate) struct Open {
     pub host: Box<dyn PreviewHost>,
     pub doc: String,
     pub target: Option<Target>,
+    /// The size laid out for: `screen`, or taller when fitted to content.
     pub size: Size,
+    /// The target's (or asked-for) size, before any fitting.
+    pub screen: Size,
+    pub fit: Fit,
     pub state: State,
     /// The aliases in force: empty when live.
     pub mocked: Vec<Alias>,
@@ -118,7 +142,49 @@ pub(crate) struct Previews {
     pub timer: Arc<dyn Timer>,
 }
 
+/// Layouts a fit takes at most: a list that makes its delegates as they
+/// come into view grows each time the preview does.
+const FIT_ROUNDS: usize = 4;
+
 impl Open {
+    /// Lays the preview out at its screen's size and, fitted to content,
+    /// makes it as tall as what it then lays out, again while that grows.
+    /// Measured at the screen's size each time, so a page that got shorter
+    /// gets a shorter preview: an item that fills the window would
+    /// otherwise always reach its bottom.
+    pub fn refit(&mut self) -> Result<(), PreviewError> {
+        let before = self.size;
+        if self.size != self.screen {
+            self.host.resize(self.screen)?;
+            self.size = self.screen;
+        }
+        if self.fit == Fit::Content {
+            for _ in 0..FIT_ROUNDS {
+                let reach = self.host.extent()?.ceil();
+                let height = if reach >= f64::from(Size::MAX_SIDE) {
+                    Size::MAX_SIDE
+                } else {
+                    // Checked: below MAX_SIDE, so it fits in a u32.
+                    (reach.max(0.0) as u32).max(self.screen.height)
+                };
+                if height <= self.size.height {
+                    break;
+                }
+                let size = Size {
+                    width: self.screen.width,
+                    height,
+                };
+                self.host.resize(size)?;
+                self.size = size;
+            }
+        }
+        // Its picture changed without a reload's generation, as a click's.
+        if self.size != before {
+            self.clicks += 1;
+        }
+        Ok(())
+    }
+
     fn write_hidden(&mut self, ids: &BTreeSet<(String, String)>) {
         let mut wrote = false;
         for (_, id) in ids.iter().filter(|(doc, _)| *doc == self.doc) {
@@ -324,6 +390,12 @@ impl Previews {
         open.reloads.push_back(self.timer.now());
         if matches!(reload, Ok(Reload::Applied { .. })) {
             open.write_hidden(&self.hidden_ids);
+            // What the new text lays out may be taller or shorter. A refit
+            // that fails (a call too many this second) leaves the last
+            // height, and the next reload fits again.
+            if open.fit == Fit::Content {
+                let _ = open.refit();
+            }
         }
         let event = match reload {
             Ok(Reload::Applied { generation }) => PreviewEvent::Reloaded {
@@ -508,6 +580,8 @@ mod tests {
                 doc: "Main.qml".to_owned(),
                 target: None,
                 size: Target::Desktop.size(),
+                screen: Target::Desktop.size(),
+                fit: Fit::Screen,
                 state: State::Live,
                 mocked: Vec::new(),
                 reloads,
