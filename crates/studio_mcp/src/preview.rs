@@ -15,6 +15,7 @@
 
 use std::{
     collections::{BTreeSet, VecDeque},
+    path::{Component, Path},
     sync::{Arc, Mutex, MutexGuard},
     time::Duration,
 };
@@ -190,9 +191,12 @@ fn same_place(a: &LogLine, b: &LogLine) -> bool {
 }
 
 /// A reload's failure as a problem, placed where its message says.
-pub(crate) fn failure(message: &str) -> LogLine {
-    let (file, line, message) = match studio_core::preview::place_of(message) {
-        Some((file, line, rest)) => (Some(file.to_owned()), Some(line), rest.to_owned()),
+pub(crate) fn failure(message: &str, root: Option<&Path>) -> LogLine {
+    let placed = studio_core::preview::place_of(message)
+        .map(|(file, line, rest)| (file, Some(line), rest))
+        .or_else(|| named(message, root));
+    let (file, line, message) = match placed {
+        Some((file, line, rest)) => (Some(file.to_owned()), line, rest.to_owned()),
         None => (None, None, message.to_owned()),
     };
     LogLine {
@@ -202,6 +206,31 @@ pub(crate) fn failure(message: &str) -> LogLine {
         line,
         compiler: true,
     }
+}
+
+/// A failure's file where `place_of` finds no place: Ljós names it from the
+/// project's root with no line where the whole file is at fault, and as it
+/// is written where it has a space. It must be a file there, as words before
+/// a colon may be a sentence.
+fn named<'a>(message: &'a str, root: Option<&Path>) -> Option<(&'a str, Option<u32>, &'a str)> {
+    let end = [".qml:", ".js:", ".mjs:"]
+        .iter()
+        .filter_map(|ext| message.find(ext).map(|at| at + ext.len() - 1))
+        .min()?;
+    let (file, rest) = message.split_at(end);
+    let inside = Path::new(file)
+        .components()
+        .all(|part| matches!(part, Component::Normal(_)));
+    if !inside || !root?.join(file).is_file() {
+        return None;
+    }
+    if let Some(words) = rest.strip_prefix(": ") {
+        return Some((file, None, words));
+    }
+    // The line is read from the path's last word on, which has no space.
+    let last = file.rsplit(char::is_whitespace).next()?;
+    let (_, line, words) = studio_core::preview::place_of(&message[end - last.len()..])?;
+    Some((file, Some(line), words))
 }
 
 impl Open {
@@ -555,7 +584,7 @@ impl Previews {
             }
         };
         let failed = match &event {
-            PreviewEvent::ReloadFailed { message } => Some(failure(message)),
+            PreviewEvent::ReloadFailed { message } => Some(failure(message, self.root.as_deref())),
             _ => None,
         };
         self.events.push(event);
@@ -634,7 +663,7 @@ impl Previews {
                 None
             }
             Reload::Failed { message } => {
-                let failed = failure(&message);
+                let failed = failure(&message, self.root.as_deref());
                 self.events.push(PreviewEvent::ReloadFailed { message });
                 Some(failed)
             }
@@ -935,13 +964,16 @@ mod tests {
         let (mut p, _) = previews(VecDeque::new(), false);
         let ran = warning("Main.qml", 5, "ReferenceError: x is not defined", false);
         p.start_problems(None, std::slice::from_ref(&ran));
-        p.start_problems(Some(failure("Main.qml:9:3: expected a property")), &[]);
+        p.start_problems(
+            Some(failure("Main.qml:9:3: expected a property", None)),
+            &[],
+        );
         assert_eq!(p.problems.len(), 2);
         assert_eq!(p.problems[1].line, Some(9));
         assert_eq!(p.problems[1].message, "expected a property");
         assert_eq!(p.problems[1].level, "error");
         // The next failure says why instead of the last.
-        p.start_problems(Some(failure("Main.qml:4:1: expected `}`")), &[]);
+        p.start_problems(Some(failure("Main.qml:4:1: expected `}`", None)), &[]);
         assert_eq!(p.problems.len(), 2);
         assert_eq!(p.problems[1].line, Some(4));
     }
@@ -950,7 +982,10 @@ mod tests {
     fn an_error_goes_when_a_reload_applies_though_its_line_is_as_it_was() {
         let (mut p, _) = previews(VecDeque::new(), false);
         let root = rooted(&mut p, "Item {\n    Badge {}\n}\n");
-        p.start_problems(Some(failure("Main.qml:2:5: Badge is not a type")), &[]);
+        p.start_problems(
+            Some(failure("Main.qml:2:5: Badge is not a type", None)),
+            &[],
+        );
         assert_eq!(p.problems[0].level, "error");
         // Mended by a new Badge.qml: line 2 is untouched.
         p.start_problems(None, &[]);
