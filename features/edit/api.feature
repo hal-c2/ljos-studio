@@ -58,6 +58,8 @@ Feature: An agent changes a component's API
       """
     Then the file "HabitCard.qml" contains:
       """qml
+      Rectangle {
+          id: card
           property string name: "Walk"
           property bool done: false
       """
@@ -71,6 +73,9 @@ Feature: An agent changes a component's API
       """
     Then the file "HabitCard.qml" contains:
       """qml
+      Rectangle {
+          id: card
+          property string title: "Read"
           property int done: 0
           signal toggled(bool done)
       """
@@ -89,6 +94,12 @@ Feature: An agent changes a component's API
       """
     Then the file "HabitCard.qml" contains:
       """qml
+      Rectangle {
+          id: card
+          property string title: "Read"
+          property bool done: false
+          signal toggled(bool done)
+
           function toggle() {
               card.done = !card.done
               card.toggled(card.done)
@@ -145,6 +156,19 @@ Feature: An agent changes a component's API
       """
     Then the file "HabitCard.qml" contains:
       """qml
+      Rectangle {
+          id: card
+          property string title: "Read"
+          property bool done: false
+          signal toggled(bool done)
+
+          function flip() {
+              card.done = !card.done
+          }
+
+          MouseArea {
+              id: area
+              anchors.fill: parent
               onClicked: {
                   card.flip(); card.toggled(card.done) // both
               }
@@ -157,6 +181,19 @@ Feature: An agent changes a component's API
       """
     Then the file "HabitCard.qml" contains:
       """qml
+      Rectangle {
+          id: card
+          property string title: "Read"
+          property bool done: false
+          signal toggled(bool done)
+
+          function flip() {
+              card.done = !card.done
+          }
+
+          MouseArea {
+              id: area
+              anchors.fill: parent
               onClicked: {
                   if (card.done) {
                       card.flip()
@@ -172,6 +209,19 @@ Feature: An agent changes a component's API
       """
     Then the file "HabitCard.qml" contains:
       """qml
+      Rectangle {
+          id: card
+          property string title: "Read"
+          property bool done: false
+          signal toggled(bool done)
+
+          function flip() {
+              card.done = !card.done
+          }
+
+          MouseArea {
+              id: area
+              anchors.fill: parent
               onClicked: {
                   card.flip()
                   card.toggled(card.done)

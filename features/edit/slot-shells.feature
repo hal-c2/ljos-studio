@@ -62,6 +62,14 @@ Feature: A block gets a slot, and a shell skins it
     And the file "Blocks/HabitCard.qml" contains "property list<Contribution> face"
     And the file "Blocks/HabitCard.qml" contains:
       """qml
+      Column {
+          id: card
+          property string title: "Read"
+          property bool done: false
+
+          Text { text: card.title }
+          Slot {
+              id: slot1
               name: "face"
               contributions: card.face
       """
