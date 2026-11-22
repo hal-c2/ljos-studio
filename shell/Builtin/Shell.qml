@@ -148,7 +148,8 @@ Item {
                         anchors.rightMargin: Spacing.xs
                         y: 36 + 2 * Spacing.xs
                         width: Math.max(0, Math.min(implicitWidth, parent.width - 2 * Spacing.xs))
-                        height: Math.max(0, Math.min(implicitHeight, parent.height - 2 * y))
+                        // Never under a row: the badge is clicked in any canvas.
+                        height: Math.min(implicitHeight, Math.max(44, parent.height - 2 * y))
                     }
                 }
                 CodePanel {
