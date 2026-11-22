@@ -4442,13 +4442,15 @@ fn wheel_down_over_frame(w: &mut UiWorld, target: String, x: f64, y: f64) -> Ste
 fn wheel_down_ten_times(w: &mut UiWorld, target: String, x: f64, y: f64) -> StepResult {
     let window = w.window()?;
     let at = frame_point(window, &target, x, y)?;
+    // Each turn is sent while the first is still going in: letting the
+    // test clock move between them would wait for Studio's jobs too, as
+    // `advance` waits for what the window was promised.
     for _ in 0..10 {
         window
             .stage
             .drive()
             .wheel(at, Wheel::Notches(0.0, -1.0))
             .map_err(drive_error)?;
-        window.stage.drive().advance(17).map_err(drive_error)?;
     }
     window.stage.drive().advance(1000).map_err(drive_error)?;
     window.rest()
