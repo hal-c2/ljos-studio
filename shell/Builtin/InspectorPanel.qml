@@ -2377,11 +2377,11 @@ Panel {
                                 Accessible.role: Accessible.StaticText
                                 Accessible.name: "Signal " + signalRow.modelData.name
                             }
-                            // As high as the words beside it: the button reaches into
-                            // the gaps over and under, and the field keeps its width.
+                            // The row holds the whole button, so nothing over or
+                            // under it takes its press, and the field keeps its width.
                             Item {
                                 implicitWidth: 24
-                                implicitHeight: 14
+                                implicitHeight: 24
                                 IconButton {
                                     anchors.centerIn: parent
                                     implicitWidth: 24

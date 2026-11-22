@@ -15,6 +15,9 @@ ToolButton {
     // Draws no icon and still takes the press: an item at opacity 0 takes
     // none, so a finger, which never hovers, could not reach it.
     property bool quiet: false
+    // False while a check is one it opened with, however late that came:
+    // `opening` has run out by then, and nothing has moved.
+    property bool fades: true
     // Runs out on the first frame, when what its user set has arrived:
     // fades are for what changes after that.
     Timer {
@@ -88,7 +91,7 @@ ToolButton {
         border.color: Colors.focusRing
         Behavior on color {
             // Not into what it opens as: nothing has moved then.
-            enabled: !opening.running
+            enabled: button.fades && !opening.running
             ColorAnimation {
                 duration: Motion.enterSmallFrequent
                 easing.type: Easing.BezierSpline

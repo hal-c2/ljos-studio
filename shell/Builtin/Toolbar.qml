@@ -11,6 +11,11 @@ ToolBar {
     id: bar
     required property Workspace workspace
     readonly property var preview: workspace.preview
+    readonly property string shownTarget: preview !== null ? preview.target : ""
+    // The target the canvas first ran on. The preview says it after the
+    // window has opened, and only a switch from it fades.
+    property string openedOn: ""
+    property bool switched: false
     property bool leftOpen: true
     property bool rightOpen: true
     property bool codeOpen: true
@@ -18,6 +23,15 @@ ToolBar {
     property int problems: 0
     // The window shows the export panel when this is called.
     signal exportRequested
+
+    onShownTargetChanged: {
+        if (shownTarget === "")
+            return
+        if (openedOn === "")
+            openedOn = shownTarget
+        else if (shownTarget !== openedOn)
+            switched = true
+    }
 
     // A preview of the open document on another target or data, as an
     // agent starts one.
@@ -126,6 +140,8 @@ ToolBar {
                     text: modelData.name
                     checkable: true
                     checked: bar.preview !== null && bar.preview.target === modelData.name
+                    fades: bar.switched || !checked
+                        || (bar.openedOn !== "" && bar.openedOn !== modelData.name)
                     ButtonGroup.group: targets
                     enabled: bar.workspace.previews && bar.workspace.doc !== ""
                     onClicked: bar.open(modelData.name.toLowerCase(),
