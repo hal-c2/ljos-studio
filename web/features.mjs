@@ -523,6 +523,8 @@ const STEPS = [
 const NATIVE_ONLY = new Map([
   ["when ^the agent asks the server to wait with:$", "a browser preview cannot be waited on yet (ljos-web request 25)"],
   ['then ^the tool "([^"]+)" answers while a wait past the answer\'s rests is parked, and the wait ends with the server$', "a page runs one call at a time, and a browser preview cannot be waited on yet (request 25)"],
+  ['when ^the agent calls the tool "([^"]+)" with the following, and the tool "([^"]+)" once its input is in:$', "a page runs one call at a time, and a browser preview cannot be waited on yet (request 25)"],
+  ["then ^the second tool answered before the first, while the page still moved$", "a page runs one call at a time, and a browser preview cannot be waited on yet (request 25)"],
   ['when ^the agent opens the project "([^"]+)" by its absolute path$', "a browser's storage has no absolute paths"],
   ["then ^the preview has opened no socket$", "a preview is a page of its own (@preview)"],
   ['then ^the preview shows "([^"]*)"$', "a preview is a page of its own (@preview): web/features.browser.mjs"],

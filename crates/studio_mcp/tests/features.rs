@@ -23,6 +23,10 @@ use ljos_mcp_core::{
     CallCtx, Cap, CapSet, McpSurface, SurfaceError, ToolImage, glue::http::HttpServer,
 };
 use serde_json::{Value, json};
+use studio_core::preview::{
+    Click, Declared, Input, LogLine, Picture, Placed, PreviewError, PreviewHost, PreviewSpec,
+    Reload, RestWatch, Size,
+};
 use studio_mcp::{
     Studio, StudioServer, endpoint,
     timer::{ThreadTimer, Timer},
@@ -62,6 +66,118 @@ struct StudioWorld {
     not_served: Option<String>,
     /// The time leases are kept by, which `seconds pass` moves on.
     clock: Arc<Clock>,
+    /// Who hears when the next input has gone into the preview.
+    input_heard: InputHeard,
+    /// Of two calls at once: whether the second answered before the first,
+    /// and what the preview said of its motion when it had.
+    overlap: Option<(bool, Result<bool, String>)>,
+}
+
+/// Told, once an input is in, a way to see whether what it moved still moves.
+type InputHeard =
+    Arc<std::sync::Mutex<Option<std::sync::mpsc::Sender<Option<Box<dyn RestWatch>>>>>>;
+
+/// Ljós's preview, which tells a scenario that asked when an input has gone
+/// in: so the scenario can call another tool while the call that put it in
+/// still runs.
+struct Watched(NativeHost, InputHeard);
+
+impl PreviewHost for Watched {
+    fn calls_per_second(&self) -> u32 {
+        self.0.calls_per_second()
+    }
+
+    fn restarts_on_switch(&self) -> bool {
+        self.0.restarts_on_switch()
+    }
+
+    fn open(&mut self, spec: &PreviewSpec) -> Result<(), PreviewError> {
+        self.0.open(spec)
+    }
+
+    fn reload(&mut self) -> Result<Reload, PreviewError> {
+        self.0.reload()
+    }
+
+    fn alias(&mut self, module: &str, dir: Option<&str>) -> Result<Reload, PreviewError> {
+        self.0.alias(module, dir)
+    }
+
+    fn resize(&mut self, size: Size) -> Result<(), PreviewError> {
+        self.0.resize(size)
+    }
+
+    fn screenshot(&mut self, max_side: u32) -> Result<Picture, PreviewError> {
+        self.0.screenshot(max_side)
+    }
+
+    fn outline(&mut self) -> Result<String, PreviewError> {
+        self.0.outline()
+    }
+
+    fn read(
+        &mut self,
+        id: &str,
+        names: &[String],
+    ) -> Result<serde_json::Map<String, Value>, PreviewError> {
+        self.0.read(id, names)
+    }
+
+    fn write(&mut self, id: &str, name: &str, value: Value) -> Result<(), PreviewError> {
+        self.0.write(id, name, value)
+    }
+
+    fn logs(&mut self, since: u64) -> Result<(Vec<LogLine>, u64), PreviewError> {
+        self.0.logs(since)
+    }
+
+    fn alive(&mut self) -> Result<(), PreviewError> {
+        self.0.alive()
+    }
+
+    fn pick(&mut self, x: f64, y: f64) -> Result<Option<Declared>, PreviewError> {
+        self.0.pick(x, y)
+    }
+
+    fn scene(
+        &mut self,
+        at: &Declared,
+    ) -> Result<Option<studio_core::scene3d::Scene>, PreviewError> {
+        self.0.scene(at)
+    }
+
+    fn placed(&mut self, ids: &[String], types: &[String]) -> Result<Vec<Placed>, PreviewError> {
+        self.0.placed(ids, types)
+    }
+
+    fn click(&mut self, at: &Click) -> Result<(), PreviewError> {
+        self.0.click(at)
+    }
+
+    fn input(&mut self, input: &Input) -> Result<(), PreviewError> {
+        self.0.input(input)?;
+        let heard = self
+            .1
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take();
+        if let Some(heard) = heard {
+            let _ = heard.send(self.0.rest_watch());
+        }
+        Ok(())
+    }
+
+    fn extent(&mut self) -> Result<f64, PreviewError> {
+        self.0.extent()
+    }
+
+    fn close(&mut self) {
+        self.0.close();
+    }
+
+    fn rest_watch(&self) -> Option<Box<dyn RestWatch>> {
+        self.0.rest_watch()
+    }
 }
 
 /// The real time, and as much more as the scenario says passed: a lease
@@ -133,6 +249,8 @@ impl StudioWorld {
             took: std::time::Duration::ZERO,
             not_served: None,
             clock: Arc::default(),
+            input_heard: Arc::default(),
+            overlap: None,
         }
     }
 
@@ -152,13 +270,17 @@ impl StudioWorld {
             let state = self.state.path().join("preview");
             let clock: Arc<dyn Timer> = self.clock.clone();
             let program = self.program.clone();
+            let heard = self.input_heard.clone();
             let studio = Studio::open_with_timer(self.dir.path(), clock)
                 .map_err(|e| e.to_string())?
                 .with_previews(Arc::new(move |dir| {
-                    Box::new(NativeHost::new(
-                        dir,
-                        program.clone().unwrap_or_else(NativeHost::default_program),
-                        &state,
+                    Box::new(Watched(
+                        NativeHost::new(
+                            dir,
+                            program.clone().unwrap_or_else(NativeHost::default_program),
+                            &state,
+                        ),
+                        heard.clone(),
                     ))
                 }));
             self.server = Some(StudioServer::new(studio));
@@ -687,6 +809,105 @@ fn answers_past_a_wait(w: &mut StudioWorld, tool: String) -> StepResult {
     ended
         .recv_timeout(std::time::Duration::from_secs(30))
         .map_err(|_| "the server did not end with a wait parked".to_owned())?
+}
+
+/// The longest a frame waits for the next, in ms (60 Hz): a preview that
+/// wakes as soon as that is drawing what still moves.
+const FRAME_MS: u64 = 17;
+
+/// Whether what the preview shows still moves: it is drawing frame after
+/// frame, as now or at its next rest within a tenth of a second.
+fn still_moves(watch: &dyn RestWatch) -> Result<bool, String> {
+    let drawing =
+        |rest: &studio_core::preview::Rest| rest.wake_in_ms.is_some_and(|ms| ms <= FRAME_MS);
+    let now = watch.wait(None, 0).map_err(|e| e.to_string())?;
+    if drawing(&now) {
+        return Ok(true);
+    }
+    let next = watch
+        .wait(Some(now.rests), 100)
+        .map_err(|e| e.to_string())?;
+    Ok(next.rests != now.rests && drawing(&next))
+}
+
+// The first call on a thread of its own, as a second client makes it.
+#[when(
+    regex = r#"^the agent calls the tool "([^"]+)" with the following, and the tool "([^"]+)" once its input is in:$"#
+)]
+fn calls_once_input_is_in(
+    w: &mut StudioWorld,
+    first: String,
+    second: String,
+    step: &Step,
+) -> StepResult {
+    let args = w.arguments(&docstring(step)?)?;
+    let caps = w.caps;
+    let server = w.server()?.clone();
+    let (heard, input_in) = std::sync::mpsc::channel();
+    *w.input_heard
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(heard);
+    let (done, answered) = std::sync::mpsc::channel();
+    let first_server = server.clone();
+    let first_tool = first.clone();
+    std::thread::spawn(move || {
+        let out = first_server.call(&first_tool, &CallCtx::new(caps), args);
+        let _ = done.send((std::time::Instant::now(), out));
+    });
+    let watch = input_in.recv_timeout(std::time::Duration::from_secs(30));
+    w.input_heard
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .take();
+    let Ok(watch) = watch else {
+        let out = answered
+            .recv_timeout(std::time::Duration::from_secs(30))
+            .map(|(_, out)| out.map(|reply| reply.structured).map_err(|e| e.to_value()));
+        return Err(format!("`{first}` put no input in; it ended with {out:?}"));
+    };
+    server
+        .call(&second, &CallCtx::new(caps), json!({}))
+        .map_err(|e| format!("`{second}` was refused: {}", e.to_value()))?;
+    let second_at = std::time::Instant::now();
+    let moves = match watch.as_deref() {
+        Some(watch) => still_moves(watch),
+        None => Err("the preview cannot be watched".to_owned()),
+    };
+    let (first_at, out) = answered
+        .recv_timeout(std::time::Duration::from_secs(60))
+        .map_err(|_| format!("`{first}` did not answer within a minute"))?;
+    let out = out.map(|reply| reply.structured);
+    if let (Ok(answer), Some(output)) = (&out, studio_mcp::schema::answer_schema(&first)) {
+        let broken = schema::validate(&output, answer);
+        if !broken.is_empty() {
+            let broken: Vec<String> = broken.iter().map(ToString::to_string).collect();
+            return Err(format!(
+                "`{first}` answered against its outputSchema: {}\nanswer: {answer}",
+                broken.join("; ")
+            ));
+        }
+    }
+    w.answer = Some(out);
+    w.images = Vec::new();
+    w.overlap = Some((second_at < first_at, moves));
+    Ok(())
+}
+
+#[then("the second tool answered before the first, while the page still moved")]
+fn second_answered_first(w: &mut StudioWorld) -> StepResult {
+    match w.overlap.take() {
+        None => Err("no two calls were made at once".to_owned()),
+        Some((false, moves)) => Err(format!(
+            "the second tool answered only after the first (the page still moved then: {moves:?})"
+        )),
+        Some((true, Ok(true))) => Ok(()),
+        Some((true, Ok(false))) => {
+            Err("the second tool answered first, but the page had stopped by then".to_owned())
+        }
+        Some((true, Err(e))) => Err(format!(
+            "the second tool answered first; whether the page moved is not known: {e}"
+        )),
+    }
 }
 
 #[given(regex = r#"^the agent keeps the answer's "(/[^"]*)" as "([^"]+)"$"#)]
