@@ -12,6 +12,13 @@ expression: value
   "description": "Run a document in a preview for a target with live blocks or the mock modules. On the open preview it changes size, fit or state in place; `state_kept` says whether the app's state survived.",
   "inputSchema": {
     "properties": {
+      "appearance": {
+        "enum": [
+          "light",
+          "dark"
+        ],
+        "type": "string"
+      },
       "doc": {
         "description": "The document, usually `Shell.qml`.",
         "type": "string"

@@ -9,7 +9,7 @@ expression: value
     "open_world": false,
     "read_only": true
   },
-  "description": "A document's objects in order: handle, path, type, id, bindings. Grouped properties (`font.bold`) are bindings. Paginated by `cursor`.",
+  "description": "A document's objects in order: handle, path, type, id, bindings and members. Grouped properties (`font.bold`) are bindings.",
   "inputSchema": {
     "properties": {
       "cursor": {

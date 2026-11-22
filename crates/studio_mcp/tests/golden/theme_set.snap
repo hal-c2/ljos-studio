@@ -9,7 +9,7 @@ expression: value
     "open_world": false,
     "read_only": false
   },
-  "description": "Read the tokens of Ljos.Design, the module's value beside the theme file's; or set one (`null` gives it back) in the theme file (made if none), the rest kept byte for byte. A theme Ljós would refuse is refused.",
+  "description": "Read Ljos.Design's tokens, the module's value beside the theme file's; or set one in that file (made if none), the rest kept byte for byte. A theme Ljós would refuse is refused.",
   "inputSchema": {
     "properties": {
       "doc": {
@@ -20,15 +20,15 @@ expression: value
         "type": "boolean"
       },
       "generation": {
-        "description": "The theme file's generation the edit was read at; 0 while it does not exist.",
+        "description": "The theme file's, as read; 0 while there is none.",
         "type": "integer"
       },
       "token": {
-        "description": "`Colors.accent`; a singleton (`Spacing`) reads its roles. Every role when left out.",
+        "description": "`Colors.accent`, or a singleton (`Spacing`). Left out: every name, and what the theme sets.",
         "type": "string"
       },
       "value": {
-        "description": "What the token becomes; `null` gives it back to the module. Left out, the tokens are read."
+        "description": "`null` gives it back to the module. Left out, the tokens are read."
       },
       "variant": {
         "description": "One variant of a colour; a colour string sets light and dark.",
@@ -39,6 +39,10 @@ expression: value
           "darkHigh"
         ],
         "type": "string"
+      },
+      "verbose": {
+        "description": "With no `token`: every value.",
+        "type": "boolean"
       }
     },
     "type": "object"
@@ -58,6 +62,7 @@ expression: value
       },
       "history": {},
       "problem": {},
+      "roles": {},
       "text": {},
       "tokens": {},
       "unchanged": {}

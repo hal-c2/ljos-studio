@@ -17,7 +17,7 @@ expression: value
         "type": "integer"
       },
       "since": {
-        "description": "The `next` of an earlier answer; 0 or left out: from the start.",
+        "description": "An earlier answer's `next`; 0 or left out: from the start.",
         "type": "integer"
       },
       "wait_ms": {
@@ -40,13 +40,17 @@ expression: value
       "open": {
         "type": "boolean"
       },
+      "problems": {
+        "type": "array"
+      },
       "rests": {},
       "wake_in_ms": {}
     },
     "required": [
       "events",
       "next",
-      "open"
+      "open",
+      "problems"
     ],
     "type": "object"
   },

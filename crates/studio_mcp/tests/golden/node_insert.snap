@@ -31,8 +31,18 @@ expression: value
         "type": "boolean"
       },
       "import": {
-        "description": "A module the document must import for it (`Shop.Blocks`).",
-        "type": "string"
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        ],
+        "description": "Modules it needs (`Shop.Blocks`); the toolkit's are added."
       },
       "index": {
         "description": "Child position; default the end.",
@@ -78,6 +88,7 @@ expression: value
         "type": "integer"
       },
       "history": {},
+      "id": {},
       "node": {},
       "rebased_from": {},
       "text": {},

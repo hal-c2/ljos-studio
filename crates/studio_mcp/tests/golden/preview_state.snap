@@ -9,7 +9,7 @@ expression: value
     "open_world": false,
     "read_only": false
   },
-  "description": "Read an object in the preview: its QML state (`variant`), a block's published state (`set` assigns it when mocked), and the properties in `read`. Input comes first, as a person's.",
+  "description": "Read an object in the preview: its QML state (`variant`), a block's published state (`set` assigns it when mocked), and the properties in `read`. Input comes first, as a person's: `type` into `type_into`.",
   "inputSchema": {
     "$defs": {
       "Address": {
@@ -68,7 +68,7 @@ expression: value
       },
       "node": {
         "$ref": "#/$defs/Address",
-        "description": "The object to read, by `id`; in the previewed document unless `doc` names another."
+        "description": "The object to read, by `id`; in the previewed document unless `doc` names another. Left out, it only acts."
       },
       "press": {
         "description": "Keys: `Ctrl+A Enter`.",
@@ -100,6 +100,10 @@ expression: value
       },
       "type": {
         "type": "string"
+      },
+      "type_into": {
+        "$ref": "#/$defs/Address",
+        "description": "Default: the focus."
       }
     },
     "type": "object"
