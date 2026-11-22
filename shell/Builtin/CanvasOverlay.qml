@@ -95,6 +95,9 @@ MouseArea {
     acceptedButtons: Qt.LeftButton
     focus: true
     cursorShape: hoverCursor
+    // Named for what a press does here, which the mode decides.
+    Accessible.role: Accessible.Canvas
+    Accessible.name: playing ? "The running app" : drawing !== "" ? "Draw " + drawing : "Edit the preview"
 
     property int hoverCursor: Qt.ArrowCursor
     readonly property var cursors: [Qt.SizeFDiagCursor, Qt.SizeVerCursor, Qt.SizeBDiagCursor,
