@@ -9,11 +9,11 @@ expression: value
     "open_world": false,
     "read_only": false
   },
-  "description": "Insert an object written in QML, or a `block` from `blocks_list`, as a child at an index, or a member (function, signal, property, handler) of `parent`. It gets an id unless it has one. Returns the handle.",
+  "description": "Insert in `parent` a QML object or a `block` from `blocks_list`, as a child at an index, or a member (function, signal, property, handler). It gets an id if it has none. Returns the handle.",
   "inputSchema": {
     "properties": {
       "block": {
-        "description": "A block from `blocks_list`, `Module.Name`; imported, and `text` must be of its type.",
+        "description": "`Module.Name` from `blocks_list`, imported; `text` must be of its type.",
         "type": "string"
       },
       "doc": {
@@ -27,7 +27,7 @@ expression: value
         "type": "integer"
       },
       "id": {
-        "description": "Give the object an `id` if it has none (default true).",
+        "description": "Add an `id` if none (default true).",
         "type": "boolean"
       },
       "import": {
@@ -35,7 +35,7 @@ expression: value
         "type": "string"
       },
       "index": {
-        "description": "Child position; the end when left out.",
+        "description": "Child position; default the end.",
         "type": "integer"
       },
       "parent": {
@@ -45,8 +45,16 @@ expression: value
         "description": "One of `node` (session handle), `id`, `path` (from `document_tree`; this text only).",
         "type": "object"
       },
+      "replace": {
+        "description": "Member to rewrite as `text`; uses keep the old name.",
+        "type": "string"
+      },
+      "slot": {
+        "description": "Name of a `Slot` to declare (imports Ljos.Blocks); `text` is its default.",
+        "type": "string"
+      },
       "text": {
-        "description": "One object in QML, or one member (`function f() {}`, `signal s()`, `property int n`, `onClicked: f()`). With `block`: left out for the bare block, or its inputs.",
+        "description": "One QML object or member (`function f() {}`, `signal s()`, `property int n`, `onClicked: f()`). With `block`: its inputs, or none for the bare block.",
         "type": "string"
       }
     },

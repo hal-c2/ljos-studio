@@ -9,15 +9,15 @@ expression: value
     "open_world": false,
     "read_only": true
   },
-  "description": "List the project's functional blocks with their contracts; `node_insert` places one by `Module.Name`. Unreadable ones are in `errors`. With `doc`, `types` lists the toolkit types it can place, its imports first.",
+  "description": "The project's functional blocks with their contracts and `slots`; `node_insert` places one by `Module.Name`. Unreadable ones are in `errors`. With `doc`, `types` lists the toolkit types it can place, its imports first.",
   "inputSchema": {
     "properties": {
       "cursor": {
-        "description": "From a previous page's `next`.",
+        "description": "The last page's `next`.",
         "type": "string"
       },
       "doc": {
-        "description": "Also answer `types`, the toolkit types this document can place.",
+        "description": "Also list `types`: toolkit types it can place.",
         "type": "string"
       },
       "module": {
