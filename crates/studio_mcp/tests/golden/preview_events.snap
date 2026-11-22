@@ -49,8 +49,7 @@ expression: value
     "required": [
       "events",
       "next",
-      "open",
-      "problems"
+      "open"
     ],
     "type": "object"
   },
