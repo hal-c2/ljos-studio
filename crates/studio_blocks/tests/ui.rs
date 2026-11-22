@@ -868,6 +868,12 @@ impl Window {
         })
     }
 
+    /// The field named `name` a person types in, of one line or of several.
+    fn typed_in(&mut self, within: &str, name: &str) -> Result<AccessibleNode, String> {
+        self.node(within, Some("multilinetextinput"), name)
+            .or_else(|_| self.node(within, Some("textinput"), name))
+    }
+
     /// Clicks the part of `node` the window shows: a text area as tall as
     /// its text reaches past the window's edge, and the driver aims at a
     /// node's middle wherever that is.
@@ -1558,7 +1564,7 @@ fn inspector_field_enabled(w: &mut UiWorld, name: String, want: String) -> StepR
 fn types_in_row(w: &mut UiWorld, text: String, name: String) -> StepResult {
     let text = unescape(&text);
     let window = w.window()?;
-    let field = window.node("Inspector", Some("textinput"), &name)?;
+    let field = window.typed_in("Inspector", &name)?;
     window.click_node(&field)?;
     let mut driver = window.stage.drive();
     driver
@@ -1571,7 +1577,7 @@ fn types_in_row(w: &mut UiWorld, text: String, name: String) -> StepResult {
 #[then(regex = r#"^the inspector's "([^"]+)" holds "(.*)"$"#)]
 fn row_holds(w: &mut UiWorld, name: String, want: String) -> StepResult {
     let want = unescape(&want);
-    let field = w.window()?.node("Inspector", Some("textinput"), &name)?;
+    let field = w.window()?.typed_in("Inspector", &name)?;
     (field.value == want)
         .then_some(())
         .ok_or_else(|| format!("the row holds {:?}", field.value))

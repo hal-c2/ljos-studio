@@ -123,7 +123,8 @@ Panel {
                 required property var modelData
                 // The eye and the lock come up under the pointer, on the
                 // chosen row and when the keys reach them; a hidden or locked
-                // row keeps its mark, so its state is seen at a glance.
+                // row keeps its mark, so its state is seen at a glance. At once:
+                // a list is picked from all day, and a fade there is a wait.
                 readonly property bool revealed: hover.hovered || row.highlighted
                                                  || eye.activeFocus || padlock.activeFocus
                 width: ListView.view.width
@@ -159,13 +160,6 @@ Panel {
                         radius: 6
                         color: row.highlighted ? Colors.surfaceSelected
                             : hover.hovered ? Colors.surfaceHover : "transparent"
-                        Behavior on color {
-                            ColorAnimation {
-                                duration: Motion.enterSmallFrequent
-                                easing.type: Easing.Bezier
-                                easing.bezierCurve: Motion.easeOut
-                            }
-                        }
                     }
                     // One guide per level above the row, under its ancestors' icons,
                     // so a deep tree reads as nesting rather than as a ragged edge.
@@ -293,15 +287,7 @@ Panel {
                     IconButton {
                         id: eye
                         visible: row.modelData.id !== ""
-                        opacity: row.revealed || row.modelData.hidden ? 1 : 0
-                        // A fade, not a move: it stays as it is under reduced motion.
-                        Behavior on opacity {
-                            NumberAnimation {
-                                duration: Motion.enterSmallFrequent
-                                easing.type: Easing.Bezier
-                                easing.bezierCurve: Motion.easeOut
-                            }
-                        }
+                        quiet: !(row.revealed || row.modelData.hidden)
                         implicitWidth: 24
                         implicitHeight: 24
                         icon_: row.modelData.hidden ? "eyeOff" : "eye"
@@ -310,15 +296,7 @@ Panel {
                     }
                     IconButton {
                         id: padlock
-                        opacity: row.revealed || row.modelData.locked ? 1 : 0
-                        // A fade, not a move: it stays as it is under reduced motion.
-                        Behavior on opacity {
-                            NumberAnimation {
-                                duration: Motion.enterSmallFrequent
-                                easing.type: Easing.Bezier
-                                easing.bezierCurve: Motion.easeOut
-                            }
-                        }
+                        quiet: !(row.revealed || row.modelData.locked)
                         implicitWidth: 24
                         implicitHeight: 24
                         icon_: row.modelData.locked ? "lock" : "unlock"
