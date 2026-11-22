@@ -459,6 +459,11 @@ fn measured_types() -> &'static HashMap<&'static str, HashSet<&'static str>> {
     })
 }
 
+/// The measured modules that have the type `ty`.
+pub(crate) fn measured_in(ty: &str) -> impl Iterator<Item = &'static str> {
+    measured_types().get(ty).into_iter().flatten().copied()
+}
+
 /// What qml6 says each toolkit type has beyond the table: `mise run
 /// measure-members`. `*` and `on*` mean it took a made-up property or handler.
 /// A type with no entry was not measured, and is taken to have anything.

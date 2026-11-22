@@ -11,15 +11,17 @@
 //! whatever the text's source had that might name it, and nothing is told the
 //! name is free.
 
+use std::collections::BTreeSet;
 use std::sync::Mutex;
 
 use ljos_mcp_core::SurfaceError;
+use studio_core::modules::{Modules, member_uses};
 use studio_core::outline::Import;
 use studio_core::{Node, Step, Store, outline};
 
 use crate::place_tools::refused;
-use crate::signals::{Keeps, Lands, Names, TypeIs, Unvouched, compare, not_an_id};
-use crate::{Studio, error, lock};
+use crate::signals::{Keeps, Lands, Names, TypeIs, Unvouched, compare, measured_in, not_an_id};
+use crate::{Studio, error, lock, toolkit};
 
 /// `name` on `object` of `doc`, if `object`'s type is known not to have it.
 pub(crate) fn check_member(
@@ -67,11 +69,12 @@ pub(crate) fn check_insert(
     check_text(studio.session.store(), doc, &source, text, imports)
 }
 
-/// The toolkit modules `text`, put in `doc` beside `imports`, needs for the
-/// types it writes bare that nothing imported has (`ColumnLayout` without
-/// `QtQuick.Layouts`), each the first module offered that has it. A type an
-/// import may have, undescribed, brings nothing: only a type sure to be
-/// missing does.
+/// The toolkit imports that have to come along for `text` to go into `doc`:
+/// for each type nothing there has, its module when that is the only one known
+/// to export it and is one Studio offers it from. A type two modules export is
+/// refused, so the agent says which. None come along when the file would still
+/// not load, or a name it resolves would become another thing: the insert is
+/// then refused as any other with a type nothing has.
 pub(crate) fn toolkit_imports(
     studio: &Mutex<Studio>,
     doc: &str,
@@ -87,19 +90,87 @@ pub(crate) fn toolkit_imports(
     ) else {
         return Ok(Vec::new());
     };
-    let mut out: Vec<String> = Vec::new();
+    let mut missing: Vec<&str> = Vec::new();
     for node in &nodes {
-        if node.ty.contains('.') || names.type_is(&node.ty, text) != TypeIs::Missing {
-            continue;
+        let ty = node.ty.as_str();
+        if !ty.contains('.') && !missing.contains(&ty) && names.type_is(ty, text) == TypeIs::Missing
+        {
+            missing.push(ty);
         }
-        let module = crate::toolkit::ALWAYS
+    }
+    if missing.is_empty() {
+        return Ok(Vec::new());
+    }
+    let project = Modules::read(store);
+    let target = outline::imports(&source).unwrap_or_default();
+    let mut out: Vec<String> = Vec::new();
+    for ty in missing {
+        let offered: Vec<&str> = toolkit::ALWAYS
             .into_iter()
-            .find(|uri| crate::toolkit::names(uri).is_some_and(|types| types.contains(&node.ty)));
-        if let Some(uri) = module.filter(|uri| !out.iter().any(|m| m == uri)) {
+            .filter(|uri| {
+                toolkit::names(uri).is_some_and(|types| types.iter().any(|name| name == ty))
+            })
+            .collect();
+        let known: BTreeSet<&str> = offered
+            .iter()
+            .copied()
+            .chain(measured_in(ty))
+            .chain(project.exporters(ty))
+            .collect();
+        if known.len() > 1 {
+            return Err(several_have(doc, ty, &known));
+        }
+        // With one known, an offered one is that one. An alias is the file's
+        // choice of how the module's types are written.
+        let Some(&uri) = offered.first() else {
+            continue;
+        };
+        let imported = target
+            .iter()
+            .any(|import| matches!(import, Import::Module { uri: had, .. } if had == uri));
+        if !imported && !out.iter().any(|had| had == uri) {
             out.push(uri.to_owned());
         }
     }
-    Ok(out)
+    if out.is_empty() {
+        return Ok(out);
+    }
+    let Some(with) = Names::of(store, doc, &source, &[imports, &out].concat()) else {
+        return Ok(Vec::new());
+    };
+    let held = outline::outline(&source).unwrap_or_default();
+    let own = |name: &str| {
+        outline::declares_component(&held, name) || outline::declares_component(&nodes, name)
+    };
+    let still_missing = held.iter().any(|node| {
+        !node.ty.contains('.') && !own(&node.ty) && with.lands(&node.ty) == Lands::Nowhere
+    });
+    let moved = held
+        .iter()
+        .chain(&nodes)
+        .map(|node| node.ty.as_str())
+        .chain(member_uses(&source))
+        .chain(member_uses(text))
+        .filter(|name| !own(name))
+        .any(|name| takes_over(&names.lands(name), &with.lands(name)));
+    Ok(if still_missing || moved {
+        Vec::new()
+    } else {
+        out
+    })
+}
+
+/// Whether more imports made what landed at `was` something else. The
+/// toolkit's modules share a type of one name; an app's module has its own.
+fn takes_over(was: &Lands, now: &Lands) -> bool {
+    was != now
+        && match was {
+            Lands::Folder(_) => true,
+            Lands::Modules(modules) => modules
+                .iter()
+                .any(|uri| !toolkit::ALWAYS.contains(&uri.as_str())),
+            Lands::Nowhere | Lands::CantTell => false,
+        }
 }
 
 /// The objects `text` writes, in `doc` once it imports `imports`.
@@ -414,6 +485,17 @@ pub(crate) fn duplicate_component(doc: &str, name: &str) -> SurfaceError {
     refused(
         "duplicate_component",
         format!("`{doc}` already declares a `component {name}`: qml6 won't load it twice"),
+    )
+}
+
+fn several_have(doc: &str, ty: &str, modules: &BTreeSet<&str>) -> SurfaceError {
+    let modules = modules.iter().copied().collect::<Vec<_>>().join(", ");
+    refused(
+        "unknown_type",
+        format!(
+            "nothing `{doc}` imports has a type `{ty}`, and more than one module does \
+             ({modules}): name the one meant as `import`"
+        ),
     )
 }
 

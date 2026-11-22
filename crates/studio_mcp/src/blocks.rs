@@ -7,6 +7,7 @@
 //! their QML files.
 
 use ljos_blocks::{BlockContract, BlockRegistry, read_qmldir};
+pub(crate) use studio_core::modules::join;
 use studio_core::{Store, StoreError};
 
 /// The module that defines `Contribution` and `Slot` (ADR 0003, section 4).
@@ -27,22 +28,6 @@ fn named(store: &dyn Store, name: &str) -> Vec<String> {
 /// The project's type dumps.
 pub(crate) fn dumps(store: &dyn Store) -> Vec<String> {
     named(store, DUMP)
-}
-
-/// `dir/file` with `.` and `..` resolved; `None` if it climbs out of the
-/// project.
-pub(crate) fn join(dir: &str, file: &str) -> Option<String> {
-    let mut parts: Vec<&str> = dir.split('/').filter(|p| !p.is_empty()).collect();
-    for part in file.split('/') {
-        match part {
-            "" | "." => {}
-            ".." => {
-                parts.pop()?;
-            }
-            _ => parts.push(part),
-        }
-    }
-    Some(parts.join("/"))
 }
 
 pub(crate) fn registry(store: &dyn Store) -> BlockRegistry {
