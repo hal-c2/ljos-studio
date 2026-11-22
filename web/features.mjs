@@ -372,6 +372,11 @@ const STEPS = [
     const got = must(w.ok(), pointer);
     if (!equal(got, wanted)) throw new Error(`\`${pointer}\` is ${JSON.stringify(got)}, not ${JSON.stringify(wanted)}`);
   }),
+  step("then", /^the answer's "(\/[^"]*)" is above (-?[0-9.]+)$/, (w, s, pointer, floor) => {
+    const got = must(w.ok(), pointer);
+    if (typeof got !== "number") throw new Error(`\`${pointer}\` is ${JSON.stringify(got)}, not a number`);
+    if (!(got > Number(floor))) throw new Error(`\`${pointer}\` is ${got}, not above ${floor}`);
+  }),
   step("then", /^the answer's "(\/[^"]*)" is:$/, (w, s, pointer) => {
     const want = fileText(s);
     const got = must(w.ok(), pointer);
