@@ -221,6 +221,29 @@ Feature: The built-in shell shows what is wrong in the preview
     When the person clicks "Left panels"
     Then the window has a button "Problems in the left panels"
 
+  # The list keeps the first 1024, and whatever the compiler says. The row
+  # for what it dropped is no problem: it isn't counted.
+  Scenario: A problem the full list dropped is told in a row of its own
+    Given the preview's log starts with 1025 warnings
+    And Studio's window shows the project
+    And the person has opened "App.qml" in the documents list
+    Then the window counts 1024 problems within 10 seconds
+    When the person clicks "Show the problems"
+    Then the window says "Past the first 1024, only the compiler's problems are added"
+    And the window has a pane "1024 problems in the preview"
+    And the window says "Problem count: 1024"
+
+  Scenario: A full list that dropped nothing has no such row
+    Given the preview's log starts with 1024 warnings
+    And Studio's window shows the project
+    And the person has opened "App.qml" in the documents list
+    Then the window counts 1024 problems within 10 seconds
+    When the person clicks "Show the problems"
+    Then the window does not say "Past the first 1024, only the compiler's problems are added"
+    When the person replaces "id: card" with "id: card; Item {" in the code view
+    Then the window counts 1025 problems within 10 seconds
+    And the window does not say "Past the first 1024, only the compiler's problems are added"
+
   # Nothing writes or asks once the window shows the document: the app's own
   # timer logs.
   Scenario: A warning the app logs after it started reaches the window

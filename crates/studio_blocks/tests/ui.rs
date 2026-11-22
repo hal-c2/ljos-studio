@@ -58,6 +58,8 @@ struct UiWorld {
     asked: u64,
     /// The previews say nothing of where their objects are, as a web host.
     no_places: bool,
+    /// How many warnings of no file the previews log as they start.
+    warns: usize,
     picture_ms: Arc<AtomicU64>,
     placed_ms: Arc<AtomicU64>,
     /// How long the preview takes over each turn of the wheel, and the turns
@@ -74,7 +76,8 @@ struct NoPlaces(NativeHost);
 /// A preview that spends what a step says (in ms) over each picture, and over
 /// saying where its objects are: a stand-in for a slow machine, so that what
 /// is about the order of things does not rest on how fast this build is.
-struct SlowPictures(NativeHost, Arc<AtomicU64>, Arc<AtomicU64>, Scrolling);
+/// Its log starts with as many warnings as a step says.
+struct SlowPictures(NativeHost, Arc<AtomicU64>, Arc<AtomicU64>, Scrolling, usize);
 
 /// A turn of the wheel the running app was given: how far, and whether what
 /// it moved still moved when the next call reached the preview (`None` till
@@ -183,7 +186,17 @@ impl PreviewHost for SlowPictures {
 
     fn logs(&mut self, since: u64) -> Result<(Vec<LogLine>, u64), PreviewError> {
         self.3.look();
-        self.0.logs(since)
+        let (mut lines, next) = self.0.logs(since)?;
+        if since == 0 {
+            lines.extend((0..self.4).map(|i| LogLine {
+                level: "warning".to_owned(),
+                message: format!("logged {i}"),
+                file: None,
+                line: None,
+                compiler: false,
+            }));
+        }
+        Ok((lines, next))
     }
 
     fn pick(&mut self, x: f64, y: f64) -> Result<Option<Declared>, PreviewError> {
@@ -346,6 +359,7 @@ impl UiWorld {
             looked: 0,
             asked: 0,
             no_places: false,
+            warns: 0,
             picture_ms: Arc::default(),
             placed_ms: Arc::default(),
             scroll_ms: Arc::default(),
@@ -428,6 +442,7 @@ impl UiWorld {
         // temporary directory itself is as open as the umask leaves it.
         let state = self.state.path().join("preview");
         let no_places = self.no_places;
+        let warns = self.warns;
         let picture_ms = Arc::clone(&self.picture_ms);
         let placed_ms = Arc::clone(&self.placed_ms);
         let scroll_ms = Arc::clone(&self.scroll_ms);
@@ -448,6 +463,7 @@ impl UiWorld {
                             record: Arc::clone(&scrolls),
                             unjudged: None,
                         },
+                        warns,
                     ))
                 }
             }));
@@ -3664,6 +3680,11 @@ fn ran_no_frames(w: &mut UiWorld) -> StepResult {
 #[given("the preview does not say where its objects are")]
 fn no_places(w: &mut UiWorld) {
     w.no_places = true;
+}
+
+#[given(regex = r"^the preview's log starts with (\d+) warnings$")]
+fn warns(w: &mut UiWorld, count: usize) {
+    w.warns = count;
 }
 
 #[given(regex = r"^the preview takes (\d+) ms over each picture$")]

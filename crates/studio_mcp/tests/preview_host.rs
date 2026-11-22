@@ -2192,6 +2192,237 @@ fn a_parked_wait_answers_within_the_cap() {
     assert_eq!(out["truncated"], true, "the cut isn't said");
 }
 
+/// How many problems there are to tell.
+fn to_tell(f: &Fixture) -> usize {
+    let studio = f.server.studio();
+    let shown = studio.lock().unwrap().view("Main.qml");
+    shown.problems.len()
+}
+
+/// The warnings an edit told, which with those it says it left out are all
+/// `total` of them.
+fn told_of(out: &Value, total: usize) -> Vec<Value> {
+    let told = out["warnings"].as_array().cloned().unwrap_or_default();
+    assert_eq!(
+        out["warnings_omitted"].as_u64(),
+        Some((total - told.len()) as u64),
+        "{} of {total} were told, and the rest aren't counted",
+        told.len()
+    );
+    told
+}
+
+#[test]
+fn an_edit_counts_the_warnings_it_left_out() {
+    let f = writable();
+    f.seen.lock().unwrap().later = (0..20).map(|i| warned(&format!("older {i}"))).collect();
+    f.server.pull_problems();
+
+    let out = fail_a_write(&f);
+    assert_eq!(told_of(&out, to_tell(&f)).len(), 8);
+}
+
+#[test]
+fn an_edit_that_told_every_warning_counts_none() {
+    let f = writable();
+    f.seen.lock().unwrap().later = (0..6).map(|i| warned(&format!("older {i}"))).collect();
+    f.server.pull_problems();
+
+    let out = fail_a_write(&f);
+    assert_eq!(to_tell(&f), 8);
+    assert_eq!(out["warnings"].as_array().unwrap().len(), 8);
+    assert!(out.get("warnings_omitted").is_none(), "{out}");
+}
+
+#[test]
+fn an_edit_with_long_warnings_answers_within_the_cap() {
+    let f = writable();
+    let long: Vec<String> = (0..8)
+        .map(|i| format!("{i}{}", "é✓𝄞".repeat(600)))
+        .collect();
+    f.seen.lock().unwrap().later = long.iter().map(|message| warned(message)).collect();
+    f.server.pull_problems();
+
+    let out = fail_a_write(&f);
+    assert_within_the_cap(&out);
+    let told = told_of(&out, to_tell(&f));
+    assert_eq!(
+        told[0]["message"], "expected a property",
+        "the error was dropped while a warning stays"
+    );
+    assert!(
+        told.iter().any(|p| long.iter().any(|m| p["message"] == *m)),
+        "no long warning was told whole, though there is room for one"
+    );
+    for p in &told[1..] {
+        let message = p["message"].as_str().unwrap();
+        assert!(
+            message == "a warning" || long.iter().any(|m| m == message),
+            "a warning was split"
+        );
+    }
+}
+
+#[test]
+fn an_error_too_long_to_tell_is_counted_and_no_warning_stands_in_for_it() {
+    let f = writable();
+    {
+        let mut seen = f.seen.lock().unwrap();
+        seen.fail_next = true;
+        seen.failure = format!("Main.qml:4: {}", "é".repeat(11_000));
+    }
+    let out = f
+        .call(
+            "binding_set",
+            json!({ "doc": "Main.qml", "node": { "id": "root" }, "name": "width", "value": "2" }),
+        )
+        .unwrap();
+    assert_within_the_cap(&out);
+    let told = told_of(&out, to_tell(&f));
+    assert!(told.is_empty(), "a warning stayed where the error didn't");
+}
+
+#[test]
+fn a_full_answer_still_counts_the_warnings_it_left_out() {
+    // A write of `chars` whose reload fails, beside the open's warning.
+    let written = |chars: usize| {
+        let f = writable();
+        {
+            let mut seen = f.seen.lock().unwrap();
+            seen.fail_next = true;
+            seen.failure = "Main.qml:4: expected a property".to_owned();
+        }
+        let value = format!("\"{}\"", "x".repeat(chars));
+        let out = f
+            .call(
+                "binding_set",
+                json!({ "doc": "Main.qml", "node": { "id": "root" }, "name": "width", "value": value }),
+            )
+            .unwrap();
+        (f, out)
+    };
+    let (_, mut small) = written(1);
+    let fields = small.as_object_mut().unwrap();
+    fields.remove("warnings");
+    fields.remove("warnings_omitted");
+    let others = serde_json::to_vec(&small).unwrap().len() - 1;
+
+    // As many as fill a copy to its last byte before the warnings.
+    let (f, out) = written(DEFAULT_RESULT_BYTES / 2 - others);
+    assert_within_the_cap(&out);
+    assert!(told_of(&out, to_tell(&f)).is_empty());
+    assert_eq!(out["truncated"], true, "the cut isn't said");
+}
+
+#[test]
+fn an_answer_cut_twice_names_both_cuts() {
+    let f = warned_without_end();
+    let since = f
+        .call("preview_events", json!({ "since": 1_000_000 }))
+        .unwrap()["next"]
+        .clone();
+    // One more than the budget reloads at once, so the reading reloads.
+    for width in 2..7 {
+        {
+            let mut seen = f.seen.lock().unwrap();
+            seen.fail_next = true;
+            seen.failure = "Main.qml:4: expected a property".to_owned();
+        }
+        f.call(
+            "binding_set",
+            json!({ "doc": "Main.qml", "node": { "id": "root" }, "name": "width", "value": width.to_string() }),
+        )
+        .unwrap();
+    }
+    f.calls();
+    let out = f.call("preview_events", json!({ "since": since })).unwrap();
+    assert!(
+        f.calls().contains(&"reload".to_owned()),
+        "the reading didn't reload"
+    );
+    assert_within_the_cap(&out);
+    assert_eq!(out["truncated"], true, "the cut isn't said");
+    assert_eq!(
+        out["truncated_field"], "problems",
+        "what was cut isn't said"
+    );
+    told_of(&out, to_tell(&f));
+}
+
+/// The answer's cut is of its problems, which no cursor can fetch.
+fn assert_cut_without_a_cursor(out: &Value) {
+    assert_eq!(out["truncated"], true, "the cut isn't said");
+    assert_eq!(
+        out["truncated_field"], "problems",
+        "what was cut isn't said"
+    );
+    assert_eq!(
+        out.get("next_cursor"),
+        None,
+        "a count of problems is given as a cursor"
+    );
+}
+
+/// What is logged next is told from `next` on, once.
+fn assert_resumes(f: &Fixture, next: u64) {
+    f.seen.lock().unwrap().later = vec![LogLine {
+        level: "info".to_owned(),
+        ..warned("the next event")
+    }];
+    let out = f.call("preview_events", json!({ "since": next })).unwrap();
+    let events = out["events"].as_array().unwrap();
+    assert_eq!(events.len(), 1, "not the next event alone");
+    assert_eq!(events[0]["message"], "the next event");
+    assert_eq!(out["next"], next + 1);
+    let after = f
+        .call("preview_events", json!({ "since": next + 1 }))
+        .unwrap();
+    assert_eq!(after["events"], json!([]), "the next event was told twice");
+}
+
+#[test]
+fn cut_problems_leave_next_as_the_only_resume_point() {
+    let f = warned_without_end();
+    let end = f
+        .call("preview_events", json!({ "since": 1_000_000 }))
+        .unwrap()["next"]
+        .as_u64()
+        .unwrap();
+    f.seen.lock().unwrap().later = vec![LogLine {
+        level: "info".to_owned(),
+        ..warned("an event")
+    }];
+    let out = f.call("preview_events", json!({ "since": end })).unwrap();
+    assert_cut_without_a_cursor(&out);
+    assert_eq!(out["next"], end + 1);
+    assert_resumes(&f, end + 1);
+}
+
+#[test]
+fn a_parked_waits_cut_problems_leave_next_as_the_only_resume_point() {
+    use ljos_mcp_core::McpSurface as _;
+
+    let f = warned_without_end();
+    let end = f
+        .call("preview_events", json!({ "since": 1_000_000 }))
+        .unwrap()["next"]
+        .as_u64()
+        .unwrap();
+    f.seen.lock().unwrap().watches = true;
+    let ctx = CallCtx::new(CapSet::of([Cap::Inspect]));
+    let args = json!({ "since": end, "wait_ms": 1000, "rests": 1 });
+    let out = tokio::runtime::Builder::new_current_thread()
+        .build()
+        .unwrap()
+        .block_on(f.server.call_tool("preview_events", &ctx, args))
+        .unwrap_or_else(|e| panic!("{}", e.to_value()))
+        .structured;
+    assert_eq!(out["rests"], 2, "the wait didn't park");
+    assert_cut_without_a_cursor(&out);
+    assert_eq!(out["next"], end);
+    assert_resumes(&f, end);
+}
+
 /// The error a write to `doc` leaves when its reload fails saying `says`.
 fn failure_of(f: &StudioServer, seen: &Mutex<Seen>, doc: &str, says: &str) -> Value {
     let ctx = CallCtx::new(CapSet::of([Cap::Inspect, Cap::Mutate, Cap::Run]));
