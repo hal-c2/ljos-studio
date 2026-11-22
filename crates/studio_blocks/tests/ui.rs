@@ -4079,6 +4079,43 @@ fn has_button(w: &mut UiWorld, name: String) -> StepResult {
         .ok_or_else(|| format!("no button {name:?}; the window holds {}", names(&tree)))
 }
 
+#[then("the problems cover none of the canvas")]
+fn problems_off_canvas(w: &mut UiWorld) -> StepResult {
+    let window = w.window()?;
+    let canvas = window
+        .bounds(&|role, name| role == "pane" && name == "Canvas")
+        .ok_or("no canvas pane")?;
+    let problems = window
+        .bounds(&|role, name| role == "pane" && name.ends_with(" in the preview"))
+        .ok_or("no problems pane")?;
+    let wide = canvas.x1.min(problems.x1) - canvas.x0.max(problems.x0);
+    let tall = canvas.y1.min(problems.y1) - canvas.y0.max(problems.y0);
+    if wide > 0.5 && tall > 0.5 {
+        return Err(format!(
+            "the problems {problems:?} are over the canvas {canvas:?}"
+        ));
+    }
+    Ok(())
+}
+
+/// The app logs on its own clock and the window hears from another thread.
+#[then(regex = r"^the window counts (\d+) problems? within (\d+) seconds$")]
+fn problems_until(w: &mut UiWorld, count: usize, seconds: u64) -> StepResult {
+    let window = w.window()?;
+    let want = format!("Problem count: {count}");
+    for _ in 0..seconds * 20 {
+        if find(&window.tree(), &|n| n.name == want).is_some() {
+            return Ok(());
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        window.stage.drive().advance(50).map_err(drive_error)?;
+        window.rest()?;
+    }
+    Err(format!(
+        "after {seconds} seconds the window does not say {want:?}"
+    ))
+}
+
 /// Where the frame for `target` is drawn; its button and label share the name.
 fn frame_bounds(window: &Window, target: &str) -> Result<ljos::item::kurbo::Rect, String> {
     window
