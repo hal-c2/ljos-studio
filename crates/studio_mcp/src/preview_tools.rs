@@ -189,10 +189,10 @@ struct EventsOut {
     next: usize,
     /// A preview is running now.
     open: bool,
-    /// What is wrong in it now: the last reload's warnings and errors and
-    /// those logged since, one a line. Absent when nothing is.
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    problems: Vec<studio_core::preview::LogLine>,
+    /// What is wrong in it now, one a line, as an edit's `warnings`:
+    /// severity, message, file, line, node. Absent when nothing is.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    problems: Vec<Value>,
     /// With `wait_ms`: how many times the app has rested saying something new.
     #[serde(skip_serializing_if = "Option::is_none")]
     rests: Option<u64>,
@@ -1181,28 +1181,41 @@ pub(crate) fn parked(
 
 /// What is known to be wrong in the preview, asking it nothing: a window
 /// waits after every rest, and each wait would be one more call of the app.
-pub(crate) fn known_problems(studio: &Mutex<Studio>) -> Vec<studio_core::preview::LogLine> {
+pub(crate) fn known_problems(studio: &Mutex<Studio>) -> Vec<Value> {
     let previews = lock(studio).previews.clone();
-    let previews = preview::lock(&previews);
-    previews.problems.clone()
+    let lines = preview::lock(&previews).problems.clone();
+    answered(&lock(studio).problems(&lines))
+}
+
+fn answered(problems: &[crate::view::Problem]) -> Vec<Value> {
+    problems
+        .iter()
+        .map(crate::view::Problem::answered)
+        .collect()
 }
 
 fn events(studio: &Mutex<Studio>, a: EventsArgs) -> Result<EventsOut, SurfaceError> {
     if let Some(wait_ms) = a.wait_ms {
         return wait_for_rest(studio, a.since.unwrap_or(0), a.rests, wait_ms);
     }
-    let studio = lock(studio);
+    let mut studio = lock(studio);
     // What a burst of writes left out is reloaded first, so its outcome
     // is among the events.
     let mut previews = preview::caught_up(&studio.previews);
     previews.pull_logs();
     let since = a.since.unwrap_or(0).min(previews.events.len());
     let end = (since + EVENTS_PAGE).min(previews.events.len());
+    let (events, open) = (
+        previews.events[since..end].to_vec(),
+        previews.open.is_some(),
+    );
+    let lines = previews.problems.clone();
+    drop(previews);
     Ok(EventsOut {
-        events: previews.events[since..end].to_vec(),
+        events,
         next: end,
-        open: previews.open.is_some(),
-        problems: previews.problems.clone(),
+        open,
+        problems: answered(&studio.problems(&lines)),
         rests: None,
         wake_in_ms: None,
     })

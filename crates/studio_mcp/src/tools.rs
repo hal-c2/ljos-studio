@@ -80,13 +80,13 @@ struct TreeNode {
     /// `name: value` as written, groups dotted (`font.bold`).
     bindings: Vec<String>,
     /// The properties it declares, by name.
-    #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     properties: Vec<String>,
     /// The signals it declares, as `name(type argument, …)`.
-    #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     signals: Vec<String>,
     /// The functions it declares, by name.
-    #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     functions: Vec<String>,
 }
 
