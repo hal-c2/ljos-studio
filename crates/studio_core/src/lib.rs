@@ -3623,19 +3623,40 @@ fn handler_body(value: &str) -> String {
     if parsed.is_ok() && parsed.document.root.members.len() == 1 {
         return value.to_owned();
     }
-    // A `//` would comment out a brace closed on its line.
-    if !trimmed.contains('\n') && !trimmed.contains("//") {
-        return format!("{{ {trimmed} }}");
+    if !trimmed.contains('\n') {
+        // A line comment would comment out a brace closed on its line. `//`
+        // is also in a URL, so the parser says which it is, read in a block
+        // of its own: the probe above doesn't parse.
+        let commented = trimmed.contains("//") && {
+            let block = format!("{BEFORE}{{{trimmed}\n}}\n}}");
+            let parsed = qml_syntax::parse(&allocator, &block);
+            !parsed.is_ok() || parsed.comments.iter().any(|c| c.is_line())
+        };
+        if !commented {
+            return format!("{{ {trimmed} }}");
+        }
     }
-    // A template string's spaces and empty lines are its value.
+    let body: Vec<&str> = value
+        .trim_end()
+        .lines()
+        .skip_while(|line| line.trim().is_empty())
+        .collect();
+    // Indentation added here could land inside a template string. Its value
+    // can still change: qml_edit reindents a value's later lines as it sets it.
     if trimmed.contains('`') {
-        return format!("{{\n{trimmed}\n}}");
+        return format!("{{\n{}\n}}", body.join("\n"));
     }
+    let indent = body
+        .iter()
+        .filter(|line| !line.trim().is_empty())
+        .map(|line| line.len() - line.trim_start_matches([' ', '\t']).len())
+        .min()
+        .unwrap_or(0);
     let mut out = String::from("{\n");
-    for line in trimmed.lines() {
+    for line in &body {
         if !line.trim().is_empty() {
             out.push_str("    ");
-            out.push_str(line);
+            out.push_str(&line[indent..]);
         }
         out.push('\n');
     }
