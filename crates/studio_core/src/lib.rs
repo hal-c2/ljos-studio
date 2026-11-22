@@ -18,6 +18,7 @@ pub mod flows;
 mod history;
 mod log;
 pub mod models;
+pub mod modules;
 pub mod outline;
 pub mod place;
 pub mod preview;
@@ -1508,7 +1509,8 @@ impl Session {
     /// The new text, what it does to paths, and where the object it put or
     /// moved ends up. An edit that writes more uses of the design module's
     /// singletons (`Colors.accent`) than the text had brings the module's
-    /// import with it, whether it set a binding, a state's or put an object.
+    /// import with it, whether it set a binding, a state's or put an object,
+    /// unless a name the import would give may be the app's own.
     fn plan(
         &mut self,
         path: &str,
@@ -1516,13 +1518,31 @@ impl Session {
         op: &Op,
     ) -> Result<(String, PathChange, Option<NodePath>), Error> {
         let (mut out, change, focus) = self.plan_op(path, before, op)?;
-        if singleton_uses(&out) > singleton_uses(before)
+        let used = singleton_uses(&out);
+        if used.len() > singleton_uses(before).len()
             && matches!(imported(&out, ljos_design::module::URI), Imported::No)
             && !declares_singleton_name(&out)
+            && !self.design_would_take_a_name(path, &out, used)
         {
             out = with_import(&out, ljos_design::module::URI)?;
         }
         Ok((out, change, focus))
+    }
+
+    /// Whether importing the design module may change what one of the names
+    /// `text` uses is.
+    fn design_would_take_a_name(&self, path: &str, text: &str, used: Vec<&str>) -> bool {
+        use ljos_design::module::{TYPES, URI};
+        let store = self.store();
+        let project = modules::Modules::read(store);
+        let nodes = outline::outline(text).unwrap_or_default();
+        let types = nodes
+            .iter()
+            .map(|node| node.ty.as_str())
+            .filter(|ty| TYPES.contains(ty));
+        used.into_iter()
+            .chain(types)
+            .any(|name| modules::may_be_anothers(store, &project, path, text, name, URI))
     }
 
     fn plan_op(
@@ -4053,45 +4073,12 @@ fn qualified(text: &str, qualifier: &str) -> Result<String, Error> {
     ))
 }
 
-/// How many times `text` reads a member of one of the design module's
-/// singletons (`Colors.x`), leaving out strings and comments.
-fn singleton_uses(text: &str) -> usize {
-    let bytes = text.as_bytes();
-    let word = |b: u8| b.is_ascii_alphanumeric() || b == b'_' || b == b'$';
-    let mut count = 0;
-    let mut i = 0;
-    while i < bytes.len() {
-        match bytes[i] {
-            b'/' if bytes.get(i + 1) == Some(&b'/') => {
-                i = text[i..].find('\n').map_or(bytes.len(), |n| i + n);
-            }
-            b'/' if bytes.get(i + 1) == Some(&b'*') => {
-                i = text[i + 2..].find("*/").map_or(bytes.len(), |n| i + n + 4);
-            }
-            quote @ (b'"' | b'\'' | b'`') => {
-                i += 1;
-                while i < bytes.len() && bytes[i] != quote {
-                    i += if bytes[i] == b'\\' { 2 } else { 1 };
-                }
-                i += 1;
-            }
-            b if word(b) => {
-                let start = i;
-                while i < bytes.len() && word(bytes[i]) {
-                    i += 1;
-                }
-                let after_dot = start > 0 && bytes[start - 1] == b'.';
-                if !after_dot
-                    && bytes.get(i) == Some(&b'.')
-                    && ljos_design::module::SINGLETONS.contains(&&text[start..i])
-                {
-                    count += 1;
-                }
-            }
-            _ => i += 1,
-        }
-    }
-    count
+/// Each read in `text` of a member of one of the design module's singletons
+/// (`Colors.x`).
+fn singleton_uses(text: &str) -> Vec<&str> {
+    let mut uses = modules::member_uses(text);
+    uses.retain(|name| ljos_design::module::SINGLETONS.contains(name));
+    uses
 }
 
 /// Whether `text` gives one of the singletons' names to something of its
