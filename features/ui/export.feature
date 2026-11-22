@@ -182,6 +182,14 @@ Feature: A person exports a native app or a web site from Studio's window
       And the export panel's button "Build and open" is disabled
       And the file "build/web/ljos-site.json" does not exist
 
+    Scenario: Writing the bundle builds nothing, whichever ljos-web folder is typed
+      Given the person has clicked the button "Export"
+      And the person has chosen "Web site" in the export panel
+      And the person has set "ljos-web folder" to "no-ljos-web" in the export panel
+      When the person clicks the button "Write bundle"
+      Then the file "build/web/ljos-site.json" exists
+      And the export panel says "^Wrote 4 files to build/web"
+
     Scenario: A native app is not built
       When the person clicks the button "Export"
       Then the export panel has no "Build and open"

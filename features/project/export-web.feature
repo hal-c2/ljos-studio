@@ -589,6 +589,35 @@ Feature: A project is exported for ljos-web to build a site from
       Then the agent is refused with "capability_denied"
       And the file "build/web/ljos-site.json" does not exist
 
+    Scenario Outline: What only a build uses is refused without one
+      When the agent calls the tool "export" with:
+        """json
+        {"entry": "Shell.qml", "target": "web", <given>}
+        """
+      Then the agent is refused with "invalid_argument"
+      And the refusal's "/details/kind" is "needs_build"
+      And the refusal's "/details/argument" is "<argument>"
+      And the refusal's "/message" contains "needs"
+      And the file "build/web/ljos-site.json" does not exist
+
+      Examples:
+        | given                               | argument |
+        | "open": true                        | open     |
+        | "open": true, "dry_run": true       | open     |
+        | "ljos_web": "../ljos-web"           | ljos_web |
+        | "qmlc": "qmlc"                      | qmlc     |
+        | "page": {"title": "M"}, "open": true | open    |
+
+    Scenario: Asking to open a native export names both arguments it needs
+      When the agent calls the tool "export" with:
+        """json
+        {"entry": "Shell.qml", "open": true}
+        """
+      Then the agent is refused with "invalid_argument"
+      And the refusal's "/details/kind" is "needs_build"
+      And the refusal's "/message" contains "web"
+      And the file "build/native/ljos-bundle.json" does not exist
+
     Scenario: Only a web export is built
       Given the studio tools are connected with the capabilities "inspect, mutate, fs, run"
       When the agent calls the tool "export" with:
