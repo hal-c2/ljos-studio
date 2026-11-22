@@ -1136,8 +1136,11 @@ terminal. `features/ui/export.feature`, `features/project/export-web.feature`,
   copies the two pictures, since Vite does not read the head.
   - A link is a block, `Site/Link.qml` (the panel's "Add a Link block"):
     an item with `Accessible.role: Accessible.Link` that calls
-    `Qt.openUrlExternally`. ljos-web renders that role as an `<a href>`,
-    and Ljós opens the URL in the browser.
+    `Qt.openUrlExternally`, and Ljós opens the URL in the browser.
+    ljos-web renders that role as `role="link"` and no `<a>`, so the site's
+    `main.js` makes an `<a href>` of an item with that role and an `href`
+    that is `http`, `https`, `mailto` or `tel`. Any other address gets no
+    `href`.
   - The page is as wide as the window and as tall as its root's content,
     so it scrolls as a document: the browser's scroll bar, keys, find,
     and a full-page screenshot taller than the window. A Flickable that

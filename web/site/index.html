@@ -10,6 +10,9 @@
          window: then the page scrolls as a document does. */
       #app { width: 100%; height: 100vh; }
       [data-ljos-page] { overscroll-behavior: auto !important; }
+      /* The `a` main.js makes of a link, over its item's box: the look is
+         the item's own. */
+      a[data-ljos-link] { position: absolute; inset: 0; z-index: 1; color: inherit; text-decoration: none; pointer-events: auto; }
     </style>
   </head>
   <body>

@@ -84,3 +84,75 @@ else {
   hear(root, "implicitHeight");
   hear(root, "childrenRect");
 }
+
+// ljos-web says `Accessible.Link` on an item's element as `role="link"` and
+// makes no `a` of it, so the page makes one of an item that has that role
+// and an `href`: what a browser follows and opens in a tab, and a crawler
+// reads. An address of another scheme (`javascript:`, `file:`) is no link
+// of a site.
+const FOLLOWED = new Set(["http:", "https:", "mailto:", "tel:"]);
+const addressOf = (item) => {
+  const given = String(item.href ?? "");
+  try {
+    return given && FOLLOWED.has(new URL(given, location.href).protocol) ? given : null;
+  } catch {
+    return null;
+  }
+};
+
+const anchors = new WeakMap();
+const heard = new WeakSet();
+const anchor = (item) => {
+  const node = item.$node;
+  const address = addressOf(item);
+  let a = anchors.get(node);
+  if (!address) return a?.removeAttribute("href");
+  if (!a) {
+    a = document.createElement("a");
+    a.dataset.ljosLink = "";
+    // A Text's letters go inside, so the link reads as them. Anything else
+    // is covered by it.
+    const letters = node.querySelector(":scope > .qq-text");
+    node.prepend(a);
+    if (letters) a.append(letters);
+    anchors.set(node, a);
+  }
+  a.setAttribute("href", address);
+  if (node.getAttribute("role") !== "link") return;
+  // One link to a reader, not one inside another.
+  const name = node.getAttribute("aria-label");
+  if (name) a.setAttribute("aria-label", name);
+  node.removeAttribute("role");
+  node.removeAttribute("aria-label");
+};
+
+const linkUp = () => {
+  const seen = new Set();
+  const walk = (item) => {
+    if (!item || seen.has(item)) return;
+    seen.add(item);
+    const node = item.$node;
+    if (node instanceof Element && node.getAttribute("role") === "link" && "href" in item) {
+      anchor(item);
+      if (!heard.has(item)) {
+        heard.add(item);
+        item.hrefChanged?.connect?.(() => queueMicrotask(() => anchor(item)));
+      }
+    }
+    for (const child of childrenOf(item)) walk(child);
+  };
+  walk(root);
+};
+
+// The tree is walked again only when an element becomes a link or one
+// arrives, so a page at rest does no work for it.
+const bringsLink = (record) =>
+  record.type === "attributes"
+    ? record.target.getAttribute("role") === "link"
+    : [...record.addedNodes].some((n) => n instanceof Element && (n.matches('[role="link"]') || n.querySelector('[role="link"]')));
+linkUp();
+new MutationObserver((records) => records.some(bringsLink) && linkUp()).observe(app, {
+  subtree: true,
+  childList: true,
+  attributeFilter: ["role"],
+});
