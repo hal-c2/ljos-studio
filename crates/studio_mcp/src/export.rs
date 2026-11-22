@@ -1352,6 +1352,13 @@ fn through_links<'a>(
 /// The bundles builds read, or wait their turn to read.
 static BEING_BUILT: LazyLock<Mutex<Vec<PathBuf>>> = LazyLock::new(Mutex::default);
 
+/// A path as holds compare it, without its letters' case: on a disk that
+/// ignores it `build/WEB` is `build/web`. Where the two differ, an export
+/// to one only waits for a build of the other.
+fn folded(path: &Path) -> PathBuf {
+    PathBuf::from(path.to_string_lossy().to_lowercase())
+}
+
 /// A build's hold on the bundle it reads. The project is let go of while a
 /// site builds, so without it another export could change what gets built.
 #[doc(hidden)]
@@ -1359,6 +1366,7 @@ pub struct BeingBuilt(PathBuf);
 
 impl BeingBuilt {
     pub fn hold(bundle: PathBuf) -> Self {
+        let bundle = folded(&bundle);
         BEING_BUILT
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
@@ -1368,11 +1376,12 @@ impl BeingBuilt {
 
     /// Whether replacing `bundle` would change what a build reads.
     fn holds(bundle: &Path) -> bool {
+        let bundle = folded(bundle);
         BEING_BUILT
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .iter()
-            .any(|held| held.starts_with(bundle) || bundle.starts_with(held))
+            .any(|held| held.starts_with(&bundle) || bundle.starts_with(held))
     }
 }
 
@@ -1453,7 +1462,9 @@ fn export(studio: &Mutex<Studio>, ctx: &CallCtx, a: ExportArgs) -> Result<Export
         if BeingBuilt::holds(&root.join(&out)) {
             return Err(SurfaceError::new(
                 ErrorCode::Busy,
-                format!("a site is being built from `{out}`: export there again when it is done"),
+                format!(
+                    "`{out}` overlaps the bundle a site is being built from: export there again when it is done"
+                ),
             )
             .with_details(json!({ "kind": "build_running" })));
         }
