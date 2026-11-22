@@ -403,12 +403,11 @@ fn open(studio: &Mutex<Studio>, a: OpenArgs) -> Result<OpenOut, SurfaceError> {
     } else {
         // One preview at a time: the last one ends before the next starts,
         // and what was wrong in it with it.
-        if let Some(mut last) = previews.open.take() {
+        if let Some(mut last) = previews.end() {
             last.host.close();
             if let Some(standing) = &mut last.harness {
                 standing.leave(store);
             }
-            previews.clear_problems();
         }
         let mut standing = match &harness {
             Some(h) => {

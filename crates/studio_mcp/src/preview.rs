@@ -151,6 +151,7 @@ pub(crate) struct Previews {
     /// them. An id means something in one document only, so only the
     /// document's own preview hears of them.
     pub(crate) hidden_ids: BTreeSet<(String, String)>,
+    /// Emptied only by [`Previews::end`], as problems are of an open one.
     pub open: Option<Open>,
     /// How many previews were started: the last one's `started`.
     pub starts: u64,
@@ -588,16 +589,18 @@ impl Previews {
             _ => None,
         };
         self.events.push(event);
-        let lines = self.read_logs();
-        self.start_problems(failed, &lines);
+        if let Ok(lines) = self.read_logs() {
+            self.start_problems(failed, &lines);
+        }
     }
 
     /// A new preview: nothing it logged has been read.
     pub fn opened(&mut self) {
         self.log_mark = 0;
         self.held.clear();
-        let lines = self.read_logs();
-        self.start_problems(None, &lines);
+        if let Ok(lines) = self.read_logs() {
+            self.start_problems(None, &lines);
+        }
     }
 
     /// The text of `line` of `file` as the preview reads it now.
@@ -669,49 +672,52 @@ impl Previews {
             }
             Reload::Unchanged => return,
         };
-        let lines = self.read_logs();
-        self.start_problems(failed, &lines);
+        if let Ok(lines) = self.read_logs() {
+            self.start_problems(failed, &lines);
+        }
     }
 
     /// Reads the host's new log lines into the events.
     pub fn pull_logs(&mut self) {
-        let lines = self.read_logs();
-        self.add_problems(&lines);
+        if let Ok(lines) = self.read_logs() {
+            self.add_problems(&lines);
+        }
     }
 
-    /// The host's new log lines, put among the events.
-    fn read_logs(&mut self) -> Vec<LogLine> {
+    /// The host's new log lines, put among the events. The error is that
+    /// the preview ended as they were read: its problems went with it, and
+    /// none are to be put back.
+    fn read_logs(&mut self) -> Result<Vec<LogLine>, PreviewError> {
         let Some(open) = &mut self.open else {
-            return Vec::new();
+            return Ok(Vec::new());
         };
         match open.host.logs(self.log_mark) {
             Ok((lines, next)) => {
                 self.log_mark = next;
                 self.events
                     .extend(lines.iter().cloned().map(PreviewEvent::Log));
-                lines
+                Ok(lines)
             }
-            Err(e @ (PreviewError::Ended(_) | PreviewError::NotOpen)) => {
-                self.failed(e);
-                Vec::new()
-            }
+            Err(e @ (PreviewError::Ended(_) | PreviewError::NotOpen)) => Err(self.failed(e)),
             Err(e) => {
                 open.behind = true;
                 self.events.push(PreviewEvent::ReloadFailed {
                     message: e.to_string(),
                 });
-                Vec::new()
+                Ok(Vec::new())
             }
         }
     }
 
-    /// No preview runs, so nothing is wrong in one.
-    pub fn clear_problems(&mut self) {
+    /// Ends the preview, however it came to: no preview runs, so nothing is
+    /// wrong in one. The preview that was open is the caller's to close.
+    pub fn end(&mut self) -> Option<Open> {
         self.held.clear();
         if !self.problems.is_empty() {
             self.problems.clear();
             self.problems_seq += 1;
         }
+        self.open.take()
     }
 
     /// What every host call's error goes through: one that says the preview
@@ -719,8 +725,7 @@ impl Previews {
     /// process that is gone. Any other leaves it open.
     pub fn failed(&mut self, e: PreviewError) -> PreviewError {
         if matches!(e, PreviewError::Ended(_) | PreviewError::NotOpen) {
-            self.open = None;
-            self.clear_problems();
+            self.end();
             self.events.push(PreviewEvent::Ended {
                 message: e.to_string(),
             });
