@@ -174,9 +174,22 @@ Feature: A tool does not write what would not load or would not show
 
     Examples:
       | text                     | why            |
-      | RowLayout {}             | unknown_type   |
-      | Item { RowLayout {} }    | unknown_type   |
+      | FlexboxLayout {}         | unknown_type   |
+      | Item { SearchField {} }  | unknown_type   |
       | Rectangle { nothere: 1 } | no_such_member |
+
+  Scenario Outline: A type only one toolkit module has brings that module's import
+    When the agent calls the tool "node_insert" with:
+      """json
+      {"doc": "Plain.qml", "parent": {"id": "plain"}, "text": "<text>"}
+      """
+    Then the file "Plain.qml" contains "import QtQuick.Layouts"
+    And the file "Plain.qml" contains "RowLayout {"
+
+    Examples:
+      | text                  |
+      | RowLayout {}          |
+      | Item { RowLayout {} } |
 
   # qml6 6.11 loads all but the last two of these with these imports; Studio's
   # table has none of them, and what it cannot be sure of it lets through.
@@ -1585,8 +1598,8 @@ Feature: A tool does not write what would not load or would not show
       """json
       {"doc": "Handled.qml", "parent": {"id": "handled"}, "text": "Slider {}"}
       """
-    Then the agent is refused with "not_actionable"
-    And the refusal's "/details/kind" is "unknown_type"
+    Then the file "Handled.qml" contains "import QtQuick.Controls"
+    And the file "Handled.qml" contains "Slider { id: slider1 }"
 
     Examples:
       | beside                                |
