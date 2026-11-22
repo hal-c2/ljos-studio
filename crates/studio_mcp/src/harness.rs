@@ -73,10 +73,18 @@ pub(crate) struct Standing {
 impl Drop for Standing {
     fn drop(&mut self) {
         if let Some(file) = &self.file {
-            // Already gone is as good.
-            let _ = std::fs::remove_file(file);
+            // A person may have written their own file there since.
+            if std::fs::read_to_string(file).is_ok_and(|text| is_studios(&text)) {
+                // Already gone is as good.
+                let _ = std::fs::remove_file(file);
+            }
         }
     }
+}
+
+/// Whether `text` is a harness Studio wrote, and so its to replace or remove.
+pub(crate) fn is_studios(text: &str) -> bool {
+    text.starts_with(MARK)
 }
 
 fn short(ty: &str) -> &str {
@@ -121,7 +129,7 @@ pub(crate) fn harness(store: &dyn Store, doc: &str) -> Option<Harness> {
         None => format!(".{name}.preview.qml"),
     };
     // A file of that name that Studio did not write is the person's.
-    if store.exists(&path) && !store.read(&path).is_ok_and(|old| old.starts_with(MARK)) {
+    if store.exists(&path) && !store.read(&path).is_ok_and(|old| is_studios(&old)) {
         return None;
     }
     Some(Harness { path, text })
@@ -467,6 +475,19 @@ mod tests {
         };
         drop(h.standing(Some(dir.path())));
         assert!(!file.exists());
+    }
+
+    #[test]
+    fn a_standing_harness_leaves_a_persons_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join(".Card.preview.qml");
+        std::fs::write(&file, "// Mine\n").unwrap();
+        let h = Harness {
+            path: ".Card.preview.qml".to_owned(),
+            text: MARK.to_owned(),
+        };
+        drop(h.standing(Some(dir.path())));
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), "// Mine\n");
     }
 
     #[test]

@@ -321,11 +321,12 @@ fn open(studio: &Mutex<Studio>, a: OpenArgs) -> Result<OpenOut, SurfaceError> {
     }
     let store = studio.session.store();
     let harness = crate::harness::harness(store, &a.doc);
-    // One that has come to need a harness cannot load where it runs.
+    // One that has come to need a harness cannot load where it runs, and
+    // one that no longer does is broken by what its old harness sets.
     let reuse = previews
         .open
         .as_ref()
-        .is_some_and(|o| o.doc == a.doc && (harness.is_none() || o.harness.is_some()));
+        .is_some_and(|o| o.doc == a.doc && harness.is_some() == o.harness.is_some());
     let mut state_kept = true;
     let write_harness = |h: &crate::harness::Harness| {
         if store.read(&h.path).ok().as_deref() == Some(h.text.as_str()) {
@@ -387,7 +388,13 @@ fn open(studio: &Mutex<Studio>, a: OpenArgs) -> Result<OpenOut, SurfaceError> {
             last.host.close();
             if let Some(standing) = &last.harness {
                 // The store's to remove where the project has no directory.
-                let _ = store.remove(&standing.path);
+                let path = &standing.path;
+                if store
+                    .read(path)
+                    .is_ok_and(|text| crate::harness::is_studios(&text))
+                {
+                    let _ = store.remove(path);
+                }
             }
         }
         let standing = match &harness {
