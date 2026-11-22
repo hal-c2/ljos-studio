@@ -4632,6 +4632,18 @@ fn palette_lists(w: &mut UiWorld, want: String) -> StepResult {
         })
 }
 
+#[then(regex = r#"^the command palette does not list "([^"]+)"$"#)]
+fn palette_lists_not(w: &mut UiWorld, unwanted: String) -> StepResult {
+    let rows = palette_rows(w.window()?)?;
+    rows.iter()
+        .all(|r| r.name != unwanted)
+        .then_some(())
+        .ok_or_else(|| {
+            let shown: Vec<&str> = rows.iter().map(|r| r.name.as_str()).collect();
+            format!("the palette lists {shown:?}")
+        })
+}
+
 #[when("the person pans the canvas with the middle button")]
 fn pans_with_middle(w: &mut UiWorld) -> StepResult {
     let window = w.window()?;

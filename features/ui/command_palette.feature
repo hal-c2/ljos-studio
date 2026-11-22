@@ -7,7 +7,9 @@
 Feature: The command palette finds and runs any of Studio's actions
   Ctrl+K, ⌘K or Ctrl+Shift+P opens the command palette. What is typed finds
   actions by their letters in order, best first, and those used lately
-  come first. Each row names its shortcut. Enter runs the row picked and
+  come first. When some row has each typed word at the start of one of its
+  words, only such rows are listed: letters found scattered through a name
+  are left out. Each row names its shortcut. Enter runs the row picked and
   closes the palette; Escape closes it and gives the keys back. Studio's
   actions are its MCP tools, so every tool is there by name, beside the
   window's own: zooms, the targets, the documents, the types to insert,
@@ -23,6 +25,12 @@ Feature: The command palette finds and runs any of Studio's actions
           width: 400; height: 300
           color: "white"
       }
+      """
+    And the file "Fixture.qml":
+      """qml
+      import QtQuick
+
+      Item {}
       """
     And Studio's window shows the project
     And the person has opened "Main.qml" in the documents list
@@ -41,6 +49,12 @@ Feature: The command palette finds and runs any of Studio's actions
     When the person types "zm100" into the command palette
     Then the command palette's first row is "Zoom to 100%"
     And the command palette's row "Zoom to 100%" names the shortcut "Ctrl+1"
+
+  Scenario: Letters found scattered are left out when words match
+    Given the person has pressed "Ctrl+K"
+    When the person types "fit" into the command palette
+    Then the command palette lists "Fit content"
+    And the command palette does not list "Open Fixture.qml"
 
   Scenario: Enter runs the action found and closes the palette
     Given the person has pressed "Ctrl+K"
