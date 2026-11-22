@@ -4099,7 +4099,7 @@ fn singleton_uses(text: &str) -> usize {
 /// module's: importing it then changes nothing that was meant.
 fn declares_singleton_name(text: &str) -> bool {
     ljos_design::module::SINGLETONS.iter().any(|name| {
-        text.split(|c: char| c == '\n' || c == ';').any(|line| {
+        text.split(['\n', ';']).any(|line| {
             let line = line.trim();
             line.strip_prefix("id:")
                 .is_some_and(|rest| rest.trim() == *name)
