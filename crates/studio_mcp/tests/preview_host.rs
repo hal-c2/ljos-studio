@@ -2598,3 +2598,44 @@ fn a_failure_named_by_a_link_names_the_document_itself() {
     assert_eq!(error["file"], "Main.qml", "{error}");
     assert!(error["node"].is_string(), "{error}");
 }
+
+#[cfg(unix)]
+#[test]
+fn a_failure_names_a_file_whose_name_has_a_file_marker_inside() {
+    let (mut placed, mut meant) = (Vec::new(), Vec::new());
+    for (name, place, line) in [
+        ("Odd.qml:Card.qml", ":4:1: ", Some(4)),
+        ("odd.js:Card.qml", ":4: ", Some(4)),
+        ("odd.mjs:Card.qml", ": ", None),
+    ] {
+        let f = Fixture::with(|dir| {
+            std::fs::write(dir.join("Main.qml"), ROOTED).unwrap();
+            std::fs::write(dir.join(name), ROOTED).unwrap();
+        });
+        f.call("preview_open", json!({ "doc": "Main.qml" }))
+            .unwrap();
+        let says = format!("{name}{place}expected a property");
+        let error = failure_of(&f.server, &f.seen, "Main.qml", &says);
+        placed.push(json!([error["file"], error["line"], error["message"]]));
+        meant.push(json!([name, line, "expected a property"]));
+    }
+    assert_eq!(placed, meant);
+}
+
+/// Either may be meant, so neither is named.
+#[cfg(unix)]
+#[test]
+fn a_failure_two_files_could_be_named_by_stays_fileless() {
+    let f = Fixture::with(|dir| {
+        std::fs::write(dir.join("Main.qml"), ROOTED).unwrap();
+        for name in ["Odd.qml", "Odd.qml:Card.qml"] {
+            std::fs::write(dir.join(name), ROOTED).unwrap();
+        }
+    });
+    f.call("preview_open", json!({ "doc": "Main.qml" }))
+        .unwrap();
+    let says = "Odd.qml:Card.qml:4:1: expected a property";
+    let error = failure_of(&f.server, &f.seen, "Main.qml", says);
+    assert!(error.get("file").is_none(), "{error}");
+    assert_eq!(error["message"], says, "{error}");
+}
