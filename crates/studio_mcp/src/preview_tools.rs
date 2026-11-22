@@ -76,7 +76,7 @@ struct StateArgs {
     read: Vec<String>,
     /// Values to assign to a block's state (mocked previews only).
     set: Option<Map<String, Value>>,
-    /// An object to click first, after `set`.
+    /// An object, by `id`, to click first, after `set`.
     click: Option<Address>,
     /// A point to click instead: what is on top gets it.
     click_at: Option<ClickAt>,
