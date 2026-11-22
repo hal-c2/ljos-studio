@@ -39,7 +39,7 @@ export const workspaces = () => [...live].map((queue) => queue.self);
 // each settled before the next. `previews` comes before `documents`: the
 // documents panel's first look opens a lone document's preview only when
 // `previews` is already true (the native block sets them in the same order).
-const PARTS = ["previews", "documents", "generation", "text", "layers", "selected", "selection", "inspector", "states", "roles", "flow", "palette", "done", "undone", "problem", "theme", "tokens", "comments", "leases", "problems", "blank", "chosen", "toolkit", "offers", "assets", "signals"];
+const PARTS = ["previews", "documents", "generation", "text", "layers", "selected", "selection", "inspector", "states", "roles", "flow", "palette", "done", "undone", "problem", "theme", "tokens", "comments", "leases", "problems", "problemsDropped", "blank", "chosen", "toolkit", "offers", "assets", "signals"];
 
 export const Workspace = defineType("Workspace", QtObject, {
   properties: {
@@ -70,6 +70,7 @@ export const Workspace = defineType("Workspace", QtObject, {
     leases: [],
     // What is wrong in the running preview: none runs on a page.
     problems: [],
+    problemsDropped: typed(kinds.bool, false),
     blank: typed(kinds.bool, false),
     chosen: [],
     assets: [],

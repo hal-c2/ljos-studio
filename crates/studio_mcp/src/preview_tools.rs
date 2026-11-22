@@ -9,7 +9,8 @@ use std::{
 
 use crate::schema::Answers;
 use ljos_mcp_core::{
-    CallCtx, Cap, ErrorCode, SurfaceError, ToolAnnotations, ToolDef, ToolRegistry, ToolReply, typed,
+    CallCtx, Cap, DEFAULT_RESULT_BYTES, ErrorCode, SurfaceError, ToolAnnotations, ToolDef,
+    ToolRegistry, ToolReply, typed,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -17,7 +18,8 @@ use serde_json::{Map, Value, json};
 use studio_core::{
     Address,
     preview::{
-        Alias, Click, Input, PreviewError, PreviewEvent, Reload, RestWatch, Size, Target, ms,
+        Alias, Click, Input, LogLine, PreviewError, PreviewEvent, Reload, RestWatch, Size, Target,
+        ms,
     },
 };
 
@@ -33,6 +35,12 @@ const PICTURE_SIDE: u32 = 800;
 const MAX_PICTURE_SIDE: u32 = 1280;
 /// Events in one answer at most.
 const EVENTS_PAGE: usize = 100;
+/// The bytes of one copy of `preview_events`' answer: more, and the registry
+/// halves its biggest list.
+const EVENTS_COPY: usize = DEFAULT_RESULT_BYTES / 2;
+/// Room left beside the events for what is said once they are chosen: that
+/// the answer was cut, and how many warnings it left out.
+const EVENTS_SPARE: usize = 256;
 
 #[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -1185,8 +1193,20 @@ pub(crate) fn logged(
 /// waits after every rest, and each wait would be one more call of the app.
 pub(crate) fn known_problems(studio: &Mutex<Studio>) -> Vec<Value> {
     let previews = lock(studio).previews.clone();
-    let lines = preview::lock(&previews).problems.clone();
+    let lines = most_urgent_first(preview::lock(&previews).problems.clone());
     answered(&lock(studio).problems(&lines))
+}
+
+/// An answer keeps the first of a list it has no room for, so why the text
+/// doesn't show comes first, then what else is an error, then warnings, each
+/// in the order said.
+pub(crate) fn most_urgent_first(mut lines: Vec<LogLine>) -> Vec<LogLine> {
+    lines.sort_by_key(|l| match l.level.as_str() {
+        "warning" | "warn" => 2,
+        "error" if l.compiler => 0,
+        _ => 1,
+    });
+    lines
 }
 
 fn answered(problems: &[crate::view::Problem]) -> Vec<Value> {
@@ -1211,16 +1231,50 @@ fn events(studio: &Mutex<Studio>, a: EventsArgs) -> Result<EventsOut, SurfaceErr
         previews.events[since..end].to_vec(),
         previews.open.is_some(),
     );
-    let lines = previews.problems.clone();
+    let lines = most_urgent_first(previews.problems.clone());
     drop(previews);
-    Ok(EventsOut {
-        events,
+    let mut out = EventsOut {
+        events: Vec::new(),
         next: end,
         open,
         problems: answered(&studio.problems(&lines)),
         rests: None,
         wake_in_ms: None,
-    })
+    };
+    out.events = fitting(events, json_bytes(&out));
+    out.next = since + out.events.len();
+    Ok(out)
+}
+
+/// The first of `events` that an answer of `others` bytes has room for, at
+/// least one. The registry's cut mustn't reach them, as `next` says they
+/// were told: where the problems leave no room for one, the events keep to
+/// less than half, so the problems are the list that is cut.
+fn fitting(mut events: Vec<PreviewEvent>, others: usize) -> Vec<PreviewEvent> {
+    // Each with the comma after it.
+    let sizes: Vec<usize> = events.iter().map(|e| json_bytes(e) + 1).collect();
+    let room = match sizes.first() {
+        None => return events,
+        Some(first) if others + first + EVENTS_SPARE <= EVENTS_COPY => {
+            EVENTS_COPY - others - EVENTS_SPARE
+        }
+        Some(_) => EVENTS_COPY / 2 - EVENTS_SPARE,
+    };
+    let mut used = 0;
+    let kept = sizes
+        .iter()
+        .take_while(|size| {
+            used += **size;
+            used <= room
+        })
+        .count();
+    events.truncate(kept.max(1));
+    events
+}
+
+pub(crate) fn json_bytes(value: &impl Serialize) -> usize {
+    // Serialising these cannot fail (string keys only).
+    serde_json::to_vec(value).map_or(0, |json| json.len())
 }
 
 pub(crate) fn add(registry: ToolRegistry, studio: &Arc<Mutex<Studio>>) -> ToolRegistry {

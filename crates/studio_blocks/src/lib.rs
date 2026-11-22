@@ -229,6 +229,9 @@ pub struct Workspace {
     /// known). It empties as the problems are fixed.
     #[qml(readonly, notify)]
     pub problems: Json,
+    /// `problems` is full and the preview had more.
+    #[qml(readonly, notify)]
+    pub problems_dropped: bool,
     /// What the person's undo and redo would take back and do again,
     /// latest last; an agent's edits are its own to undo.
     #[qml(readonly, notify)]
@@ -312,6 +315,7 @@ impl Default for Workspace {
             undone: none(),
             leases: none(),
             problems: none(),
+            problems_dropped: false,
             preview: Json::Null,
             error: String::new(),
             problem: String::new(),
@@ -1368,6 +1372,7 @@ fn publish(engine: &Engine, ws: ObjectId, view: View, seen: u64) {
     // already true. Set after, the first publish left the canvas empty.
     let _ = cx.set(Workspace::PREVIEWS, view.previews);
     let _ = cx.set(Workspace::BLANK, view.blank);
+    let _ = cx.set(Workspace::PROBLEMS_DROPPED, view.problems_dropped);
     give(
         &cx,
         Workspace::DOCUMENTS,

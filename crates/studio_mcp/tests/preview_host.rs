@@ -2308,10 +2308,44 @@ fn a_full_answer_still_counts_the_warnings_it_left_out() {
     let others = serde_json::to_vec(&small).unwrap().len() - 1;
 
     // As many as fill a copy to its last byte before the warnings.
-    let (f, out) = written(DEFAULT_RESULT_BYTES / 2 - others);
+    let chars = DEFAULT_RESULT_BYTES / 2 - others;
+    let (f, out) = written(chars);
     assert_within_the_cap(&out);
-    assert!(told_of(&out, to_tell(&f)).is_empty());
+    assert_eq!(
+        told_of(&out, to_tell(&f))[0]["message"],
+        "expected a property"
+    );
     assert_eq!(out["truncated"], true, "the cut isn't said");
+    assert_eq!(out["truncated_field"], "changes", "what was cut isn't said");
+
+    // Only the changes' text gave room.
+    let (cut, short) = (&out["changes"], &small["changes"]);
+    assert_eq!(cut.as_array().unwrap().len(), 1, "a change was dropped");
+    assert_eq!(cut[0]["start"], short[0]["start"]);
+    assert_eq!(cut[0]["end"], short[0]["end"]);
+    let whole = short[0]["text"]
+        .as_str()
+        .unwrap()
+        .replacen('x', &"x".repeat(chars), 1);
+    let text = cut[0]["text"].as_str().unwrap();
+    assert!(
+        whole.starts_with(text),
+        "the text was changed, not shortened"
+    );
+    assert!(!text.is_empty() && text.len() < whole.len());
+    let mut rest = out.clone();
+    let mut unchanged = small.clone();
+    for key in [
+        "changes",
+        "warnings",
+        "warnings_omitted",
+        "truncated",
+        "truncated_field",
+    ] {
+        rest.as_object_mut().unwrap().remove(key);
+        unchanged.as_object_mut().unwrap().remove(key);
+    }
+    assert_eq!(rest, unchanged, "more than the changes' text was cut");
 }
 
 #[test]
@@ -2375,6 +2409,22 @@ fn an_answer_cut_twice_names_both_cuts() {
         "what was cut isn't said"
     );
     told_of(&out, to_tell(&f));
+
+    // Neither cut reached the error, the events or where they resume.
+    assert_eq!(out["problems"][0]["severity"], "error");
+    assert_eq!(out["problems"][0]["message"], "expected a property");
+    let events = out["events"].as_array().unwrap();
+    let failed: Vec<_> = events
+        .iter()
+        .filter(|e| e["kind"] == "reload_failed")
+        .collect();
+    assert!(!failed.is_empty(), "the failed reload isn't told");
+    for event in failed {
+        assert_eq!(event["message"], "Main.qml:4: expected a property");
+    }
+    let from = since.as_u64().unwrap();
+    assert_eq!(out["next"], from + events.len() as u64);
+    assert_eq!(out["open"], true);
 }
 
 /// The answer's cut is of its problems, which no cursor can fetch.

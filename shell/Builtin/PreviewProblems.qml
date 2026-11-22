@@ -172,5 +172,20 @@ Pane {
                 }
             }
         }
+
+        // For what the full list dropped. It is no problem, so it is neither
+        // a row of the list nor counted.
+        Label {
+            visible: panel.open && panel.count > 0 && panel.workspace.problemsDropped
+            text: "Some preview problems aren't shown."
+            Accessible.name: text
+            wrapMode: Text.Wrap
+            padding: Spacing.xs
+            leftPadding: Spacing.sm
+            rightPadding: Spacing.sm
+            font.pixelSize: Typography.captionSize
+            color: Colors.textMuted
+            Layout.fillWidth: true
+        }
     }
 }

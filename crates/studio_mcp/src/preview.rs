@@ -178,7 +178,12 @@ pub(crate) struct Previews {
     /// What is wrong in the open preview now, one a line: the compiler's
     /// words where it said any, else what running the line logged first.
     pub problems: Vec<LogLine>,
-    /// Counts changes to `problems`.
+    /// A problem was dropped for want of room in `problems`, and may be
+    /// wrong yet: its line isn't kept to look again.
+    pub dropped: bool,
+    /// One dropped was placed, so an applied reload can't say it is gone.
+    dropped_placed: bool,
+    /// Counts changes to `problems` and `dropped`.
     pub problems_seq: u64,
     /// Counts the previews that ended, for a call to see that it ended one.
     pub ends: u64,
@@ -402,6 +407,8 @@ impl Previews {
             log_mark: 0,
             unlisted: Vec::new(),
             problems: Vec::new(),
+            dropped: false,
+            dropped_placed: false,
             problems_seq: 0,
             ends: 0,
             held: Vec::new(),
@@ -586,6 +593,7 @@ impl Previews {
     pub fn opened(&mut self) -> Result<(), PreviewError> {
         self.log_mark = 0;
         self.held.clear();
+        self.forget_dropped();
         let lines = self.read_logs()?;
         self.start_problems(None, &lines);
         Ok(())
@@ -608,6 +616,10 @@ impl Previews {
     /// that, as the last good text runs on, with only its own failure for
     /// why the new text does not show.
     fn start_problems(&mut self, failed: Option<LogLine>, lines: &[LogLine]) {
+        // As the held ones below: what had no text to change goes.
+        if failed.is_none() && !self.dropped_placed {
+            self.forget_dropped();
+        }
         let held = std::mem::take(&mut self.held);
         self.held = held
             .into_iter()
@@ -639,12 +651,29 @@ impl Previews {
                     let text = self.text_at(line.file.as_deref(), line.line);
                     self.held.push((line.clone(), text));
                 }
-                None => {}
+                None => {
+                    if !self.dropped {
+                        self.dropped = true;
+                        // The list may be as it was: the windows hear by this.
+                        self.problems_seq += 1;
+                    }
+                    if !self.dropped_placed {
+                        self.dropped_placed =
+                            self.text_at(line.file.as_deref(), line.line).is_some();
+                    }
+                }
             }
         }
         let now: Vec<LogLine> = self.held.iter().map(|(p, _)| p.clone()).collect();
         if now != self.problems {
             self.problems = now;
+            self.problems_seq += 1;
+        }
+    }
+
+    fn forget_dropped(&mut self) {
+        self.dropped_placed = false;
+        if std::mem::take(&mut self.dropped) {
             self.problems_seq += 1;
         }
     }
@@ -728,6 +757,7 @@ impl Previews {
     /// wrong in one. The preview that was open is the caller's to close.
     pub fn end(&mut self) -> Option<Open> {
         self.held.clear();
+        self.forget_dropped();
         self.unlisted.clear();
         if !self.problems.is_empty() {
             self.problems.clear();

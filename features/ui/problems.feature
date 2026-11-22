@@ -229,7 +229,7 @@ Feature: The built-in shell shows what is wrong in the preview
     And the person has opened "App.qml" in the documents list
     Then the window counts 1024 problems within 10 seconds
     When the person clicks "Show the problems"
-    Then the window says "Past the first 1024, only the compiler's problems are added"
+    Then the window says "Some preview problems aren't shown."
     And the window has a pane "1024 problems in the preview"
     And the window says "Problem count: 1024"
 
@@ -239,10 +239,10 @@ Feature: The built-in shell shows what is wrong in the preview
     And the person has opened "App.qml" in the documents list
     Then the window counts 1024 problems within 10 seconds
     When the person clicks "Show the problems"
-    Then the window does not say "Past the first 1024, only the compiler's problems are added"
+    Then the window does not say "Some preview problems aren't shown."
     When the person replaces "id: card" with "id: card; Item {" in the code view
     Then the window counts 1025 problems within 10 seconds
-    And the window does not say "Past the first 1024, only the compiler's problems are added"
+    And the window does not say "Some preview problems aren't shown."
 
   # Nothing writes or asks once the window shows the document: the app's own
   # timer logs.

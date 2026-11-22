@@ -30,6 +30,7 @@ QtObject {
     readonly property var comments
     readonly property var leases
     readonly property var problems
+    readonly property bool problemsDropped
     readonly property bool settling
     readonly property bool blank
     readonly property var chosen
