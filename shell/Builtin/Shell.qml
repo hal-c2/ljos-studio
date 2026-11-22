@@ -36,6 +36,9 @@ Item {
         id: exporter
         workspace: workspace
     }
+    ProjectEntry {
+        workspace: workspace
+    }
 
     Shortcut {
         sequences: ["Ctrl+K", "Meta+K", "Ctrl+Shift+P"]

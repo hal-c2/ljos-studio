@@ -12,6 +12,7 @@ mod component;
 #[cfg(feature = "http")]
 pub mod endpoint;
 pub mod export;
+mod harness;
 mod layout_tools;
 mod loads;
 mod place_tools;
@@ -738,6 +739,8 @@ pub(crate) fn error(e: Error) -> SurfaceError {
         Error::ReviewUnreadable(_) => kind(ErrorCode::NotActionable, "review_unreadable"),
         Error::ReviewChanged => kind(ErrorCode::StaleRef, "review_changed"),
         Error::NotAContribution(_) => kind(ErrorCode::InvalidArgument, "not_a_contribution"),
+        Error::NoMember { members, .. } => SurfaceError::new(ErrorCode::NotFound, message)
+            .with_details(json!({ "kind": "no_member", "members": members })),
         Error::NoToken(_) => kind(ErrorCode::NotFound, "no_token"),
         Error::Theme(errors) => SurfaceError::new(ErrorCode::InvalidArgument, message)
             .with_details(json!({

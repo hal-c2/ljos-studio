@@ -7,7 +7,9 @@ Feature: A person starts a document in Studio's window
   The documents panel makes a document through `document_new`, the tool an
   agent calls. A directory with nothing in it opens with a first document,
   because a window with nothing to edit has nothing to offer; a directory
-  that has other files keeps them to itself and only offers the button.
+  that has other files keeps them to itself and only offers the button. A
+  project opens on its entry, Main.qml, the document `ljos run` and the
+  export start from.
 
   Scenario: The panel makes a document and opens it
     Given the file "Main.qml":
@@ -81,7 +83,7 @@ Feature: A person starts a document in Studio's window
     Then the canvas has a frame "Desktop" of 1280 by 800
     And the frame "Desktop" shows a picture of the preview
 
-  Scenario: A project of several documents waits to be told which
+  Scenario: A project of several documents opens on its entry
     Given the file "Main.qml":
       """qml
       import QtQuick
@@ -89,6 +91,22 @@ Feature: A person starts a document in Studio's window
       Item {}
       """
     And the file "Other.qml":
+      """qml
+      import QtQuick
+
+      Item {}
+      """
+    And Studio's window shows the project
+    Then the window shows the document "Main.qml"
+
+  Scenario: A project of several documents and no entry waits to be told which
+    Given the file "Second.qml":
+      """qml
+      import QtQuick
+
+      Item {}
+      """
+    And the file "Third.qml":
       """qml
       import QtQuick
 

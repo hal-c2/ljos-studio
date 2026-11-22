@@ -274,6 +274,123 @@ object that parses, and (`not_a_contribution`) for removing anything else.
 - DECISION: both tools are annotated destructive, since they can take
   things out.
 
+## Slots, shells and a component's API (P7)
+
+A block offers a slot by declaring a `list<Contribution>` property and showing
+it with a `Slot` of that name (ADR 0003, section 4). `node_insert {doc,
+parent, slot, text?}` writes both and `import Ljos.Blocks` in one undo step:
+the `Slot` in `parent`, holding `text` as what it shows while nothing is
+contributed, and the property on the root, which gets `id: root` if it had no
+id for the `Slot` to read. `parent: {"path": "root"}` needs no generation.
+`blocks_list` then reports the slot in `slots`, and the window's palette rows
+carry it with the block's `doc`. Refused: `invalid_argument` with
+`member_taken` for a name the root already declares or binds, or a name that
+is no property name.
+
+```qml
+// Blocks/HabitCard.qml, after node_insert {doc: "Blocks/HabitCard.qml",
+// parent: {id: "card"}, slot: "face", text: "Text { text: card.title }"}
+import QtQuick
+import Ljos.Blocks
+
+Column {
+    id: card
+    property string title: "Read"
+    property bool done: false
+
+    Slot {
+        id: slot
+        name: "face"
+        contributions: card.face
+        Text { text: card.title }
+    }
+
+    property list<Contribution> face
+}
+```
+
+A shell replaces only what is in a slot: what the block shows outside its
+slots stays, so what is to be skinned goes in as the slot's `text`.
+
+`document_new {doc, shell: "Module.Block"}` writes a shell of the block: an
+instance of it that replaces what each of its slots shows with a starting
+point (a card with a `Text` of the block's first string property), to
+restyle from. A shell beside the block does not import its module.
+
+```qml
+// HabitCardShell.qml, after document_new {doc: "HabitCardShell.qml",
+// shell: "Blocks.HabitCard"}
+import QtQuick
+import Ljos.Blocks
+import Blocks
+
+HabitCard {
+    id: habitCard
+    face: Contribution {
+        mode: Contribution.Replace
+        delegate: Component {
+            Rectangle {
+                implicitWidth: 160
+                implicitHeight: 48
+                radius: 8
+                color: "#e8e8ec"
+                Text {
+                    anchors.centerIn: parent
+                    text: habitCard.title
+                }
+            }
+        }
+    }
+}
+```
+
+Refused: `not_found` (`no_block`) for a block no qmldir declares,
+`not_actionable` (`no_slots`) for one with no slot. `slot_contribute {doc,
+node, slot, mode?, text | block}` skins one instance alone: it sets the slot
+on that instance, as the shell does, instead of adding a `Contribution`
+beside it; a contribution already there is replaced. `not_found` (`no_slot`)
+when that instance's block has no such slot.
+
+A component's API is its declared properties, signals and functions.
+`node_inspect` answers them in `members`, each with `kind` (`property`,
+`signal`, `function`), `name`, `type`, `value` or `params` and its byte range.
+`node_insert {doc, parent, replace: "name", text}` writes `text`, one member,
+in place of the member of that name: a rename, another type, another default
+or another parameter list, one undo step. A rename onto a name the object
+already has, or a `text` that is not one member, is `invalid_argument`.
+`node_remove {doc, node, member}` takes out a property, signal, function or
+handler (`onClicked`); `not_found` (`no_member`) names the members the object
+has. A handler's `binding_set` value may be several statements
+(`card.flip(); card.toggled(card.done)`), written as a block.
+
+- DECISION: renaming a member does not rename what reads it: reads elsewhere
+  are the person's to change, and the preview says what no longer loads.
+- DECISION: a slot's property goes at the end of the root's members, its
+  `Slot` where `parent` and `index` say.
+- DECISION: a shell is an instance document with `Replace` contributions,
+  and a per-instance contribution replaces a binding of that name.
+
+### A document opened alone
+
+`preview_open` of a component that requires properties, or of a delegate,
+runs one instance of it, sized as a list row (320 by 72) when it is not sized
+itself, with a sample for each property it requires: the one given in
+`.studio/samples.json` (`{"Blocks/HabitCard.qml": {"title": "Read a book"}}`),
+else one of its type (a string is its name as words, `"Title"`; a bool
+`false`; a number 3 or 0.5). A block that shows nothing (a store: a plain
+`Item` of models, timers and functions) is shown as what it offers: its
+properties with their values, its functions and its signals, read from a live
+instance. The instance is a hidden file beside the document
+(`.HabitCard.preview.qml`), which project_open, the documents list and export
+leave out. It goes when the preview ends (another one, a crash, another
+project, Studio closing); only a killed Studio leaves one, which the next
+preview of that component replaces. A file of that name Studio did not write
+is left alone, and the component then previews as itself. The document is not
+changed.
+
+- DECISION: only a block a qmldir declares is taken for a store when its root
+  is an `Item`, so an app's own `Item` documents preview as they are.
+
 ## Tokens (S4)
 
 `theme_set {doc?, token?, value?, variant?, generation?, dry_run?}` works
@@ -727,6 +844,14 @@ goes on working as it did. Refused, naming the line and word:
 - `root`, `exists` (the file is there), `in_component` (inside an inline
   component), `locked`, and `invalid_argument` for a name that is no type.
 
+What the instance would set is exposed too: each string literal bound on an
+inner object with an id (`label.text: "Hi"` written as `text: "Hi"` on
+`Text { id: label }`) becomes `property alias labelText: label.text` on the
+component and `labelText: "Hi"` on the instance, so a second instance can say
+something else. The file keeps the literal as the default. Objects inside a
+delegate, a `Repeater`, a `Loader` and the like are not exposed: there is one
+of them per row, not one per instance. `aliases` names these too.
+
 Words are told apart by how they are written, without types: a property named
 like an inner id reads as a use and is refused, never rewritten silently. The
 Layout section of the inspector has a name field and the button; the palette's
@@ -796,7 +921,11 @@ valid write is worse than missing a bad one, whose load error the preview still
 says. A misspelt type goes through, as does anything in a module Studio has not
 measured, and what a file says already is not held against a write beside it.
 `component_extract` to a name Studio can't vouch for answers `name_unsure: true`,
-since an import having it would win.
+since an import having it would win, and `name_unsure_why`, which says which:
+a module the file imports that Studio has not measured, or a folder import it
+can't read, either of which might have a type of that name. Naming the
+component otherwise, or importing only measured modules, settles it; a name
+that stays unsure is still written, and the preview says if the import won.
 
 A `paste` asks one resolver where each name landed in its source and where it
 lands in the target: the same, different, or can't tell. It adds the least of the

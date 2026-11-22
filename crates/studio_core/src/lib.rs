@@ -34,7 +34,7 @@ pub use address::{Address, PathChange, parse_path};
 pub use flows::{Goal, Interaction};
 pub use history::{Entry, EntrySummary};
 pub use models::Model;
-pub use outline::{Binding, DeclaredSignal, Import, Node, is_literal_text};
+pub use outline::{Binding, DeclaredSignal, Import, Member, MemberKind, Node, is_literal_text};
 pub use qml_edit::{Change, Error as EditError, NodePath, Step};
 pub use review::{Anchor, Comment, Note};
 pub use slots::Mode;
@@ -153,6 +153,13 @@ pub enum Error {
     /// nor, for the root, compared with a breakpoint.
     #[error("{0} has no `id`; give it one first")]
     NoId(String),
+    /// `object` declares no member `name`; `members` are those it does.
+    #[error("{object} has no property, signal, function or handler `{name}`")]
+    NoMember {
+        object: String,
+        name: String,
+        members: Vec<String>,
+    },
     #[error("{0} is not a `Contribution`")]
     NotAContribution(String),
     #[error("`Ljos.Design` has no token `{0}`")]
@@ -312,6 +319,14 @@ pub enum Op {
         text: String,
         imports: Vec<String>,
     },
+    /// Rewrite `node`'s member `name` (a property, signal, function or
+    /// handler) as `text`, where it is written, or take it out when `None`.
+    /// What reads it by its old name is left as it is.
+    ReplaceMember {
+        node: Address,
+        name: String,
+        text: Option<String>,
+    },
     /// Take out a `Contribution`; refused for any other object.
     RemoveContribution {
         node: Address,
@@ -340,6 +355,7 @@ impl Op {
             | Op::SetBinding { node, .. }
             | Op::RemoveBinding { node, .. }
             | Op::State { node, .. }
+            | Op::ReplaceMember { node, .. }
             | Op::RemoveContribution { node } => vec![node],
             Op::Contribute { parent, .. } => vec![parent],
             Op::Interaction { trigger, goal, .. } => match goal {
@@ -366,6 +382,10 @@ impl Op {
             Op::State { edit, .. } => edit.label(),
             Op::Contribute { slot, .. } => format!("contribute to {slot}"),
             Op::RemoveContribution { .. } => "remove contribution".to_owned(),
+            Op::ReplaceMember { name, text, .. } => match text {
+                Some(_) => format!("change {name}"),
+                None => format!("remove {name}"),
+            },
             Op::Interaction { signal, .. } => {
                 format!("{} interaction", signal.as_deref().unwrap_or("tapped"))
             }
@@ -1035,6 +1055,7 @@ impl Session {
                 touched
             }
             Op::State { node, .. } => vec![(handle(self, node)?, Some(STATES.to_owned()))],
+            Op::ReplaceMember { node, name, .. } => vec![(handle(self, node)?, Some(name.clone()))],
             // Not planned: planning reads the text as it is now, and would
             // answer for what another writer did instead of naming them.
             Op::Interaction {
@@ -1618,12 +1639,17 @@ impl Session {
                     return Err(Error::Invalid("a binding needs a value".to_owned()));
                 }
                 let (_, target) = self.resolve_now(path, node)?;
+                let value = if outline::is_handler(name) {
+                    handler_body(value)
+                } else {
+                    value.clone()
+                };
                 let out = qml_edit::apply(
                     before,
                     &qml_edit::Edit::SetBinding {
                         object: target.path.clone(),
                         name: name.clone(),
-                        value: value.clone(),
+                        value,
                     },
                 )?
                 .text;
@@ -1673,6 +1699,11 @@ impl Session {
                     }
                 }
                 Ok((out, change, focus))
+            }
+            Op::ReplaceMember { node, name, text } => {
+                let (handle, object) = self.resolve_now(path, node)?;
+                let out = replace_member(before, &handle, &object, name, text.as_deref())?;
+                Ok((out, PathChange::Same, None))
             }
             Op::RemoveContribution { node } => {
                 let (handle, removed) = self.resolve(path, node)?;
@@ -3575,6 +3606,129 @@ pub fn diff(before: &str, after: &str) -> Vec<Change> {
         range: start..b.len() - tail,
         replacement: after[start..a.len() - tail].to_owned(),
     }]
+}
+
+/// A handler's `value` as QML takes it: statements written one after another
+/// (`a(); b()`, or on lines of their own) are put in a block, which one
+/// expression or a block already is not.
+fn handler_body(value: &str) -> String {
+    let trimmed = value.trim();
+    if trimmed.starts_with('{') || !(trimmed.contains(';') || trimmed.contains('\n')) {
+        return value.to_owned();
+    }
+    const BEFORE: &str = "QtObject { onA: ";
+    let probe = format!("{BEFORE}{trimmed}\n}}");
+    let allocator = qml_syntax::Allocator::default();
+    let parsed = qml_syntax::parse(&allocator, &probe);
+    if parsed.is_ok() && parsed.document.root.members.len() == 1 {
+        return value.to_owned();
+    }
+    let lines: Vec<&str> = trimmed
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .collect();
+    if lines.len() == 1 {
+        return format!("{{ {} }}", lines[0]);
+    }
+    let mut out = String::from("{\n");
+    for line in lines {
+        out.push_str("    ");
+        out.push_str(line);
+        out.push('\n');
+    }
+    out.push('}');
+    out
+}
+
+/// `before` with `object`'s member `name` written as `text`, or taken out
+/// with its line when `None`.
+fn replace_member(
+    before: &str,
+    handle: &str,
+    object: &Node,
+    name: &str,
+    text: Option<&str>,
+) -> Result<String, Error> {
+    let members = outline::members(before, object.start);
+    let Some(member) = members.iter().find(|m| m.name == name) else {
+        return Err(Error::NoMember {
+            object: format!("{handle} (`{}`)", object.ty),
+            name: name.to_owned(),
+            members: members.iter().map(|m| m.name.clone()).collect(),
+        });
+    };
+    if member.kind == MemberKind::Property
+        && object
+            .bindings
+            .iter()
+            .any(|b| b.name == name && b.declared && b.holds_objects)
+    {
+        return Err(Error::Invalid(format!(
+            "`{name}` holds objects; remove them first (`node_remove`), then the property"
+        )));
+    }
+    let (range, replacement) = match text {
+        None => {
+            let line_start = before[..member.start].rfind('\n').map_or(0, |i| i + 1);
+            let line_end = before[member.end..]
+                .find('\n')
+                .map_or(before.len(), |i| member.end + i);
+            let ahead = &before[line_start..member.start];
+            let behind = &before[member.end..line_end];
+            if ahead.trim().is_empty() && behind.trim().trim_start_matches(';').trim().is_empty() {
+                (line_start..(line_end + 1).min(before.len()), String::new())
+            } else {
+                // One of several members on a line: it, its `;` (inside its
+                // range or not) and the space before the next.
+                let rest = behind.trim_start_matches([' ', '\t']);
+                let rest = rest.strip_prefix(';').unwrap_or(rest);
+                let rest = rest.trim_start_matches([' ', '\t']);
+                (member.start..line_end - rest.len(), String::new())
+            }
+        }
+        Some(text) => {
+            let text = text.trim();
+            let Some(new_name) = member_name(text) else {
+                return Err(Error::Invalid(format!(
+                    "`{text}` is not a property, signal, function or handler"
+                )));
+            };
+            if new_name != name && members.iter().any(|m| m.name == new_name) {
+                return Err(Error::Invalid(format!(
+                    "{} already has a member `{new_name}`",
+                    object.ty
+                )));
+            }
+            let line_start = before[..member.start].rfind('\n').map_or(0, |i| i + 1);
+            let indent: String = before[line_start..]
+                .chars()
+                .take_while(|c| *c == ' ' || *c == '\t')
+                .collect();
+            let mut written = String::new();
+            for (i, line) in text.lines().enumerate() {
+                if i > 0 {
+                    written.push('\n');
+                    if !line.trim().is_empty() {
+                        written.push_str(&indent);
+                    }
+                }
+                written.push_str(line);
+            }
+            (member.start..member.end, written)
+        }
+    };
+    let out = format!(
+        "{}{replacement}{}",
+        &before[..range.start],
+        &before[range.end..]
+    );
+    if outline::outline(&out).is_none() {
+        return Err(Error::Invalid(format!(
+            "`{name}` written that way would not parse"
+        )));
+    }
+    Ok(out)
 }
 
 /// The name of the member `text` declares (a function, a signal, a property

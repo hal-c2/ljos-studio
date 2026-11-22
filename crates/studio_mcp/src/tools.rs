@@ -125,6 +125,8 @@ struct NewArgs {
     /// Also declare it a functional block in the `qmldir` beside it.
     #[serde(default)]
     block: bool,
+    /// A block from `blocks_list`, `Module.Name`: the document is a shell of it, an instance that skins each of its slots with a `Contribution` to restyle. Not with `text` or `data`.
+    shell: Option<String>,
     #[serde(default)]
     dry_run: bool,
 }
@@ -334,6 +336,9 @@ struct Inspected {
     /// What its type takes that the project says: the properties its files
     /// and type dumps declare, written here or not.
     takes: Vec<String>,
+    /// Its own API as written here: the properties, signals, functions and
+    /// handlers it declares, each with its range.
+    members: Vec<studio_core::Member>,
     /// Every property it can be given, nearest first, with the values of
     /// those that are enums.
     offers: Vec<crate::signals::Offer>,
@@ -354,6 +359,10 @@ struct InsertArgs {
     block: Option<String>,
     /// A module the document must import for it (`Shop.Blocks`).
     import: Option<String>,
+    /// Declare a slot of this name: a `Slot` here showing what is contributed to it, and the root's `property list<Contribution>` it reads. `text` is what it shows while nothing is.
+    slot: Option<String>,
+    /// A member of `parent` to rewrite as `text` where it is written: rename, retype, new default, parameters or body. What reads the old name is left as it is.
+    replace: Option<String>,
     /// Give the object an `id` if it has none (default true).
     id: Option<bool>,
     #[serde(default)]
@@ -381,6 +390,8 @@ struct RemoveArgs {
     /// The generation read; a `path` needs it (handles and ids are moved past others' edits).
     generation: Option<u64>,
     node: Address,
+    /// Take out only this member of `node`: a property, signal, function or handler (`node_inspect` lists them).
+    member: Option<String>,
     #[serde(default)]
     dry_run: bool,
 }
@@ -522,6 +533,8 @@ struct ContributeArgs {
     slot: Option<String>,
     /// Where the `Contribution` goes; the root when left out.
     parent: Option<Address>,
+    /// Or a block's instance: its own `slot` is set to the `Contribution`, so only it shows it (replacing what it had; `binding_set` null takes it out).
+    node: Option<Address>,
     /// How it joins what the slot holds; the runtime's default when left out.
     mode: Option<Mode>,
     /// Its place among the slot's contributions.
@@ -1279,38 +1292,12 @@ fn contribute_op(studio: &Mutex<Studio>, a: &ContributeArgs) -> Result<Op, Surfa
         .any(|b| b.slots.iter().any(|s| s.name == slot))
     {
         return Err(SurfaceError::not_found(format!(
-            "no block offers a slot `{slot}`; `blocks_list` lists them"
+            "no block offers a slot `{slot}`; `blocks_list` lists them, and `node_insert` with \
+             `slot` declares one in a block"
         ))
         .with_details(json!({ "kind": "no_slot" })));
     }
-    let mut imports = vec![blocks::RUNTIME.to_owned()];
-    let delegate = match (&a.text, &a.block) {
-        (Some(_), Some(_)) => {
-            return Err(SurfaceError::invalid_argument(
-                "give the delegate's `text` or a `block`, not both",
-            ));
-        }
-        (None, None) => {
-            return Err(SurfaceError::invalid_argument(
-                "give the delegate's `text` or a `block`",
-            ));
-        }
-        (Some(text), None) => text.clone(),
-        (None, Some(qualified)) => {
-            let Some(block) = blocks::find(&registry, qualified) else {
-                return Err(SurfaceError::not_found(format!(
-                    "no block `{qualified}`; `blocks_list` lists them"
-                ))
-                .with_details(json!({ "kind": "no_block" })));
-            };
-            imports.push(block.module.clone());
-            format!("{} {{}}", block.name)
-        }
-    };
-    if a.block.is_none() {
-        let source = studio.session.text(&a.doc).map_err(error)?.0.to_owned();
-        crate::loads::check_text(studio.session.store(), &a.doc, &source, &delegate, &[])?;
-    }
+    let (delegate, imports) = delegate_of(&mut studio, &registry, a)?;
     let (text, _) = studio.session.text(&a.doc).map_err(error)?;
     let unit = studio_core::states::unit(text);
     let text = studio_core::slots::contribution(&slot, a.mode, a.order, &delegate, &unit)
@@ -1324,6 +1311,305 @@ fn contribute_op(studio: &Mutex<Studio>, a: &ContributeArgs) -> Result<Op, Surfa
         text,
         imports,
     })
+}
+
+/// A shell of the block `qualified` at `doc`: an instance of it giving each
+/// of its slots a `Contribution` that replaces what the block shows, for a
+/// designer to restyle. The block's first string property is shown on it,
+/// so the skin is seen to be the block's.
+fn shell_text(studio: &Studio, doc: &str, qualified: &str) -> Result<String, SurfaceError> {
+    let registry = blocks::registry(studio.session.store());
+    let Some(block) = blocks::find(&registry, qualified) else {
+        return Err(SurfaceError::not_found(format!(
+            "no block `{qualified}`; `blocks_list` lists them"
+        ))
+        .with_details(json!({ "kind": "no_block" })));
+    };
+    if block.slots.is_empty() {
+        return Err(SurfaceError::new(
+            ErrorCode::NotActionable,
+            format!(
+                "`{qualified}` has no slots, so a shell has nothing to skin: declare one with \
+                 `node_insert` and `slot` in its file"
+            ),
+        )
+        .with_details(json!({ "kind": "no_slots" })));
+    }
+    let doc_dir = doc.rsplit_once('/').map_or("", |(dir, _)| dir);
+    let block_dir = match &block.origin {
+        ljos_blocks::Origin::Qml { file } => file.rsplit_once('/').map_or("", |(dir, _)| dir),
+        ljos_blocks::Origin::Rust => "",
+    };
+    let beside = matches!(block.origin, ljos_blocks::Origin::Qml { .. }) && doc_dir == block_dir;
+    let mut out = String::from("import QtQuick\nimport Ljos.Blocks\n");
+    if !beside {
+        out.push_str(&format!("import {}\n", block.module));
+    }
+    let id = {
+        let mut name = block.name.clone();
+        if let Some(first) = name.get(..1) {
+            let lower = first.to_lowercase();
+            name.replace_range(..1, &lower);
+        }
+        name
+    };
+    let shown = block
+        .state
+        .iter()
+        .chain(&block.inputs)
+        .find(|p| p.ty == "string")
+        .map(|p| p.name.clone());
+    out.push_str(&format!("\n{} {{\n    id: {id}\n", block.name));
+    for slot in &block.slots {
+        out.push_str(&format!(
+            "    {}: Contribution {{\n        mode: Contribution.Replace\n        delegate: Component {{\n            Rectangle {{\n                implicitWidth: 160\n                implicitHeight: 48\n                radius: 8\n                color: \"#e8e8ec\"\n",
+            slot.name
+        ));
+        if let Some(shown) = &shown {
+            out.push_str(&format!(
+                "                Text {{\n                    anchors.centerIn: parent\n                    text: {id}.{shown}\n                }}\n"
+            ));
+        }
+        out.push_str("            }\n        }\n    }\n");
+    }
+    out.push_str("}\n");
+    Ok(out)
+}
+
+/// What a contribution shows, as QML, and the modules that needs: its own
+/// `text`, or a block's bare instance.
+fn delegate_of(
+    studio: &mut Studio,
+    registry: &ljos_blocks::BlockRegistry,
+    a: &ContributeArgs,
+) -> Result<(String, Vec<String>), SurfaceError> {
+    let mut imports = vec![blocks::RUNTIME.to_owned()];
+    let delegate = match (&a.text, &a.block) {
+        (Some(_), Some(_)) => {
+            return Err(SurfaceError::invalid_argument(
+                "give the delegate's `text` or a `block`, not both",
+            ));
+        }
+        (None, None) => {
+            return Err(SurfaceError::invalid_argument(
+                "give the delegate's `text` or a `block`",
+            ));
+        }
+        (Some(text), None) => {
+            let source = studio.session.text(&a.doc).map_err(error)?.0.to_owned();
+            crate::loads::check_text(studio.session.store(), &a.doc, &source, text, &[])?;
+            text.clone()
+        }
+        (None, Some(qualified)) => {
+            let Some(block) = blocks::find(registry, qualified) else {
+                return Err(SurfaceError::not_found(format!(
+                    "no block `{qualified}`; `blocks_list` lists them"
+                ))
+                .with_details(json!({ "kind": "no_block" })));
+            };
+            imports.push(block.module.clone());
+            format!("{} {{}}", block.name)
+        }
+    };
+    Ok((delegate, imports))
+}
+
+/// `slot_contribute` with `node`: the instance's own slot property is set
+/// to a `Contribution` that names no slot, so it skins that instance alone.
+fn contribute_own(studio: &Mutex<Studio>, a: &ContributeArgs) -> Result<EditOut, SurfaceError> {
+    let Some(node) = &a.node else {
+        unreachable!("called with a node");
+    };
+    if a.parent.is_some() || a.remove.is_some() {
+        return Err(SurfaceError::invalid_argument(
+            "`node` sets an instance's own slot; leave `parent` and `remove` out",
+        ));
+    }
+    let slot = a
+        .slot
+        .clone()
+        .ok_or_else(|| SurfaceError::invalid_argument("give the instance's `slot`"))?;
+    let mut studio = lock(studio);
+    let (handle, instance) = studio.session.resolve(&a.doc, node).map_err(error)?;
+    let registry = blocks::registry(studio.session.store());
+    let ty = instance.ty.rsplit('.').next().unwrap_or(&instance.ty);
+    let offered: Vec<String> = registry
+        .blocks()
+        .filter(|b| b.name == ty)
+        .flat_map(|b| b.slots.iter().map(|s| s.name.clone()))
+        .collect();
+    if !offered.contains(&slot) {
+        let message = if offered.is_empty() {
+            format!(
+                "{handle} (`{}`) is no block with slots; `blocks_list` lists them",
+                instance.ty
+            )
+        } else {
+            format!(
+                "{handle} (`{}`) has no slot `{slot}`; it has {}",
+                instance.ty,
+                offered
+                    .iter()
+                    .map(|s| format!("`{s}`"))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )
+        };
+        return Err(SurfaceError::not_found(message)
+            .with_details(json!({ "kind": "no_slot", "slots": offered })));
+    }
+    let (delegate, imports) = delegate_of(&mut studio, &registry, a)?;
+    let (text, _) = studio.session.text(&a.doc).map_err(error)?;
+    let unit = studio_core::states::unit(text);
+    let value = studio_core::slots::own(a.mode, a.order, &delegate, &unit).map_err(error)?;
+    let mut ops = vec![Op::SetBinding {
+        node: Address::Node(handle),
+        name: slot,
+        value,
+    }];
+    ops.extend(imports.into_iter().map(|module| Op::Import { module }));
+    let (outcome, _) = studio
+        .session
+        .edit_many(&a.doc, a.generation, &ops, "contribute", a.dry_run)
+        .map_err(error)?;
+    Ok(outcome.into())
+}
+
+/// `node_insert` with `replace`: one member rewritten where it is.
+fn replace_member(
+    studio: &Mutex<Studio>,
+    a: &InsertArgs,
+    name: &str,
+) -> Result<EditOut, SurfaceError> {
+    if a.block.is_some() || a.slot.is_some() || a.import.is_some() || a.index.is_some() {
+        return Err(SurfaceError::invalid_argument(
+            "`replace` rewrites a member as `text`; leave `block`, `slot`, `import` and `index` out",
+        ));
+    }
+    not_an_id(name)?;
+    let text = a.text.clone().ok_or_else(|| {
+        SurfaceError::invalid_argument("give the member's new `text`, as it is written")
+    })?;
+    let op = Op::ReplaceMember {
+        node: a.parent.clone(),
+        name: name.to_owned(),
+        text: Some(text),
+    };
+    edit(studio, &a.doc, a.generation, &op, a.dry_run)
+}
+
+/// `node_insert` with `slot`: a `Slot` in `parent` that shows what is
+/// contributed to the slot, and the root's `property list<Contribution>`
+/// of that name it passes on, so an instance can skin itself. One edit.
+fn declare_slot(studio: &Mutex<Studio>, a: &InsertArgs) -> Result<EditOut, SurfaceError> {
+    let Some(name) = &a.slot else {
+        unreachable!("called with a slot");
+    };
+    if a.block.is_some() || a.import.is_some() {
+        return Err(SurfaceError::invalid_argument(
+            "a slot imports `Ljos.Blocks` itself and shows `text` while nothing is contributed; \
+             leave `block` and `import` out",
+        ));
+    }
+    let starts_lower = name.chars().next().is_some_and(|c| c.is_ascii_lowercase());
+    if !starts_lower || !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+        return Err(SurfaceError::invalid_argument(format!(
+            "`{name}` is not a property name: a slot is one, so it starts with a lowercase letter"
+        )));
+    }
+    let mut studio = lock(studio);
+    let doc = studio.session.canonical(&a.doc).map_err(error)?;
+    let (root_handle, root_node) = studio
+        .session
+        .resolve(&doc, &Address::Path("root".to_owned()))
+        .map_err(error)?;
+    let source = studio.session.text(&doc).map_err(error)?.0.to_owned();
+    let members = studio_core::outline::members(&source, root_node.start);
+    let declared = members.iter().find(|m| m.name == *name);
+    let reuse = match declared {
+        Some(m) if m.ty.as_deref() == Some("list<Contribution>") => true,
+        Some(m) => {
+            return Err(SurfaceError::invalid_argument(format!(
+                "the root already has a {} `{name}`; name the slot otherwise",
+                match m.kind {
+                    studio_core::MemberKind::Property => "property",
+                    studio_core::MemberKind::Signal => "signal",
+                    studio_core::MemberKind::Function => "function",
+                    studio_core::MemberKind::Handler => "handler",
+                }
+            ))
+            .with_details(json!({ "kind": "member_taken" })));
+        }
+        None if root_node.bindings.iter().any(|b| b.name == *name) => {
+            return Err(SurfaceError::invalid_argument(format!(
+                "the root already binds `{name}`; name the slot otherwise"
+            ))
+            .with_details(json!({ "kind": "member_taken" })));
+        }
+        None => false,
+    };
+    let (tree, _) = studio.session.tree(&doc).map_err(error)?;
+    let ids: Vec<String> = tree.iter().filter_map(|(_, n)| n.id.clone()).collect();
+    let mut ops = Vec::new();
+    let root_id = match &root_node.id {
+        Some(id) => id.clone(),
+        None => {
+            let id = std::iter::once("root".to_owned())
+                .chain((1..).map(|n| format!("root{n}")))
+                .find(|id| !ids.contains(id))
+                .expect("an unused id");
+            ops.push(Op::SetBinding {
+                node: Address::Node(root_handle.clone()),
+                name: "id".to_owned(),
+                value: id.clone(),
+            });
+            id
+        }
+    };
+    let unit = studio_core::states::unit(&source);
+    let mut slot = format!(
+        "Slot {{\n{unit}name: {}\n{unit}contributions: {root_id}.{name}\n",
+        Literal::String(name.clone()).to_qml()
+    );
+    if let Some(text) = &a.text {
+        crate::loads::check_text(studio.session.store(), &doc, &source, text, &[])?;
+        for line in text.trim().lines() {
+            if !line.trim().is_empty() {
+                slot.push_str(&unit);
+                slot.push_str(line);
+            }
+            slot.push('\n');
+        }
+    }
+    slot.push('}');
+    // The Slot first: the edit answers the handle of the first object it
+    // put, and that is the one asked for.
+    // `root` names the root in every generation, so it needs none.
+    let parent = match &a.parent {
+        Address::Path(p) if p == "root" => Address::Node(root_handle.clone()),
+        other => other.clone(),
+    };
+    ops.push(Op::Insert {
+        parent,
+        index: a.index,
+        text: slot,
+        add_id: a.id.unwrap_or(true),
+        import: Some(blocks::RUNTIME.to_owned()),
+    });
+    if !reuse {
+        ops.push(Op::Insert {
+            parent: Address::Node(root_handle),
+            index: None,
+            text: format!("property list<Contribution> {name}"),
+            add_id: false,
+            import: None,
+        });
+    }
+    let (outcome, _) = studio
+        .session
+        .edit_many(&doc, a.generation, &ops, &format!("slot {name}"), a.dry_run)
+        .map_err(error)?;
+    Ok(outcome.into())
 }
 
 fn edit(
@@ -1518,8 +1804,7 @@ fn edits(studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
         .with(
             ToolDef::new::<NewArgs>(
                 "document_new",
-                "Create a QML document from `text`, or from a JSON file's records (`data`). Refused if it \
-                 exists or does not parse. `block` declares it in the `qmldir` beside it. Undo removes it.",
+                "Create a QML document from `text`, or from a JSON file's records (`data`), or a `shell` of a block that skins its slots. Refused if it exists or does not parse. `block` declares it in the `qmldir` beside it. Undo removes it.",
             )
             .answers::<EditOut>()
             .requires(Cap::Mutate)
@@ -1528,7 +1813,15 @@ fn edits(studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
                 let studio = s();
                 move |_, a: NewArgs| {
                     let mut studio = lock(&studio);
+                    if a.shell.is_some() && (a.text.is_some() || a.data.is_some()) {
+                        return Err(SurfaceError::invalid_argument(
+                            "a shell is written from its block; leave `text` and `data` out",
+                        ));
+                    }
                     let text = match (a.text, a.data) {
+                        _ if a.shell.is_some() => {
+                            shell_text(&studio, &a.doc, a.shell.as_deref().unwrap_or_default())?
+                        }
                         (Some(_), Some(_)) => {
                             return Err(SurfaceError::invalid_argument(
                                 "give `text` or `data`, not both",
@@ -1734,7 +2027,7 @@ fn edits(studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
         .with(
             ToolDef::new::<NodeArgs>(
                 "node_inspect",
-                "An object's bindings with byte ranges, parent, children, states, transitions, flows, signals with arguments, and the roles and rows of the data it sees (in a delegate, its list's).",
+                "An object's bindings with byte ranges, its own members (properties, signals, functions, handlers), parent, children, states, transitions, flows, signals with arguments, and the roles and rows of the data it sees.",
             )
             .answers::<Inspected>()
             .requires(Cap::Inspect),
@@ -1754,6 +2047,7 @@ fn edits(studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
                         offers,
                         ..
                     } = crate::signals::described(studio.session.store(), &doc, &source, &node);
+                    let members = studio_core::outline::members(&source, node.start);
                     let (tree, generation) = studio.session.tree(&doc).map_err(error)?;
                     let parent_path = (!node.path.0.is_empty())
                         .then(|| studio_core::NodePath(node.path.0[..node.path.0.len() - 1].to_vec()));
@@ -1796,6 +2090,7 @@ fn edits(studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
                         model,
                         signals,
                         takes,
+                        members,
                         offers,
                     })
                 }
@@ -1804,7 +2099,7 @@ fn edits(studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
         .with(
             ToolDef::new::<BlocksArgs>(
                 "blocks_list",
-                "List the project's functional blocks with their contracts; `node_insert` places one by `Module.Name`. Unreadable ones are in `errors`. With `doc`, `types` lists the toolkit types it can place, its imports first.",
+                "List the project's blocks with their contracts and `slots`; `node_insert` places one by `Module.Name`, and with `slot` declares a slot (`import Ljos.Blocks`, `Slot { name: \"face\" }`). Unreadable ones are in `errors`. With `doc`, `types` lists the toolkit types it can place.",
             )
             .answers::<BlocksOut>()
             .requires(Cap::Inspect),
@@ -1846,7 +2141,7 @@ fn edits(studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
         .with(
             ToolDef::new::<InsertArgs>(
                 "node_insert",
-                "Insert an object written in QML, or a `block` from `blocks_list`, as a child at an index, or a member (function, signal, property, handler) of `parent`. It gets an id unless it has one. Returns the handle.",
+                "Insert an object in QML or a `block` from `blocks_list` as a child, or a member (property, signal, function, handler) of `parent`; `replace` rewrites one. `slot: \"face\"` writes `Slot { name: \"face\" }` and the root's `property list<Contribution> face`, importing Ljos.Blocks.",
             )
             .answers::<EditOut>()
             .requires(Cap::Mutate)
@@ -1854,6 +2149,12 @@ fn edits(studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
             typed({
                 let studio = s();
                 move |_, a: InsertArgs| {
+                    if let Some(name) = &a.replace {
+                        return replace_member(&studio, &a, name);
+                    }
+                    if a.slot.is_some() {
+                        return declare_slot(&studio, &a);
+                    }
                     let (text, import) = insert_text(&studio, &a)?;
                     crate::loads::check_insert(&studio, &a.doc, &text, import.as_slice())?;
                     let op = Op::Insert {
@@ -1890,7 +2191,7 @@ fn edits(studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
         .with(
             ToolDef::new::<RemoveArgs>(
                 "node_remove",
-                "Remove an object with its comments. Its handle then answers `stale_ref` until undo.",
+                "Remove an object with its comments, or just its `member` (a property, signal, function or handler). A removed object's handle answers `stale_ref` until undo.",
             )
             .answers::<EditOut>()
             .requires(Cap::Mutate)
@@ -1898,7 +2199,18 @@ fn edits(studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
             typed({
                 let studio = s();
                 move |_, a: RemoveArgs| {
-                    edit(&studio, &a.doc, a.generation, &Op::Remove { node: a.node }, a.dry_run)
+                    let op = match a.member {
+                        Some(name) => {
+                            not_an_id(&name)?;
+                            Op::ReplaceMember {
+                                node: a.node,
+                                name,
+                                text: None,
+                            }
+                        }
+                        None => Op::Remove { node: a.node },
+                    };
+                    edit(&studio, &a.doc, a.generation, &op, a.dry_run)
                 }
             }),
         )
@@ -1977,7 +2289,7 @@ fn edits(studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
         .with(
             ToolDef::new::<ContributeArgs>(
                 "slot_contribute",
-                "Write a Contribution to a block's slot, showing QML `text` or a `block` (imports added once); or `remove` one. Refuses a slot no block offers (`blocks_list`).",
+                "Write a Contribution to a block's slot, showing QML `text` or a `block` (imports added once), or `remove` one; with `node`, set one instance's own slot. Refuses a slot no block offers (`blocks_list`).",
             )
             .answers::<EditOut>()
             .requires(Cap::Mutate)
@@ -1985,6 +2297,9 @@ fn edits(studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
             typed({
                 let studio = s();
                 move |_, a: ContributeArgs| {
+                    if a.node.is_some() {
+                        return contribute_own(&studio, &a);
+                    }
                     let op = contribute_op(&studio, &a)?;
                     edit(&studio, &a.doc, a.generation, &op, a.dry_run)
                 }

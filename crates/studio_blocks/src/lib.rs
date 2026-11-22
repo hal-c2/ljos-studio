@@ -209,7 +209,7 @@ pub struct Workspace {
     #[qml(readonly, notify)]
     pub flow: Json,
     /// The project's blocks: `module`, `name`, `summary`, `category`,
-    /// `slots`.
+    /// `slots`, `doc`, the document it is written in.
     #[qml(readonly, notify)]
     pub palette: Json,
     /// The toolkit types the document can place, by module.

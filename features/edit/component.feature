@@ -6,7 +6,9 @@ Feature: An object becomes a component of the project
   the document and leaves an instance of it where it was, with the id and the
   place. One undo takes back both files. An id only the new file can see would
   break what reads it, so a read of a property becomes an alias, and what no
-  alias can carry is refused, naming it.
+  alias can carry is refused, naming it. A string an inner object with an id
+  shows becomes an alias too, set on the instance: another instance can say
+  another, and the file keeps it as what one that sets none shows.
 
   Background:
     Given the file "Main.qml":
@@ -41,7 +43,7 @@ Feature: An object becomes a component of the project
       {"action": "component_extract", "doc": "Main.qml", "nodes": [{"id": "card"}], "name": "Card"}
       """
     Then the answer's "/component" is "Card.qml"
-    And the answer's "/aliases" is absent
+    And the answer's "/aliases" is ["labelText"]
     And the file "Card.qml" is:
       """qml
       import QtQuick
@@ -49,6 +51,7 @@ Feature: An object becomes a component of the project
 
       Rectangle {
           id: card
+          property alias labelText: label.text
           width: 100
           color: "gold"
 
@@ -72,6 +75,7 @@ Feature: An object becomes a component of the project
               id: card
               x: 10
               y: 20
+              labelText: "Hi"
           }
       }
       """
