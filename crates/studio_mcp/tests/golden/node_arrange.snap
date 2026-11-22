@@ -93,6 +93,9 @@ expression: value
         "description": "For `rename`: the object's new `id`. For `component_extract`: the new type. For `relayout`: its new kind.",
         "type": "string"
       },
+      "node": {
+        "$ref": "#/$defs/Address"
+      },
       "nodes": {
         "description": "For all but `place` and `paste`.",
         "items": {
@@ -205,6 +208,7 @@ expression: value
       "doc": {},
       "generation": {},
       "history": {},
+      "id": {},
       "imported": {},
       "name_unsure": {},
       "name_unsure_why": {},

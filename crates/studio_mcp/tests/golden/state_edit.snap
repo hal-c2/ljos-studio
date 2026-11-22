@@ -137,6 +137,7 @@ expression: value
         "type": "integer"
       },
       "history": {},
+      "id": {},
       "node": {},
       "rebased_from": {},
       "text": {},

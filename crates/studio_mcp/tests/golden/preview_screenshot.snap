@@ -9,7 +9,7 @@ expression: value
     "open_world": false,
     "read_only": true
   },
-  "description": "What the preview shows: a PNG at most `max_size` pixels on its longest side (default 800), or with `format: \"outline\"` its items as text, one per line.",
+  "description": "What the preview shows, as a PNG or as text.",
   "inputSchema": {
     "properties": {
       "format": {
@@ -21,7 +21,7 @@ expression: value
         "type": "string"
       },
       "max_size": {
-        "description": "Longest side of a PNG in pixels (default 800, at most 1280).",
+        "description": "Longest side: 16 to 1280, default 800.",
         "type": "integer"
       }
     },
@@ -33,6 +33,7 @@ expression: value
     "properties": {
       "bytes": {},
       "height": {},
+      "max_size": {},
       "outline": {},
       "width": {}
     },
