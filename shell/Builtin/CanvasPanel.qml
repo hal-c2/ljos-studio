@@ -225,13 +225,17 @@ Panel {
         viewX -= dx / zoom
         viewY -= dy / zoom
     }
-    // From a fitted frame its corner stays put, so a frame too big for the
-    // view at its real size shows its start rather than its middle.
-    function actualSize() {
-        if (fitted && preview !== null)
-            zoomTo(1, (liveFrame.x - viewX) * zoom, (0 - viewY) * zoom, jumpTime)
+    // A zoom named by a key or typed. Going closer from a fitted frame, its
+    // corner stays put, so a frame too big for the view shows its start
+    // rather than its middle.
+    function zoomNamed(wanted) {
+        if (fitted && preview !== null && wanted >= goalZoom)
+            zoomTo(wanted, (liveFrame.x - viewX) * zoom, (0 - viewY) * zoom, jumpTime)
         else
-            zoomTo(1, undefined, undefined, jumpTime)
+            zoomTo(wanted, undefined, undefined, jumpTime)
+    }
+    function actualSize() {
+        zoomNamed(1)
     }
 
     // The box of document pixels `what` names on the canvas.
@@ -898,7 +902,7 @@ Panel {
                 const typed = text.trim().toLowerCase()
                 const n = parseFloat(typed)
                 if (!isNaN(n) && n > 0)
-                    panel.zoomTo(typed.endsWith("x") ? n : n / 100, undefined, undefined, panel.jumpTime)
+                    panel.zoomNamed(typed.endsWith("x") ? n : n / 100)
                 text = Qt.binding(() => shown)
                 canvasFocus.forceActiveFocus()
             }
