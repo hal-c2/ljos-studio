@@ -115,7 +115,9 @@ Feature: What is wrong in the preview reaches whoever made it wrong
     Then the answer's "/problems" is absent
 
   # Ljós's URLs keep a space as it is: a project below "My Projects" has one
-  # in every warning its program logs.
+  # in every warning its program logs. The pinned Ljós then counts lines in
+  # the script it made of the document (LineTable::add), so none is given:
+  # with that fixed at the pin, the line here is 4.
   Scenario: A warning from below a directory with a space in its name is placed
     Given the file "my pages/Page.qml":
       """qml
@@ -132,7 +134,8 @@ Feature: What is wrong in the preview reaches whoever made it wrong
     When the agent calls the tool "preview_events"
     Then the answer's "/problems" has 1 entry
     And the answer's "/problems/0/file" is "my pages/Page.qml"
-    And the answer's "/problems/0/line" is 4
+    And the answer's "/problems/0/message" is "TypeError: Cannot read property 'foo' of null"
+    And the answer's "/problems/0/line" is absent
 
   # Ljós names a failure's file from the project's root, as written: the
   # window lists it as the document's own only where Studio keeps that name.
