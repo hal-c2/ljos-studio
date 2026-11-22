@@ -10,6 +10,9 @@ Item {
     id: strip
     required property var tabs
     property int current: 0
+    // Only a person's switch slides. Being laid out is no move, and sliding
+    // then would have a window nobody touches ask for frames.
+    property bool switched: false
     implicitHeight: 40
 
     // Under the current tab, behind its words.
@@ -24,7 +27,7 @@ Item {
         color: Colors.surfaceHover
         visible: under !== null
         Behavior on x {
-            enabled: !Motion.reduced
+            enabled: strip.switched && !Motion.reduced
             NumberAnimation {
                 duration: Motion.moveSmallFrequent
                 easing.type: Easing.BezierSpline
@@ -32,7 +35,7 @@ Item {
             }
         }
         Behavior on width {
-            enabled: !Motion.reduced
+            enabled: strip.switched && !Motion.reduced
             NumberAnimation {
                 duration: Motion.moveSmallFrequent
                 easing.type: Easing.BezierSpline
@@ -64,6 +67,7 @@ Item {
                 implicitHeight: 26
                 implicitWidth: label.implicitWidth + 2 * Spacing.sm
                 onClicked: {
+                    strip.switched = true
                     strip.current = index
                     // A click toggles a checkable button and ends its binding.
                     checked = Qt.binding(() => shown)

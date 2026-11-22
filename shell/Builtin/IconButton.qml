@@ -12,6 +12,9 @@ ToolButton {
     // The keys that do the same, as the tooltip shows them: "Ctrl+Z".
     property string shortcut: ""
     property real iconSize: 16
+    // Draws no icon and still takes the press: an item at opacity 0 takes
+    // none, so a finger, which never hovers, could not reach it.
+    property bool quiet: false
     display: AbstractButton.IconOnly
     implicitWidth: 28
     implicitHeight: 28
@@ -58,6 +61,7 @@ ToolButton {
     }
 
     contentItem: Item {
+        opacity: button.quiet && !button.visualFocus ? 0 : 1
         Icon {
             anchors.centerIn: parent
             size: button.iconSize

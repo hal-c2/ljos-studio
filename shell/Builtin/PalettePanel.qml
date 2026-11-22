@@ -355,7 +355,7 @@ Panel {
                                     Behavior on color {
                                         ColorAnimation {
                                             duration: Motion.enterSmallFrequent
-                                            easing.type: Easing.Bezier
+                                            easing.type: Easing.BezierSpline
                                             easing.bezierCurve: Motion.easeOut
                                         }
                                     }
