@@ -124,6 +124,24 @@ Feature: The built-in shell shows what is wrong in the preview
     When the person clicks "Show the problems"
     Then the window says something starting "error: "
 
+  # A lost connection names no file. The copy of the panel is given one: the
+  # test can't cut the preview's.
+  Scenario: An error with no file doesn't hide that the document doesn't parse
+    Given the file "Aside.qml":
+      """qml
+      import QtQuick
+
+      Item {
+      """
+    And Studio's window runs the person's shell, a copy of its own
+    And the person's "PreviewProblems.qml" has "workspace.problems ?? []" replaced with "[{severity: \"error\", message: \"the connection was lost\", file: \"\"}]"
+    And the window has taken the change
+    When the person opens "Aside.qml" in the documents list
+    Then the window says "Problem count: 2"
+    When the person clicks "Show the problems"
+    Then the window says "error: the connection was lost"
+    And the window says something starting "error: `Aside.qml` does not parse"
+
   Scenario: Choosing a problem selects its object
     Given Studio's window shows the project
     And the person has opened "App.qml" in the documents list

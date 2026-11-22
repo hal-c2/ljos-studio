@@ -133,3 +133,24 @@ Feature: What is wrong in the preview reaches whoever made it wrong
     Then the answer's "/problems" has 1 entry
     And the answer's "/problems/0/file" is "my pages/Page.qml"
     And the answer's "/problems/0/line" is 4
+
+  # Ljós names a failure's file from the project's root, as written: the
+  # window lists it as the document's own only where Studio keeps that name.
+  Scenario: A failure in a document whose path has a space names that document
+    Given the file "my pages/Page.qml":
+      """qml
+      import QtQuick
+
+      Item {
+          id: page
+      }
+      """
+    And the agent has called the tool "preview_open" with:
+      """json
+      {"doc": "my pages/Page.qml"}
+      """
+    When a person types in the code view of "my pages/Page.qml", replacing "id: page" with "id: page; Item {"
+    And the agent calls the tool "preview_events"
+    Then the answer's "/problems" has 1 entry
+    And the answer's "/problems/0/severity" is "error"
+    And the answer's "/problems/0/file" is "my pages/Page.qml"

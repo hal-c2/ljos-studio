@@ -959,6 +959,46 @@ mod tests {
     }
 
     #[test]
+    fn a_failure_names_the_project_file_it_is_in() {
+        let (mut p, _) = previews(VecDeque::new(), false);
+        let root = rooted(&mut p, "Item {}\n");
+        std::fs::create_dir_all(root.join("my pages")).unwrap();
+        std::fs::write(root.join("my pages/Page.qml"), "Item {\n").unwrap();
+        let mut said = |message: &str| {
+            p.record(
+                Reload::Failed {
+                    message: message.to_owned(),
+                },
+                Duration::ZERO,
+            );
+            assert_eq!(p.problems.len(), 1, "{:?}", p.problems);
+            let said = p.problems[0].clone();
+            (said.file, said.line, said.message)
+        };
+        // Ljós writes no line where the whole file is at fault.
+        assert_eq!(
+            said("Main.qml: no entry has a file"),
+            (
+                Some("Main.qml".to_owned()),
+                None,
+                "no entry has a file".to_owned()
+            )
+        );
+        assert_eq!(
+            said("my pages/Page.qml:3:1: expected `}`"),
+            (
+                Some("my pages/Page.qml".to_owned()),
+                Some(3),
+                "expected `}`".to_owned()
+            )
+        );
+        // Words before a colon that are no file of the project are a sentence.
+        let sentence = "cannot load Main.qml: no such type";
+        assert_eq!(said(sentence), (None, None, sentence.to_owned()));
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
     fn a_catch_up_counts_against_the_budget() {
         let (mut p, count) = previews(VecDeque::new(), true);
         assert_eq!(p.catch_up(), None);
