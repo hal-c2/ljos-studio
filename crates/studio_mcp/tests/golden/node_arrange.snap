@@ -161,6 +161,9 @@ expression: value
           "bottom": {
             "type": "number"
           },
+          "horizontalCenter": {
+            "type": "number"
+          },
           "left": {
             "type": "number"
           },
@@ -168,6 +171,9 @@ expression: value
             "type": "number"
           },
           "top": {
+            "type": "number"
+          },
+          "verticalCenter": {
             "type": "number"
           }
         },
@@ -182,11 +188,11 @@ expression: value
         "type": "string"
       },
       "within": {
-        "description": "For `geometry`: the siblings are the first node's children, for something drawn inside it.",
+        "description": "For `geometry`: the siblings are the first node's children.",
         "type": "boolean"
       },
       "without_siblings": {
-        "description": "For `geometry`: leave the siblings out (each is a read of the running app).",
+        "description": "For `geometry`: no siblings.",
         "type": "boolean"
       }
     },

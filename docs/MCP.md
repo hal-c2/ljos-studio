@@ -208,6 +208,10 @@ view against each model's box (`#Cube`, `#Rectangle`, `#Cylinder`, `#Cone`)
 or sphere, and the nearest wins. A file mesh, an orthographic camera or a
 host that reads no scene leave the `View3D` selected.
 
+`node_arrange` `geometry` takes `without_siblings` to leave the siblings out,
+as each is a read of the running app, and `within` to answer the first node's
+children as the siblings, for something drawn inside it.
+
 `node_arrange` `geometry` on a spatial object (a `Model`, a light or a
 camera) has no box; it answers `scene` instead: the view's window box, the
 camera (`eye`), the object's `origin`, `axes` (the scene's vector for one
