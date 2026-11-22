@@ -409,10 +409,10 @@ Panel {
                         Layout.fillWidth: true
                         onAccepted: bring.clicked()
                     }
-                    IconButton {
+                    TextButton {
                         id: bring
-                        icon_: "plus"
-                        text: "Import asset"
+                        text: "Import"
+                        Accessible.name: "Import asset"
                         enabled: incoming.text !== ""
                         onClicked: {
                             panel.workspace.dispatch("project_open", {asset: "import", file: incoming.text})
@@ -450,6 +450,13 @@ Panel {
                             delegate: AbstractButton {
                                 id: tile
                                 required property var modelData
+                                // Runs out on the first frame, when what its user set has arrived:
+                                // fades are for what changes after that.
+                                Timer {
+                                    id: opening
+                                    interval: 0
+                                    running: true
+                                }
                                 text: modelData.name
                                 Accessible.name: "Place " + modelData.name
                                 Accessible.description: modelData.module
@@ -468,9 +475,8 @@ Panel {
                                     border.width: tile.visualFocus ? 2 : 0
                                     border.color: Colors.focusRing
                                     Behavior on color {
-                                        // Only under the pointer: what Studio changes by itself shows at once,
-                                        // so a window nobody touches asks for no frames.
-                                        enabled: tile.hovered
+                                        // Not into what it opens as: nothing has moved then.
+                                        enabled: !opening.running
                                         ColorAnimation {
                                             duration: Motion.enterSmallFrequent
                                             easing.type: Easing.BezierSpline

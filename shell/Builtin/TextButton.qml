@@ -10,6 +10,13 @@ Button {
     id: button
     property bool accent: false
     property string icon_: ""
+    // Runs out on the first frame, when what its user set has arrived:
+    // fades are for what changes after that.
+    Timer {
+        id: opening
+        interval: 0
+        running: true
+    }
     implicitHeight: 28
     leftPadding: icon_ === "" ? Spacing.sm : Spacing.xs
     rightPadding: Spacing.sm
@@ -48,9 +55,8 @@ Button {
         border.width: button.visualFocus ? 2 : 0
         border.color: Colors.focusRing
         Behavior on color {
-            // Only under the pointer: what Studio changes by itself shows at once,
-            // so a window nobody touches asks for no frames.
-            enabled: button.hovered
+            // Not into what it opens as: nothing has moved then.
+            enabled: !opening.running
             ColorAnimation {
                 duration: Motion.enterSmallFrequent
                 easing.type: Easing.BezierSpline

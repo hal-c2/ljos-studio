@@ -116,6 +116,8 @@ Item {
                     anchors.fill: parent
                     anchors.margins: Spacing.xs
                     anchors.rightMargin: 0
+                    anchors.topMargin: 0
+                    anchors.bottomMargin: Spacing.xxs
                     radius: 12
                     color: Colors.surface
                     border.width: 1
@@ -232,7 +234,7 @@ Item {
                     Rectangle {
                         id: codeCard
                         anchors.fill: parent
-                        anchors.bottomMargin: Spacing.xs
+                        anchors.bottomMargin: Spacing.xxs
                         radius: 12
                         color: Colors.surface
                         border.width: 1
@@ -257,6 +259,8 @@ Item {
                     anchors.fill: parent
                     anchors.margins: Spacing.xs
                     anchors.leftMargin: 0
+                    anchors.topMargin: 0
+                    anchors.bottomMargin: Spacing.xxs
                     radius: 12
                     color: Colors.surface
                     border.width: 1

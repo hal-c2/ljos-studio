@@ -22,6 +22,13 @@ TextField {
     property bool scrub: false
     // Pixels a scrub moves per unit of the number.
     property real scrubStep: 1
+    // Runs out on the first frame, when what its user set has arrived:
+    // fades are for what changes after that.
+    Timer {
+        id: opening
+        interval: 0
+        running: true
+    }
 
     property real scrubFrom: NaN
     property bool scrubbed: false
@@ -162,9 +169,8 @@ TextField {
         border.color: field.activeFocus ? Colors.focusRing
             : field.hovered ? Colors.border : "transparent"
         Behavior on border.color {
-            // Only under the pointer: what Studio changes by itself shows at once,
-            // so a window nobody touches asks for no frames.
-            enabled: field.hovered
+            // Not into what it opens as: nothing has moved then.
+            enabled: !opening.running
             ColorAnimation {
                 duration: Motion.enterSmallFrequent
                 easing.type: Easing.BezierSpline

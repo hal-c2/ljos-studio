@@ -13,7 +13,7 @@ Item {
     // Only a person's switch slides. Being laid out is no move, and sliding
     // then would have a window nobody touches ask for frames.
     property bool switched: false
-    implicitHeight: 40
+    implicitHeight: 36
 
     // Under the current tab, behind its words.
     Rectangle {
@@ -58,13 +58,21 @@ Item {
                 required property string modelData
                 required property int index
                 readonly property bool shown: strip.current === index
+                // Runs out on the first frame, when what its user set has arrived:
+                // fades are for what changes after that.
+                Timer {
+                    id: opening
+                    interval: 0
+                    running: true
+                }
                 text: modelData
                 checkable: true
                 checked: shown
                 hoverEnabled: true
                 Accessible.name: text + " tab"
                 Accessible.role: Accessible.PageTab
-                implicitHeight: 26
+                // The whole strip takes the press; the pill is only what is drawn.
+                implicitHeight: 36
                 implicitWidth: label.implicitWidth + 2 * Spacing.sm
                 onClicked: {
                     strip.switched = true
@@ -73,20 +81,24 @@ Item {
                     checked = Qt.binding(() => shown)
                 }
 
-                background: Rectangle {
-                    radius: 8
-                    color: Colors.surfaceHover
-                    opacity: tab.hovered && !tab.shown ? 0.6 : 0
-                    border.width: tab.visualFocus ? 2 : 0
-                    border.color: Colors.focusRing
-                    Behavior on opacity {
-                        // Only under the pointer: what Studio changes by itself shows at once,
-                        // so a window nobody touches asks for no frames.
-                        enabled: tab.hovered
-                        NumberAnimation {
-                            duration: Motion.enterSmallFrequent
-                            easing.type: Easing.BezierSpline
-                            easing.bezierCurve: Motion.easeOut
+                background: Item {
+                    Rectangle {
+                        anchors.verticalCenter: parent.verticalCenter
+                        width: parent.width
+                        height: 26
+                        radius: 8
+                        color: Colors.surfaceHover
+                        opacity: tab.hovered && !tab.shown ? 0.6 : 0
+                        border.width: tab.visualFocus ? 2 : 0
+                        border.color: Colors.focusRing
+                        Behavior on opacity {
+                            // Not into what it opens as: nothing has moved then.
+                            enabled: !opening.running
+                            NumberAnimation {
+                                duration: Motion.enterSmallFrequent
+                                easing.type: Easing.BezierSpline
+                                easing.bezierCurve: Motion.easeOut
+                            }
                         }
                     }
                 }

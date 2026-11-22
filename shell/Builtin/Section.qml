@@ -18,20 +18,15 @@ ColumnLayout {
     // Between the parts of the body. A body whose rows keep a note line
     // under them takes none: that line is the gap.
     property int gap: Spacing.xs
+    // Under the body's last part.
+    property int tail: inset
     default property alias content: body.data
     spacing: 0
 
-    Rectangle {
-        visible: section.ruled
-        Layout.fillWidth: true
-        implicitHeight: 1
-        color: Colors.surfacePressed
-        Accessible.ignored: true
-    }
     ItemDelegate {
         id: header
         Layout.fillWidth: true
-        implicitHeight: 32
+        implicitHeight: 28
         padding: 0
         leftPadding: Spacing.sm
         rightPadding: Spacing.xs
@@ -56,6 +51,14 @@ ColumnLayout {
                 color: header.hovered ? Colors.text : Colors.textMuted
             }
         }
+        // In the header's own height: parting two sections costs no row room.
+        Rectangle {
+            visible: section.ruled
+            width: header.width
+            height: 1
+            color: Colors.surfacePressed
+            Accessible.ignored: true
+        }
         background: Rectangle {
             color: header.visualFocus ? Colors.surfaceHover : "transparent"
             border.width: header.visualFocus ? 2 : 0
@@ -70,6 +73,6 @@ ColumnLayout {
         Layout.fillHeight: true
         Layout.leftMargin: section.inset
         Layout.rightMargin: section.inset
-        Layout.bottomMargin: section.inset
+        Layout.bottomMargin: section.tail
     }
 }
