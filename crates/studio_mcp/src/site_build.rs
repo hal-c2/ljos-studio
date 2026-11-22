@@ -673,7 +673,9 @@ mod tests {
             let link = root.path().join(&at);
             fs::create_dir_all(link.parent().unwrap()).unwrap();
             std::os::unix::fs::symlink(theirs.path(), &link).unwrap();
-            let refused = build(root.path(), "build/web", &tools, false).unwrap_err();
+            let Err(refused) = build(root.path(), "build/web", &tools, false) else {
+                panic!("built through the link at {}", at.display());
+            };
             assert_eq!(refused.code, ErrorCode::PathDenied, "{}", at.display());
             assert_eq!(fs::read_dir(theirs.path()).unwrap().count(), 0);
         }
