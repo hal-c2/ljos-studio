@@ -422,7 +422,7 @@ pub fn place_members(source: &str, start: usize) -> Vec<std::ops::Range<usize>> 
 }
 
 /// What kind of member of its object's API a [`Member`] is.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum MemberKind {
     Property,
@@ -434,7 +434,7 @@ pub enum MemberKind {
 
 /// One member an object declares or handles: its API as a designer edits
 /// it. Plain bindings are not members; they are its `bindings`.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, schemars::JsonSchema)]
 pub struct Member {
     pub kind: MemberKind,
     pub name: String,
@@ -448,10 +448,13 @@ pub struct Member {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub params: Option<String>,
     #[serde(skip_serializing_if = "std::ops::Not::not")]
+    #[schemars(default)]
     pub readonly: bool,
     #[serde(skip_serializing_if = "std::ops::Not::not")]
+    #[schemars(default)]
     pub required: bool,
     #[serde(skip_serializing_if = "std::ops::Not::not")]
+    #[schemars(default)]
     pub default: bool,
     /// Its byte range: the member whole, as written.
     pub start: usize,
