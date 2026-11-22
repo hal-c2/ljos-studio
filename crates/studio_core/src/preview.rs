@@ -180,6 +180,22 @@ pub struct LogLine {
 }
 
 impl LogLine {
+    /// The compiler's refusal of the files, placed where `message` says
+    /// among those below `root`.
+    pub fn failure(message: &str, root: Option<&Path>) -> Self {
+        let (file, line, message) = match place_in(message, root) {
+            Some((file, line, rest)) => (Some(file), line, rest.to_owned()),
+            None => (None, None, message.to_owned()),
+        };
+        Self {
+            level: "error".to_owned(),
+            message,
+            file,
+            line,
+            compiler: true,
+        }
+    }
+
     /// A warning or worse: what a window lists among the preview's problems.
     pub fn is_problem(&self) -> bool {
         matches!(

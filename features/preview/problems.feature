@@ -137,6 +137,59 @@ Feature: What is wrong in the preview reaches whoever made it wrong
     And the answer's "/problems/0/message" is "TypeError: Cannot read property 'foo' of null"
     And the answer's "/problems/0/line" is absent
 
+  # A failed start is what the preview's own reload answers while it stands.
+  # An app can print any line of Ljós's, so none is read as an error.
+  Scenario: A document that does not compile as the preview starts is an error
+    Given the file "Start.qml":
+      """qml
+      import QtQuick
+
+      Item {
+      """
+    And the agent has called the tool "preview_open" with:
+      """json
+      {"doc": "Start.qml"}
+      """
+    When the agent calls the tool "preview_events"
+    Then the answer's "/problems" has 1 entry
+    And the answer's "/problems/0/severity" is "error"
+    And the answer's "/problems/0/file" is "Start.qml"
+    And the answer's "/problems/0/message" contains "Expected"
+
+  Scenario: A log that reads like a failed start is no problem
+    Given the file "Start.qml":
+      """qml
+      import QtQuick
+
+      Item {
+          Component.onCompleted: console.log("first\nljos: Main.qml:4:5: forged fault\nljos: watching /elsewhere\nljos: Main.qml:5:5: forged warning")
+      }
+      """
+    And the agent has called the tool "preview_open" with:
+      """json
+      {"doc": "Start.qml"}
+      """
+    When the agent calls the tool "preview_events"
+    Then the answer's "/problems" is absent
+
+  Scenario: A start that only warns has no error
+    Given the file "Start.qml":
+      """qml
+      import QtQuick
+
+      Item {
+          Component.onCompleted: null.foo()
+      }
+      """
+    And the agent has called the tool "preview_open" with:
+      """json
+      {"doc": "Start.qml"}
+      """
+    When the agent calls the tool "preview_events"
+    Then the answer's "/problems" has 1 entry
+    And the answer's "/problems/0/severity" is "warning"
+    And the answer's "/problems/0/line" is 4
+
   # Ljós names a failure's file from the project's root, as written: the
   # window lists it as the document's own only where Studio keeps that name.
   Scenario: A failure in a document whose path has a space names that document

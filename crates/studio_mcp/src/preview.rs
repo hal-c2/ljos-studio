@@ -203,18 +203,7 @@ fn same_place(a: &LogLine, b: &LogLine) -> bool {
 
 /// A reload's failure as a problem, placed where its message says.
 pub(crate) fn failure(message: &str, root: Option<&Path>) -> LogLine {
-    let placed = studio_core::preview::place_in(message, root);
-    let (file, line, message) = match placed {
-        Some((file, line, rest)) => (Some(file), line, rest.to_owned()),
-        None => (None, None, message.to_owned()),
-    };
-    LogLine {
-        level: "error".to_owned(),
-        message,
-        file,
-        line,
-        compiler: true,
-    }
+    LogLine::failure(message, root)
 }
 
 impl Open {
