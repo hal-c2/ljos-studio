@@ -113,7 +113,7 @@ struct Text {
 #[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct NewArgs {
-    /// A new `.qml` path.
+    /// A new `.qml` path relative to the project.
     doc: String,
     /// Its text; default an empty QtQuick `Item`.
     text: Option<String>,
@@ -122,10 +122,10 @@ struct NewArgs {
     /// `json` (default): a `JsonListModel` of it; `list`: a `ListModel` copy.
     #[serde(default)]
     model: DataModel,
-    /// Also declare it a block in the `qmldir` beside it.
+    /// Also declare it a functional block in the `qmldir` beside it.
     #[serde(default)]
     block: bool,
-    /// `Module.Name`: skin that block's slots.
+    /// Skin `Module.Name`'s slots.
     shell: Option<String>,
     #[serde(default)]
     dry_run: bool,
@@ -359,7 +359,7 @@ struct InsertArgs {
     block: Option<String>,
     /// A module the document must import for it (`Shop.Blocks`).
     import: Option<String>,
-    /// Name of a `Slot` to declare (imports Ljos.Blocks); `text` is its default.
+    /// New `Slot`'s name (imports Ljos.Blocks); `text`: its default.
     slot: Option<String>,
     /// Member to rewrite as `text`; uses keep the old name.
     replace: Option<String>,
@@ -390,7 +390,7 @@ struct RemoveArgs {
     /// The generation read; a `path` needs it (handles and ids are moved past others' edits).
     generation: Option<u64>,
     node: Address,
-    /// The member's name.
+    /// Member name.
     member: Option<String>,
     #[serde(default)]
     dry_run: bool,
@@ -1868,7 +1868,7 @@ fn edits(studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
         .with(
             ToolDef::new::<NewArgs>(
                 "document_new",
-                "Create a QML document from `text`, a JSON file's records (`data`) or a `shell` of a block. Refused if it exists or does not parse. Undo removes it.",
+                "Create a QML document from `text`, a JSON file's records (`data`) or a block's `shell`. Refused if it exists or does not parse. Undo removes it.",
             )
             .answers::<EditOut>()
             .requires(Cap::Mutate)

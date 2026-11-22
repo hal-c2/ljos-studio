@@ -9,11 +9,11 @@ expression: value
     "open_world": false,
     "read_only": false
   },
-  "description": "Create a QML document from `text`, a JSON file's records (`data`) or a `shell` of a block. Refused if it exists or does not parse. Undo removes it.",
+  "description": "Create a QML document from `text`, a JSON file's records (`data`) or a block's `shell`. Refused if it exists or does not parse. Undo removes it.",
   "inputSchema": {
     "properties": {
       "block": {
-        "description": "Also declare it a block in the `qmldir` beside it.",
+        "description": "Also declare it a functional block in the `qmldir` beside it.",
         "type": "boolean"
       },
       "data": {
@@ -21,7 +21,7 @@ expression: value
         "type": "string"
       },
       "doc": {
-        "description": "A new `.qml` path.",
+        "description": "A new `.qml` path relative to the project.",
         "type": "string"
       },
       "dry_run": {
@@ -36,7 +36,7 @@ expression: value
         "type": "string"
       },
       "shell": {
-        "description": "`Module.Name`: skin that block's slots.",
+        "description": "Skin `Module.Name`'s slots.",
         "type": "string"
       },
       "text": {
