@@ -1268,7 +1268,7 @@ pub(crate) fn add(registry: ToolRegistry, studio: &Arc<Mutex<Studio>>) -> ToolRe
                 "preview_events",
                 "The preview's events since a cursor: opened, reloaded (ms), reload_failed (the last good one stays), log lines, ended. `wait_ms` waits instead for it to rest past `rests`, saying `wake_in_ms`.",
             )
-            .answers::<EventsOut>()
+            .answers_typing::<EventsOut>(&["problems"])
             .requires(Cap::Inspect)
             .annotated(ToolAnnotations::READ_ONLY),
             typed({
