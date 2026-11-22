@@ -382,6 +382,16 @@ impl Workspace {
         Ok(())
     }
 
+    /// `dispatch` for a call that takes as long as a program it runs (a
+    /// site's build): run aside from the queue, so the person's gestures
+    /// are not held behind it. `answered` or `refused` tells how it went;
+    /// what it wrote reaches the panels as any write does.
+    #[qml(invokable)]
+    fn aside(cx: &Cx, tool: String, args: Json) -> Result<(), EngineError> {
+        aside(cx.engine, cx.this, tool, args);
+        Ok(())
+    }
+
     /// Fetches the preview's picture again while `settling`.
     #[qml(invokable, name = "lookAgain")]
     fn look_again(cx: &Cx) -> Result<(), EngineError> {
@@ -730,6 +740,50 @@ fn pump(engine: &Engine, ws: ObjectId) {
         let mut q = queue.borrow_mut();
         q.busy = false;
         q.jobs.push_front(kept);
+    }
+}
+
+fn aside(engine: &Engine, ws: ObjectId, tool: String, args: Json) {
+    let server = engine.extension::<Context>().server.borrow().clone();
+    let Some(server) = server else {
+        let error = json!({"code": "unavailable", "message": "no Studio session is served"});
+        let _ = Workspace::emit_refused(&Cx::new(engine, ws), tool, error, args);
+        return;
+    };
+    let (asked, called) = ((tool.clone(), args.clone()), (tool.clone(), args.clone()));
+    let spawned = task::spawn_for(
+        engine,
+        format!("Studio's {tool}"),
+        Some(ws),
+        move || {
+            server
+                .call(&tool, &person(), args)
+                .map(|reply| reply.structured)
+                .map_err(|e| refusal(e.to_value()))
+        },
+        move |engine, done| {
+            if !engine.is_alive(ws) {
+                return;
+            }
+            let cx = Cx::new(engine, ws);
+            let (tool, args) = called;
+            let _ = match done {
+                Ok(Ok(answer)) => Workspace::emit_answered(&cx, tool, answer, args),
+                Ok(Err(error)) => Workspace::emit_refused(&cx, tool, error, args),
+                Err(panic) => {
+                    let error = json!({"code": "internal", "message": panic.message()});
+                    Workspace::emit_refused(&cx, tool, error, args)
+                }
+            };
+        },
+    );
+    if spawned.is_err() {
+        let (tool, args) = asked;
+        let error = json!({
+            "code": "unavailable",
+            "message": "Studio is busy with other work; try again in a moment",
+        });
+        let _ = Workspace::emit_refused(&Cx::new(engine, ws), tool, error, args);
     }
 }
 

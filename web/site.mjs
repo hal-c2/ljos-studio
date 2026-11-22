@@ -7,7 +7,7 @@
 // plain static server would, so it holds only if every address it asks for
 // is its own. It prints what the site weighs and when it first painted.
 
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { extname, join, relative } from "node:path";
 import { gzipSync } from "node:zlib";
 
@@ -137,6 +137,9 @@ check('the page does not show "Playing"', !(await page.evaluate(() => document.b
 
 // And the site has no "images/unused.svg", which nothing names
 check('the site has no "images/unused.svg"', !files.includes("images/unused.svg"), files);
+
+// Then the project still has the file "build/web-site.old/keep.txt"
+check('the project still has the file "build/web-site.old/keep.txt"', existsSync(join(project, "build/web-site.old/keep.txt")), project);
 
 // Then the page's title is "Media, from Studio"
 const head = await page.evaluate(() => ({

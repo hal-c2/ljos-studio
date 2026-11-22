@@ -23,6 +23,8 @@ mod project_watch;
 mod review;
 pub mod schema;
 pub mod signals;
+#[cfg(feature = "native")]
+pub mod site_build;
 pub mod timer;
 pub mod toolkit;
 mod tools;

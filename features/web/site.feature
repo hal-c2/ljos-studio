@@ -38,6 +38,12 @@ Feature: A web export becomes a site any static server serves
 
     And the site has no "images/unused.svg", which nothing names
 
+  # The builder set the site before aside as `<out>.old`, and removed
+  # whatever already had that name.
+  Scenario: A build removes no directory beside the site
+    Given the project had the file "build/web-site.old/keep.txt" before it was exported
+    Then the project still has the file "build/web-site.old/keep.txt"
+
   # A window sizes the root it shows, so a breakpoint state turns on by the
   # window's width. A page is that window; the root kept its declared size, and
   # a phone saw the corner of a desktop page.

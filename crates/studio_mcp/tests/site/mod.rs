@@ -47,6 +47,25 @@ struct Manifest {
     modules: Vec<Module>,
     imports: Vec<String>,
     ljos_web: String,
+    #[serde(default)]
+    page: Option<Page>,
+}
+
+/// The page's head: a title, a description and two pictures, each a
+/// listed file.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Page {
+    #[serde(default)]
+    #[allow(dead_code)]
+    title: Option<String>,
+    #[serde(default)]
+    #[allow(dead_code)]
+    description: Option<String>,
+    #[serde(default)]
+    icon: Option<String>,
+    #[serde(default)]
+    image: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -140,6 +159,14 @@ pub fn build(dir: &Path, entry: &str) -> Result<Site, String> {
         && !listed.contains(theme.as_str())
     {
         return Err(format!("the theme `{theme}` is not a listed file"));
+    }
+
+    for picture in m.page.iter().flat_map(|p| [&p.icon, &p.image]).flatten() {
+        if !listed.contains(picture.as_str()) {
+            return Err(format!(
+                "the page's picture `{picture}` is not a listed file"
+            ));
+        }
     }
 
     let mut own = BTreeSet::new();

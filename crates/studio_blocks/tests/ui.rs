@@ -3344,6 +3344,57 @@ fn sets_export_out(w: &mut UiWorld, out: String) -> StepResult {
     window.enter(&field, &out)
 }
 
+#[given(regex = r#"^the person has set "([^"]+)" to "([^"]*)" in the export panel$"#)]
+#[when(regex = r#"^the person sets "([^"]+)" to "([^"]*)" in the export panel$"#)]
+fn sets_export_field(w: &mut UiWorld, name: String, value: String) -> StepResult {
+    let window = w.window()?;
+    let field = window.node("Export panel", Some("textinput"), &name)?;
+    window.enter(&field, &value)
+}
+
+#[then(regex = r#"^the export panel's "([^"]+)" reads "(.+)"$"#)]
+fn export_field_reads(w: &mut UiWorld, name: String, pattern: String) -> StepResult {
+    let pattern = regex::Regex::new(&pattern).map_err(|e| e.to_string())?;
+    let field = w.window()?.node("Export panel", Some("textinput"), &name)?;
+    pattern
+        .is_match(&field.value)
+        .then_some(())
+        .ok_or_else(|| format!("it reads {:?}", field.value))
+}
+
+#[then(regex = r#"^the export panel has no "([^"]+)"$"#)]
+fn export_has_no(w: &mut UiWorld, name: String) -> StepResult {
+    let tree = w.window()?.tree();
+    let panel = find(&tree, &|n| n.name == "Export panel" && n.role != "label")
+        .ok_or("no export panel in the window")?;
+    match find(panel, &|n| n.name == name) {
+        Some(n) => Err(format!("the export panel has {:?} ({})", n.name, n.role)),
+        None => Ok(()),
+    }
+}
+
+/// Every file below `dir`, as a person listing it would count them.
+fn files_below(dir: &std::path::Path) -> std::io::Result<Vec<String>> {
+    let mut found = Vec::new();
+    for entry in std::fs::read_dir(dir)? {
+        let entry = entry?;
+        if entry.file_type()?.is_dir() {
+            found.extend(files_below(&entry.path())?);
+        } else {
+            found.push(entry.path().display().to_string());
+        }
+    }
+    Ok(found)
+}
+
+#[then(regex = r#"^the directory "([^"]+)" holds (\d+) files$"#)]
+fn directory_holds(w: &mut UiWorld, dir: String, count: usize) -> StepResult {
+    let files = files_below(&w.dir.path().join(&dir)).map_err(|e| format!("`{dir}`: {e}"))?;
+    (files.len() == count)
+        .then_some(())
+        .ok_or_else(|| format!("`{dir}` holds {files:?}"))
+}
+
 // No Return: what is typed is checked once typing pauses.
 #[when(regex = r#"^the person types the output directory "([^"]*)" in the export panel$"#)]
 fn types_export_out(w: &mut UiWorld, out: String) -> StepResult {

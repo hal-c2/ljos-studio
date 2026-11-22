@@ -103,6 +103,12 @@ export const Workspace = defineType("Workspace", QtObject, {
     follow(tool, args) {
       this.$queue.enqueue({ tool, args: args ?? {}, follows: true });
     },
+    // A call that runs a program (a site's build). On the web nothing runs
+    // one, so it waits its turn with the rest, and the tool says why it
+    // cannot.
+    aside(tool, args) {
+      this.$queue.enqueue({ tool, args: args ?? {} });
+    },
     lookAgain() {},
   },
   setup(self) {
