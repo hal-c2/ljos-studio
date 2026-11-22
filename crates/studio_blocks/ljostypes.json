@@ -401,6 +401,18 @@
               "constant": false,
               "group": false,
               "notify": "tokensChanged"
+            },
+            {
+              "name": "tools",
+              "type": "var",
+              "kind": "value",
+              "list": false,
+              "readonly": true,
+              "final": true,
+              "required": false,
+              "constant": false,
+              "group": false,
+              "notify": "toolsChanged"
             }
           ],
           "signals": [
@@ -521,6 +533,18 @@
               "constant": false,
               "group": false,
               "notify": "workspaceChanged"
+            },
+            {
+              "name": "target",
+              "type": "string",
+              "kind": "value",
+              "list": false,
+              "readonly": false,
+              "final": true,
+              "required": false,
+              "constant": false,
+              "group": false,
+              "notify": "targetChanged"
             }
           ],
           "signals": [],
