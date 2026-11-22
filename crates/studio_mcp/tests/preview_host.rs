@@ -985,6 +985,25 @@ fn a_host_that_answers_more_calls_reloads_more_of_a_burst() {
 }
 
 #[test]
+fn a_preview_that_does_not_open_takes_the_last_ones_problems_with_it() {
+    let f = Fixture::new();
+    f.call("preview_open", json!({ "doc": "Shell.qml" }))
+        .unwrap();
+    let before = f.call("preview_events", json!({})).unwrap();
+    assert_eq!(before["problems"][0]["message"], "a warning", "{before}");
+    while f.told.try_recv().is_ok() {}
+    f.fail("open Other.qml", PreviewError::Start("no".to_owned()));
+    f.call("preview_open", json!({ "doc": "Other.qml" }))
+        .unwrap_err();
+    f.told
+        .try_recv()
+        .expect("the window was told the last preview ended");
+    let after = f.call("preview_events", json!({})).unwrap();
+    assert_eq!(after["open"], false);
+    assert!(after.get("problems").is_none(), "{after}");
+}
+
+#[test]
 fn a_burst_shows_once_the_budget_allows_with_nobody_looking() {
     let f = Fixture::new();
     f.call("preview_open", json!({ "doc": "Shell.qml" }))
