@@ -911,7 +911,7 @@ mod tests {
         );
         // What running the line logged comes first; the compiler's words win.
         p.start_problems(None, &[ran.clone(), said.clone()]);
-        assert_eq!(p.problems, [said.clone()]);
+        assert_eq!(p.problems, std::slice::from_ref(&said));
         let seq = p.problems_seq;
         // Another line edited: nobody says it again, and it is still wrong.
         std::fs::write(
@@ -944,7 +944,7 @@ mod tests {
             false,
         );
         p.start_problems(None, std::slice::from_ref(&ran));
-        assert_eq!(p.problems, [ran.clone()]);
+        assert_eq!(p.problems, std::slice::from_ref(&ran));
         p.start_problems(None, &[]);
         assert!(p.problems.is_empty());
     }
