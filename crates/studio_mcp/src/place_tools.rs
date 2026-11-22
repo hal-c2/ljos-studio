@@ -94,10 +94,10 @@ struct ArrangeArgs {
     node: Option<Address>,
     /// For a `path`.
     generation: Option<u64>,
-    /// For `geometry`: leave the siblings out (each is a read of the running app).
+    /// For `geometry`: no siblings.
     #[serde(default)]
     without_siblings: bool,
-    /// For `geometry`: the siblings are the first node's children, for something drawn inside it.
+    /// For `geometry`: the siblings are the first node's children.
     #[serde(default)]
     within: bool,
     /// For `place`.
