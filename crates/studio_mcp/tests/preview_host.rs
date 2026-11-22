@@ -1076,6 +1076,97 @@ fn a_preview_that_ends_as_it_opens_answers_ended() {
 }
 
 #[test]
+fn a_refused_call_that_ended_the_preview_tells_the_windows() {
+    for how in [
+        "a click",
+        "a picture",
+        "a window's picture",
+        "a resize",
+        "a log read as it opens",
+    ] {
+        let f = Fixture::new();
+        if how != "a log read as it opens" {
+            f.call("preview_open", json!({ "doc": "Shell.qml" }))
+                .unwrap();
+        }
+        while f.told.try_recv().is_ok() {}
+        let refused = match how {
+            "a click" => {
+                f.fail("click", ended());
+                f.call("preview_state", json!({ "click": { "id": "player1" } }))
+                    .is_err()
+            }
+            "a picture" => {
+                f.fail("screenshot", ended());
+                f.call("preview_screenshot", json!({})).is_err()
+            }
+            "a window's picture" => {
+                f.fail("screenshot", ended());
+                let ctx = CallCtx::new(CapSet::of([Cap::Inspect]));
+                f.server.shown_picture(&ctx, json!({})).is_err()
+            }
+            "a resize" => {
+                f.fail("resize", ended());
+                f.call(
+                    "preview_open",
+                    json!({ "doc": "Shell.qml", "target": "phone" }),
+                )
+                .is_err()
+            }
+            _ => {
+                f.fail("logs", ended());
+                f.call("preview_open", json!({ "doc": "Shell.qml" }))
+                    .is_err()
+            }
+        };
+        assert!(refused, "{how}");
+        f.told
+            .try_recv()
+            .unwrap_or_else(|_| panic!("no window was told the preview ended: {how}"));
+    }
+}
+
+#[test]
+fn a_refused_call_that_changed_nothing_tells_no_window() {
+    for how in [
+        "no such document",
+        "no start with none open",
+        "a refused click",
+        "a refused picture",
+        "a click with none open",
+        "a picture with none open",
+    ] {
+        let f = Fixture::new();
+        if !how.ends_with("none open") {
+            f.call("preview_open", json!({ "doc": "Shell.qml" }))
+                .unwrap();
+        }
+        while f.told.try_recv().is_ok() {}
+        let answer = match how {
+            "no such document" => f.call("preview_open", json!({ "doc": "None.qml" })),
+            "no start with none open" => {
+                f.fail("open Shell.qml", PreviewError::Start("no".to_owned()));
+                f.call("preview_open", json!({ "doc": "Shell.qml" }))
+            }
+            "a refused click" => {
+                f.fail("click", refused());
+                f.call("preview_state", json!({ "click": { "id": "player1" } }))
+            }
+            "a click with none open" => {
+                f.call("preview_state", json!({ "click": { "id": "player1" } }))
+            }
+            "a refused picture" => {
+                f.fail("screenshot", refused());
+                f.call("preview_screenshot", json!({}))
+            }
+            _ => f.call("preview_screenshot", json!({})),
+        };
+        assert!(answer.is_err(), "{how}");
+        assert!(f.told.try_recv().is_err(), "a window was told: {how}");
+    }
+}
+
+#[test]
 fn a_burst_shows_once_the_budget_allows_with_nobody_looking() {
     let f = Fixture::new();
     f.call("preview_open", json!({ "doc": "Shell.qml" }))
