@@ -9,14 +9,16 @@ use std::{
 
 use crate::schema::Answers;
 use ljos_mcp_core::{
-    Cap, ErrorCode, SurfaceError, ToolAnnotations, ToolDef, ToolRegistry, ToolReply, typed,
+    CallCtx, Cap, ErrorCode, SurfaceError, ToolAnnotations, ToolDef, ToolRegistry, ToolReply, typed,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 use studio_core::{
     Address,
-    preview::{Alias, Click, Input, PreviewError, PreviewEvent, Reload, Size, Target, ms},
+    preview::{
+        Alias, Click, Input, PreviewError, PreviewEvent, Reload, RestWatch, Size, Target, ms,
+    },
 };
 
 use crate::{
@@ -401,7 +403,69 @@ fn act(open: &mut Open, click: Option<&Click>, inputs: &[Input]) -> Result<(), P
     Ok(())
 }
 
-fn state(studio: &Mutex<Studio>, a: StateArgs) -> Result<StateOut, SurfaceError> {
+/// How long an agent's read after a scroll or a swipe waits at most for
+/// the page to stop: a fling that outlasts it is read where it has got to.
+const SETTLE_MS: u64 = 3000;
+
+/// What a `preview_state` call reads once its input is in.
+struct ToRead {
+    doc: String,
+    address: Address,
+    id: String,
+    block: Option<String>,
+    /// The block's published state, then what `read` asked for.
+    names: Vec<String>,
+    mocked: bool,
+    show: Option<String>,
+}
+
+/// A `preview_state` call with its input in.
+struct Acted {
+    to_read: Option<ToRead>,
+    /// What a scroll or a swipe set moving, for a caller that waits for it.
+    watch: Option<Box<dyn RestWatch>>,
+}
+
+/// In three steps, so a glide holds up no other tool: the input goes in
+/// under Studio's lock; an agent's read then waits for the page to stop
+/// outside it, as a person looks once it stops; and what is read is read
+/// under the lock again. Studio's window (`PERSON`) does not wait: a hand
+/// turning the wheel goes on turning it while the page glides.
+fn state(studio: &Mutex<Studio>, ctx: &CallCtx, a: StateArgs) -> Result<StateOut, SurfaceError> {
+    let waits = ctx.client.as_deref() != Some(studio_core::PERSON);
+    let Acted { to_read, watch } = state_input(studio, a, waits)?;
+    if let Some(watch) = watch
+        && let Err(e) = watch.settle(SETTLE_MS)
+    {
+        let previews = lock(studio).previews.clone();
+        let mut previews = preview::lock(&previews);
+        // The wait asks the inspector alone; whether the program behind it
+        // ended, only the host can tell.
+        let e = match (e, previews.open.as_mut()) {
+            (PreviewError::Transport(message), Some(open)) => open
+                .host
+                .alive()
+                .err()
+                .unwrap_or(PreviewError::Transport(message)),
+            (e, _) => e,
+        };
+        return Err(preview_error(previews.failed(e)));
+    }
+    match to_read {
+        Some(to_read) => state_read(studio, to_read),
+        None => Ok(StateOut {
+            block: None,
+            id: None,
+            state: Map::new(),
+            mocked: false,
+            variant: None,
+        }),
+    }
+}
+
+/// Puts the call's writes and input in, and says what to read after and
+/// what to wait on first: what a scroll or a swipe set moving, if `waits`.
+fn state_input(studio: &Mutex<Studio>, a: StateArgs, waits: bool) -> Result<Acted, SurfaceError> {
     let mut studio = lock(studio);
     let previews = studio.previews.clone();
     let mut previews = preview::caught_up(&previews);
@@ -458,12 +522,9 @@ fn state(studio: &Mutex<Studio>, a: StateArgs) -> Result<StateOut, SurfaceError>
         if let Err(e) = act(open, click.as_ref(), &inputs) {
             return Err(preview_error(previews.failed(e)));
         }
-        return Ok(StateOut {
-            block: None,
-            id: None,
-            state: Map::new(),
-            mocked: false,
-            variant: None,
+        return Ok(Acted {
+            to_read: None,
+            watch: settling(open, &inputs, waits),
         });
     };
     let (_, node) = studio.session.resolve(&doc, &address).map_err(error)?;
@@ -514,7 +575,55 @@ fn state(studio: &Mutex<Studio>, a: StateArgs) -> Result<StateOut, SurfaceError>
     if let Err(e) = act(open, click.as_ref(), &inputs) {
         return Err(preview_error(previews.failed(e)));
     }
-    if let Some(show) = a.show {
+    let mut names = names;
+    names.extend(a.read);
+    let to_read = ToRead {
+        doc,
+        address,
+        id,
+        block,
+        names,
+        mocked,
+        show: a.show,
+    };
+    Ok(Acted {
+        to_read: Some(to_read),
+        watch: settling(open, &inputs, waits),
+    })
+}
+
+/// What to wait on before reading: the preview, if an input set something
+/// moving and the caller waits for it to stop.
+fn settling(open: &Open, inputs: &[Input], waits: bool) -> Option<Box<dyn RestWatch>> {
+    let moves = inputs
+        .iter()
+        .any(|i| matches!(i, Input::Scroll { .. } | Input::Swipe { .. }));
+    if waits && moves {
+        open.host.rest_watch()
+    } else {
+        None
+    }
+}
+
+/// Shows and reads what the call asked for, once its input is in.
+fn state_read(studio: &Mutex<Studio>, r: ToRead) -> Result<StateOut, SurfaceError> {
+    let ToRead {
+        doc,
+        address,
+        id,
+        block,
+        names,
+        mocked,
+        show,
+    } = r;
+    let mut studio = lock(studio);
+    let previews = studio.previews.clone();
+    let mut previews = preview::caught_up(&previews);
+    let open = previews
+        .open
+        .as_mut()
+        .ok_or_else(|| preview_error(PreviewError::NotOpen))?;
+    if let Some(show) = show {
         let known = show.is_empty()
             || studio
                 .session
@@ -543,8 +652,6 @@ fn state(studio: &Mutex<Studio>, a: StateArgs) -> Result<StateOut, SurfaceError>
         // It changes the picture without a reload, as a click does.
         open.clicks += 1;
     }
-    let mut names = names;
-    names.extend(a.read);
     let mut asked = names.clone();
     // A block may publish a `state` of its own; the variant is QML's.
     let qml_state = "state".to_owned();
@@ -874,7 +981,7 @@ pub(crate) fn add(registry: ToolRegistry, studio: &Arc<Mutex<Studio>>) -> ToolRe
             .annotated(ToolAnnotations::WRITE),
             typed({
                 let studio = s();
-                move |_, a: StateArgs| state(&studio, a)
+                move |ctx: &CallCtx, a: StateArgs| state(&studio, ctx, a)
             }),
         )
         .with(

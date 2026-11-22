@@ -290,6 +290,12 @@ pub trait RestWatch: Send {
         since: u64,
         wait_ms: u64,
     ) -> std::pin::Pin<Box<dyn Future<Output = Result<Rest, PreviewError>> + Send>>;
+
+    /// Waits until what a scroll or a swipe set moving has stopped, for at
+    /// most `wait_ms`: what is read next is where the content came to rest,
+    /// as a person looks once it stops. A fling that outlasts the bound is
+    /// read where it has got to.
+    fn settle(&self, wait_ms: u64) -> Result<(), PreviewError>;
 }
 
 pub trait PreviewHost: Send {
