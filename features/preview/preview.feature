@@ -278,6 +278,18 @@ Feature: A shell under edit runs in a preview
         }
         """
 
+    Scenario: A call that asks nothing of the preview is told all three things it can ask
+      Given the agent has called the tool "preview_open" with:
+        """json
+        {"doc": "Shell.qml"}
+        """
+      When the agent calls the tool "preview_state" with:
+        """json
+        {}
+        """
+      Then the agent is refused with "invalid_argument"
+      And the refusal's message matches "^give at least one of: the `node` to read, a click, text to `type`$"
+
     Scenario: A mocked block's state is set from outside
       Given the agent has called the tool "preview_open" with:
         """json
