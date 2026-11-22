@@ -33,19 +33,19 @@ documents: export), `run` (start previews). They are granted at launch with
 | 1 | `project_open` | Open a project directory below the workspace, or describe the open one: documents, blocks, targets; `asset` lists, imports or removes its pictures and fonts | inspect; fs to import or remove |
 | 2 | `document_tree` | A document's objects in order: handle, path, type, `id`, bindings; paginated | inspect |
 | 3 | `document_text` | A document's text or a byte range of it, with its generation and whether it parses | inspect |
-| 4 | `document_new` | Create a QML document, or one keeping a project JSON file's records (`data`): a `JsonListModel` of the file, or a `ListModel` copy; undo removes it | mutate |
+| 4 | `document_new` | Create a QML document, or one keeping a project JSON file's records (`data`): a `JsonListModel` of the file, or a `ListModel` copy, or a `shell` of a block; undo removes it | mutate |
 | 5 | `document_edit` | Replace a byte range of a document's text, as the code view does | mutate |
 | 6 | `node_find` | Find objects by `id`, type, binding name or text in a binding's value | inspect |
 | 7 | `node_select` | Set Studio's selection (shown on the canvas and in the inspector) by addresses or by a point `at` in the preview; `hold` leases them to the caller | inspect (`hold`: mutate) |
-| 8 | `node_inspect` | An object's bindings with byte ranges, its parent, its children, its type's members, its signals, its states and transitions, its flows and the data it sees | inspect |
+| 8 | `node_inspect` | An object's bindings with byte ranges, its parent, its children, its own `members` and its type's, its signals, its states and transitions, its flows and the data it sees | inspect |
 | 9 | `blocks_list` | Registered blocks with contracts: state, actions, events, slots, mocks; per document, the toolkit types it can place, QtQuick3D among them | inspect |
-| 10 | `node_insert` | Insert QML text or a block instance as a child at an index | mutate |
+| 10 | `node_insert` | Insert QML text or a block instance as a child at an index, or a member; declare a `slot`; `replace` a member | mutate |
 | 11 | `node_move` | Move a node to a parent and index (reparent or reorder) | mutate |
-| 12 | `node_remove` | Remove a node with its comments | mutate |
+| 12 | `node_remove` | Remove a node with its comments, or one `member` of it | mutate |
 | 13 | `property_set` | Set or remove a property's value (a literal) | mutate |
 | 14 | `binding_set` | Set a binding expression or a handler, checked before it is written | mutate |
 | 15 | `state_edit` | Add, rename or remove a `State`; set its changes, its `when` or a breakpoint; add or remove a `Transition` or an interaction | mutate |
-| 16 | `slot_contribute` | Write a `Contribution` to a block's slot, or take one out | mutate |
+| 16 | `slot_contribute` | Write a `Contribution` to a block's slot or to one instance's own (`node`), or take one out | mutate |
 | 17 | `history` | List, undo or redo edits (each with its inverse changes and its author); undo and redo take the caller's own, `all` the newest | inspect to list; mutate to undo or redo |
 | 18 | `theme_set` | Read the tokens (`Ljos.Design` roles and the theme file, light and dark), or set one; the preview reloads live | mutate |
 | 19 | `preview_open` | Start a preview of a shell on a target (desktop, tablet, phone) or size with live or mocked state, its height the screen's or its content's (`fit`); on the open one, change size, fit or state in place | run |
@@ -348,7 +348,8 @@ Refused: `not_found` (`no_block`) for a block no qmldir declares,
 `not_actionable` (`no_slots`) for one with no slot. `slot_contribute {doc,
 node, slot, mode?, text | block}` skins one instance alone: it sets the slot
 on that instance, as the shell does, instead of adding a `Contribution`
-beside it; a contribution already there is replaced. `not_found` (`no_slot`)
+beside it; a contribution already there is replaced, and `binding_set` of the
+slot's name to `null` takes it out. `not_found` (`no_slot`)
 when that instance's block has no such slot.
 
 A component's API is its declared properties, signals and functions.

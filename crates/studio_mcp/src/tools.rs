@@ -113,19 +113,19 @@ struct Text {
 #[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct NewArgs {
-    /// A new `.qml` path relative to the project.
+    /// A new `.qml` path.
     doc: String,
-    /// Its text; an empty `Item` importing QtQuick when left out.
+    /// Its text; default an empty QtQuick `Item`.
     text: Option<String>,
-    /// A project JSON file of records: a `JsonListModel` of it, or with `model: "list"` a `ListModel` copy. Not with `text`.
+    /// A project JSON file of records. Not with `text`.
     data: Option<String>,
-    /// How `data` is kept: `json` (the default), or `list`.
+    /// `json` (default): a `JsonListModel` of it; `list`: a `ListModel` copy.
     #[serde(default)]
     model: DataModel,
-    /// Also declare it a functional block in the `qmldir` beside it.
+    /// Also declare it a block in the `qmldir` beside it.
     #[serde(default)]
     block: bool,
-    /// A block from `blocks_list`, `Module.Name`: the document is a shell of it, an instance that skins each of its slots with a `Contribution` to restyle. Not with `text` or `data`.
+    /// `Module.Name`: skin that block's slots.
     shell: Option<String>,
     #[serde(default)]
     dry_run: bool,
@@ -351,19 +351,19 @@ struct InsertArgs {
     /// The generation read; a `path` needs it (handles and ids are moved past others' edits).
     generation: Option<u64>,
     parent: Address,
-    /// Child position; the end when left out.
+    /// Child position; default the end.
     index: Option<usize>,
-    /// One object in QML, or one member (`function f() {}`, `signal s()`, `property int n`, `onClicked: f()`). With `block`: left out for the bare block, or its inputs.
+    /// One object, or member (`function f() {}`, `signal s()`, `property int n`, `onClicked: f()`). With `block`: its inputs, if any.
     text: Option<String>,
-    /// A block from `blocks_list`, `Module.Name`; imported, and `text` must be of its type.
+    /// `Module.Name` from `blocks_list`, imported; `text` must be of its type.
     block: Option<String>,
     /// A module the document must import for it (`Shop.Blocks`).
     import: Option<String>,
-    /// Declare a slot of this name: a `Slot` here showing what is contributed to it, and the root's `property list<Contribution>` it reads. `text` is what it shows while nothing is.
+    /// Declare a slot: `face` writes `Slot { name: "face" }`, imports Ljos.Blocks; `text` is its default.
     slot: Option<String>,
-    /// A member of `parent` to rewrite as `text` where it is written: rename, retype, new default, parameters or body. What reads the old name is left as it is.
+    /// Member to rewrite as `text`; uses keep the old name.
     replace: Option<String>,
-    /// Give the object an `id` if it has none (default true).
+    /// Add an `id` if none (default true).
     id: Option<bool>,
     #[serde(default)]
     dry_run: bool,
@@ -390,7 +390,7 @@ struct RemoveArgs {
     /// The generation read; a `path` needs it (handles and ids are moved past others' edits).
     generation: Option<u64>,
     node: Address,
-    /// Take out only this member of `node`: a property, signal, function or handler (`node_inspect` lists them).
+    /// The member's name.
     member: Option<String>,
     #[serde(default)]
     dry_run: bool,
@@ -529,21 +529,21 @@ struct StateEditArgs {
 struct ContributeArgs {
     doc: String,
     generation: Option<u64>,
-    /// The slot, as `blocks_list` lists it (`controls`).
+    /// As in `blocks_list`.
     slot: Option<String>,
-    /// Where the `Contribution` goes; the root when left out.
+    /// Where it goes; default the root.
     parent: Option<Address>,
-    /// Or a block's instance: its own `slot` is set to the `Contribution`, so only it shows it (replacing what it had; `binding_set` null takes it out).
+    /// Or the instance to skin alone.
     node: Option<Address>,
-    /// How it joins what the slot holds; the runtime's default when left out.
+    /// How it joins the slot; default the runtime's.
     mode: Option<Mode>,
-    /// Its place among the slot's contributions.
+    /// Its place in the slot.
     order: Option<i64>,
     /// What it shows: one object in QML.
     text: Option<String>,
-    /// Or a block from `blocks_list`, `Module.Name`, shown bare.
+    /// Or a `Module.Name`, shown bare.
     block: Option<String>,
-    /// Take this `Contribution` out instead.
+    /// The one to take out instead.
     remove: Option<Address>,
     #[serde(default)]
     dry_run: bool,
@@ -920,13 +920,13 @@ const DESTRUCTIVE: ToolAnnotations = ToolAnnotations {
 #[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct BlocksArgs {
-    /// Only this module's blocks (`App.Media`).
+    /// Only this module's blocks.
     module: Option<String>,
-    /// Also answer `types`, the toolkit types this document can place.
+    /// Also list `types` it can place, its imports first.
     doc: Option<String>,
-    /// Only blocks and types whose name holds this, in any case.
+    /// Only names holding this, in any case.
     search: Option<String>,
-    /// From a previous page's `next`.
+    /// The last page's `next`.
     cursor: Option<String>,
 }
 
@@ -1804,7 +1804,7 @@ fn edits(studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
         .with(
             ToolDef::new::<NewArgs>(
                 "document_new",
-                "Create a QML document from `text`, or from a JSON file's records (`data`), or a `shell` of a block that skins its slots. Refused if it exists or does not parse. `block` declares it in the `qmldir` beside it. Undo removes it.",
+                "Create a QML document from `text`, a JSON file's records (`data`) or a `shell` of a block. Refused if it exists or does not parse. Undo removes it.",
             )
             .answers::<EditOut>()
             .requires(Cap::Mutate)
@@ -2027,7 +2027,7 @@ fn edits(studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
         .with(
             ToolDef::new::<NodeArgs>(
                 "node_inspect",
-                "An object's bindings with byte ranges, its own members (properties, signals, functions, handlers), parent, children, states, transitions, flows, signals with arguments, and the roles and rows of the data it sees.",
+                "An object's bindings with byte ranges, own members, parent, children, states, transitions, flows, signals with arguments, and its data's roles and rows (in a delegate, the list's).",
             )
             .answers::<Inspected>()
             .requires(Cap::Inspect),
@@ -2099,7 +2099,7 @@ fn edits(studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
         .with(
             ToolDef::new::<BlocksArgs>(
                 "blocks_list",
-                "List the project's blocks with their contracts and `slots`; `node_insert` places one by `Module.Name`, and with `slot` declares a slot (`import Ljos.Blocks`, `Slot { name: \"face\" }`). Unreadable ones are in `errors`. With `doc`, `types` lists the toolkit types it can place.",
+                "The project's blocks with their contracts and `slots`; `node_insert` places one by `Module.Name`. Unreadable ones are in `errors`.",
             )
             .answers::<BlocksOut>()
             .requires(Cap::Inspect),
@@ -2141,7 +2141,7 @@ fn edits(studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
         .with(
             ToolDef::new::<InsertArgs>(
                 "node_insert",
-                "Insert an object in QML or a `block` from `blocks_list` as a child, or a member (property, signal, function, handler) of `parent`; `replace` rewrites one. `slot: \"face\"` writes `Slot { name: \"face\" }` and the root's `property list<Contribution> face`, importing Ljos.Blocks.",
+                "Insert an object, a `block` or a member in `parent`. Returns the handle.",
             )
             .answers::<EditOut>()
             .requires(Cap::Mutate)
@@ -2191,7 +2191,7 @@ fn edits(studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
         .with(
             ToolDef::new::<RemoveArgs>(
                 "node_remove",
-                "Remove an object with its comments, or just its `member` (a property, signal, function or handler). A removed object's handle answers `stale_ref` until undo.",
+                "Remove an object with its comments, or its `member`. An object's handle is `stale_ref` until undo.",
             )
             .answers::<EditOut>()
             .requires(Cap::Mutate)
@@ -2289,7 +2289,7 @@ fn edits(studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
         .with(
             ToolDef::new::<ContributeArgs>(
                 "slot_contribute",
-                "Write a Contribution to a block's slot, showing QML `text` or a `block` (imports added once), or `remove` one; with `node`, set one instance's own slot. Refuses a slot no block offers (`blocks_list`).",
+                "Write or `remove` a Contribution to a block's slot (imports added). Refuses a slot no block offers.",
             )
             .answers::<EditOut>()
             .requires(Cap::Mutate)
