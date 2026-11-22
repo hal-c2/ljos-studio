@@ -4,7 +4,7 @@
 
 use std::sync::{Arc, Mutex};
 
-use ljos_mcp_core::{CallCtx, Cap, CapSet};
+use ljos_mcp_core::{CallCtx, Cap, CapSet, DEFAULT_RESULT_BYTES};
 use serde_json::{Map, Value, json};
 use studio_core::MemStore;
 use studio_core::preview::{
@@ -50,6 +50,35 @@ struct Seen {
     /// On the `n`th measure the `tall` item folds to this height first, as a
     /// page changes while it runs.
     folds: Option<(usize, f64)>,
+    /// The host can be waited on: it rested once, and rests again as soon as
+    /// a wait parks.
+    watches: bool,
+}
+
+struct RestsOnceMore;
+
+impl RestWatch for RestsOnceMore {
+    fn wait(&self, _since: Option<u64>, _wait_ms: u64) -> Result<Rest, PreviewError> {
+        Ok(Rest {
+            rests: 1,
+            wake_in_ms: None,
+        })
+    }
+
+    fn parked(
+        &self,
+        since: u64,
+        _wait_ms: u64,
+    ) -> std::pin::Pin<Box<dyn Future<Output = Result<Rest, PreviewError>> + Send>> {
+        Box::pin(std::future::ready(Ok(Rest {
+            rests: since + 1,
+            wake_in_ms: None,
+        })))
+    }
+
+    fn settle(&self, _: u64) -> Result<(), PreviewError> {
+        Ok(())
+    }
 }
 
 struct Recorder(Arc<Mutex<Seen>>);
@@ -243,12 +272,19 @@ impl PreviewHost for Recorder {
         })
     }
 
-    fn rest_watch(&self) -> Option<Box<dyn RestWatch>> {
-        Some(Box::new(Settling(self.0.clone())))
-    }
-
     fn close(&mut self) {
         let _ = self.note("close".to_owned());
+    }
+
+    /// One that comes to rest at once, after whatever `during_settle`
+    /// does; with `watches`, one that rests again as soon as a wait parks.
+    fn rest_watch(&self) -> Option<Box<dyn RestWatch>> {
+        let watches = self.0.lock().unwrap().watches;
+        Some(if watches {
+            Box::new(RestsOnceMore)
+        } else {
+            Box::new(Settling(self.0.clone()))
+        })
     }
 }
 
@@ -1926,6 +1962,7 @@ fn a_read_after_a_scroll_reads_nothing_when_its_object_was_replaced_while_it_set
         "read the other object: {calls:?}"
     );
 }
+
 #[test]
 fn a_refused_open_that_changed_the_preview_tells_the_windows() {
     for how in [
@@ -1989,15 +2026,170 @@ fn a_warning_logged_later_reaches_the_windows_without_a_call() {
 
 #[test]
 fn an_app_that_warns_without_end_has_bounded_problems() {
-    let f = Fixture::new();
-    f.call("preview_open", json!({ "doc": "Shell.qml" }))
+    let f = warned_without_end();
+    let shown = f.server.studio().lock().unwrap().view("Shell.qml");
+    assert_eq!(shown.problems.len(), 1024);
+
+    fail_a_write(&f);
+    let out = f.call("preview_events", json!({})).unwrap();
+    assert_within_the_cap(&out);
+    let problems = out["problems"].as_array().unwrap();
+    assert!(!problems.is_empty(), "no problems were answered");
+    assert!(
+        problems
+            .iter()
+            .any(|p| p["message"] == "expected a property"),
+        "the failed reload's error was cut"
+    );
+    assert_eq!(out["truncated"], true, "the cut isn't said");
+    assert_eq!(
+        out["truncated_field"], "problems",
+        "what was cut isn't said"
+    );
+}
+
+/// A project whose `Main.qml` can be written, its preview open.
+fn writable() -> Fixture {
+    let f = Fixture::with(|dir| {
+        std::fs::write(dir.join("Main.qml"), ROOTED).unwrap();
+    });
+    f.call("preview_open", json!({ "doc": "Main.qml" }))
         .unwrap();
+    f
+}
+
+/// [`writable`], its app having warned 1200 times.
+fn warned_without_end() -> Fixture {
+    let f = writable();
     for round in 0..12 {
         f.seen.lock().unwrap().later = (0..100).map(|i| warned(&format!("{round}.{i}"))).collect();
         f.server.pull_problems();
     }
-    let out = f.call("preview_events", json!({})).unwrap();
-    assert_eq!(out["problems"].as_array().unwrap().len(), 1024);
+    f
+}
+
+/// Writes `Main.qml`, whose reload fails, and what that edit answers.
+fn fail_a_write(f: &Fixture) -> Value {
+    {
+        let mut seen = f.seen.lock().unwrap();
+        seen.fail_next = true;
+        seen.failure = "Main.qml:4: expected a property".to_owned();
+    }
+    f.call(
+        "binding_set",
+        json!({ "doc": "Main.qml", "node": { "id": "root" }, "name": "width", "value": "2" }),
+    )
+    .unwrap()
+}
+
+/// An answer is sent twice, each copy within half of the tool's budget.
+fn assert_within_the_cap(out: &Value) {
+    let bytes = serde_json::to_vec(out).unwrap().len();
+    assert!(bytes <= DEFAULT_RESULT_BYTES / 2, "{bytes} bytes in a copy");
+}
+
+#[test]
+fn a_failed_reloads_error_is_among_an_edits_warnings_whatever_came_before() {
+    let f = writable();
+    let mut older: Vec<LogLine> = (0..10).map(|i| warned(&format!("older {i}"))).collect();
+    older.extend((0..10).map(|i| LogLine {
+        level: "error".to_owned(),
+        ..warned(&format!("thrown {i}"))
+    }));
+    f.seen.lock().unwrap().later = older;
+    f.server.pull_problems();
+
+    let out = fail_a_write(&f);
+    let told = out["warnings"].as_array().unwrap();
+    assert!(
+        told.iter().any(|p| p["message"] == "expected a property"),
+        "the failed reload's error was left out: {out}"
+    );
+}
+
+/// The logged messages starting `with` in every page of events from the
+/// first, each page's problems handed to `check`.
+fn polled(f: &Fixture, with: &str, check: impl Fn(&Value)) -> Vec<String> {
+    let (mut since, mut got) = (0, Vec::new());
+    for _ in 0..2000 {
+        let out = f.call("preview_events", json!({ "since": since })).unwrap();
+        assert_within_the_cap(&out);
+        check(&out);
+        let next = out["next"].as_u64().unwrap();
+        let events = out["events"].as_array().unwrap();
+        if events.is_empty() {
+            assert_eq!(next, since, "a page of no events moved on");
+            return got;
+        }
+        assert!(next > since, "a page of events didn't move on");
+        got.extend(
+            events
+                .iter()
+                .filter_map(|e| e["message"].as_str())
+                .filter(|m| m.starts_with(with))
+                .map(str::to_owned),
+        );
+        since = next;
+    }
+    panic!("polling never ended");
+}
+
+#[test]
+fn polling_beside_problems_yields_every_event_once_in_order() {
+    let f = writable();
+    let said: Vec<String> = (0..100)
+        .map(|i| format!("line {i:03}: {}", "x".repeat(72)))
+        .collect();
+    f.seen.lock().unwrap().later = said
+        .iter()
+        .enumerate()
+        .map(|(i, message)| LogLine {
+            level: if i < 90 { "warning" } else { "info" }.to_owned(),
+            ..warned(message)
+        })
+        .collect();
+    f.server.pull_problems();
+
+    let got = polled(&f, "line ", |out| {
+        let problems = out["problems"].as_array().unwrap();
+        let listed = problems
+            .iter()
+            .filter(|p| p["message"].as_str().unwrap().starts_with("line "))
+            .count();
+        assert_eq!(listed, 90, "problems are missing beside the events");
+    });
+    assert_eq!(got, said);
+}
+
+#[test]
+fn polling_ends_when_problems_alone_fill_the_answer() {
+    let f = warned_without_end();
+    let got = polled(&f, "", |out| {
+        assert_eq!(
+            out["truncated_field"], "problems",
+            "what was cut isn't said"
+        );
+    });
+    assert_eq!(got.last().map(String::as_str), Some("11.99"));
+}
+
+#[test]
+fn a_parked_wait_answers_within_the_cap() {
+    use ljos_mcp_core::McpSurface as _;
+
+    let f = warned_without_end();
+    f.seen.lock().unwrap().watches = true;
+    let ctx = CallCtx::new(CapSet::of([Cap::Inspect]));
+    let args = json!({ "wait_ms": 1000, "rests": 1 });
+    let out = tokio::runtime::Builder::new_current_thread()
+        .build()
+        .unwrap()
+        .block_on(f.server.call_tool("preview_events", &ctx, args))
+        .unwrap_or_else(|e| panic!("{}", e.to_value()))
+        .structured;
+    assert_eq!(out["rests"], 2, "the wait didn't park");
+    assert_within_the_cap(&out);
+    assert_eq!(out["truncated"], true, "the cut isn't said");
 }
 
 /// The error a write to `doc` leaves when its reload fails saying `says`.
