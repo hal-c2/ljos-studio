@@ -738,6 +738,9 @@ than a bundle of either kind (a site built from one, say).
   another by a name it makes. A string naming a directory or the start of a
   path keeps everything below it rather than guessing.
 - DECISION: `export` writes no history entry; it changes no document.
+- DECISION: what the arguments take is said here and, of `entry` and `out`
+  alone, in `tools/list`: the list has a cap every session pays for, so a
+  build's and a page's arguments are named and typed there, and no more.
 
 `review {action, doc?, node?, comment?, text?, author?}` keeps design
 review comments in `.studio/review.json`, never in the QML:

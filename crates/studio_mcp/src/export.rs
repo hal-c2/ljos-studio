@@ -135,30 +135,31 @@ impl Target {
 #[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct ExportArgs {
-    /// The document the app starts with, usually its shell (`Shell.qml`).
+    // A `///` here is bytes every session pays for in `tools/list`, which
+    // has a cap: what else these take is in MCP.md.
+    /// The first document.
     entry: String,
-    /// `native` (default) or `web`.
     #[serde(default)]
     target: Target,
-    /// Below the project's `build/`; default `build/<target>`. A bundle there is replaced.
+    /// Below `build/`; replaced.
     out: Option<String>,
-    /// Say what the bundle would hold; write nothing.
+    // Says what the bundle would hold; writes nothing.
     #[serde(default)]
     dry_run: bool,
-    /// The site's title, description and pictures (web): written into the
-    /// project's `site.json`, which is read when this is not given.
+    // The site's title, description and pictures (web): written into the
+    // project's `site.json`, which is read when this is not given.
     page: Option<Page>,
-    /// Build the site from the bundle with ljos-web, into `<out>-site`, and
-    /// serve it on this machine (web; needs `run`). With `dry_run`, only say
-    /// whether a build would find what it needs.
+    // Build the site from the bundle with ljos-web, into `<out>-site`, and
+    // serve it on this machine (web; needs `run`). With `dry_run`, only say
+    // whether a build would find what it needs.
     #[serde(default)]
     build: bool,
-    /// Open the built site in the browser.
+    // Open the built site in the browser.
     #[serde(default)]
     open: bool,
-    /// The ljos-web folder to build with, when Studio does not find one.
+    // The ljos-web folder to build with, when Studio does not find one.
     ljos_web: Option<String>,
-    /// The `qmlc` to build with, when Studio does not find one.
+    // The `qmlc` to build with, when Studio does not find one.
     qmlc: Option<String>,
 }
 
@@ -171,10 +172,10 @@ pub struct Page {
     pub title: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
-    /// The tab's icon.
+    // The tab's icon.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub icon: Option<String>,
-    /// The picture a shared link shows.
+    // The picture a shared link shows.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub image: Option<String>,
 }
@@ -1483,7 +1484,7 @@ pub(crate) fn add(registry: ToolRegistry, studio: &Arc<Mutex<Studio>>) -> ToolRe
     registry.with(
         ToolDef::new::<ExportArgs>(
             "export",
-            "Write a bundle that runs without Studio: QML, theme, assets and own modules, never mocks or `.studio/`. `native`: `ljos-bundle.json` says how `ljos run` starts it. `web`: `ljos-site.json` is what ljos-web builds from, holding the code and only the files it names; `page` sets the title, description and pictures (kept in `site.json`); `build` (needs `run`) builds the site into `<out>-site` and answers its path and a URL this machine serves it on, `open` opens it. `dry_run` writes nothing and, with `build`, says what a build lacks.",
+            "Write a bundle that runs without Studio, never mocks or `.studio/`: for `ljos run`, or `web` to `build` with ljos-web. `dry_run` only checks.",
         )
         .answers::<ExportOut>()
         .requires(Cap::Fs)
