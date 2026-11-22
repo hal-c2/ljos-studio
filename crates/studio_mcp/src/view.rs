@@ -11,7 +11,7 @@ use serde::Serialize;
 use serde_json::Value as Json;
 use studio_core::{
     Address, StateInfo,
-    preview::{PreviewEvent, Target},
+    preview::{LogLine, PreviewEvent, Target},
 };
 use studio_core::{Interaction, flows::handler_name};
 
@@ -174,6 +174,38 @@ pub struct Edge {
     pub signal: String,
 }
 
+/// Something wrong in the running preview: a warning or error its last
+/// reload, or the app since, logged, placed on the object written there.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct Problem {
+    /// `warning` or `error`.
+    pub severity: String,
+    pub message: String,
+    /// As the project names it; empty when the preview did not say.
+    pub file: String,
+    /// One-based; 0 when the preview did not say.
+    pub line: u32,
+    /// The handle of the innermost object written on that line of `file`;
+    /// empty when none is known.
+    pub node: String,
+}
+
+impl Problem {
+    /// As an answer carries it: what is not known is left out.
+    pub(crate) fn answered(&self) -> Json {
+        let mut out = serde_json::json!({ "severity": self.severity, "message": self.message });
+        for (key, value) in [("file", &self.file), ("node", &self.node)] {
+            if !value.is_empty() {
+                out[key] = Json::from(value.as_str());
+            }
+        }
+        if self.line > 0 {
+            out["line"] = Json::from(self.line);
+        }
+        out
+    }
+}
+
 /// What a panel shows of an asset; `project_open` answers more, after reading
 /// each file, which a publish after every edit should not.
 #[derive(Clone, Debug, Default, PartialEq, Serialize)]
@@ -235,6 +267,9 @@ pub struct View {
     /// What other writers hold now, in every document: what the window's
     /// edit of would be refused as `leased`.
     pub leases: Vec<Held>,
+    /// What is wrong in the running preview now, in every file it runs;
+    /// empty when nothing is, or no preview runs.
+    pub problems: Vec<Problem>,
 }
 
 /// An object another writer holds.
@@ -317,6 +352,8 @@ impl Studio {
             })
             .collect();
         view.preview = preview_of(&preview::lock(&self.previews));
+        let lines = preview::lock(&self.previews).problems.clone();
+        view.problems = self.problems(&lines);
         if let Some(p) = &mut view.preview {
             let shown = shown(&preview::lock(&self.previews));
             p.variant = shown
@@ -517,6 +554,56 @@ impl Studio {
         view
     }
 
+    /// The preview's problems, each on the object written on its line.
+    pub(crate) fn problems(&mut self, lines: &[LogLine]) -> Vec<Problem> {
+        let mut trees: std::collections::HashMap<String, Option<Vec<(String, usize, usize)>>> =
+            std::collections::HashMap::new();
+        lines
+            .iter()
+            .map(|l| {
+                let file = l.file.clone().unwrap_or_default();
+                let line = l.line.unwrap_or(0);
+                let node = if file.is_empty() || line == 0 {
+                    String::new()
+                } else {
+                    let spans = trees
+                        .entry(file.clone())
+                        .or_insert_with(|| self.spans(&file));
+                    spans
+                        .as_deref()
+                        .and_then(|spans| innermost(spans, line))
+                        .unwrap_or_default()
+                };
+                Problem {
+                    severity: if matches!(l.level.as_str(), "warning" | "warn") {
+                        "warning"
+                    } else {
+                        "error"
+                    }
+                    .to_owned(),
+                    message: l.message.clone(),
+                    file,
+                    line,
+                    node,
+                }
+            })
+            .collect()
+    }
+
+    /// Each object of `doc` with the lines it is written on: handle, first
+    /// line, last line, one-based. `None` for a file that is no document
+    /// the session can read.
+    fn spans(&mut self, doc: &str) -> Option<Vec<(String, usize, usize)>> {
+        let text = self.session.text(doc).ok()?.0.to_owned();
+        let (tree, _) = self.session.tree(doc).ok()?;
+        let line_of = |at: usize| text[..at.min(text.len())].matches('\n').count() + 1;
+        Some(
+            tree.iter()
+                .map(|(h, n)| (h.clone(), line_of(n.start), line_of(n.end)))
+                .collect(),
+        )
+    }
+
     /// `doc`'s root's states and the ways between them. Only interactions
     /// that set the root's state, or open a document, are its flow; one
     /// that sets another object's state is that object's.
@@ -591,6 +678,17 @@ impl Studio {
             .find(|s| s.when.as_deref() == Some(condition.as_str()))
             .map(|s| s.name)
     }
+}
+
+/// The object written on `line` that no other object written there is in:
+/// the one that starts last among those around it.
+fn innermost(spans: &[(String, usize, usize)], line: u32) -> Option<String> {
+    let line = line as usize;
+    spans
+        .iter()
+        .filter(|(_, first, last)| *first <= line && line <= *last)
+        .max_by_key(|(_, first, _)| *first)
+        .map(|(h, ..)| h.clone())
 }
 
 /// The state `preview_state` is showing, which wins over a breakpoint's.

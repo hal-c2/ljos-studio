@@ -418,6 +418,39 @@ fn an_added_line_is_read_as_a_whole_line() {
     assert_eq!(qml_edit::splice(after, &back), before);
 }
 
+#[test]
+fn an_edit_at_both_ends_is_told_as_two_changes() {
+    let before = "import QtQuick\n\nItem {\n    width: 200\n    height: 100\n}\n";
+    let after = "import QtQuick\nimport QtQuick.Layouts\n\nItem {\n    width: 200\n    height: 100\n    RowLayout {}\n}\n";
+    assert_eq!(diff(before, after).len(), 1);
+    let s = spans(before, after);
+    assert_eq!(s.len(), 2, "{s:?}");
+    assert_eq!(s[0].replacement, "import QtQuick.Layouts\n");
+    assert_eq!(s[1].replacement, "    RowLayout {}\n");
+    assert_eq!(qml_edit::splice(before, &s), after);
+    // Too little kept between is one change.
+    assert_eq!(spans("a\nb\nc\n", "x\nb\ny\n").len(), 1);
+    assert_eq!(spans("same", "same"), vec![]);
+}
+
+#[test]
+fn a_file_url_with_a_space_is_a_place_and_a_sentence_is_not() {
+    use crate::preview::place_of;
+    assert_eq!(
+        place_of("file:///My Projects/app/Main.qml:6: ReferenceError: x is not defined"),
+        Some((
+            "file:///My Projects/app/Main.qml",
+            6,
+            "ReferenceError: x is not defined"
+        ))
+    );
+    assert_eq!(place_of("cannot load Main.qml:6: no such type"), None);
+    assert_eq!(
+        place_of("file:///p/a.png: wanted by Main.qml:6: missing"),
+        None
+    );
+}
+
 /// A store whose writes fail while the flag is up.
 struct Flaky {
     files: MemStore,

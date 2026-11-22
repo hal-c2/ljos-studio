@@ -79,6 +79,31 @@ struct TreeNode {
     line: usize,
     /// `name: value` as written, groups dotted (`font.bold`).
     bindings: Vec<String>,
+    /// The properties it declares, by name.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    properties: Vec<String>,
+    /// The signals it declares, as `name(type argument, …)`.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    signals: Vec<String>,
+    /// The functions it declares, by name.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    functions: Vec<String>,
+}
+
+/// A declared signal as it would be written, less the keyword.
+fn signal_text(s: &studio_core::DeclaredSignal) -> String {
+    let arguments: Vec<String> = s
+        .arguments
+        .iter()
+        .map(|(name, ty)| {
+            if ty.is_empty() {
+                name.clone()
+            } else {
+                format!("{ty} {name}")
+            }
+        })
+        .collect();
+    format!("{}({})", s.name, arguments.join(", "))
 }
 
 #[derive(Serialize, JsonSchema)]
@@ -180,6 +205,9 @@ pub(crate) struct EditOut {
     /// The handle of the object put or moved.
     #[serde(skip_serializing_if = "Option::is_none")]
     node: Option<String>,
+    /// The id the object put has.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    id: Option<String>,
     /// The text the edit would give, for a dry run.
     #[serde(skip_serializing_if = "Option::is_none")]
     text: Option<String>,
@@ -209,6 +237,7 @@ impl From<Outcome> for EditOut {
                 .collect(),
             history: o.history,
             node: o.node,
+            id: None,
             unchanged: o.unchanged,
             text: o.text,
             rebased_from: o.rebased,
@@ -357,8 +386,8 @@ struct InsertArgs {
     text: Option<String>,
     /// `Module.Name` from `blocks_list`, imported; `text` must be of its type.
     block: Option<String>,
-    /// A module the document must import for it (`Shop.Blocks`).
-    import: Option<String>,
+    /// Modules it needs (`Shop.Blocks`); the toolkit's are added.
+    import: Option<Modules>,
     /// New `Slot`'s name (imports Ljos.Blocks); `text`: its default.
     slot: Option<String>,
     /// Member to rewrite as `text`; uses keep the old name.
@@ -367,6 +396,23 @@ struct InsertArgs {
     id: Option<bool>,
     #[serde(default)]
     dry_run: bool,
+}
+
+/// One module or several.
+#[derive(Deserialize, JsonSchema)]
+#[serde(untagged)]
+enum Modules {
+    One(String),
+    Many(Vec<String>),
+}
+
+impl Modules {
+    fn list(self) -> Vec<String> {
+        match self {
+            Modules::One(module) => vec![module],
+            Modules::Many(modules) => modules,
+        }
+    }
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -634,18 +680,18 @@ impl Variant {
 struct ThemeArgs {
     /// Whose theme: the nearest `theme.json` up from it; left out, the preview's, else the project's.
     doc: Option<String>,
-    /// `Colors.accent`; a singleton (`Spacing`) reads its roles. Every role
-    /// when left out.
+    /// `Colors.accent`, or a singleton (`Spacing`). Left out: every name, and what the theme sets.
     token: Option<String>,
-    /// What the token becomes; `null` gives it back to the module. Left
-    /// out, the tokens are read.
+    /// With no `token`: every value.
+    #[serde(default)]
+    verbose: bool,
+    /// `null` gives it back to the module. Left out, the tokens are read.
     #[serde(default, deserialize_with = "present")]
     #[schemars(with = "Option<serde_json::Value>")]
     value: Option<Option<serde_json::Value>>,
     /// One variant of a colour; a colour string sets light and dark.
     variant: Option<Variant>,
-    /// The theme file's generation the edit was read at; 0 while it does
-    /// not exist.
+    /// The theme file's, as read; 0 while there is none.
     generation: Option<u64>,
     #[serde(default)]
     dry_run: bool,
@@ -695,6 +741,9 @@ struct ThemeOut {
     /// Read: the tokens asked for.
     #[serde(skip_serializing_if = "Option::is_none")]
     tokens: Option<Vec<TokenOut>>,
+    /// Read with no `token`: every role's name.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    roles: Option<Vec<String>>,
     /// Written: the edit, as other edits answer it.
     #[serde(skip_serializing_if = "Option::is_none")]
     doc: Option<String>,
@@ -780,6 +829,10 @@ fn theme_set(studio: &Mutex<Studio>, a: ThemeArgs) -> Result<ThemeOut, SurfaceEr
             .session
             .tokens(&file, a.token.as_deref())
             .map_err(error)?;
+        // Every role in full is some 26 KB, mostly the module's colours an
+        // agent can ask for one at a time.
+        let names = (a.token.is_none() && !a.verbose)
+            .then(|| read.tokens.iter().map(|t| t.token.clone()).collect());
         return Ok(ThemeOut {
             file: read.file,
             generation: read.generation,
@@ -788,6 +841,7 @@ fn theme_set(studio: &Mutex<Studio>, a: ThemeArgs) -> Result<ThemeOut, SurfaceEr
             tokens: Some(
                 read.tokens
                     .into_iter()
+                    .filter(|t| names.is_none() || t.theme.is_some())
                     .map(|t| TokenOut {
                         token: t.token,
                         kind: t.kind,
@@ -796,6 +850,7 @@ fn theme_set(studio: &Mutex<Studio>, a: ThemeArgs) -> Result<ThemeOut, SurfaceEr
                     })
                     .collect(),
             ),
+            roles: names,
             doc: None,
             changes: None,
             history: None,
@@ -827,6 +882,7 @@ fn theme_set(studio: &Mutex<Studio>, a: ThemeArgs) -> Result<ThemeOut, SurfaceEr
         exists: None,
         problem: None,
         tokens: None,
+        roles: None,
         doc: Some(edit.doc),
         changes: Some(edit.changes),
         history: edit.history,
@@ -949,13 +1005,13 @@ const BLOCKS_PAGE: usize = 50;
 /// a block's.
 fn insert_text(
     studio: &Mutex<Studio>,
-    a: &InsertArgs,
-) -> Result<(String, Option<String>), SurfaceError> {
+    a: &mut InsertArgs,
+) -> Result<(String, Vec<String>), SurfaceError> {
     let Some(qualified) = &a.block else {
         let text = a.text.clone().ok_or_else(|| {
             SurfaceError::invalid_argument("give the object's `text`, or a `block`")
         })?;
-        return Ok((text, a.import.clone()));
+        return Ok((text, a.import.take().map(Modules::list).unwrap_or_default()));
     };
     if a.import.is_some() {
         return Err(SurfaceError::invalid_argument(
@@ -985,7 +1041,7 @@ fn insert_text(
             text.clone()
         }
     };
-    Ok((text, Some(block.module.clone())))
+    Ok((text, vec![block.module.clone()]))
 }
 
 fn literal(value: LiteralArg) -> Literal {
@@ -994,6 +1050,13 @@ fn literal(value: LiteralArg) -> Literal {
         LiteralArg::Number(n) => Literal::Number(n.to_string()),
         LiteralArg::String(s) => Literal::String(s),
     }
+}
+
+/// The id of the object a write put, by its handle; none for a dry run,
+/// which put nothing a handle names.
+fn inserted_id(studio: &Mutex<Studio>, doc: &str, node: Option<&str>) -> Option<String> {
+    let address = Address::Node(node?.to_owned());
+    lock(studio).session.resolve(doc, &address).ok()?.1.id
 }
 
 /// The id of the object `address` names: states name objects by id.
@@ -1815,7 +1878,7 @@ fn edits(studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
         .with(
             ToolDef::new::<TreeArgs>(
                 "document_tree",
-                "A document's objects in order: handle, path, type, id, bindings. Grouped properties (`font.bold`) are bindings. Paginated by `cursor`.",
+                "A document's objects in order: handle, path, type, id, bindings and members. Grouped properties (`font.bold`) are bindings.",
             )
             .answers::<Tree>()
             .requires(Cap::Inspect),
@@ -1839,6 +1902,9 @@ fn edits(studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
                                 .into_iter()
                                 .map(|b| format!("{}: {}", b.name, b.value))
                                 .collect(),
+                            properties: n.properties,
+                            signals: n.signals.iter().map(signal_text).collect(),
+                            functions: n.functions,
                         })
                         .collect();
                     let limit = a.limit.unwrap_or(TREE_PAGE).clamp(1, TREE_PAGE);
@@ -1899,6 +1965,10 @@ fn edits(studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
                             "a shell is written from its block; leave `text` and `data` out",
                         ));
                     }
+                    // The caller has the text it gave: answering it again
+                    // doubles the call. What Studio made, from data or the
+                    // empty document, is answered.
+                    let echo = a.text.is_none() || a.dry_run;
                     let text = match (a.text, a.data) {
                         _ if a.shell.is_some() => {
                             shell_text(&studio, &a.doc, a.shell.as_deref().unwrap_or_default())?
@@ -1924,8 +1994,14 @@ fn edits(studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
                     } else {
                         session.create(&a.doc, &text, a.dry_run)
                     }
-                    .map(EditOut::from)
-                        .map_err(error)
+                    .map(|outcome| {
+                        let mut out = EditOut::from(outcome);
+                        if !echo {
+                            out.changes.clear();
+                        }
+                        out
+                    })
+                    .map_err(error)
                 }
             }),
         )
@@ -2229,23 +2305,44 @@ fn edits(studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
             .annotated(MUTATE),
             typed({
                 let studio = s();
-                move |_, a: InsertArgs| {
+                move |_, mut a: InsertArgs| {
                     if let Some(name) = &a.replace {
                         return replace_member(&studio, &a, name);
                     }
                     if a.slot.is_some() {
                         return declare_slot(&studio, &a);
                     }
-                    let (text, import) = insert_text(&studio, &a)?;
-                    crate::loads::check_insert(&studio, &a.doc, &text, import.as_slice())?;
-                    let op = Op::Insert {
+                    let (text, mut imports) = insert_text(&studio, &mut a)?;
+                    // A member is no object: it brings nothing.
+                    let toolkit = crate::loads::toolkit_imports(&studio, &a.doc, &text, &imports)?;
+                    imports.extend(toolkit);
+                    crate::loads::check_insert(&studio, &a.doc, &text, &imports)?;
+                    // The first module is the one the object's type may have
+                    // to be written under; the rest only come along.
+                    let mut modules = imports.into_iter();
+                    let import = modules.next();
+                    let mut ops: Vec<Op> = modules.map(|module| Op::Import { module }).collect();
+                    ops.push(Op::Insert {
                         parent: a.parent,
                         index: a.index,
                         text,
                         add_id: a.id.unwrap_or(true),
                         import,
+                    });
+                    let mut out = if ops.len() == 1 {
+                        edit(&studio, &a.doc, a.generation, &ops[0], a.dry_run)?
+                    } else {
+                        let mut s = lock(&studio);
+                        let (outcome, nodes) = s
+                            .session
+                            .edit_many(&a.doc, a.generation, &ops, "insert", a.dry_run)
+                            .map_err(error)?;
+                        let mut out = EditOut::from(outcome);
+                        out.node = nodes.into_iter().last().or(out.node);
+                        out
                     };
-                    edit(&studio, &a.doc, a.generation, &op, a.dry_run)
+                    out.id = inserted_id(&studio, &a.doc, out.node.as_deref());
+                    Ok(out)
                 }
             }),
         )
@@ -2433,7 +2530,7 @@ fn edits(studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
         .with(
             ToolDef::new::<ThemeArgs>(
                 "theme_set",
-                "Read the tokens of Ljos.Design, the module's value beside the theme file's; or set one (`null` gives it back) in the theme file (made if none), the rest kept byte for byte. A theme Ljós would refuse is refused.",
+                "Read Ljos.Design's tokens, the module's value beside the theme file's; or set one in that file (made if none), the rest kept byte for byte. A theme Ljós would refuse is refused.",
             )
             .answers::<ThemeOut>()
             .requires(Cap::Mutate)

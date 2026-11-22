@@ -87,6 +87,7 @@ struct ArrangeArgs {
     /// For all but `place` and `paste`.
     #[serde(default)]
     nodes: Vec<Address>,
+    node: Option<Address>,
     /// For a `path`.
     generation: Option<u64>,
     /// For `geometry`: leave the siblings out (each is a read of the running app).
@@ -104,6 +105,7 @@ struct ArrangeArgs {
     /// For `paste`, into any document. Ids it has are renamed.
     parent: Option<Address>,
     /// For `rename`: the object's new `id`. For `component_extract`: the new type. For `relayout`: its new kind.
+    #[serde(alias = "new_name")]
     name: Option<String>,
     /// For `wrap`.
     #[serde(rename = "in")]
@@ -1372,7 +1374,10 @@ pub(crate) fn add(registry: ToolRegistry, studio: &Arc<Mutex<Studio>>) -> ToolRe
         .answers::<ArrangeOut>()
         .requires(Cap::Inspect)
         .annotated(MUTATE),
-        typed(move |ctx: &CallCtx, a: ArrangeArgs| {
+        typed(move |ctx: &CallCtx, mut a: ArrangeArgs| {
+            if let Some(node) = a.node.take() {
+                a.nodes.insert(0, node);
+            }
             // Reading and copying only read; the registry checked `inspect`,
             // the rest is checked here, refused the way the registry does.
             if !matches!(a.action, Action::Geometry | Action::Copy)

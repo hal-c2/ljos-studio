@@ -883,8 +883,12 @@ impl Session {
                 .find(|(_, node)| node.id.as_deref() == Some(id))
                 .ok_or_else(not_found),
             Address::Path(p) => {
-                let at =
-                    parse_path(p).ok_or_else(|| Error::Invalid(format!("`{p}` is not a path")))?;
+                let at = parse_path(p).ok_or_else(|| {
+                    Error::Invalid(format!(
+                        "`{p}` is not a path: one reads as `document_tree` prints it, \
+                         `root/0/1`, or `root/0/contentItem:`"
+                    ))
+                })?;
                 tree.into_iter()
                     .find(|(_, node)| node.path == at)
                     .ok_or_else(not_found)
@@ -1311,7 +1315,7 @@ impl Session {
         let rebased = self.rebase(path, generation, op)?;
         let before = self.doc(path)?.text.clone();
         let (text, change, focus) = self.plan(path, &before, op)?;
-        let changes = diff(&before, &text);
+        let changes = spans(&before, &text);
         let touched = self.touches(path, op)?;
         self.check_leased(path, touched.iter().map(|(h, _)| *h))?;
         if dry_run {
@@ -1406,7 +1410,7 @@ impl Session {
         }
         let after = self.doc(path)?.text.clone();
         let before = saved.text.clone();
-        let changes = diff(&before, &after);
+        let changes = spans(&before, &after);
         if dry_run {
             *self.doc(path)? = saved;
             return Ok((
@@ -1446,7 +1450,7 @@ impl Session {
             outside: false,
             generation,
             side: side(&after),
-            forward: changes.clone(),
+            forward: diff(&before, &after),
             inverse: diff(&after, &before),
             created: false,
             group: None,
@@ -1502,8 +1506,26 @@ impl Session {
     }
 
     /// The new text, what it does to paths, and where the object it put or
-    /// moved ends up.
+    /// moved ends up. An edit that writes more uses of the design module's
+    /// singletons (`Colors.accent`) than the text had brings the module's
+    /// import with it, whether it set a binding, a state's or put an object.
     fn plan(
+        &mut self,
+        path: &str,
+        before: &str,
+        op: &Op,
+    ) -> Result<(String, PathChange, Option<NodePath>), Error> {
+        let (mut out, change, focus) = self.plan_op(path, before, op)?;
+        if singleton_uses(&out) > singleton_uses(before)
+            && matches!(imported(&out, ljos_design::module::URI), Imported::No)
+            && !declares_singleton_name(&out)
+        {
+            out = with_import(&out, ljos_design::module::URI)?;
+        }
+        Ok((out, change, focus))
+    }
+
+    fn plan_op(
         &mut self,
         path: &str,
         before: &str,
@@ -3802,6 +3824,94 @@ fn replace_member(
     Ok(out)
 }
 
+/// What an edit changed, told to whoever made it: `diff`'s changes split
+/// where whole lines were kept between, so an edit that adds an import at
+/// the top and an object at the bottom tells two small changes, not the
+/// whole document between them. History keeps `diff`'s single change.
+pub fn spans(before: &str, after: &str) -> Vec<Change> {
+    let mut out = Vec::new();
+    // `diff` tells one change or none.
+    for c in diff(before, after) {
+        // Whole lines on both sides: what is kept around the change is the
+        // same in both texts, so it widens both alike.
+        let start = before[..c.range.start].rfind('\n').map_or(0, |i| i + 1);
+        let end = before[c.range.end..]
+            .find('\n')
+            .map_or(before.len(), |i| c.range.end + i + 1);
+        let new = format!(
+            "{}{}{}",
+            &before[start..c.range.start],
+            c.replacement,
+            &before[c.range.end..end]
+        );
+        split_kept(start, &before[start..end], &new, 0, &mut out);
+    }
+    out
+}
+
+/// Splits `old` → `new` (at `at` in the text before) around the longest run
+/// of lines both keep, then each side again. Bounded: a large change is
+/// told whole rather than searched.
+fn split_kept(at: usize, old: &str, new: &str, depth: u8, out: &mut Vec<Change>) {
+    // Shorter kept runs are not worth a second change's words.
+    const MIN_KEPT: usize = 16;
+    const MAX_CELLS: usize = 250_000;
+    if old == new {
+        return;
+    }
+    let whole = |out: &mut Vec<Change>| {
+        out.extend(diff(old, new).into_iter().map(|c| Change {
+            range: at + c.range.start..at + c.range.end,
+            replacement: c.replacement,
+        }));
+    };
+    let lines = |s: &str| -> Vec<(usize, usize)> {
+        let mut at = 0;
+        s.split_inclusive('\n')
+            .map(|l| {
+                let r = (at, at + l.len());
+                at += l.len();
+                r
+            })
+            .collect()
+    };
+    let (ol, nl) = (lines(old), lines(new));
+    if depth >= 8 || ol.is_empty() || nl.is_empty() || ol.len() * nl.len() > MAX_CELLS {
+        return whole(out);
+    }
+    // The longest run, in bytes, of equal lines: (bytes, old end, new end).
+    let mut best = (0, 0, 0);
+    let mut prev = vec![0usize; nl.len() + 1];
+    let mut row = vec![0usize; nl.len() + 1];
+    for (i, &(os, oe)) in ol.iter().enumerate() {
+        for (j, &(ns, ne)) in nl.iter().enumerate() {
+            row[j + 1] = if old[os..oe] == new[ns..ne] {
+                prev[j] + (oe - os)
+            } else {
+                0
+            };
+            if row[j + 1] > best.0 {
+                best = (row[j + 1], i + 1, j + 1);
+            }
+        }
+        std::mem::swap(&mut prev, &mut row);
+    }
+    let (bytes, oi, nj) = best;
+    if bytes < MIN_KEPT {
+        return whole(out);
+    }
+    let (old_end, new_end) = (ol[oi - 1].1, nl[nj - 1].1);
+    let (old_start, new_start) = (old_end - bytes, new_end - bytes);
+    split_kept(at, &old[..old_start], &new[..new_start], depth + 1, out);
+    split_kept(
+        at + old_end,
+        &old[old_end..],
+        &new[new_end..],
+        depth + 1,
+        out,
+    );
+}
+
 /// The name of the member `text` declares (a function, a signal, a property
 /// or a signal handler); `None` for an object, which starts with its type.
 fn member_name(text: &str) -> Option<&str> {
@@ -3941,6 +4051,65 @@ fn qualified(text: &str, qualifier: &str) -> Result<String, Error> {
         &text[..root.start],
         &text[root.start..]
     ))
+}
+
+/// How many times `text` reads a member of one of the design module's
+/// singletons (`Colors.x`), leaving out strings and comments.
+fn singleton_uses(text: &str) -> usize {
+    let bytes = text.as_bytes();
+    let word = |b: u8| b.is_ascii_alphanumeric() || b == b'_' || b == b'$';
+    let mut count = 0;
+    let mut i = 0;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'/' if bytes.get(i + 1) == Some(&b'/') => {
+                i = text[i..].find('\n').map_or(bytes.len(), |n| i + n);
+            }
+            b'/' if bytes.get(i + 1) == Some(&b'*') => {
+                i = text[i + 2..].find("*/").map_or(bytes.len(), |n| i + n + 4);
+            }
+            quote @ (b'"' | b'\'' | b'`') => {
+                i += 1;
+                while i < bytes.len() && bytes[i] != quote {
+                    i += if bytes[i] == b'\\' { 2 } else { 1 };
+                }
+                i += 1;
+            }
+            b if word(b) => {
+                let start = i;
+                while i < bytes.len() && word(bytes[i]) {
+                    i += 1;
+                }
+                let after_dot = start > 0 && bytes[start - 1] == b'.';
+                if !after_dot
+                    && bytes.get(i) == Some(&b'.')
+                    && ljos_design::module::SINGLETONS.contains(&&text[start..i])
+                {
+                    count += 1;
+                }
+            }
+            _ => i += 1,
+        }
+    }
+    count
+}
+
+/// Whether `text` gives one of the singletons' names to something of its
+/// own (`id: Colors`, `property var Colors`), which would then win over the
+/// module's: importing it then changes nothing that was meant.
+fn declares_singleton_name(text: &str) -> bool {
+    ljos_design::module::SINGLETONS.iter().any(|name| {
+        text.split(|c: char| c == '\n' || c == ';').any(|line| {
+            let line = line.trim();
+            line.strip_prefix("id:")
+                .is_some_and(|rest| rest.trim() == *name)
+                || line
+                    .split_whitespace()
+                    .collect::<Vec<_>>()
+                    .windows(3)
+                    .any(|w| w[0] == "property" && w[2].trim_end_matches(':') == *name)
+        })
+    })
 }
 
 /// `text` importing `module`, which it does not yet: a line after the last

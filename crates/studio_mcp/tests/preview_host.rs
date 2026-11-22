@@ -164,6 +164,7 @@ impl PreviewHost for Recorder {
                 message: "a warning".to_owned(),
                 file: None,
                 line: None,
+                compiler: false,
             }]
         } else {
             Vec::new()
@@ -833,7 +834,8 @@ fn every_write_reloads_the_preview_before_the_tool_answers() {
         .iter()
         .map(|e| e["kind"].as_str().unwrap())
         .collect();
-    assert_eq!(kinds, ["reloaded", "reload_failed", "log"]);
+    // What the preview logged as it opened is read then, before any edit.
+    assert_eq!(kinds, ["log", "reloaded", "reload_failed"]);
     assert_eq!(events["next"], 4);
     let rest = f.call("preview_events", json!({ "since": 4 })).unwrap();
     assert_eq!(rest["events"], json!([]));
@@ -867,13 +869,13 @@ fn a_burst_of_writes_reloads_within_the_budget_and_a_reading_catches_up() {
     assert_eq!(f.calls(), ["screenshot 800"]);
 }
 
-/// No second holds more reloads than the budget allows: 8 (preview.rs).
+/// No second holds more reloads than the budget allows: 4 (preview.rs).
 fn assert_within_the_budget(f: &Fixture) {
     let seen = f.seen.lock().unwrap();
-    for (first, last) in seen.reloads.iter().zip(seen.reloads.iter().skip(8)) {
+    for (first, last) in seen.reloads.iter().zip(seen.reloads.iter().skip(4)) {
         assert!(
             last.duration_since(*first) >= std::time::Duration::from_secs(1),
-            "nine reloads in {:?}",
+            "five reloads in {:?}",
             last.duration_since(*first)
         );
     }

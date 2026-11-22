@@ -174,8 +174,8 @@ Feature: A tool does not write what would not load or would not show
 
     Examples:
       | text                     | why            |
-      | RowLayout {}             | unknown_type   |
-      | Item { RowLayout {} }    | unknown_type   |
+      | Nowhere {}               | unknown_type   |
+      | Item { Nowhere {} }      | unknown_type   |
       | Rectangle { nothere: 1 } | no_such_member |
 
   # qml6 6.11 loads all but the last two of these with these imports; Studio's
@@ -453,8 +453,9 @@ Feature: A tool does not write what would not load or would not show
       | TextEdit |
       | Window |
 
-  # qml6 refuses even QtObject in a file that imports nothing.
-  Scenario: In a file that imports nothing, no type is there
+  # qml6 refuses even QtObject in a file that imports nothing: the insert
+  # brings the toolkit's module that has it.
+  Scenario: In a file that imports nothing, a toolkit type brings its module
     Given the file "Bare.qml":
       """qml
       Item {
@@ -465,8 +466,7 @@ Feature: A tool does not write what would not load or would not show
       """json
       {"doc": "Bare.qml", "parent": {"id": "bare"}, "text": "QtObject {}"}
       """
-    Then the agent is refused with "not_actionable"
-    And the refusal's "/details/kind" is "unknown_type"
+    Then the file "Bare.qml" contains "import QtQml"
 
   Scenario: A paste into a document without the type brings its import
     Given the agent has called the tool "node_arrange" with:

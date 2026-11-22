@@ -67,6 +67,41 @@ pub(crate) fn check_insert(
     check_text(studio.session.store(), doc, &source, text, imports)
 }
 
+/// The toolkit modules `text`, put in `doc` beside `imports`, needs for the
+/// types it writes bare that nothing imported has (`ColumnLayout` without
+/// `QtQuick.Layouts`), each the first module offered that has it. A type an
+/// import may have, undescribed, brings nothing: only a type sure to be
+/// missing does.
+pub(crate) fn toolkit_imports(
+    studio: &Mutex<Studio>,
+    doc: &str,
+    text: &str,
+    imports: &[String],
+) -> Result<Vec<String>, SurfaceError> {
+    let mut studio = lock(studio);
+    let source = studio.session.text(doc).map_err(error)?.0.to_owned();
+    let store = studio.session.store();
+    let (Some(names), Some(nodes)) = (
+        Names::of(store, doc, &source, imports),
+        outline::outline(text),
+    ) else {
+        return Ok(Vec::new());
+    };
+    let mut out: Vec<String> = Vec::new();
+    for node in &nodes {
+        if node.ty.contains('.') || names.type_is(&node.ty, text) != TypeIs::Missing {
+            continue;
+        }
+        let module = crate::toolkit::ALWAYS
+            .into_iter()
+            .find(|uri| crate::toolkit::names(uri).is_some_and(|types| types.contains(&node.ty)));
+        if let Some(uri) = module.filter(|uri| !out.iter().any(|m| m == uri)) {
+            out.push(uri.to_owned());
+        }
+    }
+    Ok(out)
+}
+
 /// The objects `text` writes, in `doc` once it imports `imports`.
 pub(crate) fn check_text(
     store: &dyn Store,

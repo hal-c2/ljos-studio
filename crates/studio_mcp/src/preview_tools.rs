@@ -47,6 +47,14 @@ struct OpenArgs {
     state: Option<State>,
     /// `content`: as tall as the page.
     fit: Option<Fit>,
+    appearance: Option<Appearance>,
+}
+
+#[derive(Clone, Copy, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+enum Appearance {
+    Light,
+    Dark,
 }
 
 #[derive(Serialize, JsonSchema)]
@@ -69,7 +77,7 @@ struct OpenOut {
 #[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct StateArgs {
-    /// The object to read, by `id`; in the previewed document unless `doc` names another.
+    /// The object to read, by `id`; in the previewed document unless `doc` names another. Left out, it only acts.
     node: Option<Address>,
     doc: Option<String>,
     /// Show `node` in this QML state through reloads, until `""`.
@@ -91,6 +99,8 @@ struct StateArgs {
     press: Option<String>,
     #[serde(rename = "type")]
     typed: Option<String>,
+    /// Default: the focus.
+    type_into: Option<Address>,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -133,7 +143,7 @@ struct ScreenshotArgs {
     /// `png` (default) or `outline`: one text line per item.
     #[serde(default)]
     format: Format,
-    /// Longest side of a PNG in pixels (default 800, at most 1280).
+    /// Longest side: 16 to 1280, default 800.
     max_size: Option<u32>,
 }
 
@@ -155,12 +165,16 @@ struct ScreenshotOut {
     bytes: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
     outline: Option<String>,
+    /// The side used, when the `max_size` asked for was out of 16 to 1280.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    max_size: Option<u32>,
 }
 
 #[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct EventsArgs {
-    /// The `next` of an earlier answer; 0 or left out: from the start.
+    /// An earlier answer's `next`; 0 or left out: from the start.
+    #[serde(alias = "next")]
     since: Option<usize>,
     /// Instead of events, wait up to this long (3 600 000 at most) for the app to rest past `rests`.
     wait_ms: Option<u64>,
@@ -175,6 +189,10 @@ struct EventsOut {
     next: usize,
     /// A preview is running now.
     open: bool,
+    /// What is wrong in it now: the last reload's warnings and errors and
+    /// those logged since, one a line. Absent when nothing is.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    problems: Vec<studio_core::preview::LogLine>,
     /// With `wait_ms`: how many times the app has rested saying something new.
     #[serde(skip_serializing_if = "Option::is_none")]
     rests: Option<u64>,
@@ -444,11 +462,22 @@ fn open(studio: &Mutex<Studio>, a: OpenArgs) -> Result<OpenOut, SurfaceError> {
             harness: standing,
         });
         previews.write_hidden();
+        previews.root = studio.dir();
+        // What was wrong as it started: the compiler's warnings, and what
+        // running the first text logged.
+        previews.opened();
         let open = previews.open.as_mut().expect("just opened");
         if let Err(e) = open.refit() {
             open.undo_fit(Fit::Screen, size);
             return Err(preview_error(previews.failed(e)));
         }
+    }
+    if let Some(appearance) = a.appearance {
+        let open = previews.open.as_mut().expect("opened above");
+        if let Err(e) = open.host.appearance(matches!(appearance, Appearance::Dark)) {
+            return Err(preview_error(previews.failed(e)));
+        }
+        open.clicks += 1;
     }
     let size = previews.open.as_ref().map_or(size, |o| o.size);
     Ok(OpenOut {
@@ -474,6 +503,15 @@ fn act(open: &mut Open, click: Option<&Click>, inputs: &[Input]) -> Result<(), P
     for input in inputs {
         open.host.input(input)?;
         // It changes the picture without a reload, as a click does.
+        open.clicks += 1;
+    }
+    Ok(())
+}
+
+/// Types text into the field with an id, as a person who picked it would.
+fn type_in(open: &mut Open, typing: Option<&(String, String)>) -> Result<(), PreviewError> {
+    if let Some((text, field)) = typing {
+        open.host.type_text(text, Some(field))?;
         open.clicks += 1;
     }
     Ok(())
@@ -590,6 +628,24 @@ fn state_input(studio: &Mutex<Studio>, a: StateArgs, waits: bool) -> Result<Acte
         (None, Some(at)) => Some(Click::Point { x: at.x, y: at.y }),
         (None, None) => None,
     };
+    let type_into = match &a.type_into {
+        Some(address) => {
+            let (_, field) = studio.session.resolve(&doc, address).map_err(error)?;
+            Some(field.id.ok_or_else(no_id)?)
+        }
+        None => None,
+    };
+    if type_into.is_some() && a.typed.is_none() {
+        return Err(SurfaceError::invalid_argument(
+            "`type_into` names where `type` goes: give the text as `type`",
+        ));
+    }
+    // Text for a named field goes to it after the rest of the input, which
+    // may be what shows it; other text goes wherever the keyboard is.
+    let (typed, typing) = match type_into {
+        Some(field) => (None, a.typed.map(|text| (text, field))),
+        None => (a.typed, None),
+    };
     let inputs: Vec<Input> = [
         a.scroll.map(|w| Input::Scroll {
             x: w.x,
@@ -604,7 +660,7 @@ fn state_input(studio: &Mutex<Studio>, a: StateArgs, waits: bool) -> Result<Acte
             dy: w.dy.unwrap_or(0.0),
         }),
         a.press.map(Input::Press),
-        a.typed.map(Input::Type),
+        typed.map(Input::Type),
     ]
     .into_iter()
     .flatten()
@@ -615,12 +671,14 @@ fn state_input(studio: &Mutex<Studio>, a: StateArgs, waits: bool) -> Result<Acte
                 "`set` needs the `node` whose state it sets",
             ));
         }
-        if click.is_none() && inputs.is_empty() {
+        if click.is_none() && inputs.is_empty() && typing.is_none() {
             return Err(SurfaceError::invalid_argument(
                 "give the `node` to read, input (a click, scroll, swipe, press or type), or both",
             ));
         }
-        if let Err(e) = act(open, click.as_ref(), &inputs) {
+        if let Err(e) =
+            act(open, click.as_ref(), &inputs).and_then(|()| type_in(open, typing.as_ref()))
+        {
             return Err(preview_error(previews.failed(e)));
         }
         return Ok(Acted {
@@ -675,6 +733,9 @@ fn state_input(studio: &Mutex<Studio>, a: StateArgs, waits: bool) -> Result<Acte
         }
     }
     if let Err(e) = act(open, click.as_ref(), &inputs) {
+        return Err(preview_error(previews.failed(e)));
+    }
+    if let Err(e) = type_in(open, typing.as_ref()) {
         return Err(preview_error(previews.failed(e)));
     }
     let mut names = names;
@@ -828,10 +889,9 @@ pub(crate) fn shown_screenshot(
 ) -> Result<(ToolReply, Option<PictureOf>), SurfaceError> {
     let a: ScreenshotArgs = serde_json::from_value(if args.is_null() { json!({}) } else { args })
         .map_err(|e| SurfaceError::invalid_argument(e.to_string()))?;
-    let side = a
-        .max_size
-        .unwrap_or(PICTURE_SIDE)
-        .clamp(16, MAX_PICTURE_SIDE);
+    let asked = a.max_size.unwrap_or(PICTURE_SIDE);
+    let side = asked.clamp(16, MAX_PICTURE_SIDE);
+    let clamped = (side != asked).then_some(side);
     let studio = lock(studio);
     // Its own handle: the document's generation is read while it is held.
     let all = studio.previews.clone();
@@ -878,6 +938,7 @@ pub(crate) fn shown_screenshot(
         height: Some(picture.height),
         bytes: Some(picture.png.len()),
         outline: None,
+        max_size: clamped,
     };
     let structured = serde_json::to_value(out).map_err(internal)?;
     Ok((
@@ -1080,6 +1141,7 @@ fn wait_for_rest(
         events: Vec::new(),
         next: since,
         open: true,
+        problems: known_problems(studio),
         rests: Some(rest.rests),
         wake_in_ms: rest.wake_in_ms,
     })
@@ -1110,6 +1172,14 @@ pub(crate) fn parked(
     Ok(watch.parked(rests, wait_ms.min(3_600_000)))
 }
 
+/// What is known to be wrong in the preview, asking it nothing: a window
+/// waits after every rest, and each wait would be one more call of the app.
+pub(crate) fn known_problems(studio: &Mutex<Studio>) -> Vec<studio_core::preview::LogLine> {
+    let previews = lock(studio).previews.clone();
+    let previews = preview::lock(&previews);
+    previews.problems.clone()
+}
+
 fn events(studio: &Mutex<Studio>, a: EventsArgs) -> Result<EventsOut, SurfaceError> {
     if let Some(wait_ms) = a.wait_ms {
         return wait_for_rest(studio, a.since.unwrap_or(0), a.rests, wait_ms);
@@ -1125,6 +1195,7 @@ fn events(studio: &Mutex<Studio>, a: EventsArgs) -> Result<EventsOut, SurfaceErr
         events: previews.events[since..end].to_vec(),
         next: end,
         open: previews.open.is_some(),
+        problems: previews.problems.clone(),
         rests: None,
         wake_in_ms: None,
     })
@@ -1149,7 +1220,7 @@ pub(crate) fn add(registry: ToolRegistry, studio: &Arc<Mutex<Studio>>) -> ToolRe
         .with(
             ToolDef::new::<StateArgs>(
                 "preview_state",
-                "Read an object in the preview: its QML state (`variant`), a block's published state (`set` assigns it when mocked), and the properties in `read`. Input comes first, as a person's.",
+                "Read an object in the preview: its QML state (`variant`), a block's published state (`set` assigns it when mocked), and the properties in `read`. Input comes first, as a person's: `type` into `type_into`.",
             )
             .answers::<StateOut>()
             .requires(Cap::Run)
@@ -1162,8 +1233,7 @@ pub(crate) fn add(registry: ToolRegistry, studio: &Arc<Mutex<Studio>>) -> ToolRe
         .with(
             ToolDef::new::<ScreenshotArgs>(
                 "preview_screenshot",
-                "What the preview shows: a PNG at most `max_size` pixels on its longest side \
-                 (default 800), or with `format: \"outline\"` its items as text, one per line.",
+                "What the preview shows, as a PNG or as text.",
             )
             .answers::<ScreenshotOut>()
             .requires(Cap::Inspect)

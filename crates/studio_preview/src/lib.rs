@@ -24,7 +24,7 @@ use serde_json::{Map, Value, json};
 use studio_core::place::Rect;
 use studio_core::preview::{
     Click, Declared, Extent, Input, LogLine, Picture, Placed, PreviewError, PreviewHost,
-    PreviewSpec, Reload, Rest, RestWatch, Size,
+    PreviewSpec, Reload, Rest, RestWatch, Size, place_of,
 };
 use studio_core::scene3d::{Body, Camera, Scene, rotate};
 
@@ -40,9 +40,9 @@ const START_LIMIT: Duration = Duration::from_secs(30);
 const CAPS: &str = "inspect,input,mutate";
 /// The calls a second the child's inspector grants Studio, its only client:
 /// a person's gestures and an agent's edits through Studio each ask for a
-/// reload and a picture, and Ljós's default of 20 kept them waiting on its
-/// one-second `Retry-After` at a brisk pace.
-const CALLS_PER_SECOND: u32 = 200;
+/// reload, the read of what it logged and a picture, and Ljós's default of
+/// 20 kept them waiting on its one-second `Retry-After` at a brisk pace.
+const CALLS_PER_SECOND: u32 = 400;
 
 /// Objects read to find those without an id, in one call: past this a call
 /// would spend the inspector's whole second, and the object is reported as
@@ -70,8 +70,9 @@ struct Running {
     child: Reaped,
     inspector: Inspector,
     log: PathBuf,
-    /// The last generation a reload was reported applied at.
-    reported: u64,
+    /// How much of `log` has been read for the compiler's warnings.
+    log_read: u64,
+    reported: Reported,
     /// The window's size, as it was started or last resized.
     size: Size,
 }
@@ -237,7 +238,8 @@ impl NativeHost {
             child,
             inspector,
             log,
-            reported: 0,
+            log_read: 0,
+            reported: Reported::default(),
             size: spec.size,
         })
     }
@@ -496,22 +498,38 @@ impl PreviewHost for NativeHost {
 
     fn logs(&mut self, since: u64) -> Result<(Vec<LogLine>, u64), PreviewError> {
         let answer = self.call("app_logs", json!({ "since": since }))?;
-        let lines = answer.structured["entries"]
+        let root = self.root.clone();
+        let mut lines: Vec<LogLine> = answer.structured["entries"]
             .as_array()
-            .map(|entries| {
-                entries
-                    .iter()
-                    .map(|e| LogLine {
-                        level: e["level"].as_str().unwrap_or("info").to_owned(),
-                        message: e["message"].as_str().unwrap_or_default().to_owned(),
-                        file: e["file"].as_str().map(str::to_owned),
-                        line: e["line"].as_u64().and_then(|l| u32::try_from(l).ok()),
-                    })
-                    .collect()
-            })
+            .map(|entries| entries.iter().map(|e| logged(e, &root)).collect())
             .unwrap_or_default();
         let next = answer.structured["next_since"].as_u64().unwrap_or(since);
+        // The compiler's warnings reach only the child's stderr, and before
+        // what running the program then logged: they go first, so a window
+        // that keeps one problem a line keeps the compiler's.
+        let running = self.running()?;
+        let (said, read) = compiled(&running.log, running.log_read, &root);
+        running.log_read = read;
+        lines.splice(0..0, said);
         Ok((lines, next))
+    }
+
+    fn type_text(&mut self, text: &str, id: Option<&str>) -> Result<(), PreviewError> {
+        let mut args = json!({ "text": text });
+        if let Some(id) = id {
+            args["target"] = json!(locator(id));
+        }
+        self.call("app_type", args).map_err(|e| match id {
+            Some(id) => no_object(e, id),
+            None => e,
+        })?;
+        Ok(())
+    }
+
+    fn appearance(&mut self, dark: bool) -> Result<(), PreviewError> {
+        let scheme = if dark { "dark" } else { "light" };
+        self.call("app_set_appearance", json!({ "color_scheme": scheme }))?;
+        Ok(())
     }
 
     fn alive(&mut self) -> Result<(), PreviewError> {
@@ -881,8 +899,7 @@ impl NativeHost {
         })
     }
 
-    /// A file the child names (a `file:` URL, as its engine does) as the
-    /// store names it: relative to the project when it is below it.
+    /// A file the child names, as the store names it.
     fn document(&self, file: &str) -> String {
         document_of(&self.root, file)
     }
@@ -982,20 +999,7 @@ fn lines_of(
 /// A file as the inspector names it, relative to the project when it is
 /// one of the project's.
 fn document_of(root: &Path, file: &str) -> String {
-    let Some(path) = file.strip_prefix("file://") else {
-        return file.to_owned();
-    };
-    let path = PathBuf::from(percent_decoded(path));
-    let root = root.canonicalize().unwrap_or_else(|_| root.to_owned());
-    let path = path.canonicalize().unwrap_or(path);
-    match path.strip_prefix(&root) {
-        Ok(relative) => relative
-            .components()
-            .map(|c| c.as_os_str().to_string_lossy())
-            .collect::<Vec<_>>()
-            .join("/"),
-        Err(_) => file.to_owned(),
-    }
+    resolved(file, root)
 }
 
 /// A URL path with its `%XX` escapes turned back into bytes.
@@ -1181,9 +1185,15 @@ fn value_of(row: &Value) -> Value {
     match (row["type"].as_str(), text) {
         (Some("bool"), Some("true")) => Value::Bool(true),
         (Some("bool"), Some("false")) => Value::Bool(false),
-        (Some("int" | "real" | "double"), Some(text)) => {
-            number_in(text).unwrap_or_else(|| Value::String(text.to_owned()))
-        }
+        // A number the inspector writes as text is still a number, whole
+        // when it is.
+        (
+            Some(
+                "int" | "uint" | "qint64" | "long" | "real" | "double" | "float" | "number"
+                | "qreal",
+            ),
+            Some(text),
+        ) => number_in(text.trim()).unwrap_or_else(|| Value::String(text.to_owned())),
         (_, Some(text)) => Value::String(text.to_owned()),
         _ => row["value"].clone(),
     }
@@ -1198,19 +1208,39 @@ fn number_in(text: &str) -> Option<Value> {
     serde_json::Number::from_f64(text.parse().ok()?).map(Value::Number)
 }
 
+/// What the last reloads were reported to have done.
+#[derive(Default)]
+struct Reported {
+    /// The last generation one was reported applied at.
+    generation: u64,
+    /// The last one failed.
+    failed: bool,
+}
+
 /// What a reload's answer says the preview did since the one `reported`
 /// last told of. The preview watches the files too, and its watcher may
 /// apply a save before the reload asked for it arrives; that reload then
 /// answers `unchanged` at a generation nobody was told of, which was
-/// applied all the same.
-fn since(answer: &Value, reported: &mut u64) -> Result<Reload, PreviewError> {
+/// applied all the same. After a failure `unchanged` is news as well: Ljós
+/// repeats the failure while it stands, so the files are what runs again
+/// (a mistake taken back), which is applied at the generation already told.
+fn since(answer: &Value, reported: &mut Reported) -> Result<Reload, PreviewError> {
     let generation = answer["generation"].as_u64().unwrap_or(0);
     let outcome = match reload(answer)? {
-        Reload::Unchanged if generation > *reported => Reload::Applied { generation },
+        Reload::Unchanged if reported.failed || generation > reported.generation => {
+            Reload::Applied { generation }
+        }
         outcome => outcome,
     };
-    if let Reload::Applied { generation } = outcome {
-        *reported = generation;
+    match outcome {
+        Reload::Applied { generation } => {
+            *reported = Reported {
+                generation,
+                failed: false,
+            };
+        }
+        Reload::Failed { .. } => reported.failed = true,
+        Reload::Unchanged => {}
     }
     Ok(outcome)
 }
@@ -1227,6 +1257,110 @@ fn reload(answer: &Value) -> Result<Reload, PreviewError> {
             "a reload answered {answer}"
         ))),
     }
+}
+
+/// A line `app_logs` kept, with its file named as the project names it.
+/// A runtime warning names its file by URL and its line in its message
+/// (`file:///p/Main.qml:6: ReferenceError: …`) when the entry does not.
+fn logged(e: &Value, root: &Path) -> LogLine {
+    let mut message = e["message"].as_str().unwrap_or_default().to_owned();
+    let mut file = e["file"].as_str().map(str::to_owned);
+    let mut line = e["line"].as_u64().and_then(|l| u32::try_from(l).ok());
+    if file.is_none()
+        && let Some((f, l, rest)) = place_of(&message)
+    {
+        (file, line, message) = (Some(f.to_owned()), Some(l), rest.to_owned());
+    }
+    LogLine {
+        level: e["level"].as_str().unwrap_or("info").to_owned(),
+        message,
+        file: file.map(|f| relative(&f, root)),
+        line,
+        compiler: false,
+    }
+}
+
+/// The file of a warning, from the project's root. A link keeps its name,
+/// as in the compiler's words, so one that leads out still has a place in
+/// the project. Ljós resolves the root, so that spelling is taken too.
+fn relative(file: &str, root: &Path) -> String {
+    let Some(path) = named_path(file) else {
+        return file.to_owned();
+    };
+    below(&path, root)
+        .or_else(|| below(&path, &root.canonicalize().ok()?))
+        .unwrap_or_else(|| resolved(file, root))
+}
+
+/// A file the child names as the store names it: where it really is, when
+/// that is in the project, and as given when it is not.
+fn resolved(file: &str, root: &Path) -> String {
+    let Some(path) = named_path(file) else {
+        return file.to_owned();
+    };
+    let root = root.canonicalize().unwrap_or_else(|_| root.to_owned());
+    let path = path.canonicalize().unwrap_or(path);
+    below(&path, &root).unwrap_or_else(|| file.to_owned())
+}
+
+/// The path in a `file:` URL or an absolute path. None for what is already
+/// from the project's root, which need not be Studio's own.
+fn named_path(file: &str) -> Option<PathBuf> {
+    match file.strip_prefix("file://") {
+        Some(path) => Some(PathBuf::from(percent_decoded(path))),
+        None => Path::new(file).is_absolute().then(|| PathBuf::from(file)),
+    }
+}
+
+/// `path` from `root`, if only plain names lead there: a `..` could leave.
+fn below(path: &Path, root: &Path) -> Option<String> {
+    let names = path
+        .strip_prefix(root)
+        .ok()?
+        .components()
+        .map(|c| match c {
+            std::path::Component::Normal(name) => Some(name.to_string_lossy()),
+            _ => None,
+        })
+        .collect::<Option<Vec<_>>>()?;
+    Some(names.join("/"))
+}
+
+/// The compiler's warnings the child wrote to `log` past the byte `from`,
+/// and how far whole lines were read. Ljós says each once, when it is new
+/// (`ljos: Main.qml:5:19: x is not a name in sight…`, or indented under
+/// the reload that found it); what running the program logged there
+/// (`warning: file:///…`) is not one, and `app_logs` has it.
+fn compiled(log: &Path, from: u64, root: &Path) -> (Vec<LogLine>, u64) {
+    use std::io::{Read, Seek, SeekFrom};
+    let Ok(mut file) = File::open(log) else {
+        return (Vec::new(), from);
+    };
+    let mut bytes = Vec::new();
+    if file.seek(SeekFrom::Start(from)).is_err() || file.read_to_end(&mut bytes).is_err() {
+        return (Vec::new(), from);
+    }
+    // A line still being written is read next time, whole.
+    let Some(end) = bytes.iter().rposition(|b| *b == b'\n') else {
+        return (Vec::new(), from);
+    };
+    let text = String::from_utf8_lossy(&bytes[..=end]);
+    let said = text
+        .lines()
+        .filter_map(|l| {
+            let l = l.strip_prefix("ljos: ").unwrap_or(l).trim_start();
+            let (file, line, message) = place_of(l)?;
+            // A path the project names, not a URL a runtime warning gives.
+            (!file.contains("://")).then(|| LogLine {
+                level: "warning".to_owned(),
+                message: message.to_owned(),
+                file: Some(relative(file, root)),
+                line: Some(line),
+                compiler: true,
+            })
+        })
+        .collect();
+    (said, from + end as u64 + 1)
 }
 
 /// The last lines the child wrote to stderr, which say why it ended.
@@ -1440,27 +1574,161 @@ mod tests {
     }
 
     #[test]
+    fn the_compilers_warnings_are_read_from_stderr_once_and_whole() {
+        let dir = std::env::temp_dir().join(format!("studio-preview-log-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let log = dir.join("preview.log");
+        let root = Path::new("/p");
+        std::fs::write(
+            &log,
+            "ljos: watching /p\n\
+             warning: file:///p/Main.qml:5: ReferenceError: transparent is not defined\n\
+             ljos: Main.qml:5:19: `transparent` is not a name in sight: it is looked up when the program runs\n\
+             ljos: reloaded in 3 ms\n  Card.qml:2:7: `Colors` is not a name in sight\nljos: Half.qml:1",
+        )
+        .unwrap();
+        let (said, read) = compiled(&log, 0, root);
+        let places: Vec<_> = said
+            .iter()
+            .map(|l| (l.file.as_deref().unwrap(), l.line.unwrap(), l.compiler))
+            .collect();
+        assert_eq!(places, [("Main.qml", 5, true), ("Card.qml", 2, true)]);
+        assert!(
+            said[0]
+                .message
+                .starts_with("`transparent` is not a name in sight")
+        );
+        // The half-written last line waits; nothing before it is read twice.
+        let (again, _) = compiled(&log, read, root);
+        assert!(again.is_empty());
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_runtime_warning_names_its_file_from_the_project() {
+        let line = logged(
+            &json!({ "level": "warning", "message": "file:///p/ui/Main.qml:6: ReferenceError: Colors is not defined" }),
+            Path::new("/p"),
+        );
+        assert_eq!(line.file.as_deref(), Some("ui/Main.qml"));
+        assert_eq!(line.line, Some(6));
+        assert_eq!(line.message, "ReferenceError: Colors is not defined");
+        assert!(!line.compiler);
+    }
+
+    #[test]
+    fn a_file_url_is_decoded_before_it_is_named_from_the_project() {
+        let line = logged(
+            &json!({ "level": "warning", "message": "file:///My Projects/a%23b/ui/Main.qml:6: oops" }),
+            Path::new("/My Projects/a#b"),
+        );
+        assert_eq!(line.file.as_deref(), Some("ui/Main.qml"));
+        assert_eq!(line.line, Some(6));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_warning_through_a_link_out_of_the_project_keeps_its_path_in_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let at = dir.path().canonicalize().unwrap();
+        let (real, given) = (at.join("project"), at.join("given"));
+        let outside = at.join("outside");
+        std::fs::create_dir(&real).unwrap();
+        std::fs::create_dir(&outside).unwrap();
+        std::fs::write(outside.join("Card.qml"), "Item {}").unwrap();
+        std::os::unix::fs::symlink(&outside, real.join("blocks")).unwrap();
+        std::os::unix::fs::symlink(&real, &given).unwrap();
+        let named = |path: &Path, root: &Path| {
+            let message = format!("file://{}:1: oops", path.display());
+            logged(&json!({ "level": "warning", "message": message }), root).file
+        };
+        let card = Some("blocks/Card.qml");
+        // Ljós may name the project as given or as it really is.
+        let written = real.join("blocks/Card.qml");
+        assert_eq!(named(&written, &real).as_deref(), card);
+        assert_eq!(named(&written, &given).as_deref(), card);
+        let spelled = given.join("blocks/Card.qml");
+        assert_eq!(named(&spelled, &given).as_deref(), card);
+        // Only plain names are from the root: `..` is judged where it leads.
+        let left = real.join("../outside/Card.qml");
+        let url = format!("file://{}", left.display());
+        assert_eq!(named(&left, &real), Some(url));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_declaration_is_named_where_the_store_holds_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let (root, outside) = (dir.path().join("project"), dir.path().join("outside"));
+        std::fs::create_dir_all(root.join("parts")).unwrap();
+        std::fs::create_dir(&outside).unwrap();
+        std::fs::write(root.join("parts/Card.qml"), "Item {}").unwrap();
+        std::fs::write(outside.join("Card.qml"), "Item {}").unwrap();
+        std::os::unix::fs::symlink(root.join("parts"), root.join("alias")).unwrap();
+        std::os::unix::fs::symlink(&outside, root.join("linked")).unwrap();
+        let host = NativeHost::new(&root, "ljos", dir.path().join("state"));
+        let url = |below: &str| format!("file://{}", root.join(below).display());
+        assert_eq!(host.document(&url("alias/Card.qml")), "parts/Card.qml");
+        // `scene` leaves out what is no document, and knows it by the URL.
+        let theirs = url("linked/Card.qml");
+        assert_eq!(host.document(&theirs), theirs);
+    }
+
+    #[test]
+    fn numbers_the_inspector_writes_as_text_read_as_numbers() {
+        assert_eq!(value_of(&json!({ "type": "int", "value": "3" })), json!(3));
+        assert_eq!(
+            value_of(&json!({ "type": "real", "value": "1.5" })),
+            json!(1.5)
+        );
+        assert_eq!(
+            value_of(&json!({ "type": "QString", "value": "3" })),
+            json!("3")
+        );
+    }
+
+    #[test]
     fn a_save_the_watcher_applied_first_is_reported_applied() {
-        let mut reported = 3;
+        let mut reported = Reported {
+            generation: 3,
+            ..Reported::default()
+        };
         let answer = json!({ "outcome": "unchanged", "generation": 4 });
         assert_eq!(
             since(&answer, &mut reported).unwrap(),
             Reload::Applied { generation: 4 }
         );
-        assert_eq!(reported, 4);
+        assert_eq!(reported.generation, 4);
         // Told of once: asked again, nothing changed.
         assert_eq!(since(&answer, &mut reported).unwrap(), Reload::Unchanged);
     }
 
     #[test]
     fn an_applied_reload_is_what_is_reported_next() {
-        let mut reported = 0;
+        let mut reported = Reported::default();
         let applied = json!({ "outcome": "applied", "generation": 1 });
         assert_eq!(
             since(&applied, &mut reported).unwrap(),
             Reload::Applied { generation: 1 }
         );
         let unchanged = json!({ "outcome": "unchanged", "generation": 1 });
+        assert_eq!(since(&unchanged, &mut reported).unwrap(), Reload::Unchanged);
+    }
+
+    #[test]
+    fn a_mistake_taken_back_is_reported_applied_once() {
+        let mut reported = Reported::default();
+        let failed = json!({ "outcome": "failed", "generation": 0, "message": "no" });
+        assert!(matches!(
+            since(&failed, &mut reported).unwrap(),
+            Reload::Failed { .. }
+        ));
+        // The files are what runs again, so the inspector counts nothing new.
+        let unchanged = json!({ "outcome": "unchanged", "generation": 0 });
+        assert_eq!(
+            since(&unchanged, &mut reported).unwrap(),
+            Reload::Applied { generation: 0 }
+        );
         assert_eq!(since(&unchanged, &mut reported).unwrap(), Reload::Unchanged);
     }
 }

@@ -64,6 +64,26 @@ Feature: Tokens are read and set in the project's theme file
       And the answer's "/tokens/0/token" is "Colors.seedHue"
       And the answer's "/tokens/1/token" is "Colors.canvas"
 
+    Scenario: With no token every role is named and only the theme's are read out
+      Given the file "app/theme.json":
+        """json
+        { "Spacing": { "md": 20 } }
+        """
+      When the agent calls the tool "theme_set" with:
+        """json
+        {"doc": "app/Main.qml"}
+        """
+      Then the answer's "/roles/0" is "Colors.seedHue"
+      And the answer's "/tokens" has 1 entry
+      And the answer's "/tokens/0/token" is "Spacing.md"
+      When the agent calls the tool "theme_set" with:
+        """json
+        {"doc": "app/Main.qml", "verbose": true}
+        """
+      Then the answer's "/roles" is absent
+      And the answer's "/tokens/0/token" is "Colors.seedHue"
+      And the answer's "/tokens/1/token" is "Colors.canvas"
+
     Scenario: The theme file's value is read beside the module's
       Given the file "app/theme.json":
         """json

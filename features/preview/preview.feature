@@ -181,6 +181,34 @@ Feature: A shell under edit runs in a preview
         """
       Then the answer has a PNG picture at most 200 pixels on its longest side
 
+    # A screenshot needs only `inspect`, and switching the look changes the
+    # running app: that is preview_open's, which needs `run`.
+    @native
+    Scenario: A picture cannot switch the app's appearance
+      Given the file "Look.qml":
+        """qml
+        import QtQuick
+
+        Rectangle {
+            width: 100
+            height: 100
+            color: Application.styleHints.colorScheme === Qt.ColorScheme.Dark ? "#00ff00" : "#ff0000"
+        }
+        """
+      And the agent has called the tool "preview_open" with:
+        """json
+        {"doc": "Look.qml", "appearance": "dark"}
+        """
+      When the agent calls the tool "preview_screenshot" with:
+        """json
+        {"appearance": "light"}
+        """
+      Then the agent is refused with "invalid_argument"
+      And the refusal's message matches "appearance"
+      When the agent calls the tool "preview_screenshot"
+      Then the answer's picture has some green
+      And the answer's picture has no red
+
     Scenario: The outline lists every item, with its box and where it is written
       Given the file "Card.qml":
         """qml

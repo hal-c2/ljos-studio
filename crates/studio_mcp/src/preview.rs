@@ -23,15 +23,17 @@ use crate::timer::Timer;
 use studio_core::{
     Store,
     preview::{
-        Alias, Extent, PreviewError, PreviewEvent, PreviewHost, PreviewSpec, Reload, Size, Target,
-        ms,
+        Alias, Extent, LogLine, PreviewError, PreviewEvent, PreviewHost, PreviewSpec, Reload, Size,
+        Target, ms,
     },
 };
 
-/// Reloads asked for after writes in any second: two fifths of the calls
-/// the preview answers, leaving the rest to pictures and reads.
+/// Reloads asked for after writes in any second, with the read of their
+/// logs: two fifths of the calls the preview answers, leaving the rest to
+/// pictures and reads.
 pub(crate) fn reloads_per_second(calls_per_second: u32) -> usize {
-    (calls_per_second as usize * 2 / 5).max(1)
+    // Each reload is two calls: the reload and the read of what it logged.
+    (calls_per_second as usize * 2 / 5 / 2).max(1)
 }
 
 /// Makes a host for the project in a directory.
@@ -154,6 +156,21 @@ pub(crate) struct Previews {
     pub events: Vec<PreviewEvent>,
     /// The host's log mark already read into `events`.
     pub log_mark: u64,
+    /// What is wrong in the open preview now, one a line: the compiler's
+    /// words where it said any, else what running the line logged first.
+    pub problems: Vec<LogLine>,
+    /// Counts changes to `problems`.
+    pub problems_seq: u64,
+    /// Each of `problems` with the text of its line when it was told, or
+    /// `None` when that text could not be read. Neither the compiler nor
+    /// the app says a problem again while its line is unchanged (Ljós tells
+    /// a warning once; a reload keeps an object whose binding is the same),
+    /// so a problem goes when its line's text does: an edit that leaves the
+    /// line still wrong is told anew.
+    held: Vec<(LogLine, Option<String>)>,
+    /// The project's directory, where the open preview reads the files it
+    /// runs; `None` for one held in no directory.
+    pub root: Option<std::path::PathBuf>,
     pub timer: Arc<dyn Timer>,
 }
 
@@ -167,6 +184,25 @@ fn measure(host: &mut dyn PreviewHost) -> Result<Extent, PreviewError> {
 /// Layouts a fit takes at most: a list that makes its delegates as they
 /// come into view grows each time the preview does.
 const FIT_ROUNDS: usize = 4;
+/// Two lines about one place: one line of one file, or one message of none.
+fn same_place(a: &LogLine, b: &LogLine) -> bool {
+    a.file == b.file && a.line == b.line && (a.file.is_some() || a.message == b.message)
+}
+
+/// A reload's failure as a problem, placed where its message says.
+pub(crate) fn failure(message: &str) -> LogLine {
+    let (file, line, message) = match studio_core::preview::place_of(message) {
+        Some((file, line, rest)) => (Some(file.to_owned()), Some(line), rest.to_owned()),
+        None => (None, None, message.to_owned()),
+    };
+    LogLine {
+        level: "error".to_owned(),
+        message,
+        file,
+        line,
+        compiler: true,
+    }
+}
 
 impl Open {
     /// Lays the preview out at its screen's size and, fitted to content,
@@ -349,6 +385,10 @@ impl Previews {
             starts: 0,
             events: Vec::new(),
             log_mark: 0,
+            problems: Vec::new(),
+            problems_seq: 0,
+            held: Vec::new(),
+            root: None,
             timer,
             hidden: BTreeSet::new(),
             hidden_ids: BTreeSet::new(),
@@ -508,47 +548,140 @@ impl Previews {
             // again.
             Err(e) => {
                 open.behind = true;
-                PreviewEvent::ReloadFailed {
+                self.events.push(PreviewEvent::ReloadFailed {
                     message: e.to_string(),
-                }
+                });
+                return;
             }
         };
+        let failed = match &event {
+            PreviewEvent::ReloadFailed { message } => Some(failure(message)),
+            _ => None,
+        };
         self.events.push(event);
+        let lines = self.read_logs();
+        self.start_problems(failed, &lines);
+    }
+
+    /// A new preview: nothing it logged has been read.
+    pub fn opened(&mut self) {
+        self.log_mark = 0;
+        self.held.clear();
+        let lines = self.read_logs();
+        self.start_problems(None, &lines);
+    }
+
+    /// The text of `line` of `file` as the preview reads it now.
+    fn text_at(&self, file: Option<&str>, line: Option<u32>) -> Option<String> {
+        let (file, line) = (file?, line?.checked_sub(1)?);
+        let text = std::fs::read_to_string(self.root.as_ref()?.join(file)).ok()?;
+        text.lines().nth(line as usize).map(|l| l.trim().to_owned())
+    }
+
+    /// After a reload. One that applied compiled, so no error of the
+    /// compiler's outlasts it, whatever its line says; it keeps what else is
+    /// wrong on lines it left as they were. One that failed keeps all of
+    /// that, as the last good text runs on, with only its own failure for
+    /// why the new text does not show.
+    fn start_problems(&mut self, failed: Option<LogLine>, lines: &[LogLine]) {
+        let held = std::mem::take(&mut self.held);
+        self.held = held
+            .into_iter()
+            .filter(|(p, _)| !(p.compiler && p.level == "error"))
+            .filter(|(p, text)| {
+                failed.is_some()
+                    || (text.is_some() && *text == self.text_at(p.file.as_deref(), p.line))
+            })
+            .collect();
+        if let Some(failed) = failed {
+            let text = self.text_at(failed.file.as_deref(), failed.line);
+            self.held.push((failed, text));
+        }
+        self.add_problems(lines);
+    }
+
+    /// What was logged: the compiler's words win over what running the same
+    /// line logged, whichever came first.
+    fn add_problems(&mut self, lines: &[LogLine]) {
+        for line in lines.iter().filter(|l| l.is_problem()) {
+            let at = self.held.iter().position(|(p, _)| same_place(p, line));
+            match at {
+                Some(at) if line.compiler && !self.held[at].0.compiler => {
+                    self.held[at].0 = line.clone();
+                }
+                Some(_) => {}
+                None => {
+                    let text = self.text_at(line.file.as_deref(), line.line);
+                    self.held.push((line.clone(), text));
+                }
+            }
+        }
+        let now: Vec<LogLine> = self.held.iter().map(|(p, _)| p.clone()).collect();
+        if now != self.problems {
+            self.problems = now;
+            self.problems_seq += 1;
+        }
     }
 
     /// What a reload asked for at `started` (the timer's time) did.
     pub fn record(&mut self, reload: Reload, started: Duration) {
-        match reload {
-            Reload::Applied { generation } => self.events.push(PreviewEvent::Reloaded {
-                generation,
-                ms: ms(self.timer.now().saturating_sub(started)),
-            }),
-            Reload::Failed { message } => {
-                self.events.push(PreviewEvent::ReloadFailed { message });
+        let failed = match reload {
+            Reload::Applied { generation } => {
+                self.events.push(PreviewEvent::Reloaded {
+                    generation,
+                    ms: ms(self.timer.now().saturating_sub(started)),
+                });
+                None
             }
-            Reload::Unchanged => {}
-        }
+            Reload::Failed { message } => {
+                let failed = failure(&message);
+                self.events.push(PreviewEvent::ReloadFailed { message });
+                Some(failed)
+            }
+            Reload::Unchanged => return,
+        };
+        let lines = self.read_logs();
+        self.start_problems(failed, &lines);
     }
 
     /// Reads the host's new log lines into the events.
     pub fn pull_logs(&mut self) {
+        let lines = self.read_logs();
+        self.add_problems(&lines);
+    }
+
+    /// The host's new log lines, put among the events.
+    fn read_logs(&mut self) -> Vec<LogLine> {
         let Some(open) = &mut self.open else {
-            return;
+            return Vec::new();
         };
         match open.host.logs(self.log_mark) {
             Ok((lines, next)) => {
                 self.log_mark = next;
-                self.events.extend(lines.into_iter().map(PreviewEvent::Log));
+                self.events
+                    .extend(lines.iter().cloned().map(PreviewEvent::Log));
+                lines
             }
             Err(e @ (PreviewError::Ended(_) | PreviewError::NotOpen)) => {
                 self.failed(e);
+                Vec::new()
             }
             Err(e) => {
                 open.behind = true;
                 self.events.push(PreviewEvent::ReloadFailed {
                     message: e.to_string(),
                 });
+                Vec::new()
             }
+        }
+    }
+
+    /// No preview runs, so nothing is wrong in one.
+    pub fn clear_problems(&mut self) {
+        self.held.clear();
+        if !self.problems.is_empty() {
+            self.problems.clear();
+            self.problems_seq += 1;
         }
     }
 
@@ -558,6 +691,7 @@ impl Previews {
     pub fn failed(&mut self, e: PreviewError) -> PreviewError {
         if matches!(e, PreviewError::Ended(_) | PreviewError::NotOpen) {
             self.open = None;
+            self.clear_problems();
             self.events.push(PreviewEvent::Ended {
                 message: e.to_string(),
             });
@@ -606,7 +740,7 @@ pub(crate) fn spec(store: &dyn Store, doc: &str, size: Size, aliases: &[Alias]) 
 #[cfg(test)]
 mod tests {
     use serde_json::{Map, Value};
-    use studio_core::preview::{Declared, LogLine, Picture, PreviewError};
+    use studio_core::preview::{Declared, Picture, PreviewError};
 
     use super::*;
 
@@ -639,8 +773,8 @@ mod tests {
         fn write(&mut self, _: &str, _: &str, _: Value) -> Result<(), PreviewError> {
             unreachable!()
         }
-        fn logs(&mut self, _: u64) -> Result<(Vec<LogLine>, u64), PreviewError> {
-            unreachable!()
+        fn logs(&mut self, since: u64) -> Result<(Vec<LogLine>, u64), PreviewError> {
+            Ok((Vec::new(), since))
         }
         fn pick(&mut self, _: f64, _: f64) -> Result<Option<Declared>, PreviewError> {
             unreachable!()
@@ -720,6 +854,108 @@ mod tests {
         let reload = std::panic::AssertUnwindSafe(|| p.catch_up());
         assert!(std::panic::catch_unwind(reload).is_err());
         assert!(p.open.as_ref().unwrap().behind);
+    }
+
+    fn warning(file: &str, line: u32, message: &str, compiler: bool) -> LogLine {
+        LogLine {
+            level: "warning".to_owned(),
+            message: message.to_owned(),
+            file: Some(file.to_owned()),
+            line: Some(line),
+            compiler,
+        }
+    }
+
+    /// A project of one file, written by the test as an edit writes it.
+    fn rooted(p: &mut Previews, text: &str) -> std::path::PathBuf {
+        let root = std::env::temp_dir().join(format!(
+            "studio-problems-{}-{}",
+            std::process::id(),
+            text.len()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("Main.qml"), text).unwrap();
+        p.root = Some(root.clone());
+        root
+    }
+
+    #[test]
+    fn a_problem_stays_while_its_line_is_unchanged_and_goes_when_edited() {
+        let (mut p, _) = previews(VecDeque::new(), false);
+        let root = rooted(&mut p, "Item {\n    color: transparent\n    width: 1\n}\n");
+        let said = warning("Main.qml", 2, "`transparent` is not a name in sight", true);
+        let ran = warning(
+            "Main.qml",
+            2,
+            "Unable to assign [undefined] to QColor",
+            false,
+        );
+        // What running the line logged comes first; the compiler's words win.
+        p.start_problems(None, &[ran.clone(), said.clone()]);
+        assert_eq!(p.problems, [said.clone()]);
+        let seq = p.problems_seq;
+        // Another line edited: nobody says it again, and it is still wrong.
+        std::fs::write(
+            root.join("Main.qml"),
+            "Item {\n    color: transparent\n    width: 2\n}\n",
+        )
+        .unwrap();
+        p.start_problems(None, &[]);
+        assert_eq!(p.problems, [said]);
+        assert_eq!(p.problems_seq, seq, "nothing changed");
+        // Its own line edited and fixed: it goes.
+        std::fs::write(
+            root.join("Main.qml"),
+            "Item {\n    color: \"transparent\"\n    width: 2\n}\n",
+        )
+        .unwrap();
+        p.start_problems(None, &[]);
+        assert!(p.problems.is_empty());
+        assert_eq!(p.problems_seq, seq + 1);
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn a_problem_whose_line_cannot_be_read_lasts_one_reload() {
+        let (mut p, _) = previews(VecDeque::new(), false);
+        let ran = warning(
+            "ljos-design:/Ljos/Design/Colors.qml",
+            93,
+            "Unable to assign [undefined] to QColor",
+            false,
+        );
+        p.start_problems(None, std::slice::from_ref(&ran));
+        assert_eq!(p.problems, [ran.clone()]);
+        p.start_problems(None, &[]);
+        assert!(p.problems.is_empty());
+    }
+
+    #[test]
+    fn a_failed_reload_keeps_what_was_wrong_and_adds_why() {
+        let (mut p, _) = previews(VecDeque::new(), false);
+        let ran = warning("Main.qml", 5, "ReferenceError: x is not defined", false);
+        p.start_problems(None, std::slice::from_ref(&ran));
+        p.start_problems(Some(failure("Main.qml:9:3: expected a property")), &[]);
+        assert_eq!(p.problems.len(), 2);
+        assert_eq!(p.problems[1].line, Some(9));
+        assert_eq!(p.problems[1].message, "expected a property");
+        assert_eq!(p.problems[1].level, "error");
+        // The next failure says why instead of the last.
+        p.start_problems(Some(failure("Main.qml:4:1: expected `}`")), &[]);
+        assert_eq!(p.problems.len(), 2);
+        assert_eq!(p.problems[1].line, Some(4));
+    }
+
+    #[test]
+    fn an_error_goes_when_a_reload_applies_though_its_line_is_as_it_was() {
+        let (mut p, _) = previews(VecDeque::new(), false);
+        let root = rooted(&mut p, "Item {\n    Badge {}\n}\n");
+        p.start_problems(Some(failure("Main.qml:2:5: Badge is not a type")), &[]);
+        assert_eq!(p.problems[0].level, "error");
+        // Mended by a new Badge.qml: line 2 is untouched.
+        p.start_problems(None, &[]);
+        assert!(p.problems.is_empty());
+        std::fs::remove_dir_all(&root).unwrap();
     }
 
     #[test]
