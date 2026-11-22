@@ -66,10 +66,10 @@ Feature: The preview is scrolled, typed into and made as tall as its page, as a 
       """
     Then the answer's "/state/contentY" is above 100
 
-  Scenario: Another tool answers while the page a swipe flung still moves
+  Scenario: Another tool answers while the page a wheel turned still glides
     When the agent calls the tool "preview_state" with the following, and the tool "preview_events" once its input is in:
       """json
-      {"swipe": {"x": 600, "y": 700, "dy": -400}, "node": {"id": "page"}, "read": ["contentY"]}
+      {"scroll": {"x": 600, "y": 400, "dy": -10}, "node": {"id": "page"}, "read": ["contentY"]}
       """
     Then the second tool answered before the first, while the page still moved
     And the answer's "/state/contentY" is above 100
