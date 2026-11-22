@@ -1127,20 +1127,7 @@ fn wait_for_rest(
     rests: Option<u64>,
     wait_ms: u64,
 ) -> Result<EventsOut, SurfaceError> {
-    let waiting = {
-        let studio = lock(studio);
-        let previews = preview::lock(&studio.previews);
-        let open = previews
-            .open
-            .as_ref()
-            .ok_or_else(|| preview_error(PreviewError::NotOpen))?;
-        open.host.rest_watch().ok_or_else(|| {
-            preview_error(PreviewError::NotSupported {
-                message: "this preview cannot say when it rests".to_owned(),
-                ljos_web_request: 25,
-            })
-        })?
-    };
+    let waiting = watch_of(studio)?;
     let rest = waiting
         .wait(rests, wait_ms.min(3_600_000))
         .map_err(preview_error)?;
@@ -1154,6 +1141,23 @@ fn wait_for_rest(
     })
 }
 
+/// The open preview's watch, found with the session held and waited on
+/// without it.
+fn watch_of(studio: &Mutex<Studio>) -> Result<Box<dyn RestWatch>, SurfaceError> {
+    let studio = lock(studio);
+    let previews = preview::lock(&studio.previews);
+    let open = previews
+        .open
+        .as_ref()
+        .ok_or_else(|| preview_error(PreviewError::NotOpen))?;
+    open.host.rest_watch().ok_or_else(|| {
+        preview_error(PreviewError::NotSupported {
+            message: "this preview cannot say when it rests".to_owned(),
+            ljos_web_request: 25,
+        })
+    })
+}
+
 /// A wait for a server's thread, begun with the session held only to find it.
 #[cfg(feature = "native")]
 pub(crate) fn parked(
@@ -1164,19 +1168,17 @@ pub(crate) fn parked(
     impl Future<Output = Result<studio_core::preview::Rest, PreviewError>> + Send + use<>,
     SurfaceError,
 > {
-    let studio = lock(studio);
-    let previews = preview::lock(&studio.previews);
-    let open = previews
-        .open
-        .as_ref()
-        .ok_or_else(|| preview_error(PreviewError::NotOpen))?;
-    let watch = open.host.rest_watch().ok_or_else(|| {
-        preview_error(PreviewError::NotSupported {
-            message: "this preview cannot say when it rests".to_owned(),
-            ljos_web_request: 25,
-        })
-    })?;
-    Ok(watch.parked(rests, wait_ms.min(3_600_000)))
+    Ok(watch_of(studio)?.parked(rests, wait_ms.min(3_600_000)))
+}
+
+/// A wait on the app's log, begun the same way.
+#[cfg(feature = "native")]
+pub(crate) fn logged(
+    studio: &Mutex<Studio>,
+    since: Option<u64>,
+    wait_ms: u64,
+) -> Result<impl Future<Output = Result<u64, PreviewError>> + Send + use<>, SurfaceError> {
+    Ok(watch_of(studio)?.logged(since, wait_ms.min(3_600_000)))
 }
 
 /// What is known to be wrong in the preview, asking it nothing: a window

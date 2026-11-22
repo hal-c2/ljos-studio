@@ -242,7 +242,18 @@ pub fn place_in<'a>(
     message: &'a str,
     root: Option<&Path>,
 ) -> Option<(String, Option<u32>, &'a str)> {
-    if let Some((file, rest)) = root.and_then(|root| script_place(message, root)) {
+    place_among(message, &|file| {
+        root.is_some_and(|root| is_file_below(file, root))
+    })
+}
+
+/// [`place_in`], among the files `is_file` knows: a project's store has
+/// them where there is no directory to look in.
+pub fn place_among<'a>(
+    message: &'a str,
+    is_file: &dyn Fn(&str) -> bool,
+) -> Option<(String, Option<u32>, &'a str)> {
+    if let Some((file, rest)) = script_place(message, is_file) {
         return Some((file, None, rest));
     }
     if let Some((file, line, rest)) = place_of(message) {
@@ -253,7 +264,7 @@ pub fn place_in<'a>(
         .filter_map(|ext| message.find(ext).map(|at| at + ext.len() - 1))
         .min()?;
     let (file, rest) = message.split_at(end);
-    if !is_file_below(file, root?) {
+    if !is_file(file) {
         return None;
     }
     if let Some(words) = rest.strip_prefix(": ") {
@@ -268,10 +279,10 @@ pub fn place_in<'a>(
 /// `key.qml.js[?generation=N|?text=N]:line: rest`, the pin's name for the
 /// program of `key.qml`. The line is the generated script's: line 21 there
 /// can be the document's 15, so it is never passed on as the document's.
-fn script_place<'a>(message: &'a str, root: &Path) -> Option<(String, &'a str)> {
+fn script_place<'a>(message: &'a str, is_file: &dyn Fn(&str) -> bool) -> Option<(String, &'a str)> {
     let (key, after) = message.split_once(".qml.js")?;
     let file = format!("{key}.qml");
-    if !is_file_below(&file, root) {
+    if !is_file(&file) {
         return None;
     }
     let (query, place) = after.split_once(':')?;
@@ -430,6 +441,20 @@ pub trait RestWatch: Send {
     /// as a person looks once it stops. A fling that outlasts the bound is
     /// read where it has got to.
     fn settle(&self, wait_ms: u64) -> Result<(), PreviewError>;
+
+    /// How often the app logged: at once without `since`, else when that
+    /// differs from `since` or after `wait_ms`. Dropped, it is over as
+    /// [`RestWatch::parked`] is.
+    fn logged(
+        &self,
+        _since: Option<u64>,
+        _wait_ms: u64,
+    ) -> std::pin::Pin<Box<dyn Future<Output = Result<u64, PreviewError>> + Send>> {
+        Box::pin(std::future::ready(Err(PreviewError::NotSupported {
+            message: "this preview cannot say when it logs".to_owned(),
+            ljos_web_request: 25,
+        })))
+    }
 }
 
 pub trait PreviewHost: Send {

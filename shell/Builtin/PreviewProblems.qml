@@ -4,8 +4,8 @@
 // object, the `node_select` an agent makes. The list is the workspace's
 // `problems`, kept by Studio: it empties as each problem is fixed, so the
 // panel keeps only whether the person opened it. It comes and goes as they
-// type, so place it where that moves nothing. A skin may restyle or move it
-// freely.
+// type, so place it where that covers nothing and moves neither the code
+// nor the frame. A skin may restyle or move it freely.
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
@@ -17,8 +17,6 @@ Pane {
     required property Workspace workspace
     // How many rows show before the list scrolls.
     property int rows: 4
-    // How wide it is open: a message wraps in it.
-    property int listWidth: 360
 
     // And why the open document doesn't parse, where no error names it: one
     // broken when it was opened has had no preview to say so, and an error
@@ -51,7 +49,7 @@ Pane {
 
     visible: count > 0
     padding: 1
-    implicitWidth: (open ? listWidth : header.implicitWidth) + 2 * padding
+    implicitWidth: header.implicitWidth + 2 * padding
     implicitHeight: column.implicitHeight + 2 * padding
     Accessible.role: Accessible.Pane
     Accessible.name: count === 0 ? "No problems in the preview" : count === 1 ? "1 problem in the preview" : count + " problems in the preview"

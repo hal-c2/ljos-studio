@@ -30,7 +30,10 @@ pub mod view;
 
 use std::{
     path::{Path, PathBuf},
-    sync::{Arc, Mutex, MutexGuard},
+    sync::{
+        Arc, Mutex, MutexGuard,
+        atomic::{AtomicU64, Ordering},
+    },
 };
 
 use ljos_mcp_core::{
@@ -82,12 +85,21 @@ pub struct Studio {
 pub type Watcher = Arc<dyn Fn() + Send + Sync>;
 
 #[derive(Clone, Default)]
-struct Watchers(Arc<Mutex<Vec<Watcher>>>);
+struct Watchers {
+    all: Arc<Mutex<Vec<Watcher>>>,
+    /// Counts the tells, for a call to see that one was made during it.
+    tells: Arc<AtomicU64>,
+}
 
 impl Watchers {
+    fn tells(&self) -> u64 {
+        self.tells.load(Ordering::SeqCst)
+    }
+
     fn tell(&self) {
+        self.tells.fetch_add(1, Ordering::SeqCst);
         let watchers = self
-            .0
+            .all
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .clone();
@@ -269,7 +281,7 @@ impl Studio {
     /// changed or reloaded, another project opened.
     pub fn watch(&mut self, watcher: Watcher) {
         self.watchers
-            .0
+            .all
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .push(watcher);
@@ -519,19 +531,33 @@ impl StudioServer {
 impl StudioServer {
     /// A client's call and a window's picture are answered through here.
     /// The windows are told once: of what a `shown` call changed when it
-    /// answers, and of a preview any call ended, refused or answered (its
+    /// answers, of a preview any call ended, refused or answered (its
     /// process was gone as its log was read, say), which they show until
-    /// told. A call that did neither tells them nothing.
+    /// told, and of a preview or problems any call changed with no tell
+    /// since it began: a `preview_open` may resize and then be refused. A
+    /// tell during the call is enough, as who reads after it waits for the
+    /// session the tool holds. A call that did none of these tells them
+    /// nothing.
     fn telling<T>(
         &self,
         shown: bool,
         call: impl FnOnce() -> Result<T, SurfaceError>,
     ) -> Result<T, SurfaceError> {
-        let previews = lock(&self.studio).previews.clone();
-        let ends = preview::lock(&previews).ends;
+        let (previews, watchers) = {
+            let studio = lock(&self.studio);
+            (studio.previews.clone(), studio.watchers.clone())
+        };
+        let tells = watchers.tells();
+        let (ends, showed) = {
+            let previews = preview::lock(&previews);
+            (previews.ends, previews.shown_now())
+        };
         let out = call();
-        let ended = preview::lock(&previews).ends != ends;
-        if ended || (shown && out.is_ok()) {
+        let (ended, changed) = {
+            let previews = preview::lock(&previews);
+            (previews.ends != ends, previews.shown_now() != showed)
+        };
+        if ended || (shown && out.is_ok()) || (changed && watchers.tells() == tells) {
             lock(&self.studio).watchers.tell();
         }
         out
@@ -619,6 +645,36 @@ impl StudioServer {
                 .map(view::Problem::answered)
                 .collect();
             out.insert("warnings".to_owned(), serde_json::Value::Array(told));
+        }
+    }
+
+    /// For a window, which lists what is wrong as it happens: how often the
+    /// previewed app logged, once that differs from `since` (at once without
+    /// one) or `wait_ms` went by. The session is held only to begin it.
+    #[cfg(feature = "native")]
+    pub fn logged(
+        &self,
+        since: Option<u64>,
+        wait_ms: u64,
+    ) -> Result<
+        impl Future<Output = Result<u64, studio_core::preview::PreviewError>> + Send + use<>,
+        SurfaceError,
+    > {
+        preview_tools::logged(&self.studio, since, wait_ms)
+    }
+
+    /// For a window, after [`StudioServer::logged`]: reads what the app
+    /// logged, and tells the windows only if that changed what is wrong.
+    pub fn pull_problems(&self) {
+        let previews = lock(&self.studio).previews.clone();
+        let changed = {
+            let mut previews = preview::lock(&previews);
+            let was = (previews.problems_seq, previews.ends);
+            previews.pull_problems();
+            (previews.problems_seq, previews.ends) != was
+        };
+        if changed {
+            lock(&self.studio).watchers.tell();
         }
     }
 

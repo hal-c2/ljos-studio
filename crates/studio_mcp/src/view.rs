@@ -11,7 +11,7 @@ use serde::Serialize;
 use serde_json::Value as Json;
 use studio_core::{
     Address, StateInfo,
-    preview::{LogLine, PreviewEvent, Target},
+    preview::{Alias, LogLine, PreviewEvent, Target, place_among},
 };
 use studio_core::{Interaction, flows::handler_name};
 
@@ -561,11 +561,15 @@ impl Studio {
     pub(crate) fn problems(&mut self, lines: &[LogLine]) -> Vec<Problem> {
         let mut trees: std::collections::HashMap<String, Option<Vec<Written>>> =
             std::collections::HashMap::new();
+        let mocked = preview::lock(&self.previews)
+            .open
+            .as_ref()
+            .map(|open| open.mocked.clone())
+            .unwrap_or_default();
         lines
             .iter()
             .map(|l| {
-                let file = l.file.clone().unwrap_or_default();
-                let line = l.line.unwrap_or(0);
+                let (file, line, message) = self.placed(l, &mocked);
                 let node = if file.is_empty() || line == 0 {
                     String::new()
                 } else {
@@ -584,13 +588,35 @@ impl Studio {
                         "error"
                     }
                     .to_owned(),
-                    message: l.message.clone(),
+                    message,
                     file,
                     line,
                     node,
                 }
             })
             .collect()
+    }
+
+    /// Where `said` is, its file as the store names the document, which is
+    /// what a window opens and compares: a mock in its own directory, a
+    /// link followed. A failure is looked for among the store's files too,
+    /// as a project need be in no directory.
+    fn placed(&self, said: &LogLine, mocked: &[Alias]) -> (String, u32, String) {
+        let store = self.session.store();
+        let found = if said.file.is_none() && said.compiler && said.level == "error" {
+            place_among(&said.message, &|file| store.exists(&unmocked(file, mocked)))
+        } else {
+            None
+        };
+        let (file, line, message) = match found {
+            Some((file, line, words)) => (Some(file), line, words),
+            None => (said.file.clone(), said.line, said.message.as_str()),
+        };
+        let file = file.map_or_else(String::new, |file| {
+            let file = unmocked(&file, mocked);
+            store.resolved(&file).unwrap_or(file)
+        });
+        (file, line.unwrap_or(0), message.to_owned())
     }
 
     /// Each object of `doc` with the lines it is written on: handle, first
@@ -681,6 +707,18 @@ impl Studio {
             .find(|s| s.when.as_deref() == Some(condition.as_str()))
             .map(|s| s.name)
     }
+}
+
+/// The project's path of `file`: Ljós names a mocked module's files
+/// `.aliases/<module>/`, wherever the project keeps them.
+fn unmocked(file: &str, mocked: &[Alias]) -> String {
+    file.strip_prefix(".aliases/")
+        .and_then(|rest| rest.split_once('/'))
+        .and_then(|(module, rest)| {
+            let alias = mocked.iter().find(|a| a.module == module)?;
+            Some(format!("{}/{rest}", alias.dir))
+        })
+        .unwrap_or_else(|| file.to_owned())
 }
 
 /// The object written on `line` that no other object written there is in:

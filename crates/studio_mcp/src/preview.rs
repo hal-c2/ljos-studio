@@ -139,6 +139,19 @@ pub(crate) struct Open {
     pub harness: Option<crate::harness::Standing>,
 }
 
+/// The most lines kept unread for the events, and the most problems of
+/// what an app logs: as many lines as Ljós's own log keeps. A window reads
+/// the log as the app writes it, and an app may warn for ever.
+const LINES_KEPT: usize = 1024;
+
+/// What a window shows of the previews that a call can change without
+/// writing.
+#[derive(PartialEq)]
+pub(crate) struct Shown {
+    problems: u64,
+    open: Option<(String, Option<Target>, Size, State, u64)>,
+}
+
 pub(crate) struct Previews {
     /// The objects `node_arrange` `hide` hides, by document and handle, which
     /// outlast a reload and a preview: an id can pass to another object, a
@@ -612,7 +625,8 @@ impl Previews {
     }
 
     /// What was logged: the compiler's words win over what running the same
-    /// line logged, whichever came first.
+    /// line logged, whichever came first. Past [`LINES_KEPT`] the first
+    /// problems stay and only the compiler's are added.
     fn add_problems(&mut self, lines: &[LogLine]) {
         for line in lines.iter().filter(|l| l.is_problem()) {
             let at = self.held.iter().position(|(p, _)| same_place(p, line));
@@ -621,10 +635,11 @@ impl Previews {
                     self.held[at].0 = line.clone();
                 }
                 Some(_) => {}
-                None => {
+                None if line.compiler || self.held.len() < LINES_KEPT => {
                     let text = self.text_at(line.file.as_deref(), line.line);
                     self.held.push((line.clone(), text));
                 }
+                None => {}
             }
         }
         let now: Vec<LogLine> = self.held.iter().map(|(p, _)| p.clone()).collect();
@@ -660,11 +675,27 @@ impl Previews {
     /// Reads the host's new log lines, and puts all that are unlisted among
     /// the events.
     pub fn pull_logs(&mut self) {
+        self.pull_problems();
+        self.events
+            .extend(self.unlisted.drain(..).map(PreviewEvent::Log));
+    }
+
+    /// Reads the host's new log lines for the problems among them. They
+    /// join the events when those are read.
+    pub fn pull_problems(&mut self) {
         if let Ok(lines) = self.read_logs() {
             self.add_problems(&lines);
         }
-        self.events
-            .extend(self.unlisted.drain(..).map(PreviewEvent::Log));
+    }
+
+    pub fn shown_now(&self) -> Shown {
+        Shown {
+            problems: self.problems_seq,
+            open: self
+                .open
+                .as_ref()
+                .map(|o| (o.doc.clone(), o.target, o.size, o.state, o.clicks)),
+        }
     }
 
     /// The host's new log lines, kept for the events. The error is that
@@ -678,6 +709,8 @@ impl Previews {
             Ok((lines, next)) => {
                 self.log_mark = next;
                 self.unlisted.extend_from_slice(&lines);
+                let over = self.unlisted.len().saturating_sub(LINES_KEPT);
+                self.unlisted.drain(..over);
                 Ok(lines)
             }
             Err(e @ (PreviewError::Ended(_) | PreviewError::NotOpen)) => Err(self.failed(e)),
