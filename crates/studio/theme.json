@@ -18,6 +18,8 @@
     "textMuted": { "light": "#5c5c68", "dark": "#a8a8b4" },
     "textDisabled": { "light": "#8a8a96", "dark": "#71717c" },
     "link": { "light": "#5638d0", "dark": "#b4a6ff" },
+    "danger": { "light": "#b03e3b", "dark": "#ee766e" },
+    "textOnDanger": { "dark": "#270d0b" },
     "info": "#00799c",
     "textOnInfo": "#ffffff"
   },
