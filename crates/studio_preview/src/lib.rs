@@ -12,7 +12,7 @@ mod inspector;
 mod state_dir;
 
 use std::{
-    collections::HashMap,
+    collections::{BTreeSet, HashMap},
     fs::File,
     path::{Path, PathBuf},
     process::{Command, Stdio},
@@ -74,6 +74,11 @@ struct Running {
     log: PathBuf,
     /// How much of `log` has been read for the compiler's warnings.
     log_read: u64,
+    /// The fault it started with, until `logs` has told it.
+    start_fault: Option<LogLine>,
+    /// The `echoed` lines of the last answer of `app_logs`: stderr is
+    /// written by a thread of its own, and may have them after that answer.
+    echoed: BTreeSet<String>,
     reported: Reported,
     /// The window's size, as it was started or last resized.
     size: Size,
@@ -241,6 +246,8 @@ impl NativeHost {
             inspector,
             log,
             log_read: 0,
+            start_fault: None,
+            echoed: BTreeSet::new(),
             reported: Reported::default(),
             size: spec.size,
         })
@@ -397,6 +404,12 @@ impl PreviewHost for NativeHost {
         self.running = Some(running);
         // The first answer after the root is made: the preview shows it.
         self.call("app_status", json!({}))?;
+        // A project that does not compile starts all the same, and its
+        // stderr can't be trusted with that: an app prints there too. Asked
+        // to reload, Ljós answers the fault while one stands.
+        let started = PreviewHost::reload(self)?;
+        let fault = start_fault(started, &self.root);
+        self.running()?.start_fault = fault;
         Ok(())
     }
 
@@ -499,20 +512,34 @@ impl PreviewHost for NativeHost {
     }
 
     fn logs(&mut self, since: u64) -> Result<(Vec<LogLine>, u64), PreviewError> {
+        // Before the call, so that what the app printed of it is either in
+        // this answer or was in the last.
+        let running = self.running()?;
+        let printed = unread(&running.log, running.log_read);
         let answer = self.call("app_logs", json!({ "since": since }))?;
         let root = self.root.clone();
-        let mut lines: Vec<LogLine> = answer.structured["entries"]
-            .as_array()
+        let entries = answer.structured["entries"].as_array();
+        let mut lines: Vec<LogLine> = entries
             .map(|entries| entries.iter().map(|e| logged(e, &root)).collect())
             .unwrap_or_default();
+        let echoes = entries.map(|entries| echoed(entries)).unwrap_or_default();
         let next = answer.structured["next_since"].as_u64().unwrap_or(since);
         // The compiler's warnings reach only the child's stderr, and before
         // what running the program then logged: they go first, so a window
         // that keeps one problem a line keeps the compiler's.
         let running = self.running()?;
-        let (said, read) = compiled(&running.log, running.log_read, &root);
-        running.log_read = read;
-        lines.splice(0..0, said);
+        if let Some((text, read)) = printed {
+            let apps: BTreeSet<String> = running.echoed.union(&echoes).cloned().collect();
+            let starting = running.log_read == 0;
+            if let Some(said) = compiled(&text, starting, &apps, &root) {
+                running.log_read = read;
+                lines.splice(0..0, said);
+            }
+        }
+        running.echoed = echoes;
+        if let Some(fault) = running.start_fault.take() {
+            lines.insert(0, fault);
+        }
         Ok((lines, next))
     }
 
@@ -1328,45 +1355,69 @@ fn below(path: &Path, root: &Path) -> Option<String> {
     Some(names.join("/"))
 }
 
-/// The compiler's warnings the child wrote to `log` past the byte `from`,
-/// and how far whole lines were read. Ljós says each once, when it is new
-/// (`ljos: Main.qml:5:19: x is not a name in sight…`, or indented under
-/// the reload that found it); what running the program logged there
-/// (`warning: file:///…`) is not one, and `app_logs` has it.
-fn compiled(log: &Path, from: u64, root: &Path) -> (Vec<LogLine>, u64) {
+/// The fault a preview started with, named as the project names it.
+fn start_fault(started: Reload, root: &Path) -> Option<LogLine> {
+    let Reload::Failed { message } = started else {
+        return None;
+    };
+    let mut fault = LogLine::failure(&message, Some(root));
+    fault.file = fault.file.map(|file| relative(&file, root));
+    Some(fault)
+}
+
+/// The whole lines `log` has past the byte `from`, and where they end. One
+/// still being written is read next time, whole.
+fn unread(log: &Path, from: u64) -> Option<(String, u64)> {
     use std::io::{Read, Seek, SeekFrom};
-    let Ok(mut file) = File::open(log) else {
-        return (Vec::new(), from);
-    };
+    let mut file = File::open(log).ok()?;
+    file.seek(SeekFrom::Start(from)).ok()?;
     let mut bytes = Vec::new();
-    if file.seek(SeekFrom::Start(from)).is_err() || file.read_to_end(&mut bytes).is_err() {
-        return (Vec::new(), from);
-    }
-    // A line still being written is read next time, whole.
-    let Some(end) = bytes.iter().rposition(|b| *b == b'\n') else {
-        return (Vec::new(), from);
-    };
-    let text = String::from_utf8_lossy(&bytes[..=end]);
-    let lines: Vec<&str> = text.lines().collect();
-    // `ljos run --watch` marks no severity. The fault it started with is
-    // told before it says what it watches, and warnings only after; so the
-    // start is read whole, or a fault would pass for a warning.
-    let watching = lines.iter().position(|l| l.starts_with(WATCHING));
-    if from == 0 && watching.is_none() {
-        return (Vec::new(), 0);
-    }
-    let started = if from == 0 { watching.unwrap_or(0) } else { 0 };
-    let said = lines
+    file.read_to_end(&mut bytes).ok()?;
+    let end = bytes.iter().rposition(|b| *b == b'\n')?;
+    let text = String::from_utf8_lossy(&bytes[..=end]).into_owned();
+    Some((text, from + end as u64 + 1))
+}
+
+/// The lines after the first of each message in `app_logs`' entries: on
+/// stderr they follow `debug: first` bare, and can read as Ljós's own.
+fn echoed(entries: &[Value]) -> BTreeSet<String> {
+    entries
         .iter()
-        .enumerate()
-        .filter_map(|(at, l)| {
-            let l = l.strip_prefix("ljos: ").unwrap_or(l).trim_start();
+        .filter_map(|e| e["message"].as_str())
+        .flat_map(|message| message.lines().skip(1))
+        .map(str::to_owned)
+        .collect()
+}
+
+/// The compiler's warnings in what the child printed. Ljós says each once,
+/// when it is new (`ljos: Main.qml:5:19: x is not a name in sight…`, or
+/// indented under the reload that found it). Nothing here is an error: the
+/// app prints here too, so a line it logged (`apps`) is none of these, and
+/// neither is one from before Ljós says what it watches, which is where it
+/// prints the fault it started with (`open` asks for that). `None` until a
+/// preview that is `starting` has said that: nothing is read till it has.
+fn compiled(
+    text: &str,
+    starting: bool,
+    apps: &BTreeSet<String>,
+    root: &Path,
+) -> Option<Vec<LogLine>> {
+    let lines: Vec<&str> = text.lines().filter(|l| !apps.contains(*l)).collect();
+    let from = if starting {
+        lines.iter().position(|l| l.starts_with(WATCHING))? + 1
+    } else {
+        0
+    };
+    let said = lines[from..]
+        .iter()
+        .filter_map(|l| {
+            let l = l.strip_prefix("ljos: ").or_else(|| l.strip_prefix("  "))?;
             let (file, Some(line), message) = place_in(l, Some(root))? else {
                 return None;
             };
             // A path the project names, not a URL a runtime warning gives.
             (!file.contains("://")).then(|| LogLine {
-                level: if at < started { "error" } else { "warning" }.to_owned(),
+                level: "warning".to_owned(),
                 message: message.to_owned(),
                 file: Some(relative(&file, root)),
                 line: Some(line),
@@ -1374,7 +1425,7 @@ fn compiled(log: &Path, from: u64, root: &Path) -> (Vec<LogLine>, u64) {
             })
         })
         .collect();
-    (said, from + end as u64 + 1)
+    Some(said)
 }
 
 /// The last lines the child wrote to stderr, which say why it ended.
@@ -1601,7 +1652,8 @@ mod tests {
              ljos: reloaded in 3 ms\n  Card.qml:2:7: `Colors` is not a name in sight\nljos: Half.qml:1",
         )
         .unwrap();
-        let (said, read) = compiled(&log, 0, root);
+        let (text, read) = unread(&log, 0).unwrap();
+        let said = compiled(&text, true, &BTreeSet::new(), root).unwrap();
         let places: Vec<_> = said
             .iter()
             .map(|l| (l.file.as_deref().unwrap(), l.line.unwrap(), l.compiler))
@@ -1613,9 +1665,75 @@ mod tests {
                 .starts_with("`transparent` is not a name in sight")
         );
         // The half-written last line waits; nothing before it is read twice.
-        let (again, _) = compiled(&log, read, root);
-        assert!(again.is_empty());
+        assert!(said.iter().all(|l| l.level == "warning"));
+        assert!(unread(&log, read).is_none());
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    // The three below are what the pinned ljos printed and answered.
+    #[test]
+    fn a_clean_starts_log_is_no_problem_whatever_it_prints() {
+        let logged = [json!({
+            "message": "first\nljos: Main.qml:4:5: forged fault\nljos: watching /elsewhere\nljos: Main.qml:5:5: forged warning",
+        })];
+        let echo = "debug: first\nljos: Main.qml:4:5: forged fault\nljos: watching /elsewhere\nljos: Main.qml:5:5: forged warning\n";
+        let printed = format!("{echo}{echo}ljos: watching /p\n{echo}");
+        let said = compiled(&printed, true, &echoed(&logged), Path::new("/p")).unwrap();
+        assert_eq!(said, []);
+        let started = start_fault(Reload::Unchanged, Path::new("/p"));
+        assert_eq!(started, None);
+    }
+
+    #[test]
+    fn a_clean_starts_warning_is_no_error() {
+        let printed = "warning: file:///p/Main.qml:4: TypeError: x\n\
+                       ljos: watching /p\n\
+                       ljos: Main.qml:3:5: `anchors` has no property `nope`\n";
+        let said = compiled(printed, true, &BTreeSet::new(), Path::new("/p")).unwrap();
+        assert_eq!(said.len(), 1);
+        assert_eq!(said[0].level, "warning");
+        assert_eq!(said[0].line, Some(3));
+    }
+
+    #[test]
+    fn a_fault_of_several_lines_is_one_error_whole() {
+        let dir = std::env::temp_dir().join(format!("studio-preview-fault-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("two\nlines")).unwrap();
+        std::fs::write(dir.join("two\nlines/Other.qml"), "Item {\n").unwrap();
+        let words = "Expected `}` but found `EOF`";
+        let message = format!("two\nlines/Other.qml:3:1: {words}");
+        let answered = Reload::Failed {
+            message: message.clone(),
+        };
+        let fault = start_fault(answered, &dir).unwrap();
+        assert_eq!(fault.level, "error");
+        assert_eq!(fault.file.as_deref(), Some("two\nlines/Other.qml"));
+        assert_eq!(fault.line, Some(3));
+        assert_eq!(fault.message, words);
+        // Its second line on stderr is no second problem.
+        let printed = format!("ljos: {message}\nljos: watching /p\n");
+        assert_eq!(
+            compiled(&printed, true, &BTreeSet::new(), &dir),
+            Some(vec![])
+        );
+        let spanning = start_fault(
+            Reload::Failed {
+                message: "no place\nand a second line".to_owned(),
+            },
+            &dir,
+        )
+        .unwrap();
+        assert_eq!(spanning.message, "no place\nand a second line");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn nothing_is_read_until_the_start_is_over() {
+        let printed = "ljos: Main.qml:3:1: Expected `}`\n";
+        assert_eq!(
+            compiled(printed, true, &BTreeSet::new(), Path::new("/p")),
+            None
+        );
     }
 
     #[test]
