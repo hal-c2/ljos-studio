@@ -720,6 +720,83 @@ Feature: A project is exported for ljos-web to build a site from
       Then the answer's "/written" is true
       And the file "build/web-site/ljos-site.json" exists
 
+    # A build empties its work directory, and reads the copy of the bundle
+    # it keeps there.
+    Scenario Outline: Where builds work is no place for an export
+      When the agent calls the tool "export" with:
+        """json
+        {"entry": "Shell.qml", "target": "<target>", "out": "<out>"<given>}
+        """
+      Then the agent is refused with "path_denied"
+      And the refusal's "/details/kind" is "work_directory"
+      And the file "<out>" does not exist
+
+      Examples:
+        | target | out                        | given            |
+        | web    | build/.site-work           |                  |
+        | web    | build/.site-work/site      |                  |
+        | web    | build/.site-work/site      | , "dry_run": true |
+        | web    | build/.SITE-WORK/site      |                  |
+        | native | build/.site-work           |                  |
+        | native | build/.site-work/deep/down |                  |
+        | native | build/.Site-Work           | , "dry_run": true |
+
+    Scenario Outline: Nothing is exported into a built site
+      Given the file "build/web-site/.ljos-site-build":
+        """
+        {"files": {}}
+        """
+      When the agent calls the tool "export" with:
+        """json
+        {"entry": "Shell.qml", "target": "<target>", "out": "<out>"<given>}
+        """
+      Then the agent is refused with "invalid_argument"
+      And the refusal's "/details/kind" is "inside_site"
+      And the file "<out>" does not exist
+
+      Examples:
+        | target | out                       | given            |
+        | web    | build/web-site/inner      |                  |
+        | web    | build/web-site/inner      | , "dry_run": true |
+        | web    | build/web-site/inner/deep |                  |
+        | native | build/web-site/inner      |                  |
+
+    # The toolchain is only looked at: the refusal comes before it runs.
+    Scenario: A build waits for the bundle that lies where its site would go
+      Given the studio tools are connected with the capabilities "inspect, mutate, fs, run"
+      And the file "standin/packages/runtime/package.json":
+        """
+        {}
+        """
+      And the file "standin/examples/web/node_modules/ljos-web/package.json":
+        """
+        {}
+        """
+      And the file "standin/examples/web/node_modules/solid-js/package.json":
+        """
+        {}
+        """
+      And the file "standin/examples/web/node_modules/vite/package.json":
+        """
+        {}
+        """
+      And the file "standin/examples/web/node_modules/@solidjs/web/package.json":
+        """
+        {}
+        """
+      And the file "standin/qmlc":
+        """
+        not run
+        """
+      And a site is being built from "build/web-site/inner"
+      When the agent calls the tool "export" with:
+        """json
+        {"entry": "Shell.qml", "target": "web", "build": true, "ljos_web": "standin", "qmlc": "standin/qmlc"}
+        """
+      Then the agent is refused with "busy"
+      And the refusal's "/details/kind" is "build_running"
+      And the file "build/web/ljos-site.json" does not exist
+
     Scenario: Only a web export is built
       Given the studio tools are connected with the capabilities "inspect, mutate, fs, run"
       When the agent calls the tool "export" with:
