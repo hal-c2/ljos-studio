@@ -145,42 +145,6 @@ impl NativeHost {
         }
     }
 
-    /// Waits until what a scroll or a swipe set moving has stopped, for at
-    /// most `SETTLE_MS`. `until_rest` alone does not say so: the pinned
-    /// inspector counts neither a Flickable's glide nor its fling as
-    /// animating, and tells of them only as a wake one frame away. So it is
-    /// at rest when the inspector says so and no wake is due that soon.
-    fn settle(&mut self) -> Result<(), PreviewError> {
-        let until = Instant::now() + Duration::from_millis(SETTLE_MS);
-        let mut told = self
-            .call(
-                "app_watch",
-                json!({ "until_rest": true, "wait_ms": SETTLE_MS }),
-            )?
-            .structured;
-        while !stopped(&told["rest"]) {
-            let left = until.saturating_duration_since(Instant::now());
-            if left.is_zero() {
-                break;
-            }
-            // Slept through on the inspector's side, not asked again and
-            // again: it answers when the app next goes to sleep differently,
-            // and gathers the frames that follow closely.
-            told = self
-                .call(
-                    "app_watch",
-                    json!({
-                        "topics": ["rests"],
-                        "since": { "rests": told["counts"]["rests"] },
-                        "wait_ms": u64::try_from(left.as_millis()).unwrap_or(SETTLE_MS),
-                        "settle_ms": GATHER_MS,
-                    }),
-                )?
-                .structured;
-        }
-        Ok(())
-    }
-
     /// Calls a tool that aims at the centre of the object it is given, on
     /// the topmost object under the point whose centre can be reached.
     /// `app_scroll` and `app_touch` take no point of their own, and the
@@ -358,6 +322,38 @@ impl RestWatch for Rests {
         });
         let asking = self.0.asking("app_watch", args);
         Box::pin(async move { rest_of(asking.await) })
+    }
+
+    /// `until_rest` alone does not say so: the pinned inspector counts
+    /// neither a Flickable's glide nor its fling as animating, and tells of
+    /// them only as a wake one frame away. So it is at rest when the
+    /// inspector says so and no wake is due that soon. It runs on the
+    /// inspector's own thread and holds no lock of Studio's: a glide holds
+    /// up no other tool.
+    fn settle(&self, wait_ms: u64) -> Result<(), PreviewError> {
+        let until = Instant::now() + Duration::from_millis(wait_ms);
+        let call = |args: Value| match self.0.call("app_watch", args) {
+            Ok(answer) => Ok(answer.structured),
+            Err(Fault::Refused { code, message }) => Err(PreviewError::Refused { code, message }),
+            Err(Fault::Transport(message)) => Err(PreviewError::Transport(message)),
+        };
+        let mut told = call(json!({ "until_rest": true, "wait_ms": wait_ms }))?;
+        while !stopped(&told["rest"]) {
+            let left = until.saturating_duration_since(Instant::now());
+            if left.is_zero() {
+                break;
+            }
+            // Slept through on the inspector's side, not asked again and
+            // again: it answers when the app next goes to sleep differently,
+            // and gathers the frames that follow closely.
+            told = call(json!({
+                "topics": ["rests"],
+                "since": { "rests": told["counts"]["rests"] },
+                "wait_ms": u64::try_from(left.as_millis()).unwrap_or(wait_ms),
+                "settle_ms": GATHER_MS,
+            }))?;
+        }
+        Ok(())
     }
 }
 
@@ -543,22 +539,15 @@ impl PreviewHost for NativeHost {
             Input::Press(keys) => self.call("app_press", json!({ "keys": keys }))?,
             Input::Type(text) => self.call("app_type", json!({ "text": text }))?,
         };
-        // A wheel's notch glides and a swipe flings: what is read next is
-        // where the content came to rest, as a person looks once it stops.
-        // A fling that outlasts the bound is read where it has got to.
-        if matches!(input, Input::Scroll { .. } | Input::Swipe { .. }) {
-            self.settle()?;
-        }
+        // A wheel's notch glides and a swipe flings. Nothing here waits for
+        // it to stop: that wait would hold Studio's lock, and a hand on the
+        // wheel goes on turning it. A caller that reads where the content
+        // came to rest waits on `rest_watch` outside the lock.
         Ok(())
     }
 
     fn extent(&mut self) -> Result<f64, PreviewError> {
-        let listed = self.call("app_objects", json!({ "max": 5000 }))?;
-        let rows = listed.structured["objects"]
-            .as_array()
-            .cloned()
-            .unwrap_or_default();
-        Ok(lowest_edge(&rows))
+        Ok(lowest_edge(&self.all_objects()?))
     }
 
     fn pick(&mut self, x: f64, y: f64) -> Result<Option<Declared>, PreviewError> {
@@ -758,6 +747,38 @@ impl PreviewHost for NativeHost {
 }
 
 impl NativeHost {
+    /// Every object `app_objects` lists from the scene's root, page after
+    /// page: one answer holds as many rows as fit its cap, and a long page's
+    /// lowest items are in the rows it cut. The cursor keeps `depth`
+    /// counted from the root.
+    fn all_objects(&mut self) -> Result<Vec<Value>, PreviewError> {
+        let mut rows = Vec::new();
+        let mut args = json!({ "max": 5000 });
+        loop {
+            let listed = self.call("app_objects", args.clone())?.structured;
+            let page = listed["objects"].as_array().cloned().unwrap_or_default();
+            let more = listed["truncated"] == true;
+            let empty = page.is_empty();
+            rows.extend(page);
+            if !more {
+                return Ok(rows);
+            }
+            let cut = |why: &str| {
+                PreviewError::Transport(format!(
+                    "app_objects was cut after {} rows {why}",
+                    rows.len()
+                ))
+            };
+            let Some(cursor) = listed["next_cursor"].as_str() else {
+                return Err(cut("and gave no cursor"));
+            };
+            if empty {
+                return Err(cut("by a page with none"));
+            }
+            args["cursor"] = json!(cursor);
+        }
+    }
+
     /// The object with the QML id `id`, or each copy when a delegate has it.
     fn placed_by_id(&mut self, id: &str) -> Result<Vec<Placed>, PreviewError> {
         match self.call("app_inspect", json!({ "target": locator(id) })) {
@@ -987,8 +1008,6 @@ fn number_of(answer: &Value, name: &str) -> Option<f64> {
         .or_else(|| row["value"].as_str()?.parse().ok())
 }
 
-/// How long a scroll or a swipe waits at most for the content to stop.
-const SETTLE_MS: u64 = 3000;
 /// How long a settle gathers the rests between a glide's frames.
 const GATHER_MS: u64 = 50;
 /// The frame a moving Flickable asks for next is this near, in whole

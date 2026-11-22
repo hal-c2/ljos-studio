@@ -563,9 +563,66 @@ fn enqueue(engine: &Engine, ws: ObjectId, job: Job) {
         if matches!(job, Job::Refresh) && q.jobs.iter().any(|j| matches!(j, Job::Refresh)) {
             return;
         }
+        if let Some(turned) = wheel_of(&job)
+            && let Some(waiting) = waiting_wheel(&mut q.jobs, &job)
+        {
+            waiting["dx"] = json!(turned.dx + number(&waiting["dx"]));
+            waiting["dy"] = json!(turned.dy + number(&waiting["dy"]));
+            return;
+        }
         q.jobs.push_back(job);
     }
     pump(engine, ws);
+}
+
+/// A turn of the wheel the window sends: `preview_state` with a `scroll`
+/// and nothing else.
+struct Turned {
+    x: f64,
+    y: f64,
+    dx: f64,
+    dy: f64,
+}
+
+fn wheel_of(job: &Job) -> Option<Turned> {
+    let Job::Call { tool, args, .. } = job else {
+        return None;
+    };
+    let only_scroll = args.as_object().is_some_and(|a| a.len() == 1);
+    if tool != "preview_state" || !only_scroll {
+        return None;
+    }
+    let scroll = args.get("scroll")?;
+    Some(Turned {
+        x: scroll["x"].as_f64()?,
+        y: scroll["y"].as_f64()?,
+        dx: number(&scroll["dx"]),
+        dy: number(&scroll["dy"]),
+    })
+}
+
+/// The `scroll` of a turn still waiting at the same point that `job` can
+/// join: turns that come while one is going in reach the app together, as
+/// one, rather than each after the one before. Only a refresh or a picture
+/// may be queued after it, so nothing the person did comes out of order.
+fn waiting_wheel<'q>(jobs: &'q mut VecDeque<Job>, job: &Job) -> Option<&'q mut Json> {
+    let (Some(turned), Job::Call { follows, .. }) = (wheel_of(job), job) else {
+        return None;
+    };
+    let last = jobs.iter().rposition(|j| matches!(j, Job::Call { .. }))?;
+    let joins = wheel_of(&jobs[last]).is_some_and(|w| w.x == turned.x && w.y == turned.y);
+    match &mut jobs[last] {
+        Job::Call {
+            args,
+            follows: theirs,
+            ..
+        } if joins && theirs == follows => args.get_mut("scroll"),
+        _ => None,
+    }
+}
+
+fn number(value: &Json) -> f64 {
+    value.as_f64().unwrap_or(0.0)
 }
 
 fn queue_of(engine: &Engine, ws: ObjectId) -> Option<Rc<RefCell<Queue>>> {
