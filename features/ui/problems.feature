@@ -1,14 +1,19 @@
 # Sources:
 #   features/preview/problems.feature (what the preview says is wrong)
 #   shell/Builtin/Shell.qml (the shell Studio shows with no --shell)
-#   the dogfood backlog's P7-1 (errors reach the window and the agent)
+#   the dogfood backlog's P7-1 (errors reach the window and the agent) and
+#   P7-2 (nothing a problem says moves what the person is working on)
 
 @ui @preview @native
 Feature: The built-in shell shows what is wrong in the preview
   A person who breaks a binding sees it in the window they already have: a
-  badge with how many problems the preview has, and under it the list of
-  them, each with where it is. With none there is neither. It is a panel of
-  the shell like the others, so a person's copy of the shell may restyle it.
+  badge with how many problems the preview has, over a corner of the
+  canvas. A click on it opens the list of them, each with where it is, and
+  choosing one shows its object. The list stays open or closed as the person
+  left it. With no problems there is neither badge nor list. Half-typed text
+  is a problem too, so nothing in the window moves as one comes and goes. It
+  is a panel of the shell like the others, so a person's copy of the shell
+  may restyle it.
 
   Background:
     # First in the documents list, also beside a shell's own files.
@@ -42,7 +47,12 @@ Feature: The built-in shell shows what is wrong in the preview
     When the person replaces "\"black\"" with "transparent" in the code view
     Then the window has a pane "1 problem in the preview"
     And the window says "Problem count: 1"
-    And the window says "warning: `transparent` is not a name in sight: it is looked up when the program runs, App.qml:11"
+    And the window does not say "warning: `transparent` is not a name in sight: it is looked up when the program runs, App.qml:11"
+    When the person clicks "Show the problems"
+    Then the window says "warning: `transparent` is not a name in sight: it is looked up when the program runs, App.qml:11"
+    When the person clicks "Hide the problems"
+    Then the window does not say "warning: `transparent` is not a name in sight: it is looked up when the program runs, App.qml:11"
+    And the window says "Problem count: 1"
 
   Scenario: A problem an agent's edit made shows in the window too
     Given Studio's window shows the project
@@ -63,6 +73,103 @@ Feature: The built-in shell shows what is wrong in the preview
     Then the window has no pane "1 problem in the preview"
     And the window has no pane "No problems in the preview"
     And the window does not say "Problem count: 1"
+
+  Scenario: The list stays open for the next problem
+    Given Studio's window shows the project
+    And the person has opened "App.qml" in the documents list
+    When the person replaces "\"black\"" with "transparent" in the code view
+    And the person clicks "Show the problems"
+    And the person replaces "border.color: transparent" with "border.color: \"transparent\"" in the code view
+    Then the window does not say "Hide the problems"
+    When the person replaces "border.color: \"transparent\"" with "border.color: transparent" in the code view
+    Then the window says "warning: `transparent` is not a name in sight: it is looked up when the program runs, App.qml:11"
+
+  Scenario: A problem that comes and goes moves neither the code nor the frame
+    Given Studio's window shows the project
+    And the person has opened "App.qml" in the documents list
+    And the person has noted where the code view and the frame "Desktop" are
+    When the person replaces "\"black\"" with "transparent" in the code view
+    Then the window has a pane "1 problem in the preview"
+    And the code view and the frame "Desktop" are where they were
+    When the person clicks "Show the problems"
+    Then the code view and the frame "Desktop" are where they were
+    When the person replaces "border.color: transparent" with "border.color: \"transparent\"" in the code view
+    Then the window has no pane "1 problem in the preview"
+    And the code view and the frame "Desktop" are where they were
+
+  Scenario: Text that doesn't compile shows as an error, and moves nothing
+    Given Studio's window shows the project
+    And the person has opened "App.qml" in the documents list
+    And the person has noted where the code view and the frame "Desktop" are
+    When the person replaces "id: card" with "id: card; Item {" in the code view
+    Then the window says "Problem count: 1"
+    And the code view and the frame "Desktop" are where they were
+    When the person clicks "Show the problems"
+    Then the window says something starting "error: "
+    When the person replaces "id: card; Item {" with "id: card" in the code view
+    Then the window does not say "Problem count: 1"
+    And the code view and the frame "Desktop" are where they were
+
+  # A file broken before it was opened never had a preview to fail a reload.
+  Scenario: A document that doesn't parse when it is opened is an error too
+    Given the file "Other.qml":
+      """qml
+      import QtQuick
+
+      Item {
+      """
+    And Studio's window shows the project
+    When the person opens "Other.qml" in the documents list
+    Then the window says "Problem count: 1"
+    When the person clicks "Show the problems"
+    Then the window says something starting "error: "
+
+  Scenario: Choosing a problem selects its object
+    Given Studio's window shows the project
+    And the person has opened "App.qml" in the documents list
+    And the person has selected "Rectangle root" in the layers panel
+    When an agent calls the tool "binding_set" with:
+      """json
+      {"doc": "App.qml", "node": {"id": "card"}, "name": "border.color", "value": "transparent"}
+      """
+    Then the layers panel has "Rectangle root" selected
+    When the person clicks "Show the problems"
+    And the person clicks "warning: `transparent` is not a name in sight: it is looked up when the program runs, App.qml:11"
+    Then the window shows the document "App.qml"
+    And the layers panel has "Rectangle card" selected
+
+  Scenario: Choosing a problem in another document shows that document
+    Given the file "Tile.qml":
+      """qml
+      import QtQuick
+
+      Rectangle {
+          id: face
+          width: 80; height: 80
+
+          Rectangle {
+              id: mark
+              border.width: 2
+              border.color: transparent
+          }
+      }
+      """
+    And the file "Board.qml":
+      """qml
+      import QtQuick
+
+      Item {
+          width: 200; height: 120
+
+          Tile {}
+      }
+      """
+    And Studio's window shows the project
+    And the person has opened "Board.qml" in the documents list
+    When the person clicks "Show the problems"
+    And the person clicks "warning: `transparent` is not a name in sight: it is looked up when the program runs, Tile.qml:10"
+    Then the window shows the document "Tile.qml"
+    And the layers panel has "Rectangle mark" selected
 
   Scenario: A person's copy of the shell restyles the problems like any panel
     Given Studio's window runs the person's shell, a copy of its own

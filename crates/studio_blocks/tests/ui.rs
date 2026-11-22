@@ -36,6 +36,8 @@ const HEIGHT: f64 = 900.0;
 struct UiWorld {
     /// Where a frame was before the wheel turned.
     frame_before: Option<ljos::item::kurbo::Rect>,
+    /// Where the code view was before what could have moved it.
+    code_before: Option<ljos::item::kurbo::Rect>,
     /// Where the pointer was for a zoom.
     pointer_was: Option<Point>,
     /// A workspace a scenario expects to go.
@@ -332,6 +334,7 @@ impl UiWorld {
     fn new() -> Self {
         Self {
             frame_before: None,
+            code_before: None,
             pointer_was: None,
             remembered: None,
             followers_before: Vec::new(),
@@ -3873,6 +3876,69 @@ fn has_pane(w: &mut UiWorld, name: String) -> StepResult {
         "no pane {name:?} in the window; it holds {}",
         names(&tree)
     ))
+}
+
+/// Whatever its role: a list's row and a panel's header are no buttons.
+#[when(regex = r#"^the person clicks "([^"]+)"$"#)]
+fn clicks_named(w: &mut UiWorld, name: String) -> StepResult {
+    let window = w.window()?;
+    let tree = window.tree();
+    let node = find(&tree, &|n| n.name == name && n.key.is_some())
+        .cloned()
+        .ok_or_else(|| format!("no {name:?}; the window holds {}", names(&tree)))?;
+    window.click_node(&node)
+}
+
+#[then(regex = r#"^the window says something starting "(.+)"$"#)]
+fn says_starting(w: &mut UiWorld, start: String) -> StepResult {
+    let tree = w.window()?.tree();
+    find(&tree, &|n| n.name.starts_with(&start))
+        .map(drop)
+        .ok_or_else(|| {
+            format!(
+                "nothing starts {start:?}; the window holds {}",
+                names(&tree)
+            )
+        })
+}
+
+/// The code view's pane: its text area is as tall as its text.
+fn code_bounds(window: &Window) -> Result<ljos::item::kurbo::Rect, String> {
+    window
+        .bounds(&|role, name| role == "pane" && name.starts_with("Code of "))
+        .ok_or_else(|| "no code view in the window".to_owned())
+}
+
+#[given(regex = r#"^the person has noted where the code view and the frame "([^"]+)" are$"#)]
+fn notes_code_and_frame(w: &mut UiWorld, target: String) -> StepResult {
+    let window = w.window()?;
+    let code = code_bounds(window)?;
+    let frame = frame_bounds(window, &target)?;
+    w.code_before = Some(code);
+    w.frame_before = Some(frame);
+    Ok(())
+}
+
+#[then(regex = r#"^the code view and the frame "([^"]+)" are where they were$"#)]
+fn code_and_frame_kept(w: &mut UiWorld, target: String) -> StepResult {
+    let code = w.code_before.ok_or("no place noted")?;
+    let frame = w.frame_before.ok_or("no place noted")?;
+    let window = w.window()?;
+    for (what, was, now) in [
+        ("code view", code, code_bounds(window)?),
+        ("frame", frame, frame_bounds(window, &target)?),
+    ] {
+        let moved = [
+            now.x0 - was.x0,
+            now.y0 - was.y0,
+            now.x1 - was.x1,
+            now.y1 - was.y1,
+        ];
+        if moved.iter().any(|by| by.abs() > 0.5) {
+            return Err(format!("the {what} went from {was:?} to {now:?}"));
+        }
+    }
+    Ok(())
 }
 
 /// `STUDIO_PERF_EXPORT=hello|200`: times the export panel's opening, from the
