@@ -430,14 +430,10 @@ fn open(studio: &Mutex<Studio>, a: OpenArgs) -> Result<OpenOut, SurfaceError> {
         };
         let entry = harness.as_ref().map_or(a.doc.as_str(), |h| h.path.as_str());
         let mut host = hosts.make(dir.as_deref()).expect("checked: it runs here");
-        let spec = preview::spec(store, entry, size, &aliases);
-        if let Err(e) = host.open(&spec) {
+        if let Err(e) = host.open(&preview::spec(store, entry, size, &aliases)) {
             if let Some(standing) = &mut standing {
                 standing.leave(store);
             }
-            // A refused call tells no window, and none of this is running.
-            drop(previews);
-            studio.watchers.tell();
             return Err(preview_error(e));
         }
         previews.log_mark = 0;
