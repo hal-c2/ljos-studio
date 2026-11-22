@@ -198,6 +198,9 @@ Panel {
                     border.width: 1
                     border.color: Colors.surfacePressed
                     Behavior on color {
+                        // Under the pointer or while the flow plays: otherwise at once,
+                        // so a window nobody touches asks for no frames.
+                        enabled: showState.hovered || panel.playing !== null
                         ColorAnimation {
                             duration: Motion.enterSmallFrequent
                             easing.type: Easing.BezierSpline

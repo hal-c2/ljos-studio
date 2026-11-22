@@ -162,6 +162,9 @@ TextField {
         border.color: field.activeFocus ? Colors.focusRing
             : field.hovered ? Colors.border : "transparent"
         Behavior on border.color {
+            // Only under the pointer: what Studio changes by itself shows at once,
+            // so a window nobody touches asks for no frames.
+            enabled: field.hovered
             ColorAnimation {
                 duration: Motion.enterSmallFrequent
                 easing.type: Easing.BezierSpline
