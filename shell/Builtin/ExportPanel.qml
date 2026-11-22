@@ -71,18 +71,21 @@ Popup {
         return p
     }
 
-    function args(dry) {
+    function args(dry, builds) {
         const a = {entry: entry, target: target, dry_run: dry}
         if (out.text.trim() !== "")
             a.out = out.text.trim()
         if (target === "web") {
             if (pageEdited)
                 a.page = page()
-            if (builder.text.trim() !== "")
-                a.ljos_web = builder.text.trim()
-            // A check says whether a build would find what it needs.
-            if (dry)
+            // A check says whether a build would find what it needs. Writing
+            // the bundle builds nothing, and only a build takes a folder to
+            // build with.
+            if (dry || builds) {
                 a.build = true
+                if (builder.text.trim() !== "")
+                    a.ljos_web = builder.text.trim()
+            }
         }
         return a
     }
@@ -94,15 +97,14 @@ Popup {
         built = null
         buildRefusal = ""
         waiting += 1
-        workspace.dispatch("export", args(dry))
+        workspace.dispatch("export", args(dry, false))
     }
 
     // Exports, builds and opens the site in the person's browser.
     function build() {
         if (entry === "" || building)
             return
-        const a = args(false)
-        a.build = true
+        const a = args(false, true)
         a.open = true
         building = true
         built = null
