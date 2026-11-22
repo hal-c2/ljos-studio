@@ -425,6 +425,10 @@ const STEPS = [
     const got = must(w.refusal(), pointer);
     if (!equal(got, wanted)) throw new Error(`\`${pointer}\` is ${JSON.stringify(got)}, not ${JSON.stringify(wanted)}`);
   }),
+  step("then", /^the refusal's "(\/[^"]*)" contains "([^"]*)"$/, (w, s, pointer, text) => {
+    const got = must(w.refusal(), pointer);
+    if (typeof got !== "string" || !got.includes(text)) throw new Error(`\`${pointer}\` is ${JSON.stringify(got)}, without ${JSON.stringify(text)}`);
+  }),
   // The pattern is a Rust `regex` one; the ones the scenarios use mean the
   // same to JavaScript's.
   step("then", /^the refusal's message matches "(.+)"$/, (w, s, pattern) => {
