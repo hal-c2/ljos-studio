@@ -4384,7 +4384,8 @@ fn keyboard_in_code(w: &mut UiWorld) -> StepResult {
 /// agent reads it.
 fn running_value(w: &mut UiWorld, id: &str, name: &str) -> Result<Json, String> {
     let window = w.window()?;
-    let ctx = CallCtx::new(CapSet::of([Cap::Inspect]));
+    // Reading the running app is `preview_state`'s, which needs `run`.
+    let ctx = CallCtx::new(CapSet::of([Cap::Inspect, Cap::Run]));
     let args = serde_json::json!({ "node": { "id": id }, "read": [name] });
     let reply = window
         .server
