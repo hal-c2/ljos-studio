@@ -239,7 +239,7 @@ pub fn build(
     open: bool,
 ) -> Result<BuildOut, SurfaceError> {
     let _one = BUILDING.lock().unwrap_or_else(|e| e.into_inner());
-    let site = format!("{out}-site");
+    let site = format!("{out}{}", crate::export::SITE_SUFFIX);
     let work = root.join(WORK);
     let log = work.join("build.log");
     for at in std::iter::once(root.join(&site)).chain(written_in(&work)) {

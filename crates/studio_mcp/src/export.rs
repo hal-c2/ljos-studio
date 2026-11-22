@@ -1349,7 +1349,10 @@ fn through_links<'a>(
     Ok(copy.out)
 }
 
-/// The bundles builds read, or wait their turn to read.
+/// What a bundle's name has after it as the name of the site built from it.
+pub(crate) const SITE_SUFFIX: &str = "-site";
+
+/// What builds read and write, or wait their turn to.
 static BEING_BUILT: LazyLock<Mutex<Vec<PathBuf>>> = LazyLock::new(Mutex::default);
 
 /// A path as holds compare it, without its letters' case: on a disk that
@@ -1359,22 +1362,26 @@ fn folded(path: &Path) -> PathBuf {
     PathBuf::from(path.to_string_lossy().to_lowercase())
 }
 
-/// A build's hold on the bundle it reads. The project is let go of while a
-/// site builds, so without it another export could change what gets built.
+/// A build's hold on the bundle it reads and the directory it writes the
+/// site to. The project is let go of while a site builds, so without it
+/// another export could change what gets built, or take the site's place.
 #[doc(hidden)]
-pub struct BeingBuilt(PathBuf);
+pub struct BeingBuilt([PathBuf; 2]);
 
 impl BeingBuilt {
     pub fn hold(bundle: PathBuf) -> Self {
         let bundle = folded(&bundle);
+        let mut site = bundle.clone().into_os_string();
+        site.push(SITE_SUFFIX);
+        let both = [bundle, PathBuf::from(site)];
         BEING_BUILT
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
-            .push(bundle.clone());
-        Self(bundle)
+            .extend(both.clone());
+        Self(both)
     }
 
-    /// Whether replacing `bundle` would change what a build reads.
+    /// Whether replacing `bundle` would change what a build reads or writes.
     fn holds(bundle: &Path) -> bool {
         let bundle = folded(bundle);
         BEING_BUILT
@@ -1388,8 +1395,10 @@ impl BeingBuilt {
 impl Drop for BeingBuilt {
     fn drop(&mut self) {
         let mut held = BEING_BUILT.lock().unwrap_or_else(PoisonError::into_inner);
-        if let Some(at) = held.iter().position(|bundle| *bundle == self.0) {
-            held.swap_remove(at);
+        for ours in &self.0 {
+            if let Some(at) = held.iter().position(|path| path == ours) {
+                held.swap_remove(at);
+            }
         }
     }
 }
@@ -1463,7 +1472,7 @@ fn export(studio: &Mutex<Studio>, ctx: &CallCtx, a: ExportArgs) -> Result<Export
             return Err(SurfaceError::new(
                 ErrorCode::Busy,
                 format!(
-                    "`{out}` overlaps the bundle a site is being built from: export there again when it is done"
+                    "`{out}` overlaps a site build that is running: export there again when it is done"
                 ),
             )
             .with_details(json!({ "kind": "build_running" })));
@@ -1488,7 +1497,7 @@ fn export(studio: &Mutex<Studio>, ctx: &CallCtx, a: ExportArgs) -> Result<Export
     };
     let ms = studio_core::preview::ms(studio.timer.now().saturating_sub(started));
     // A build takes as long as ljos-web does; the project is not held for
-    // it, only the bundle, from before anyone else can export.
+    // it, only the bundle and the site, from before anyone else can export.
     let _held = (a.build && !a.dry_run).then(|| BeingBuilt::hold(root.join(&out)));
     drop(studio);
     let build = match tools {

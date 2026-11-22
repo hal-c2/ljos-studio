@@ -703,9 +703,10 @@ before anything is written (`unavailable`, `no_site_builder`,
 (`build_failed`, with `details.step`, where it stopped, `why`, in plain
 words, `log`, the builder's whole output, and the `steps` before it). A
 build runs on its own thread, one at a time, and does not hold the project.
-It does hold its bundle: a real export to it, or to a directory over or
-below it, is refused until the build is done (`busy`, `build_running`), so
-the site built is the one the answer's `manifest` lists. DECISION: refused
+It does hold its bundle and its `<out>-site`, whether that is there yet or
+not: a real export to either, or to a directory over or below either, is
+refused until the build is done (`busy`, `build_running`), so the site built
+is the one the answer's `manifest` lists and has its place. DECISION: refused
 rather than queued, so an export never waits minutes with the project held.
 DECISION: the hold ignores letter case, as some file systems do: while
 `build/web` is being built, `build/WEB` is refused on every system.
