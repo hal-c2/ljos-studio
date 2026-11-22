@@ -111,8 +111,10 @@ Feature: A block gets a slot, and a shell skins it
     And the file "HabitCardShell.qml" contains "mode: Contribution.Replace"
     And the file "HabitCardShell.qml" contains "text: habitCard.title"
 
+  @preview
   Scenario: A shell of a block named like a word of the language still loads
-    Given the file "Blocks/qmldir":
+    Given the studio tools are connected with the capabilities "inspect, mutate, run"
+    And the file "Blocks/qmldir":
       """
       module Blocks
       # block Switch 1.0 Switch.qml Habits "On or off"
@@ -136,6 +138,11 @@ Feature: A block gets a slot, and a shell skins it
       """
     Then the file "SwitchShell.qml" contains "id: switchBlock"
     And the file "SwitchShell.qml" contains "text: switchBlock.label"
+    When the agent calls the tool "preview_open" with:
+      """json
+      {"doc": "SwitchShell.qml"}
+      """
+    Then the preview shows "On"
 
   Scenario: A block with no slots has no shell
     When the agent calls the tool "document_new" with:
