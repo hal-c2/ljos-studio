@@ -174,7 +174,9 @@ impl Studio {
     /// on the session does not hold it up.
     pub fn preview_closer(&self) -> impl FnOnce() + Send + 'static {
         let previews = self.previews.clone();
-        move || preview::lock(&previews).open = None
+        move || {
+            preview::lock(&previews).end();
+        }
     }
 
     /// Previews of this project run on hosts `hosts` makes in its
@@ -379,8 +381,7 @@ impl Studio {
         // A preview shows a project; another one needs its own.
         {
             let mut previews = preview::lock(&self.previews);
-            previews.open = None;
-            previews.clear_problems();
+            previews.end();
             previews.hidden.clear();
             previews.hidden_ids.clear();
         }
