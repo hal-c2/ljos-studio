@@ -15,7 +15,7 @@
 
 use std::{
     collections::{BTreeSet, VecDeque},
-    path::{Component, Path},
+    path::Path,
     sync::{Arc, Mutex, MutexGuard},
     time::Duration,
 };
@@ -156,8 +156,12 @@ pub(crate) struct Previews {
     /// How many previews were started: the last one's `started`.
     pub starts: u64,
     pub events: Vec<PreviewEvent>,
-    /// The host's log mark already read into `events`.
+    /// The host's log mark already read.
     pub log_mark: u64,
+    /// What was read for `problems` and is not yet among the events: lines
+    /// join them when the events are read, so a reload's outcome comes
+    /// before what was logged around it.
+    unlisted: Vec<LogLine>,
     /// What is wrong in the open preview now, one a line: the compiler's
     /// words where it said any, else what running the line logged first.
     pub problems: Vec<LogLine>,
@@ -170,7 +174,8 @@ pub(crate) struct Previews {
     /// the app says a problem again while its line is unchanged (Ljós tells
     /// a warning once; a reload keeps an object whose binding is the same),
     /// so a problem goes when its line's text does: an edit that leaves the
-    /// line still wrong is told anew.
+    /// line still wrong is told anew. One that names a file and no line of
+    /// it is held by the whole file's text.
     held: Vec<(LogLine, Option<String>)>,
     /// The project's directory, where the open preview reads the files it
     /// runs; `None` for one held in no directory.
@@ -188,18 +193,19 @@ fn measure(host: &mut dyn PreviewHost) -> Result<Extent, PreviewError> {
 /// Layouts a fit takes at most: a list that makes its delegates as they
 /// come into view grows each time the preview does.
 const FIT_ROUNDS: usize = 4;
-/// Two lines about one place: one line of one file, or one message of none.
+
+/// Two lines about one place: one line of one file, or one message where no
+/// line is told.
 fn same_place(a: &LogLine, b: &LogLine) -> bool {
-    a.file == b.file && a.line == b.line && (a.file.is_some() || a.message == b.message)
+    let one_line = a.file.is_some() && a.line.is_some();
+    a.file == b.file && a.line == b.line && (one_line || a.message == b.message)
 }
 
 /// A reload's failure as a problem, placed where its message says.
 pub(crate) fn failure(message: &str, root: Option<&Path>) -> LogLine {
-    let placed = studio_core::preview::place_of(message)
-        .map(|(file, line, rest)| (file, Some(line), rest))
-        .or_else(|| named(message, root));
+    let placed = studio_core::preview::place_in(message, root);
     let (file, line, message) = match placed {
-        Some((file, line, rest)) => (Some(file.to_owned()), line, rest.to_owned()),
+        Some((file, line, rest)) => (Some(file), line, rest.to_owned()),
         None => (None, None, message.to_owned()),
     };
     LogLine {
@@ -209,31 +215,6 @@ pub(crate) fn failure(message: &str, root: Option<&Path>) -> LogLine {
         line,
         compiler: true,
     }
-}
-
-/// A failure's file where `place_of` finds no place: Ljós names it from the
-/// project's root with no line where the whole file is at fault, and as it
-/// is written where it has a space. It must be a file there, as words before
-/// a colon may be a sentence.
-fn named<'a>(message: &'a str, root: Option<&Path>) -> Option<(&'a str, Option<u32>, &'a str)> {
-    let end = [".qml:", ".js:", ".mjs:"]
-        .iter()
-        .filter_map(|ext| message.find(ext).map(|at| at + ext.len() - 1))
-        .min()?;
-    let (file, rest) = message.split_at(end);
-    let inside = Path::new(file)
-        .components()
-        .all(|part| matches!(part, Component::Normal(_)));
-    if !inside || !root?.join(file).is_file() {
-        return None;
-    }
-    if let Some(words) = rest.strip_prefix(": ") {
-        return Some((file, None, words));
-    }
-    // The line is read from the path's last word on, which has no space.
-    let last = file.rsplit(char::is_whitespace).next()?;
-    let (_, line, words) = studio_core::preview::place_of(&message[end - last.len()..])?;
-    Some((file, Some(line), words))
 }
 
 impl Open {
@@ -417,6 +398,7 @@ impl Previews {
             starts: 0,
             events: Vec::new(),
             log_mark: 0,
+            unlisted: Vec::new(),
             problems: Vec::new(),
             problems_seq: 0,
             ends: 0,
@@ -607,10 +589,14 @@ impl Previews {
         Ok(())
     }
 
-    /// The text of `line` of `file` as the preview reads it now.
+    /// The text of `line` of `file` as the preview reads it now, or the
+    /// file's where no line is told.
     fn text_at(&self, file: Option<&str>, line: Option<u32>) -> Option<String> {
-        let (file, line) = (file?, line?.checked_sub(1)?);
-        let text = std::fs::read_to_string(self.root.as_ref()?.join(file)).ok()?;
+        let text = std::fs::read_to_string(self.root.as_ref()?.join(file?)).ok()?;
+        let Some(line) = line else {
+            return Some(text);
+        };
+        let line = line.checked_sub(1)?;
         text.lines().nth(line as usize).map(|l| l.trim().to_owned())
     }
 
@@ -682,14 +668,17 @@ impl Previews {
         Ok(())
     }
 
-    /// Reads the host's new log lines into the events.
+    /// Reads the host's new log lines, and puts all that are unlisted among
+    /// the events.
     pub fn pull_logs(&mut self) {
         if let Ok(lines) = self.read_logs() {
             self.add_problems(&lines);
         }
+        self.events
+            .extend(self.unlisted.drain(..).map(PreviewEvent::Log));
     }
 
-    /// The host's new log lines, put among the events. The error is that
+    /// The host's new log lines, kept for the events. The error is that
     /// the preview ended as they were read: its problems went with it, and
     /// none are to be put back.
     fn read_logs(&mut self) -> Result<Vec<LogLine>, PreviewError> {
@@ -699,8 +688,7 @@ impl Previews {
         match open.host.logs(self.log_mark) {
             Ok((lines, next)) => {
                 self.log_mark = next;
-                self.events
-                    .extend(lines.iter().cloned().map(PreviewEvent::Log));
+                self.unlisted.extend_from_slice(&lines);
                 Ok(lines)
             }
             Err(e @ (PreviewError::Ended(_) | PreviewError::NotOpen)) => Err(self.failed(e)),
@@ -718,6 +706,7 @@ impl Previews {
     /// wrong in one. The preview that was open is the caller's to close.
     pub fn end(&mut self) -> Option<Open> {
         self.held.clear();
+        self.unlisted.clear();
         if !self.problems.is_empty() {
             self.problems.clear();
             self.problems_seq += 1;
@@ -1000,6 +989,40 @@ mod tests {
         );
         assert_eq!(p.problems[0].level, "error");
         // Mended by a new Badge.qml: line 2 is untouched.
+        p.start_problems(None, &[]);
+        assert!(p.problems.is_empty());
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn a_script_line_is_not_given_as_the_documents() {
+        let (mut p, _) = previews(VecDeque::new(), false);
+        let root = rooted(&mut p, "Item { id: scripted }\n");
+        // Measured at the pin for line 15 of a document under "my pages".
+        let placed = failure("Main.qml.js:21: TypeError: x", p.root.as_deref());
+        assert_eq!(placed.file.as_deref(), Some("Main.qml"));
+        assert_eq!(placed.line, None);
+        assert_eq!(placed.message, "TypeError: x");
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn warnings_of_a_file_without_a_line_are_each_held_by_its_text() {
+        let (mut p, _) = previews(VecDeque::new(), false);
+        let root = rooted(&mut p, "Item { id: two_warnings }\n");
+        let said = ["TypeError: x", "TypeError: y"].map(|message| LogLine {
+            level: "warning".to_owned(),
+            message: message.to_owned(),
+            file: Some("Main.qml".to_owned()),
+            line: None,
+            compiler: false,
+        });
+        p.start_problems(None, &said);
+        assert_eq!(p.problems, said);
+        // Another file was edited.
+        p.start_problems(None, &[]);
+        assert_eq!(p.problems, said);
+        std::fs::write(root.join("Main.qml"), "Item {}\n").unwrap();
         p.start_problems(None, &[]);
         assert!(p.problems.is_empty());
         std::fs::remove_dir_all(&root).unwrap();

@@ -24,7 +24,7 @@ use serde_json::{Map, Value, json};
 use studio_core::place::Rect;
 use studio_core::preview::{
     Click, Declared, Extent, Input, LogLine, Picture, Placed, PreviewError, PreviewHost,
-    PreviewSpec, Reload, Rest, RestWatch, Size, place_of,
+    PreviewSpec, Reload, Rest, RestWatch, Size, place_in,
 };
 use studio_core::scene3d::{Body, Camera, Scene, rotate};
 
@@ -38,6 +38,8 @@ const START_LIMIT: Duration = Duration::from_secs(30);
 /// The capabilities the child grants Studio: reading, resizing (`input`),
 /// assigning mocked state and reloading (`mutate`). Never `eval`.
 const CAPS: &str = "inspect,input,mutate";
+/// How the child's stderr says that its start is over.
+const WATCHING: &str = "ljos: watching ";
 /// The calls a second the child's inspector grants Studio, its only client:
 /// a person's gestures and an agent's edits through Studio each ask for a
 /// reload, the read of what it logged and a picture, and Ljós's default of
@@ -1267,9 +1269,9 @@ fn logged(e: &Value, root: &Path) -> LogLine {
     let mut file = e["file"].as_str().map(str::to_owned);
     let mut line = e["line"].as_u64().and_then(|l| u32::try_from(l).ok());
     if file.is_none()
-        && let Some((f, l, rest)) = place_of(&message)
+        && let Some((f, l, rest)) = place_in(&message, Some(root))
     {
-        (file, line, message) = (Some(f.to_owned()), Some(l), rest.to_owned());
+        (file, line, message) = (Some(f), l, rest.to_owned());
     }
     LogLine {
         level: e["level"].as_str().unwrap_or("info").to_owned(),
@@ -1345,16 +1347,28 @@ fn compiled(log: &Path, from: u64, root: &Path) -> (Vec<LogLine>, u64) {
         return (Vec::new(), from);
     };
     let text = String::from_utf8_lossy(&bytes[..=end]);
-    let said = text
-        .lines()
-        .filter_map(|l| {
+    let lines: Vec<&str> = text.lines().collect();
+    // `ljos run --watch` marks no severity. The fault it started with is
+    // told before it says what it watches, and warnings only after; so the
+    // start is read whole, or a fault would pass for a warning.
+    let watching = lines.iter().position(|l| l.starts_with(WATCHING));
+    if from == 0 && watching.is_none() {
+        return (Vec::new(), 0);
+    }
+    let started = if from == 0 { watching.unwrap_or(0) } else { 0 };
+    let said = lines
+        .iter()
+        .enumerate()
+        .filter_map(|(at, l)| {
             let l = l.strip_prefix("ljos: ").unwrap_or(l).trim_start();
-            let (file, line, message) = place_of(l)?;
+            let (file, Some(line), message) = place_in(l, Some(root))? else {
+                return None;
+            };
             // A path the project names, not a URL a runtime warning gives.
             (!file.contains("://")).then(|| LogLine {
-                level: "warning".to_owned(),
+                level: if at < started { "error" } else { "warning" }.to_owned(),
                 message: message.to_owned(),
-                file: Some(relative(file, root)),
+                file: Some(relative(&file, root)),
                 line: Some(line),
                 compiler: true,
             })

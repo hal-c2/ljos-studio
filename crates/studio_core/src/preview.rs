@@ -8,7 +8,10 @@
 //! each write, which is what keeps the edit-to-preview path free of the
 //! hot-reload watcher's quiet time.
 
-use std::time::Duration;
+use std::{
+    path::{Component, Path},
+    time::Duration,
+};
 
 use serde::{Deserialize, Serialize};
 
@@ -212,6 +215,63 @@ pub fn place_of(text: &str) -> Option<(&str, u32, &str)> {
         rest = &after[n..];
     }
     Some((file, line, rest.strip_prefix(':')?.trim_start()))
+}
+
+/// Where `message` says it is, among the files below `root` too: Ljós names
+/// those from the root as written, spaces and all, with no line where the
+/// whole file is at fault, and a program it can't map by its script
+/// (`Main.qml.js`), which tells the file and no line of it. Such a name must
+/// be a file there, as words before a colon may be a sentence.
+pub fn place_in<'a>(
+    message: &'a str,
+    root: Option<&Path>,
+) -> Option<(String, Option<u32>, &'a str)> {
+    if let Some((file, rest)) = root.and_then(|root| script_place(message, root)) {
+        return Some((file, None, rest));
+    }
+    if let Some((file, line, rest)) = place_of(message) {
+        return Some((file.to_owned(), Some(line), rest));
+    }
+    let end = [".qml:", ".js:", ".mjs:"]
+        .iter()
+        .filter_map(|ext| message.find(ext).map(|at| at + ext.len() - 1))
+        .min()?;
+    let (file, rest) = message.split_at(end);
+    if !is_file_below(file, root?) {
+        return None;
+    }
+    if let Some(words) = rest.strip_prefix(": ") {
+        return Some((file.to_owned(), None, words));
+    }
+    // The line is read from the path's last word on, which has no space.
+    let last = file.rsplit(char::is_whitespace).next()?;
+    let (_, line, words) = place_of(&message[end - last.len()..])?;
+    Some((file.to_owned(), Some(line), words))
+}
+
+/// `key.qml.js[?generation=N|?text=N]:line: rest`, the pin's name for the
+/// program of `key.qml`. The line is the generated script's: line 21 there
+/// can be the document's 15, so it is never passed on as the document's.
+fn script_place<'a>(message: &'a str, root: &Path) -> Option<(String, &'a str)> {
+    let (key, after) = message.split_once(".qml.js")?;
+    let file = format!("{key}.qml");
+    if !is_file_below(&file, root) {
+        return None;
+    }
+    let (query, place) = after.split_once(':')?;
+    if !(query.is_empty() || query.starts_with('?')) {
+        return None;
+    }
+    let (line, rest) = place.split_once(':')?;
+    line.parse::<u32>().ok()?;
+    Some((file, rest.trim_start()))
+}
+
+fn is_file_below(file: &str, root: &Path) -> bool {
+    let inside = Path::new(file)
+        .components()
+        .all(|part| matches!(part, Component::Normal(_)));
+    inside && root.join(file).is_file()
 }
 
 /// A PNG of the preview.

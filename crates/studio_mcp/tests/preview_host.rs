@@ -839,8 +839,7 @@ fn every_write_reloads_the_preview_before_the_tool_answers() {
         .iter()
         .map(|e| e["kind"].as_str().unwrap())
         .collect();
-    // What the preview logged as it opened is read then, before any edit.
-    assert_eq!(kinds, ["log", "reloaded", "reload_failed"]);
+    assert_eq!(kinds, ["reloaded", "reload_failed", "log"]);
     assert_eq!(events["next"], 4);
     let rest = f.call("preview_events", json!({ "since": 4 })).unwrap();
     assert_eq!(rest["events"], json!([]));
