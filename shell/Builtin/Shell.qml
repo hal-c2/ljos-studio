@@ -139,6 +139,17 @@ Item {
                     onDoneRecording: inspector.pick("", "")
                     onLayoutAsked: (target, state) => inspector.editLayout(target, state)
                     SplitView.fillHeight: true
+
+                    // Over the canvas's free corner, under the row of the
+                    // top bar and above the zoom's: it moves nothing.
+                    PreviewProblems {
+                        workspace: workspace
+                        anchors.right: parent.right
+                        anchors.rightMargin: Spacing.xs
+                        y: 36 + 2 * Spacing.xs
+                        width: Math.max(0, Math.min(implicitWidth, parent.width - 2 * Spacing.xs))
+                        height: Math.max(0, Math.min(implicitHeight, parent.height - 2 * y))
+                    }
                 }
                 CodePanel {
                     visible: toolbar.codeOpen
@@ -180,12 +191,6 @@ Item {
                     Layout.fillHeight: true
                 }
             }
-        }
-
-        PreviewProblems {
-            workspace: workspace
-            visible: count > 0
-            Layout.fillWidth: true
         }
 
         // The person's own last refusal, until the next gesture is answered.
