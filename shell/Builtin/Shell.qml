@@ -182,6 +182,12 @@ Item {
             }
         }
 
+        PreviewProblems {
+            workspace: workspace
+            visible: count > 0
+            Layout.fillWidth: true
+        }
+
         // The person's own last refusal, until the next gesture is answered.
         Label {
             objectName: "status"
