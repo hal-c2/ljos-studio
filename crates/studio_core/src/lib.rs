@@ -3623,18 +3623,20 @@ fn handler_body(value: &str) -> String {
     if parsed.is_ok() && parsed.document.root.members.len() == 1 {
         return value.to_owned();
     }
-    let lines: Vec<&str> = trimmed
-        .lines()
-        .map(str::trim)
-        .filter(|l| !l.is_empty())
-        .collect();
-    if lines.len() == 1 {
-        return format!("{{ {} }}", lines[0]);
+    // A `//` would comment out a brace closed on its line.
+    if !trimmed.contains('\n') && !trimmed.contains("//") {
+        return format!("{{ {trimmed} }}");
+    }
+    // A template string's spaces and empty lines are its value.
+    if trimmed.contains('`') {
+        return format!("{{\n{trimmed}\n}}");
     }
     let mut out = String::from("{\n");
-    for line in lines {
-        out.push_str("    ");
-        out.push_str(line);
+    for line in trimmed.lines() {
+        if !line.trim().is_empty() {
+            out.push_str("    ");
+            out.push_str(line);
+        }
         out.push('\n');
     }
     out.push('}');
