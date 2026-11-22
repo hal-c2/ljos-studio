@@ -6,7 +6,8 @@
 // a design role it names as a chip. Anything beside the field may scrub it too,
 // through scrubStart, scrubTo and scrubEnd. Left alone, a value too long for
 // it shows its start and its end, cut in the middle: an expression's last
-// term is as often what tells it apart as its first.
+// term is as often what tells it apart as its first. Typed in, a narrow bound
+// one gives its marks' room to the value, which scrolls with the caret.
 import QtQuick
 import QtQuick.Controls
 import Ljos.Design
@@ -53,6 +54,9 @@ TextField {
     }
 
     implicitHeight: 28
+    // Beside the pin pad a bound field's marks left its value two pixels. A
+    // literal keeps them: its lead is the handle it is scrubbed by.
+    readonly property bool cramped: bound && activeFocus && width < 80
     leftPadding: Spacing.xs + (leadBox.visible ? leadBox.width + 2 : 0)
     rightPadding: Spacing.xs + (unitText.visible ? unitText.implicitWidth + Spacing.xxs : 0)
     topPadding: 0
@@ -78,7 +82,7 @@ TextField {
     // scrub with.
     Item {
         id: leadBox
-        visible: field.lead !== "" || field.bound || field.leadIcon !== ""
+        visible: !field.cramped && (field.lead !== "" || field.bound || field.leadIcon !== "")
         x: Spacing.xxs
         anchors.verticalCenter: parent.verticalCenter
         width: leadRow.implicitWidth
@@ -149,7 +153,7 @@ TextField {
     }
     Text {
         id: unitText
-        visible: field.unit !== ""
+        visible: !field.cramped && field.unit !== ""
         anchors.right: parent.right
         anchors.rightMargin: Spacing.xs
         anchors.verticalCenter: parent.verticalCenter

@@ -4,7 +4,8 @@
 // the gap over the top of what follows, cut to a line and read whole as
 // their name. What the refusal offers instead is a button as high as any
 // other, centred on the gap: it reaches the middle of neither row, so each
-// of those is still clicked where it is aimed at.
+// of those is still clicked where it is aimed at. Given a button's height,
+// beside buttons, it holds both and hangs over nothing.
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
