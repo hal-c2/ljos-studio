@@ -401,12 +401,14 @@ fn open(studio: &Mutex<Studio>, a: OpenArgs) -> Result<OpenOut, SurfaceError> {
             previews.write_hidden();
         }
     } else {
-        // One preview at a time: the last one ends before the next starts.
+        // One preview at a time: the last one ends before the next starts,
+        // and what was wrong in it with it.
         if let Some(mut last) = previews.open.take() {
             last.host.close();
             if let Some(standing) = &mut last.harness {
                 standing.leave(store);
             }
+            previews.clear_problems();
         }
         let mut standing = match &harness {
             Some(h) => {
@@ -429,10 +431,14 @@ fn open(studio: &Mutex<Studio>, a: OpenArgs) -> Result<OpenOut, SurfaceError> {
         };
         let entry = harness.as_ref().map_or(a.doc.as_str(), |h| h.path.as_str());
         let mut host = hosts.make(dir.as_deref()).expect("checked: it runs here");
-        if let Err(e) = host.open(&preview::spec(store, entry, size, &aliases)) {
+        let spec = preview::spec(store, entry, size, &aliases);
+        if let Err(e) = host.open(&spec) {
             if let Some(standing) = &mut standing {
                 standing.leave(store);
             }
+            // A refused call tells no window, and none of this is running.
+            drop(previews);
+            studio.watchers.tell();
             return Err(preview_error(e));
         }
         previews.log_mark = 0;
