@@ -425,6 +425,43 @@ mod tests {
         theme.check_contrast(theme.seed_hue()).unwrap();
     }
 
+    // A refusal is small text in this red, and the palette promises it only
+    // a mark's 3:1.
+    #[test]
+    fn the_error_red_reads_as_text_on_every_ground_in_light_and_dark() {
+        use ljos_design::color::{Srgb, wcag_contrast};
+        use ljos_design::palette::{Contrast, Scheme, Seed, palette};
+        use ljos_design::theme::{Setting, palette_hue};
+
+        let theme = builtin_theme().unwrap();
+        let hue = palette_hue(theme.seed_hue().unwrap());
+        for scheme in Scheme::ALL {
+            let module = palette(Seed::hue(hue), scheme, Contrast::Normal);
+            let shown = |role: &str| {
+                let own = theme.entries.iter().find_map(|e| match &e.value {
+                    Setting::Color(v) if e.name == role => v.pick(scheme == Scheme::Dark, false),
+                    _ => None,
+                });
+                Srgb::parse(own.or_else(|| module.role(role)).unwrap()).unwrap()
+            };
+            for ground in [
+                "canvas",
+                "surface",
+                "surfaceRaised",
+                "surfaceHover",
+                "surfacePressed",
+                "surfaceSelected",
+            ] {
+                let ratio = wcag_contrast(shown("danger"), shown(ground));
+                assert!(
+                    ratio >= Contrast::Normal.text(),
+                    "danger on {ground} is {ratio:.2}:1 in {}",
+                    scheme.name()
+                );
+            }
+        }
+    }
+
     #[test]
     fn a_missing_theme_file_starts_as_studios_and_an_existing_one_is_kept() {
         let dir = tempfile::tempdir().unwrap();
