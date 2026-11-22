@@ -341,12 +341,13 @@ Panel {
         }
 
         // A drag on the canvas around the frames, the middle button and the
-        // hand pan wherever they press, over a frame too. Nothing here to
-        // name for assistive technology: the keys move the view by Ctrl+0,
-        // Ctrl+1, Shift+1 and the zoom field.
+        // hand pan wherever they press, over a frame too. A keyboard moves
+        // the view otherwise, which the description says.
         MouseArea {
             anchors.fill: parent
-            Accessible.ignored: true
+            Accessible.role: Accessible.Pane
+            Accessible.name: "Pan the canvas"
+            Accessible.description: "Ctrl+0 fits the frame, Ctrl+1 shows it at its own size, Shift+1 fits every frame"
             acceptedButtons: Qt.LeftButton | Qt.MiddleButton
             cursorShape: panel.panning || pressed ? (pressed ? Qt.ClosedHandCursor : Qt.OpenHandCursor) : Qt.ArrowCursor
             property real lastX: 0

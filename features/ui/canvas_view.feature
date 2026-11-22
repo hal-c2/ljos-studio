@@ -35,6 +35,9 @@ Feature: The canvas is a surface without edges that pans and zooms
     And Studio's window shows the project
     And the person has opened "Main.qml" in the documents list
 
+  Scenario: What a drag pans has a name for assistive technology
+    Then the window has a pane "Pan the canvas"
+
   Scenario: Space and a drag move the view by as much as the hand moved
     When the person holds "Space"
     And the person drags with the hand in the frame "Desktop" from 60, 40 by 40, 30
