@@ -138,6 +138,33 @@ Feature: An agent changes a component's API
       """
     Then the file "HabitCard.qml" contains "onClicked: { card.flip(); card.toggled(card.done) }"
 
+  Scenario: A handler's last comment stays inside its block
+    When the agent calls the tool "binding_set" with:
+      """json
+      {"doc": "HabitCard.qml", "node": {"id": "area"}, "name": "onClicked", "value": "card.flip(); card.toggled(card.done) // both"}
+      """
+    Then the file "HabitCard.qml" contains:
+      """qml
+              onClicked: {
+                  card.flip(); card.toggled(card.done) // both
+              }
+      """
+
+  Scenario: A handler's nested statements keep their indentation
+    When the agent calls the tool "binding_set" with:
+      """json
+      {"doc": "HabitCard.qml", "node": {"id": "area"}, "name": "onClicked", "value": "if (card.done) {\n    card.flip()\n}\ncard.toggled(card.done)"}
+      """
+    Then the file "HabitCard.qml" contains:
+      """qml
+              onClicked: {
+                  if (card.done) {
+                      card.flip()
+                  }
+                  card.toggled(card.done)
+              }
+      """
+
   Scenario: A handler is changed and taken out by its name
     Given the agent has called the tool "binding_set" with:
       """json

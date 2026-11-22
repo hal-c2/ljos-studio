@@ -1237,6 +1237,15 @@ fn statements_one_after_another_are_a_handlers_block() {
     assert_eq!(handler_body("a(); b()"), "{ a(); b() }");
     assert_eq!(handler_body("{ a(); b() }"), "{ a(); b() }");
     assert_eq!(handler_body("a()\nb()"), "{\n    a()\n    b()\n}");
+    assert_eq!(
+        handler_body("a(); b() // both"),
+        "{\n    a(); b() // both\n}"
+    );
+    assert_eq!(
+        handler_body("if (a) {\n    b()\n}\n\nc()"),
+        "{\n    if (a) {\n        b()\n    }\n\n    c()\n}"
+    );
+    assert_eq!(handler_body("a = `x\n  y`; b()"), "{\na = `x\n  y`; b()\n}");
     // One expression that happens to hold a `;` is left as it is.
     assert_eq!(
         handler_body("console.log(\"a; b\")"),
