@@ -1751,6 +1751,39 @@ fn enters_slot_name(w: &mut UiWorld, name: String) -> StepResult {
     window.enter(&field, &name)
 }
 
+// The name is entered before the shell's call is answered.
+#[when(
+    regex = r#"^the person clicks the button "([^"]+)" and enters "([^"]+)" as the block's new slot's name without waiting between them$"#
+)]
+fn clicks_then_enters_slot_name(w: &mut UiWorld, button: String, name: String) -> StepResult {
+    let window = w.window()?;
+    let field = window.node("Block", Some("textinput"), "New slot's name")?;
+    let tree = window.tree();
+    let pressed = find(&tree, &|n| {
+        n.name == button && n.role == "button" && n.key.is_some()
+    })
+    .and_then(|n| n.key)
+    .ok_or_else(|| format!("no button {button:?}; the window holds {}", names(&tree)))?;
+    let typed_in = field.key.ok_or("the slot's name has no key")?;
+    let mut driver = window.stage.drive();
+    for key in [pressed, typed_in] {
+        let at = driver
+            .aim_at_node(key)
+            .map_err(|why| format!("{key:?} is not clicked: {why:?}"))?;
+        driver
+            .click(at, MouseButtons::LEFT, 1)
+            .map_err(drive_error)?;
+    }
+    driver
+        .chord(&Chord::parse("Ctrl+A")?, 0)
+        .map_err(drive_error)?;
+    driver.commit(&name).map_err(drive_error)?;
+    driver
+        .chord(&Chord::parse("Return")?, 0)
+        .map_err(drive_error)?;
+    window.rest()
+}
+
 // Focus without a click: a click would drop a text selection by itself, and
 // the object the layers panel chose would seem safe from the next key.
 #[when(regex = r#"^the person tabs to the code view and types "(.*)"$"#)]

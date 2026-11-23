@@ -223,3 +223,11 @@ Feature: A person edits variants and slots in Studio's window
     Then the documents panel says why it made no document
     And the block's actions say no refusal
     And the window shows the document "PlayerShell.qml"
+
+  # Enter in the slot's name is the "Add slot" button, so it waits as the
+  # button does while the shell is being made.
+  Scenario: Enter in the new slot's name waits for the shell being made
+    Given the person has opened "App/Media/Player.qml" in the documents list
+    When the person clicks the button "Make a shell" and enters "artwork" as the block's new slot's name without waiting between them
+    Then the window shows the document "PlayerShell.qml"
+    And the file "App/Media/Player.qml" does not say "artwork"
