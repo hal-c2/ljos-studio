@@ -96,6 +96,12 @@ Feature: A long page shows whole on the canvas and plays as it would on the devi
     When the person types the text "hello"
     Then the running app's "field" has "text" "hello"
 
+  Scenario: In play mode a key the canvas has a shortcut for is typed into the app
+    Given the person has clicked the button "Play"
+    And the person has clicked the frame "Desktop" at 20, 20
+    When the person presses "Shift+!"
+    Then the running app's "field" has "text" "!"
+
   Scenario: In play mode a key pressed reaches the app
     Given the person has clicked the button "Play"
     And the person has clicked the frame "Desktop" at 20, 20

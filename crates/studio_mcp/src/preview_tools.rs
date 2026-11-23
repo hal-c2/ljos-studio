@@ -213,7 +213,9 @@ fn change(
     aliases: &[Alias],
     reloads: &mut Vec<Reload>,
 ) -> Result<(), PreviewError> {
-    if open.size != size {
+    // Against the screen, not the size laid out: fitted to content that is
+    // taller, and an unchanged screen is no resize.
+    if open.screen != size {
         open.host.resize(size)?;
         open.size = size;
     }
@@ -317,10 +319,19 @@ fn open(studio: &Mutex<Studio>, a: OpenArgs) -> Result<OpenOut, SurfaceError> {
     if reuse {
         let open = previews.open.as_mut().expect("checked");
         let mut reloads = Vec::new();
+        let same = open.screen == size && open.fit == fit;
         let changed = change(open, size, target, state, &aliases, &mut reloads);
         open.screen = size;
         open.fit = fit;
-        let changed = changed.and_then(|()| open.refit());
+        // A new screen, fit or alias is laid out from the screen again; the
+        // same ones keep the height fitted, not shrunk and grown back.
+        let changed = changed.and_then(|()| {
+            if same && reloads.is_empty() {
+                open.keep_fit()
+            } else {
+                open.refit()
+            }
+        });
         // A mock switched in starts the app again, with everything showing.
         let restarted = reloads
             .iter()

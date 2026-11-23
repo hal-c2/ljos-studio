@@ -158,31 +158,63 @@ impl Open {
             self.host.resize(self.screen)?;
             self.size = self.screen;
         }
-        if self.fit == Fit::Content {
-            for _ in 0..FIT_ROUNDS {
-                let reach = self.host.extent()?.ceil();
-                let height = if reach >= f64::from(Size::MAX_SIDE) {
-                    Size::MAX_SIDE
-                } else {
-                    // Checked: below MAX_SIDE, so it fits in a u32.
-                    (reach.max(0.0) as u32).max(self.screen.height)
-                };
-                if height <= self.size.height {
-                    break;
-                }
-                let size = Size {
-                    width: self.screen.width,
-                    height,
-                };
-                self.host.resize(size)?;
-                self.size = size;
-            }
+        self.grow()?;
+        self.bumped(before);
+        Ok(())
+    }
+
+    /// Opened again with its screen, fit and aliases as they were: one fitted
+    /// to content keeps its height while what it lays out still reaches it,
+    /// grows if that reaches further, and is laid out from its screen again
+    /// only when that got shorter. An unchanged page is not resized at all.
+    pub fn keep_fit(&mut self) -> Result<(), PreviewError> {
+        if self.fit == Fit::Content
+            && self.size != self.screen
+            && self.host.extent()?.ceil() < f64::from(self.size.height)
+        {
+            return self.refit();
         }
-        // Its picture changed without a reload's generation, as a click's.
+        let before = self.size;
+        if self.fit == Fit::Screen && self.size != self.screen {
+            return self.refit();
+        }
+        self.grow()?;
+        self.bumped(before);
+        Ok(())
+    }
+
+    /// Fitted to content, makes the preview as tall as what it lays out at
+    /// its present size, again while that grows; never shorter.
+    fn grow(&mut self) -> Result<(), PreviewError> {
+        if self.fit != Fit::Content {
+            return Ok(());
+        }
+        for _ in 0..FIT_ROUNDS {
+            let reach = self.host.extent()?.ceil();
+            let height = if reach >= f64::from(Size::MAX_SIDE) {
+                Size::MAX_SIDE
+            } else {
+                // Checked: below MAX_SIDE, so it fits in a u32.
+                (reach.max(0.0) as u32).max(self.screen.height)
+            };
+            if height <= self.size.height {
+                break;
+            }
+            let size = Size {
+                width: self.screen.width,
+                height,
+            };
+            self.host.resize(size)?;
+            self.size = size;
+        }
+        Ok(())
+    }
+
+    /// Its picture changed without a reload's generation, as a click's.
+    fn bumped(&mut self, before: Size) {
         if self.size != before {
             self.clicks += 1;
         }
-        Ok(())
     }
 
     fn write_hidden(&mut self, ids: &BTreeSet<(String, String)>) {
