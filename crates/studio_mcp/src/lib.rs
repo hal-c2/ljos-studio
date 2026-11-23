@@ -508,7 +508,7 @@ impl StudioServer {
         &self,
         ctx: &CallCtx,
         args: serde_json::Value,
-    ) -> Result<(ToolReply, Option<view::Shown>), SurfaceError> {
+    ) -> Result<(ToolReply, Option<view::PictureOf>), SurfaceError> {
         let _calling = Calling::new(ctx);
         let def = self.tools.check("preview_screenshot", ctx)?;
         let per_copy = def.per_copy_bytes();

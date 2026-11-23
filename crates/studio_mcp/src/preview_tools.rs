@@ -24,7 +24,7 @@ use studio_core::{
 use crate::{
     Studio, blocks, error, lock,
     preview::{self, Fit, Open, State},
-    view::{self, Shown},
+    view::{self, PictureOf},
 };
 
 /// Pictures are this many pixels on their longest side unless asked for
@@ -776,7 +776,7 @@ pub(crate) fn shown_screenshot(
     studio: &Mutex<Studio>,
     args: Value,
     picturing: Picturing,
-) -> Result<(ToolReply, Option<Shown>), SurfaceError> {
+) -> Result<(ToolReply, Option<PictureOf>), SurfaceError> {
     let a: ScreenshotArgs = serde_json::from_value(if args.is_null() { json!({}) } else { args })
         .map_err(|e| SurfaceError::invalid_argument(e.to_string()))?;
     let side = a
@@ -817,7 +817,7 @@ pub(crate) fn shown_screenshot(
         Ok(picture) => picture,
         Err(e) => return Err(preview_error(previews.failed(e))),
     };
-    let shown = view::preview_of(&previews).map(|p| Shown {
+    let shown = view::preview_of(&previews).map(|p| PictureOf {
         text: studio.session.text(&p.doc).map_or(0, |(_, g)| g),
         doc: p.doc,
         target: p.target,
