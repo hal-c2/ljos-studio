@@ -233,17 +233,23 @@ Panel {
         const z = clampZoom(wanted)
         const px = viewX + sx / zoom
         const py = viewY + sy / zoom
-        fitted = false
-        fitWhenSized = ""
+        leaveFit()
         glideTo(z, px - sx / z, py - sy / z, time === undefined ? stepTime : time)
     }
     function zoomBy(notches, atX, atY, time) {
         zoomTo(goalZoom * Math.pow(1.25, notches), atX, atY, time)
     }
+    // The person has taken the view, so it stays where they put it. With no
+    // frame on the canvas there is nothing to keep in view: the first one
+    // still comes fitted.
+    function leaveFit() {
+        fitWhenSized = ""
+        if (frames.length > 0)
+            fitted = false
+    }
     function panBy(dx, dy) {
         glider.stop()
-        fitted = false
-        fitWhenSized = ""
+        leaveFit()
         viewX -= dx / zoom
         viewY -= dy / zoom
     }
