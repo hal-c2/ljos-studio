@@ -74,6 +74,8 @@ struct Running {
     log: PathBuf,
     /// How much of `log` has been read for the compiler's warnings.
     log_read: u64,
+    /// Ljós has said what it watches: the compiler's warnings follow.
+    watching: bool,
     /// The fault it started with, until `logs` has told it.
     start_fault: Option<LogLine>,
     /// The `echoed` lines of the last answer of `app_logs`: stderr is
@@ -246,6 +248,7 @@ impl NativeHost {
             inspector,
             log,
             log_read: 0,
+            watching: false,
             start_fault: None,
             echoed: BTreeSet::new(),
             reported: Reported::default(),
@@ -556,11 +559,9 @@ impl PreviewHost for NativeHost {
         let running = self.running()?;
         if let Some((text, read)) = printed {
             let apps: BTreeSet<String> = running.echoed.union(&echoes).cloned().collect();
-            let starting = running.log_read == 0;
-            if let Some(said) = compiled(&text, starting, &apps, &root) {
-                running.log_read = read;
-                lines.splice(0..0, said);
-            }
+            running.log_read = read;
+            let said = take_compiled(&mut running.watching, &text, &apps, &root);
+            lines.splice(0..0, said);
         }
         running.echoed = echoes;
         if let Some(fault) = running.start_fault.take() {
@@ -1532,6 +1533,22 @@ fn compiled(
     Some(said)
 }
 
+/// The compiler's warnings in whole lines read from stderr, all of which
+/// are then read past: before Ljós says what it watches none of them is
+/// the compiler's, and its saying so is in a line after them. Held back
+/// till it came, a program that printed more than [`READ_AT_MOST`] first
+/// would have its warnings never read.
+fn take_compiled(
+    watching: &mut bool,
+    text: &str,
+    apps: &BTreeSet<String>,
+    root: &Path,
+) -> Vec<LogLine> {
+    let said = compiled(text, !*watching, apps, root);
+    *watching |= said.is_some();
+    said.unwrap_or_default()
+}
+
 /// The last lines the child wrote to stderr, which say why it ended.
 fn tail(log: &Path) -> String {
     let text = std::fs::read_to_string(log).unwrap_or_default();
@@ -1740,6 +1757,32 @@ mod tests {
         assert!(stopped(&rest(true, Value::Null)));
         // A timer due later moves nothing by itself.
         assert!(stopped(&rest(true, json!(500))));
+    }
+
+    #[test]
+    fn warnings_after_more_than_a_reads_worth_before_ljos_watches_are_read() {
+        let dir = std::env::temp_dir().join(format!("studio-preview-watch-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let log = dir.join("preview.log");
+        let root = Path::new("/p");
+        let before = "debug: started\n".repeat(READ_AT_MOST as usize / 8);
+        std::fs::write(
+            &log,
+            format!("{before}ljos: watching /p\nljos: Main.qml:5:19: `x` is not a name in sight\n"),
+        )
+        .unwrap();
+        let (mut at, mut watching, mut said) = (0, false, Vec::new());
+        let mut reads = 0;
+        while let Some((text, read)) = unread(&log, at) {
+            said.extend(take_compiled(&mut watching, &text, &BTreeSet::new(), root));
+            at = read;
+            reads += 1;
+            assert!(reads < 4, "read {at} of {} and no further", before.len());
+        }
+        assert!(watching);
+        let places: Vec<_> = said.iter().map(|l| (l.file.as_deref(), l.line)).collect();
+        assert_eq!(places, [(Some("Main.qml"), Some(5))]);
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
