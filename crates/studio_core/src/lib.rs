@@ -828,6 +828,26 @@ impl Session {
         self.resolve_now(path, address)
     }
 
+    /// The object `address` names, as read at `generation`. A path names an
+    /// object only in the generation it was read at, so it is followed only
+    /// at that one: one read at none, or at an older one, names nothing now.
+    pub fn resolve_at(
+        &mut self,
+        path: &str,
+        generation: Option<u64>,
+        address: &Address,
+    ) -> Result<(String, Node), Error> {
+        let path = &self.canonical(path)?;
+        self.sync(path)?;
+        if let Address::Path(p) = address {
+            if generation.is_none() {
+                return Err(unread_path(p));
+            }
+            self.check_generation(path, generation)?;
+        }
+        self.resolve_now(path, address)
+    }
+
     fn resolve_now(&mut self, path: &str, address: &Address) -> Result<(String, Node), Error> {
         let (tree, _) = self.tree_now(path)?;
         let not_found = || Error::NotFound {
@@ -1273,10 +1293,7 @@ impl Session {
                 .into_iter()
                 .find(|a| matches!(a, Address::Path(_)))
         {
-            return Err(Error::Invalid(format!(
-                "the path `{p}` names an object only in the generation it was read at: give \
-                 `generation`"
-            )));
+            return Err(unread_path(p));
         }
         let rebased = self.rebase(path, generation, op)?;
         let before = self.doc(path)?.text.clone();
@@ -1349,10 +1366,7 @@ impl Session {
                 .flat_map(Op::addresses)
                 .find(|a| matches!(a, Address::Path(_)))
         {
-            return Err(Error::Invalid(format!(
-                "the path `{p}` names an object only in the generation it was read at: give \
-                 `generation`"
-            )));
+            return Err(unread_path(p));
         }
         // Against the log as it stands: what an older read could not have seen
         // is judged before any of these edits is part of it.
@@ -3942,6 +3956,13 @@ fn with_import(text: &str, module: &str) -> Result<String, Error> {
         )));
     }
     Ok(out)
+}
+
+fn unread_path(path: &str) -> Error {
+    Error::Invalid(format!(
+        "the path `{path}` names an object only in the generation it was read at: give \
+         `generation`"
+    ))
 }
 
 #[cfg(test)]

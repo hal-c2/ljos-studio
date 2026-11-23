@@ -175,6 +175,34 @@ Feature: A block gets a slot, and a shell skins it
     And the file "Main.qml" contains "mode: Contribution.Replace"
     And the file "Main.qml" does not contain "slot: "
 
+  # A path is true of one text only: another writer's insert moves what it names.
+  Scenario: An instance named by path is skinned only at the generation the path was read at
+    Given the agent has called the tool "node_insert" with:
+      """json
+      {"doc": "Blocks/HabitCard.qml", "parent": {"id": "card"}, "slot": "face"}
+      """
+    When the agent calls the tool "slot_contribute" with:
+      """json
+      {"doc": "Main.qml", "node": {"path": "root/0"}, "slot": "face", "text": "Text {}"}
+      """
+    Then the agent is refused with "invalid_argument"
+    And the refusal's "/details/kind" is "invalid"
+    When the agent calls the tool "node_insert" with:
+      """json
+      {"doc": "Main.qml", "parent": {"id": "root"}, "generation": 1, "index": 0, "text": "HabitCard { id: card2 }"}
+      """
+    When the agent calls the tool "slot_contribute" with:
+      """json
+      {"doc": "Main.qml", "generation": 1, "node": {"path": "root/0"}, "slot": "face", "text": "Text {}"}
+      """
+    Then the agent is refused with "stale_ref"
+    And the file "Main.qml" does not contain "face:"
+    When the agent calls the tool "slot_contribute" with:
+      """json
+      {"doc": "Main.qml", "generation": 2, "node": {"path": "root/1"}, "slot": "face", "text": "Text {}"}
+      """
+    Then the file "Main.qml" contains "face: Contribution {"
+
   Scenario: An instance of a block without that slot is refused
     When the agent calls the tool "slot_contribute" with:
       """json

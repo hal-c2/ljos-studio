@@ -106,6 +106,30 @@ fn undo_gives_back_the_bytes() {
 }
 
 #[test]
+fn a_path_is_followed_only_at_the_generation_it_was_read_at() {
+    let mut s = session();
+    let g = s.generation("Main.qml").unwrap();
+    let first = Address::Path("root/0".into());
+    let (read, _) = s.resolve_at("Main.qml", Some(g), &first).unwrap();
+    let unread = s.resolve_at("Main.qml", None, &first).unwrap_err();
+    assert!(
+        matches!(unread, Error::Invalid(ref m) if m.contains("give `generation`")),
+        "{unread:?}"
+    );
+    s.edit("Main.qml", Some(g), &insert("Item {}", Some(0)), false)
+        .unwrap();
+    // `root/0` is now the inserted object, not the one read.
+    let stale = s.resolve_at("Main.qml", Some(g), &first).unwrap_err();
+    assert!(matches!(stale, Error::Stale { given, current, .. } if given == g && current == g + 1));
+    let (now, _) = s.resolve_at("Main.qml", Some(g + 1), &first).unwrap();
+    assert_ne!(now, read);
+    // A handle or an id is followed at any generation.
+    let id = Address::Id("root".into());
+    assert!(s.resolve_at("Main.qml", None, &id).is_ok());
+    assert!(s.resolve_at("Main.qml", Some(g), &id).is_ok());
+}
+
+#[test]
 fn a_stale_generation_by_path_is_refused_and_changes_nothing() {
     let mut s = session();
     let g = s.generation("Main.qml").unwrap();
