@@ -1244,6 +1244,20 @@ mod tests {
     }
 
     #[test]
+    fn of_two_objects_warned_alike_the_one_left_has_one_warning() {
+        let (mut p, _) = previews(VecDeque::new(), false);
+        let two = "Item {\n    Rectangle {\n        color: oops\n    }\n    \
+                   Rectangle {\n        color: oops\n    }\n}\n";
+        let root = rooted(&mut p, two);
+        p.start_problems(None, &[held_warning(3), held_warning(6)]);
+        let one = "Item {\n    Rectangle {\n        color: oops\n    }\n}\n";
+        std::fs::write(root.join("Main.qml"), one).unwrap();
+        p.start_problems(None, &[]);
+        assert_eq!(p.problems, [held_warning(3)]);
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
     fn warnings_on_lines_that_read_alike_each_follow_their_own() {
         let (mut p, _) = previews(VecDeque::new(), false);
         let text = "Item {\n    color: oops\n    x: 1\n    color: oops\n}\n";
