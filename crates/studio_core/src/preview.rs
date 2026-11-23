@@ -111,6 +111,20 @@ impl Size {
     }
 }
 
+/// How far down a preview's page reaches, as [`PreviewHost::extent`]
+/// measures it, and what it left out of that measure.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Extent {
+    /// Logical pixels down to the lowest edge counted.
+    pub reach: f64,
+    /// The objects left out for being exactly the window's size, by the
+    /// host's name for each, in the page's order. A page that measures the
+    /// same can still have changed: an item the preview was grown to is
+    /// left out once the window is as tall, and counts again when it folds
+    /// to within the rest, so this changes where `reach` does not.
+    pub window_sized: Vec<String>,
+}
+
 /// One module standing in for another: `module` is imported from `dir`
 /// (relative to the project) instead of where it would be found.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -398,9 +412,10 @@ pub trait PreviewHost: Send {
     /// How far down (logical pixels) what the preview shows reaches: the
     /// lowest edge of anything drawn, scrolled out of view or not. What is
     /// exactly the window's size follows the window, not the page, and is
-    /// not counted; a page of nothing else answers 0, which fits the preview
-    /// to its screen. A host that cannot tell refuses.
-    fn extent(&mut self) -> Result<f64, PreviewError> {
+    /// not counted, and is named in [`Extent::window_sized`]; a page of
+    /// nothing else reaches 0, which fits the preview to its screen. A host
+    /// that cannot tell refuses.
+    fn extent(&mut self) -> Result<Extent, PreviewError> {
         Err(PreviewError::Refused {
             code: "unsupported".to_owned(),
             message: "this preview does not say how tall its content is".to_owned(),

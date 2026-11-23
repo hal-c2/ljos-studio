@@ -24,8 +24,8 @@ use ljos_mcp_core::{
 };
 use serde_json::{Value, json};
 use studio_core::preview::{
-    Click, Declared, Input, LogLine, Picture, Placed, PreviewError, PreviewHost, PreviewSpec,
-    Reload, RestWatch, Size,
+    Click, Declared, Extent, Input, LogLine, Picture, Placed, PreviewError, PreviewHost,
+    PreviewSpec, Reload, RestWatch, Size,
 };
 use studio_mcp::{
     Studio, StudioServer, endpoint,
@@ -167,7 +167,7 @@ impl PreviewHost for Watched {
         Ok(())
     }
 
-    fn extent(&mut self) -> Result<f64, PreviewError> {
+    fn extent(&mut self) -> Result<Extent, PreviewError> {
         self.0.extent()
     }
 

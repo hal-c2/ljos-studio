@@ -7,8 +7,8 @@ use std::sync::{Arc, Mutex};
 use ljos_mcp_core::{CallCtx, Cap, CapSet};
 use serde_json::{Map, Value, json};
 use studio_core::preview::{
-    Click, Declared, Input, LogLine, Picture, PreviewError, PreviewHost, PreviewSpec, Reload, Rest,
-    RestWatch, Size,
+    Click, Declared, Extent, Input, LogLine, Picture, PreviewError, PreviewHost, PreviewSpec,
+    Reload, Rest, RestWatch, Size,
 };
 use studio_mcp::{Studio, StudioServer};
 
@@ -163,16 +163,26 @@ impl PreviewHost for Recorder {
         self.answer("alive")
     }
 
-    fn extent(&mut self) -> Result<f64, PreviewError> {
+    fn extent(&mut self) -> Result<Extent, PreviewError> {
         self.answer("extent")?;
         let seen = self.0.lock().unwrap();
-        let extent = seen.extent.ok_or(PreviewError::Refused {
+        let reach = seen.extent.ok_or(PreviewError::Refused {
             code: "unsupported".to_owned(),
             message: "no extent set".to_owned(),
         })?;
         Ok(match seen.tall {
-            Some(tall) if f64::from(seen.window) != tall => extent.max(tall),
-            _ => extent,
+            Some(tall) if f64::from(seen.window) == tall => Extent {
+                reach,
+                window_sized: vec!["tall".to_owned()],
+            },
+            Some(tall) => Extent {
+                reach: reach.max(tall),
+                window_sized: Vec::new(),
+            },
+            None => Extent {
+                reach,
+                window_sized: Vec::new(),
+            },
         })
     }
 
@@ -495,6 +505,32 @@ fn reopening_a_preview_grown_to_an_item_that_got_shorter_makes_it_shorter() {
         .unwrap();
     assert_eq!(out["size"], json!({ "width": 1280, "height": 1700 }));
     assert_eq!(f.calls(), ["resize 1280x800", "resize 1280x1700"]);
+}
+
+/// Folded to within the rest of the page, that item reaches no further
+/// than the rest, so the page measures what it did; but the item is not
+/// the window's size any more, so the page has changed and the preview is
+/// laid out from its screen and fitted to the rest.
+#[test]
+fn reopening_a_preview_grown_to_an_item_folded_within_the_rest_fits_the_rest() {
+    let f = Fixture::new();
+    {
+        let mut seen = f.seen.lock().unwrap();
+        seen.tall = Some(2000.0);
+        seen.extent = Some(1500.0);
+    }
+    f.call(
+        "preview_open",
+        json!({ "doc": "Shell.qml", "fit": "content" }),
+    )
+    .unwrap();
+    f.calls();
+    f.seen.lock().unwrap().tall = Some(1000.0);
+    let out = f
+        .call("preview_open", json!({ "doc": "Shell.qml" }))
+        .unwrap();
+    assert_eq!(out["size"], json!({ "width": 1280, "height": 1500 }));
+    assert_eq!(f.calls(), ["resize 1280x800", "resize 1280x1500"]);
 }
 
 /// A host that cannot say how far its page reaches refuses a fit to
