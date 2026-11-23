@@ -467,6 +467,37 @@ fn a_refused_fit_to_content_leaves_the_preview_fitted_to_its_screen() {
     assert_eq!(out["size"], json!({ "width": 1280, "height": 800 }));
 }
 
+/// A resize the host refused leaves the preview at the size it has, and
+/// the screen it was asked for is not taken as reached: asked again, it is
+/// resized, not answered with a size the host never had. Fitted to its
+/// content, so the second ask is not laid out from the screen anyway.
+#[test]
+fn a_refused_resize_is_asked_again_and_not_answered_as_done() {
+    let f = Fixture::new();
+    f.seen.lock().unwrap().extent = Some(2000.0);
+    f.call(
+        "preview_open",
+        json!({ "doc": "Shell.qml", "fit": "content" }),
+    )
+    .unwrap();
+    f.calls();
+    f.fail("resize", refused());
+    f.call(
+        "preview_open",
+        json!({ "doc": "Shell.qml", "target": "phone" }),
+    )
+    .unwrap_err();
+    f.calls();
+    let out = f
+        .call(
+            "preview_open",
+            json!({ "doc": "Shell.qml", "target": "phone" }),
+        )
+        .unwrap();
+    assert_eq!(out["size"], json!({ "width": 390, "height": 2000 }));
+    assert_eq!(f.calls(), ["resize 390x844", "resize 390x2000"]);
+}
+
 #[test]
 fn another_document_starts_another_preview() {
     let f = Fixture::new();
