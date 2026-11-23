@@ -111,6 +111,18 @@ pub struct TokenRow {
     pub set: bool,
 }
 
+/// What a window's picture was taken of, read under the lock it was taken
+/// under: one that lands after the preview moved is not a picture of where
+/// it is then.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Shown {
+    pub doc: String,
+    /// As [`Previewed::target`] names it.
+    pub target: String,
+    /// The document's text generation.
+    pub text: u64,
+}
+
 /// The preview of the open document, when one runs.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct Previewed {
@@ -612,7 +624,7 @@ fn row(t: studio_core::theme::Token) -> TokenRow {
     }
 }
 
-fn preview_of(previews: &preview::Previews) -> Option<Previewed> {
+pub(crate) fn preview_of(previews: &preview::Previews) -> Option<Previewed> {
     let open = previews.open.as_ref()?;
     // The events since this preview started say how often it reloaded.
     let mut generation = 1;

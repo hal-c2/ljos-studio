@@ -501,13 +501,19 @@ impl StudioServer {
     /// `preview_screenshot` for a window: what the preview shows now, even
     /// if a burst's last writes are still to come. Unlike an agent, a window
     /// never waits for the reload budget: it fetches again after the catch-up.
+    /// With what the picture was taken of, which a window keeps it by: by the
+    /// time the window has it, the preview may show another target or
+    /// document.
     pub fn shown_picture(
         &self,
         ctx: &CallCtx,
         args: serde_json::Value,
-    ) -> Result<ToolReply, SurfaceError> {
+    ) -> Result<(ToolReply, Option<view::Shown>), SurfaceError> {
         let _calling = Calling::new(ctx);
-        self.picture(ctx, args, preview_tools::Picturing::AsShown)
+        let def = self.tools.check("preview_screenshot", ctx)?;
+        let per_copy = def.per_copy_bytes();
+        preview_tools::shown_screenshot(&self.studio, args, preview_tools::Picturing::AsShown)
+            .map(|(reply, shown)| (reply.capped(per_copy), shown))
     }
 
     fn picture(
