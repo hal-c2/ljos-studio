@@ -316,8 +316,8 @@ Panel {
         }
     }
     // The live frame's size when "Fit content" was pressed, until it changes,
-    // the fit answers with that same size, or the person moves the view: a
-    // mark left behind would snap a later view back to the fit.
+    // the fit answers with that same size or is refused, or the person moves
+    // the view: a mark left behind would snap a later view back to the fit.
     property string fitWhenSized: ""
     function fitContent(on) {
         fitWhenSized = liveFrame.width + "x" + liveFrame.height
@@ -328,6 +328,10 @@ Panel {
         function onAnswered(tool, answer) {
             if (tool === "preview_open" && answer && answer.size
                     && panel.fitWhenSized === answer.size.width + "x" + answer.size.height)
+                panel.fitWhenSized = ""
+        }
+        function onRefused(tool, error, asked) {
+            if (tool === "preview_open" && asked && asked.fit !== undefined)
                 panel.fitWhenSized = ""
         }
     }
