@@ -360,10 +360,10 @@ the three forms is the app's own logic and is not listed.
 `preview_state {node?, click?, click_at?: {x, y}, set?}` plays the flow:
 after `set`, it clicks the object `click` names (by its `id`, at its
 middle) or the point `click_at`, through the preview's inspector, then
-reads `node`. Without `node` it only clicks and answers nothing (`id` and
-`variant` are left out), so a document whose root has no `id` can be
-played; with neither `node` nor a click, or `set` without `node`, it is
-refused (`invalid_argument`). `variant` is the state it is in now (empty for the base
+reads `node`. Without `node` it only clicks, or puts in the input below,
+and answers nothing (`id` and `variant` are left out), so a document
+whose root has no `id` can be played; with neither `node` nor a click or
+other input, or `set` without `node`, it is refused (`invalid_argument`). `variant` is the state it is in now (empty for the base
 state); `block` and `state` are left out for an object that is not a
 block, and `set` on one is refused (`not_a_block`).
 
@@ -405,8 +405,11 @@ field and `type` fill it in. They go through the inspector's
 swipe answers once the content has stopped (at most 3 s), so `read` says
 where it came to rest. Another call may open another preview while it
 waits; then nothing is read (`stale_ref` with `details.kind`
-`preview_replaced`). Any of them stands for the click when `node` is
-left out.
+`preview_replaced`). An edit meanwhile may remove `node` and give its
+`id` to another object; that one is not read for it (`stale_ref` with
+`details.kind` `node_replaced`). Whether the block runs mocked is said as
+it is once the page stops, aliases put in or taken out meanwhile
+counted. Any of them stands for the click when `node` is left out.
 
 `preview_open {fit: "content"}` makes the preview as tall as what the
 document lays out: the lowest edge of anything shown, scrolled out of
