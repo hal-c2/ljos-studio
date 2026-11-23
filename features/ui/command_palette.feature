@@ -13,7 +13,8 @@ Feature: The command palette finds and runs any of Studio's actions
   closes the palette; Escape closes it and gives the keys back. Studio's
   actions are its MCP tools, so every tool is there by name, beside the
   window's own: zooms, the targets, the documents, the types to insert,
-  the look and the panels.
+  the look and the panels. A tool picked by name keeps the palette open
+  for its arguments, as JSON, and Enter runs it with them.
 
   Background:
     Given the file "Main.qml":
@@ -76,6 +77,22 @@ Feature: The command palette finds and runs any of Studio's actions
     Given the person has pressed "Ctrl+K"
     When the person types "node_arrange" into the command palette
     Then the command palette lists "node_arrange"
+
+  Scenario: Picking a tool by name asks for its arguments
+    Given the person has pressed "Ctrl+K"
+    And the person has typed "property_set" into the command palette
+    When the person presses "Return"
+    Then the window has a pane "Command palette"
+
+  Scenario: The arguments typed for a tool run it and close the palette
+    Given the person has pressed "Ctrl+K"
+    And the person has typed "property_set" into the command palette
+    And the person has pressed "Return"
+    And the person has pressed "Ctrl+A"
+    And the person has typed "{"doc": "Main.qml", "node": {"id": "root"}, "name": "width", "value": 401}" into the command palette
+    When the person presses "Return"
+    Then the file "Main.qml" says "width: 401"
+    And the window has no pane "Command palette"
 
   Scenario: A type is inserted from the palette
     Given the person has pressed "Ctrl+K"
