@@ -9,7 +9,8 @@ Feature: The preview is scrolled, typed into and made as tall as its page, as a 
   `preview_state` does what a person's hands do, through the preview's
   inspector: `scroll` turns the wheel at a point, `swipe` drags a finger
   from a point, `press` presses keys and `type` types text into whatever
-  has the keyboard (after any `click`, which gives it the keyboard).
+  has the keyboard (after any `click`, which gives it the keyboard), or
+  into the field `type_into` names, once the rest of the input is in.
   What is read after a scroll or a swipe is where the page came to rest,
   and while it glides other tools still answer.
   `preview_open` with `fit: "content"` makes the preview as tall as what
@@ -43,6 +44,20 @@ Feature: The preview is scrolled, typed into and made as tall as its page, as a 
               id: field
               width: 200
               height: 40
+          }
+
+          TextInput {
+              id: word
+              y: 60
+              width: 200
+              height: 40
+              text: "worl"
+          }
+
+          Component {
+              id: later
+
+              TextInput { id: unmade }
           }
       }
       """
@@ -91,6 +106,32 @@ Feature: The preview is scrolled, typed into and made as tall as its page, as a 
       {"press": "Backspace", "node": {"id": "field"}, "read": ["text"]}
       """
     Then the answer's "/state/text" is "hell"
+
+  # Nothing has the keyboard when the Backspace is pressed. Typed first,
+  # the text would give the field the keyboard and the Backspace would take
+  # its last letter back.
+  Scenario: Text typed into a named field goes in after the keys pressed
+    When the agent calls the tool "preview_state" with:
+      """json
+      {"press": "Backspace", "type": "d", "type_into": {"id": "word"}, "node": {"id": "word"}, "read": ["text"]}
+      """
+    Then the answer's "/state/text" is "world"
+
+  Scenario: A field named with no text to type into it is refused
+    When the agent calls the tool "preview_state" with:
+      """json
+      {"type_into": {"id": "field"}}
+      """
+    Then the agent is refused with "invalid_argument"
+
+  # The document declares it, but no object of it runs until it is made.
+  Scenario: A field the running preview has no object of is refused
+    When the agent calls the tool "preview_state" with:
+      """json
+      {"type": "hello", "type_into": {"id": "unmade"}}
+      """
+    Then the agent is refused with "not_found"
+    And the refusal's "/details/kind" is "no_object"
 
   Scenario: A preview fitted to its content is as tall as the page
     When the agent calls the tool "preview_open" with:

@@ -167,6 +167,10 @@ impl PreviewHost for Watched {
         Ok(())
     }
 
+    fn type_text(&mut self, text: &str, id: Option<&str>) -> Result<(), PreviewError> {
+        self.0.type_text(text, id)
+    }
+
     fn extent(&mut self) -> Result<Extent, PreviewError> {
         self.0.extent()
     }
