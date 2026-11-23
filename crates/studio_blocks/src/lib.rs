@@ -1177,23 +1177,27 @@ fn same_shape(drawn: (u32, u32), size: (u32, u32)) -> bool {
 
 /// The target a picture is kept for, and the document's generation it is
 /// labelled with, if it is kept: `shown` is what it was taken of, `now` the
-/// document, target and generation the window shows. Another document's
-/// first picture can be the same as the last one's, pixel for pixel:
-/// unchanged, it is still kept for its target, whose pictures went when that
-/// document was shown. A picture asked for before the preview moved to this
-/// target has the shape of the one before.
+/// document, target and generation the window shows. Labelled when it lands,
+/// a picture taken before the preview moved to another document or target
+/// would be kept for where it is now; the move asks for a picture of its
+/// own, kept instead. Another document's first picture can be the same as
+/// the last one's, pixel for pixel: unchanged, it is still kept for its
+/// target, whose pictures went when that document was shown. A preview
+/// fitted to its content changes shape on its target.
 fn kept_slot(
     q: &Queue,
-    _shown: &Shown,
+    shown: &Shown,
     now: &Shown,
     drawn: (u32, u32),
     changed: bool,
 ) -> Option<(String, u64)> {
-    let target = &now.target;
+    let target = &shown.target;
     (!target.is_empty()
+        && shown.doc == now.doc
+        && *target == now.target
         && same_shape(drawn, q.size)
-        && (changed || q.kept.get(target).is_none_or(|(_, t)| *t != now.text)))
-    .then(|| (target.clone(), now.text))
+        && (changed || q.kept.get(target).is_none_or(|(_, t)| *t != shown.text)))
+    .then(|| (target.clone(), shown.text))
 }
 
 /// `preview.kept`: each target with a kept picture, and the document's
