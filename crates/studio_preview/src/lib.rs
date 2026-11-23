@@ -1234,6 +1234,35 @@ mod tests {
         assert_eq!(extent.window_sized, ["h1", "#3"]);
     }
 
+    /// One with no handle (a delegate's background, a Loader's item) is
+    /// named by what holds it, its type and its depth, not by its row: rows
+    /// that come or go before it (a list making or dropping a delegate) do
+    /// not make an unchanged page measure as changed (review 6027864532).
+    #[test]
+    fn an_unnamed_item_as_big_as_the_window_keeps_its_name_when_rows_come_before_it() {
+        let rows = json!([
+            { "depth": 0, "handle": "h1", "type": "Item", "bounds": [0, 0, 1280, 2000] },
+            { "depth": 1, "type": "Rectangle", "bounds": [0, 0, 1280, 2000] },
+            { "depth": 1, "handle": "h3", "type": "Column", "bounds": [0, 0, 400, 1500] },
+        ]);
+        let before = lowest_edge(rows.as_array().unwrap(), WINDOW);
+        let grown = json!([
+            { "depth": 0, "handle": "h1", "type": "Item", "bounds": [0, 0, 1280, 2000] },
+            { "depth": 1, "type": "Text", "bounds": [0, 0, 400, 20] },
+            { "depth": 1, "type": "Text", "bounds": [0, 20, 400, 20] },
+            { "depth": 1, "type": "Rectangle", "bounds": [0, 0, 1280, 2000] },
+            { "depth": 1, "handle": "h3", "type": "Column", "bounds": [0, 0, 400, 1500] },
+        ]);
+        assert_eq!(lowest_edge(grown.as_array().unwrap(), WINDOW), before);
+        // Folded, it is not left out any more: that still reads as a change.
+        let folded = json!([
+            { "depth": 0, "handle": "h1", "type": "Item", "bounds": [0, 0, 1280, 2000] },
+            { "depth": 1, "type": "Rectangle", "bounds": [0, 0, 1280, 1000] },
+            { "depth": 1, "handle": "h3", "type": "Column", "bounds": [0, 0, 400, 1500] },
+        ]);
+        assert_ne!(lowest_edge(folded.as_array().unwrap(), WINDOW), before);
+    }
+
     /// Nothing but items the size of the window measures nothing, which
     /// fits a preview to its screen.
     #[test]

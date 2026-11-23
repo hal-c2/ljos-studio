@@ -37,6 +37,9 @@ struct Seen {
     window: u32,
     /// What happens while a scroll or a swipe settles, outside Studio's lock.
     during_settle: Option<Box<dyn FnOnce() + Send>>,
+    /// How many times `extent` was asked: the `n`th answers to the call
+    /// `extent n`, so a test can fail one of a fit's measures.
+    extents: usize,
 }
 
 struct Recorder(Arc<Mutex<Seen>>);
@@ -164,7 +167,12 @@ impl PreviewHost for Recorder {
     }
 
     fn extent(&mut self) -> Result<Extent, PreviewError> {
-        self.answer("extent")?;
+        let n = {
+            let mut seen = self.0.lock().unwrap();
+            seen.extents += 1;
+            seen.extents
+        };
+        self.answer(&format!("extent {n}"))?;
         let seen = self.0.lock().unwrap();
         let reach = seen.extent.ok_or(PreviewError::Refused {
             code: "unsupported".to_owned(),
@@ -531,6 +539,42 @@ fn reopening_a_preview_grown_to_an_item_folded_within_the_rest_fits_the_rest() {
         .unwrap();
     assert_eq!(out["size"], json!({ "width": 1280, "height": 1500 }));
     assert_eq!(f.calls(), ["resize 1280x800", "resize 1280x1500"]);
+}
+
+/// A measure refused partway through a reopen, after the page measured what
+/// it did, leaves what it measured when it was last grown: the next reopen
+/// of the unchanged page resizes nothing (review 6027419412).
+#[test]
+fn a_measure_refused_on_a_reopen_keeps_what_the_unchanged_page_measured() {
+    let f = Fixture::new();
+    {
+        let mut seen = f.seen.lock().unwrap();
+        seen.tall = Some(2000.0);
+        seen.extent = Some(1500.0);
+    }
+    f.call(
+        "preview_open",
+        json!({ "doc": "Shell.qml", "fit": "content" }),
+    )
+    .unwrap();
+    f.calls();
+    // The reopen measures once to see whether the page changed, then again
+    // as it grows: the second is refused.
+    let second = f.seen.lock().unwrap().extents + 2;
+    f.fail(&format!("extent {second}"), refused());
+    f.call("preview_open", json!({ "doc": "Shell.qml" }))
+        .unwrap_err();
+    assert_eq!(
+        f.seen.lock().unwrap().extents,
+        second,
+        "not the measure meant"
+    );
+    assert_eq!(f.calls(), Vec::<String>::new());
+    let out = f
+        .call("preview_open", json!({ "doc": "Shell.qml" }))
+        .unwrap();
+    assert_eq!(out["size"], json!({ "width": 1280, "height": 2000 }));
+    assert_eq!(f.calls(), Vec::<String>::new());
 }
 
 /// A host that cannot say how far its page reaches refuses a fit to
@@ -1398,4 +1442,82 @@ fn a_read_after_a_scroll_reads_nothing_from_a_preview_opened_while_it_settled() 
     f.call("preview_open", json!({ "doc": "Other.qml" }))
         .unwrap();
     assert_eq!(*f.opened.lock().unwrap(), 2);
+}
+
+/// The same document switched to its mocks while a scroll settled, in place:
+/// what is read is the mock's, so it says so (review 6027291981).
+#[test]
+fn a_read_after_a_scroll_says_mocked_when_mocks_came_in_while_it_settled() {
+    let f = Fixture::new();
+    f.call("preview_open", json!({ "doc": "Shell.qml" }))
+        .unwrap();
+    let server = f.server.clone();
+    f.seen.lock().unwrap().during_settle = Some(Box::new(move || {
+        let ctx = CallCtx::new(CapSet::of([Cap::Inspect, Cap::Mutate, Cap::Run]));
+        let out = server
+            .call(
+                "preview_open",
+                &ctx,
+                json!({ "doc": "Shell.qml", "state": "mocked" }),
+            )
+            .unwrap();
+        assert_eq!(out.structured["started"], false, "not switched in place");
+    }));
+    let out = f
+        .call(
+            "preview_state",
+            json!({
+                "node": { "id": "player1" },
+                "scroll": { "x": 10, "y": 10, "dy": -3 }
+            }),
+        )
+        .unwrap();
+    assert_eq!(out["block"], "App.Media.Player");
+    assert_eq!(out["mocked"], true, "{out}");
+}
+
+/// The object a read names removed while a scroll settled, and its `id`
+/// given to another: the read is of another object, so it reads nothing and
+/// says why (review 6027419412).
+#[test]
+fn a_read_after_a_scroll_reads_nothing_when_its_object_was_replaced_while_it_settled() {
+    let f = Fixture::new();
+    f.call("preview_open", json!({ "doc": "Shell.qml" }))
+        .unwrap();
+    let server = f.server.clone();
+    f.seen.lock().unwrap().during_settle = Some(Box::new(move || {
+        let ctx = CallCtx::new(CapSet::of([Cap::Inspect, Cap::Mutate, Cap::Run]));
+        server
+            .call(
+                "node_arrange",
+                &ctx,
+                json!({ "action": "remove", "doc": "Shell.qml", "nodes": [{ "id": "player1" }] }),
+            )
+            .unwrap();
+        server
+            .call(
+                "node_arrange",
+                &ctx,
+                json!({ "action": "rename", "doc": "Shell.qml", "nodes": [{ "path": "root/0" }], "name": "player1" }),
+            )
+            .unwrap();
+    }));
+    f.calls();
+    let refused = f
+        .call(
+            "preview_state",
+            json!({
+                "node": { "id": "player1" },
+                "scroll": { "x": 10, "y": 10, "dy": -3 },
+                "read": ["text"]
+            }),
+        )
+        .unwrap_err();
+    assert_eq!(refused["code"], "stale_ref", "{refused}");
+    assert_eq!(refused["details"]["kind"], "node_replaced", "{refused}");
+    let calls = f.calls();
+    assert!(
+        !calls.iter().any(|c| c.starts_with("read ")),
+        "read the other object: {calls:?}"
+    );
 }
