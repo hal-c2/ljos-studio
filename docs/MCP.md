@@ -429,9 +429,12 @@ window's preview say `fit`.
   shorter while it ran is still measured shorter and laid out again. An
   item the preview was grown to (a full-width root of a fixed height) is
   then that size too, so the page measures shorter than the preview while
-  nothing changed: what it measured when it was last grown is kept, and a
+  nothing changed: what it measured when it was last grown is kept (how
+  far it reached and which items it left out as the window's size), and a
   page that measures the same is not laid out again. One whose measure
-  changed and is below the preview's height is laid out from its screen.
+  changed and is below the preview's height is laid out from its screen,
+  including when that item folds to within the rest: it reaches no
+  further, but it is no longer left out.
 - DECISION: `scroll` and `swipe` act on the topmost object under their
   point whose centre is in the window, at that centre: `app_scroll` and
   `app_touch` take an object and no point (unlike `app_click`). On a long

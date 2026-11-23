@@ -23,7 +23,8 @@ use crate::timer::Timer;
 use studio_core::{
     Store,
     preview::{
-        Alias, PreviewError, PreviewEvent, PreviewHost, PreviewSpec, Reload, Size, Target, ms,
+        Alias, Extent, PreviewError, PreviewEvent, PreviewHost, PreviewSpec, Reload, Size, Target,
+        ms,
     },
 };
 
@@ -106,10 +107,11 @@ pub(crate) struct Open {
     pub screen: Size,
     pub fit: Fit,
     /// What the page measured at the height it was last grown to, fitted to
-    /// content. An item the host leaves out because it is the window's size
-    /// can be what made the preview that tall, so an unchanged page can
-    /// measure shorter than the preview; it measures this again.
-    pub measured: Option<f64>,
+    /// content: how far it reached and what the host left out as the
+    /// window's size. An item left out so can be what made the preview that
+    /// tall, so an unchanged page can measure shorter than the preview; it
+    /// measures all of this again.
+    pub measured: Option<Extent>,
     pub state: State,
     /// The aliases in force: empty when live.
     pub mocked: Vec<Alias>,
@@ -152,6 +154,13 @@ pub(crate) struct Previews {
     pub timer: Arc<dyn Timer>,
 }
 
+/// The page's extent in whole pixels, as a preview is sized.
+fn measure(host: &mut dyn PreviewHost) -> Result<Extent, PreviewError> {
+    let mut extent = host.extent()?;
+    extent.reach = extent.reach.ceil();
+    Ok(extent)
+}
+
 /// Layouts a fit takes at most: a list that makes its delegates as they
 /// come into view grows each time the preview does.
 const FIT_ROUNDS: usize = 4;
@@ -180,12 +189,15 @@ impl Open {
     /// A root that fills the window is not what it lays out (see
     /// [`PreviewHost::extent`]), so a page that folds while it runs is
     /// measured shorter here. One that measures what it did when it was
-    /// last grown has not changed, though it is shorter than the preview: an
-    /// item the host left out made the preview that tall.
+    /// last grown, reaching as far and leaving out the same items, has not
+    /// changed, though it is shorter than the preview: an item the host left
+    /// out made the preview that tall. That item folded to within the rest
+    /// reaches no further, but is no longer left out, so the page is laid
+    /// out again.
     pub fn keep_fit(&mut self) -> Result<(), PreviewError> {
         if self.fit == Fit::Content && self.size != self.screen {
-            let reach = self.host.extent()?.reach.ceil();
-            if reach < f64::from(self.size.height) && self.measured != Some(reach) {
+            let now = measure(self.host.as_mut())?;
+            if now.reach < f64::from(self.size.height) && self.measured.as_ref() != Some(&now) {
                 return self.refit();
             }
         }
@@ -206,7 +218,8 @@ impl Open {
             return Ok(());
         }
         for _ in 0..FIT_ROUNDS {
-            let reach = self.host.extent()?.reach.ceil();
+            let extent = measure(self.host.as_mut())?;
+            let reach = extent.reach;
             let height = if reach >= f64::from(Size::MAX_SIDE) {
                 Size::MAX_SIDE
             } else {
@@ -214,7 +227,7 @@ impl Open {
                 (reach.max(0.0) as u32).max(self.screen.height)
             };
             if height <= self.size.height {
-                self.measured = Some(reach);
+                self.measured = Some(extent);
                 break;
             }
             let size = Size {
