@@ -652,6 +652,110 @@ fn a_refused_fit_to_content_leaves_the_preview_fitted_to_its_screen() {
     assert_eq!(out["size"], json!({ "width": 1280, "height": 800 }));
 }
 
+/// The clicks a window counts to know the preview's picture changed without
+/// a reload.
+fn clicks(f: &Fixture) -> u64 {
+    let studio = f.server.studio();
+    let mut studio = studio.lock().unwrap();
+    studio.view("Shell.qml").preview.unwrap().clicks
+}
+
+/// A fit to content the host refuses after it grew the preview leaves it
+/// fitted to its screen again, and so at its screen's size: not as tall as
+/// the page it grew to while its fit says screen (review 7079316842).
+#[test]
+fn a_fit_refused_partway_puts_the_preview_back_to_its_screen() {
+    let f = Fixture::new();
+    {
+        let mut seen = f.seen.lock().unwrap();
+        seen.tall = Some(2000.0);
+        seen.extent = Some(1500.0);
+    }
+    f.call("preview_open", json!({ "doc": "Shell.qml" }))
+        .unwrap();
+    f.calls();
+    // Grown to the page's first measure, the fit's second is refused.
+    let second = f.seen.lock().unwrap().extents + 2;
+    f.fail(&format!("extent {second}"), refused());
+    f.call(
+        "preview_open",
+        json!({ "doc": "Shell.qml", "fit": "content" }),
+    )
+    .unwrap_err();
+    assert_eq!(f.calls(), ["resize 1280x2000", "resize 1280x800"]);
+    let out = f
+        .call("preview_open", json!({ "doc": "Shell.qml" }))
+        .unwrap();
+    assert_eq!(out["fit"], "screen");
+    assert_eq!(out["size"], json!({ "width": 1280, "height": 800 }));
+    assert_eq!(f.calls(), Vec::<String>::new());
+}
+
+/// Put back to its screen, a preview the host would not resize again stays
+/// as tall as it grew: a window is told its picture changed, as for a click,
+/// and the next open resizes it (review 7079316842).
+#[test]
+fn a_fit_refused_partway_tells_a_window_of_the_size_it_left() {
+    let f = Fixture::new();
+    {
+        let mut seen = f.seen.lock().unwrap();
+        seen.tall = Some(2000.0);
+        seen.extent = Some(1500.0);
+    }
+    f.call("preview_open", json!({ "doc": "Shell.qml" }))
+        .unwrap();
+    f.calls();
+    let before = clicks(&f);
+    let second = f.seen.lock().unwrap().extents + 2;
+    f.fail(&format!("extent {second}"), refused());
+    f.fail("resize 1280x800", refused());
+    f.call(
+        "preview_open",
+        json!({ "doc": "Shell.qml", "fit": "content" }),
+    )
+    .unwrap_err();
+    assert_eq!(f.calls(), ["resize 1280x2000", "resize 1280x800"]);
+    assert_eq!(clicks(&f), before + 1, "no window was told of the resize");
+    let out = f
+        .call("preview_open", json!({ "doc": "Shell.qml" }))
+        .unwrap();
+    assert_eq!(out["fit"], "screen");
+    assert_eq!(out["size"], json!({ "width": 1280, "height": 800 }));
+    assert_eq!(f.calls(), ["resize 1280x800"]);
+}
+
+/// A preview started fitted to content whose fit the host refuses after it
+/// grew is kept, fitted to its screen as documented, and at its screen's
+/// size: the next open that names no fit reuses it as it is.
+#[test]
+fn a_new_preview_whose_fit_is_refused_partway_is_left_at_its_screen() {
+    let f = Fixture::new();
+    {
+        let mut seen = f.seen.lock().unwrap();
+        seen.tall = Some(2000.0);
+        seen.extent = Some(1500.0);
+    }
+    f.fail("extent 2", refused());
+    f.call(
+        "preview_open",
+        json!({ "doc": "Shell.qml", "fit": "content" }),
+    )
+    .unwrap_err();
+    let resizes: Vec<String> = f
+        .calls()
+        .into_iter()
+        .filter(|c| c.starts_with("resize"))
+        .collect();
+    assert_eq!(resizes, ["resize 1280x2000", "resize 1280x800"]);
+    let out = f
+        .call("preview_open", json!({ "doc": "Shell.qml" }))
+        .unwrap();
+    assert_eq!(out["started"], false);
+    assert_eq!(out["fit"], "screen");
+    assert_eq!(out["size"], json!({ "width": 1280, "height": 800 }));
+    assert_eq!(f.calls(), Vec::<String>::new());
+}
+
 /// A resize the host refused leaves the preview at the size it has, and
 /// the screen it was asked for is not taken as reached: asked again, it is
 /// resized, not answered with a size the host never had. Fitted to its
