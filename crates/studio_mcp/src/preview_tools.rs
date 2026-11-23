@@ -107,7 +107,7 @@ struct StateArgs {
     press: Option<String>,
     #[serde(rename = "type")]
     typed: Option<String>,
-    /// Default: the focus.
+    /// Where `type` goes; default: the focus.
     type_into: Option<Address>,
 }
 
@@ -1296,7 +1296,7 @@ pub(crate) fn add(registry: ToolRegistry, studio: &Arc<Mutex<Studio>>) -> ToolRe
         .with(
             ToolDef::new::<StateArgs>(
                 "preview_state",
-                "Read an object in the preview: its QML state (`variant`), a block's published state (`set` assigns it when mocked), and the properties in `read`. Input comes first, as a person's: `type` into `type_into`.",
+                "Read an object in the preview: its QML state (`variant`), a block's published state (`set` assigns it when mocked), and the properties in `read`. Input comes first, as a person's.",
             )
             .answers::<StateOut>()
             .requires(Cap::Run)
