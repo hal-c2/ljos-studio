@@ -948,17 +948,30 @@ mod tests {
         }
     }
 
-    /// A project of one file, written by the test as an edit writes it.
+    /// A project of one file, written by the test as an edit writes it, in
+    /// a folder of its own: tests run side by side.
     fn rooted(p: &mut Previews, text: &str) -> std::path::PathBuf {
-        let root = std::env::temp_dir().join(format!(
-            "studio-problems-{}-{}",
-            std::process::id(),
-            text.len()
-        ));
+        static ROOTS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let n = ROOTS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let root = std::env::temp_dir().join(format!("studio-problems-{}-{n}", std::process::id()));
         std::fs::create_dir_all(&root).unwrap();
         std::fs::write(root.join("Main.qml"), text).unwrap();
         p.root = Some(root.clone());
         root
+    }
+
+    // Tests run side by side: two of them wrote texts of one length, shared
+    // a folder, and one's clean-up took the file the other was reading.
+    #[test]
+    fn two_projects_written_at_once_are_two_folders() {
+        let (mut p, _) = previews(VecDeque::new(), false);
+        let first = rooted(&mut p, "Item { id: aa }\n");
+        let second = rooted(&mut p, "Item { id: bb }\n");
+        assert_ne!(first, second);
+        let text = std::fs::read_to_string(first.join("Main.qml")).unwrap();
+        assert_eq!(text, "Item { id: aa }\n");
+        std::fs::remove_dir_all(&first).unwrap();
+        std::fs::remove_dir_all(&second).unwrap();
     }
 
     #[test]
