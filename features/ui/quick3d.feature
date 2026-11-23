@@ -47,6 +47,14 @@ Feature: A person places a 3D view from the palette
     And the inspector has no button "Align Left"
 
   @preview
+  Scenario: In a narrow window the canvas's bars leave its words and each other uncovered
+    Given the person has searched the palette for "View3D"
+    And the person has placed "View3D" from the palette
+    And the person has selected "Model" in the layers panel
+    When Studio's window is made 820 by 900
+    Then the canvas's bars cover neither "This object has no box on the canvas" nor each other, all in the canvas
+
+  @preview
   # The camera looks down z, so the z axis is a point on the picture: there
   # is nothing to drag, and its row in the inspector is where z is set.
   Scenario: A model of a 3D scene is moved by the arrows the picture can show

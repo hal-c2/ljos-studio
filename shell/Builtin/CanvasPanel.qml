@@ -101,8 +101,28 @@ Panel {
         }
         return out.join(", ")
     }
-    // The lines above a frame, on the screen.
+    // The lines above a frame, on the screen: its header takes more than one
+    // in a canvas too narrow for it side by side.
+    property int frameHeaderLines: 1
     readonly property real frameLabels: (held === "" ? 1 : 2) * (Typography.captionSize * 1.5 + Spacing.xxs) + Spacing.xxs
+        + (frameHeaderLines - 1) * (Typography.captionSize * 1.5 + Spacing.xs)
+    // How many lines things this wide take, one after another with `gap`
+    // between them, in `room`.
+    function linesFor(widths, room, gap) {
+        let lines = 1
+        let at = 0
+        for (let i = 0; i < widths.length; i++) {
+            if (widths[i] <= 0)
+                continue
+            if (at > 0 && at + gap + widths[i] > room) {
+                lines += 1
+                at = widths[i]
+            } else {
+                at += (at > 0 ? gap : 0) + widths[i]
+            }
+        }
+        return lines
+    }
 
     // ----------------------------------------------------------- the frames
 
@@ -580,19 +600,51 @@ Panel {
                 width: body.width
                 height: body.height
 
-                // Above the frame at their own size, whatever the zoom.
+                // The header's lines, as many as the canvas's width makes of it
+                // shown whole, so a fit leaves them room. Not the lines it has
+                // now: those change with the zoom, and a fit that changed them
+                // would fit again.
+                readonly property int headerLines: panel.linesFor([
+                    liveLabel.implicitWidth, frameState.implicitWidth,
+                    layoutButton.target !== "" && panel.recording === null ? layoutButton.implicitWidth : 0,
+                    problemsSpot.width
+                ], surface.width - 2 * Spacing.xs, Spacing.xs)
+                onHeaderLinesChanged: panel.frameHeaderLines = headerLines
+                Component.onCompleted: panel.frameHeaderLines = headerLines
+
+                // Above the frame at their own size, whatever the zoom. A
+                // canvas too narrow for them side by side takes them in more
+                // lines, and they slide in from its right edge rather than
+                // go past it.
                 Column {
-                    anchors.left: parent.left
+                    id: header
+                    x: Math.max(Math.min(0, surface.width - Spacing.xs - frame.x - width),
+                                Math.min(0, Spacing.xs - frame.x))
                     anchors.bottom: body.top
                     anchors.bottomMargin: Spacing.xxs
                     spacing: Spacing.xxs
-                    Row {
+                    Flow {
+                        id: headerLine
+                        readonly property real line: Typography.captionSize * 1.5
+                        readonly property real lineWidth: {
+                            let w = 0
+                            let n = 0
+                            for (let i = 0; i < children.length; i++) {
+                                const c = children[i]
+                                if (c.visible && c.width > 0) {
+                                    w += c.width
+                                    n += 1
+                                }
+                            }
+                            return w + Math.max(0, n - 1) * spacing
+                        }
+                        width: Math.min(lineWidth, Math.max(0, surface.width - 2 * Spacing.xs))
                         spacing: Spacing.xs
-                        height: Typography.captionSize * 1.5
                         Label {
                             id: liveLabel
                             objectName: "frameLabel"
-                            anchors.verticalCenter: parent.verticalCenter
+                            height: headerLine.line
+                            verticalAlignment: Text.AlignVCenter
                             // A frame zoomed out to a sliver names itself in
                             // as much as it has, not over its neighbour's.
                             width: Math.min(implicitWidth, Math.max(Typography.captionSize, frame.width))
@@ -607,8 +659,10 @@ Panel {
                         // The state the frame's breakpoint turns on, as the
                         // file's `when` says.
                         Label {
+                            id: frameState
                             objectName: "frameState"
-                            anchors.verticalCenter: parent.verticalCenter
+                            height: headerLine.line
+                            verticalAlignment: Text.AlignVCenter
                             visible: frame.width >= liveLabel.implicitWidth
                             text: frame.modelData.variant !== "" ? "State " + frame.modelData.variant : "No state"
                             color: Colors.textMuted
@@ -618,24 +672,36 @@ Panel {
                         }
                         // The state this frame's width turns on, to draw in; a
                         // layout for a width is that state, not a second file.
-                        TextButton {
-                            readonly property string target: frame.modelData.target.toLowerCase()
-                            anchors.verticalCenter: parent.verticalCenter
-                            visible: target !== "" && panel.recording === null && frame.width >= liveLabel.implicitWidth
-                            text: frame.modelData.variant !== ""
-                                  ? "Edit " + target + " layout"
-                                  : target.charAt(0).toUpperCase() + target.slice(1) + " layout"
-                            onClicked: panel.layoutAsked(target, frame.modelData.variant)
+                        // Centred on its line as the words are, standing out
+                        // of it above and below.
+                        Item {
+                            width: layoutButton.implicitWidth
+                            height: headerLine.line
+                            visible: layoutButton.target !== "" && panel.recording === null
+                                     && frame.width >= liveLabel.implicitWidth
+                            TextButton {
+                                id: layoutButton
+                                readonly property string target: frame.modelData.target.toLowerCase()
+                                anchors.verticalCenter: parent.verticalCenter
+                                text: frame.modelData.variant !== ""
+                                      ? "Edit " + target + " layout"
+                                      : target.charAt(0).toUpperCase() + target.slice(1) + " layout"
+                                onClicked: panel.layoutAsked(target, frame.modelData.variant)
+                            }
                         }
                         // Where the running app's errors and warnings say how
                         // many they are, beside the frame they belong to.
                         Item {
-                            id: problemsSpot
-                            objectName: "problemsSpot"
-                            anchors.verticalCenter: parent.verticalCenter
-                            visible: children.length > 0
-                            width: childrenRect.width
-                            height: childrenRect.height
+                            width: problemsSpot.width
+                            height: headerLine.line
+                            visible: problemsSpot.children.length > 0
+                            Item {
+                                id: problemsSpot
+                                objectName: "problemsSpot"
+                                anchors.verticalCenter: parent.verticalCenter
+                                width: childrenRect.width
+                                height: childrenRect.height
+                            }
                         }
                     }
                     Label {
@@ -712,10 +778,31 @@ Panel {
         onTriggered: panel.workspace.lookAgain()
     }
 
+    // Where something `h` high from `x` to `x + w` rests: on `base`, or above
+    // the first of `below` in its way, and so on up.
+    function restingY(x, w, h, base, below) {
+        let bottom = base
+        for (let pass = 0; pass <= below.length; pass++) {
+            let moved = false
+            for (let i = 0; i < below.length; i++) {
+                const b = below[i]
+                if (b.visible && x < b.x + b.width + Spacing.xs && b.x < x + w + Spacing.xs
+                        && b.y < bottom && b.y + b.height + Spacing.xs > bottom - h) {
+                    bottom = b.y - Spacing.xs
+                    moved = true
+                }
+            }
+            if (!moved)
+                break
+        }
+        return bottom - h
+    }
+
     // Above the canvas, not in it, so they stay put as the frame moves.
     FloatBar {
         anchors.horizontalCenter: parent.horizontalCenter
         y: Spacing.xs
+        maxWidth: parent.width - 2 * Spacing.xs
         visible: alignments.count > 0 || wraps.count > 0 || unwrapping.visible
 
         Repeater {
@@ -784,9 +871,9 @@ Panel {
     FloatBar {
         id: recordingBar
         objectName: "recordingBar"
-        anchors.left: parent.left
-        anchors.bottom: parent.bottom
-        anchors.margins: Spacing.xs
+        x: Spacing.xs
+        y: panel.restingY(x, width, height, parent.height - Spacing.xs, [toolsBar, zoomBar])
+        maxWidth: parent.width - 2 * Spacing.xs
         visible: panel.recording !== null
 
         Label {
@@ -794,7 +881,8 @@ Panel {
             color: Colors.text
             font.weight: Typography.bodyStrongWeight
             leftPadding: Spacing.xs
-            anchors.verticalCenter: parent.verticalCenter
+            height: 28
+            verticalAlignment: Text.AlignVCenter
             Accessible.role: Accessible.StaticText
             Accessible.name: text
         }
@@ -806,9 +894,11 @@ Panel {
     }
 
     FloatBar {
+        id: toolsBar
         anchors.horizontalCenter: parent.horizontalCenter
         anchors.bottom: parent.bottom
         anchors.bottomMargin: Spacing.xs
+        maxWidth: parent.width - 2 * Spacing.xs
         visible: panel.preview !== null
 
         IconButton {
@@ -879,10 +969,12 @@ Panel {
             canvasFocus.forceActiveFocus()
     }
 
+    // Beside the tools when there is room, above them when there is not.
     FloatBar {
-        anchors.right: parent.right
-        anchors.bottom: parent.bottom
-        anchors.margins: Spacing.xs
+        id: zoomBar
+        x: parent.width - Spacing.xs - width
+        y: panel.restingY(x, width, height, parent.height - Spacing.xs, [toolsBar])
+        maxWidth: parent.width - 2 * Spacing.xs
         visible: panel.preview !== null
 
         IconButton {
@@ -957,9 +1049,11 @@ Panel {
     Label {
         objectName: "canvasHint"
         x: Spacing.xs
-        // Above the bar when there is one: a drag's text comes just when the
-        // bar saying where the drag goes matters.
-        y: (recordingBar.visible ? recordingBar.y : parent.height - Spacing.md + Spacing.xs) - height - Spacing.xs
+        width: Math.min(implicitWidth, parent.width - 2 * Spacing.xs)
+        wrapMode: Text.Wrap
+        // Above the bars in its way: a drag's text comes just when the bar
+        // saying where the drag goes matters.
+        y: panel.restingY(x, width, height, parent.height - Spacing.md, [toolsBar, zoomBar, recordingBar])
         visible: text !== ""
         text: panel.says
         color: Colors.text

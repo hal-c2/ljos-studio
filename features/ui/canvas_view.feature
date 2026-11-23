@@ -35,6 +35,17 @@ Feature: The canvas is a surface without edges that pans and zooms
     And Studio's window shows the project
     And the person has opened "Main.qml" in the documents list
 
+  Scenario: In a narrow window the frame's name, state and layout button show whole
+    When Studio's window is made 820 by 900
+    And the canvas has finished moving
+    Then the frame "Desktop"'s name, state and layout button show whole in the canvas
+
+  Scenario: In a narrow window the tools for the selection show whole
+    Given the person has selected "Rectangle badge" in the layers panel
+    When Studio's window is made 820 by 900
+    And the canvas has finished moving
+    Then the canvas's 10 tools for the selection show whole in the canvas, apart
+
   Scenario: What a drag pans has a name for assistive technology
     Then the window has a pane "Pan the canvas"
 
