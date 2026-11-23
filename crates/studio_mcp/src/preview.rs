@@ -253,6 +253,21 @@ impl Open {
         Ok(())
     }
 
+    /// After a fit or change the host refused partway, from `before`: the fit
+    /// it had again. Back to fitting its screen, it is put back to its
+    /// screen's size, or its fit would say screen while it is as tall as the
+    /// page it grew to; a resize refused again is the next open's, which
+    /// refits a preview not at its screen. A size it is left at that is not
+    /// `before` changes its picture, and a window has to know to look.
+    pub fn undo_fit(&mut self, was: Fit, before: Size) {
+        self.fit = was;
+        if was == Fit::Screen && self.size != self.screen && self.host.resize(self.screen).is_ok() {
+            self.size = self.screen;
+            self.measured = None;
+        }
+        self.bumped(before);
+    }
+
     /// Its picture changed without a reload's generation, as a click's.
     fn bumped(&mut self, before: Size) {
         if self.size != before {
