@@ -180,7 +180,11 @@ shows it; the watcher's quiet time is not on that path.
   since another module's code is another program.
 - DECISION: starting a preview needs `run` (it runs the project's code);
   looking at one that runs (`preview_screenshot`, `preview_events`) needs
-  only `inspect`.
+  only `inspect`. The hidden file a document opened alone runs from (below)
+  is part of running it, so `run` writes it without `mutate` or `fs`: its
+  path is the document's own name, made hidden, and a file there Studio did
+  not write is never replaced. The project's code `run` starts reaches more
+  than that.
 
 ## Selection from the canvas (S3)
 
@@ -390,6 +394,12 @@ is left alone, and the component then previews as itself. The document is not
 changed. In a browser, where only the store reaches the file, it goes when
 another preview opens or this one does not start; one whose preview ended
 otherwise stays hidden until that component is previewed again.
+
+- DECISION: nothing sweeps a killed Studio's leftover when a project opens:
+  a second Studio on the same project may be previewing from it.
+- A file is taken out only while the directory it was written in is still
+  inside the project: a directory swapped for a link to elsewhere since
+  keeps what it points at.
 
 - DECISION: only a block a qmldir declares is taken for a store when its root
   is an `Item`, so an app's own `Item` documents preview as they are.
