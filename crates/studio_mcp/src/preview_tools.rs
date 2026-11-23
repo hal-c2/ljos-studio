@@ -1193,11 +1193,10 @@ pub(crate) fn logged(
 /// preview it began on.
 pub(crate) fn open_one(studio: &Mutex<Studio>) -> Option<(u64, String)> {
     let previews = lock(studio).previews.clone();
-    let open = preview::lock(&previews)
+    preview::lock(&previews)
         .open
         .as_ref()
-        .map(|o| (o.started, o.doc.clone()));
-    open
+        .map(|o| (o.started, o.doc.clone()))
 }
 
 /// As [`known_problems`], of the preview `open` names alone: `None` once
