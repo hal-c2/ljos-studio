@@ -42,9 +42,10 @@ export function servePreview({ element, mount, reload: remade, inspect, tell, co
   // A file is named by its path in the project, not the compile's: an aliased
   // module's files are compiled at the module's path, so `served` read backwards.
   const inProject = (file) => {
-    const path = file?.replace(/^projects\/\d+\//, "") ?? null;
-    if (path === null) return null;
-    if (Object.hasOwn(renamed, path)) return renamed[path];
+    const compiledAt = file?.replace(/^projects\/\d+\//, "") ?? null;
+    if (compiledAt === null) return null;
+    // A renamed file is named back first; it may still be an aliased module's.
+    const path = Object.hasOwn(renamed, compiledAt) ? renamed[compiledAt] : compiledAt;
     // Only a module's own files move: one nested in it is compiled where it is.
     const dir = path.slice(0, path.lastIndexOf("/"));
     const alias = compiledWith.find((a) => a.module.replaceAll(".", "/") === dir);
