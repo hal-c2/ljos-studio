@@ -411,6 +411,7 @@ impl PreviewHost for NativeHost {
             "app_resize",
             json!({ "width": size.width, "height": size.height }),
         )?;
+        self.running()?.size = size;
         Ok(())
     }
 
@@ -1022,8 +1023,14 @@ const AIM_DEPTH: usize = 32;
 
 /// The lowest edge of the shown items in `app_objects` rows, in window
 /// pixels: what a hidden item holds is not shown, so it does not count.
+/// An item exactly as big as the `window` (a root that fills it, a
+/// background) follows the window, not the page: once a preview is grown
+/// to its content such an item reaches the bottom whatever the page holds
+/// now, so it is left out and what it holds is measured instead. A page of
+/// nothing else reaches nowhere, 0.
 fn lowest_edge(rows: &[Value], window: Size) -> f64 {
-    let _ = window;
+    // Bounds are logical pixels; a scaled layout may round them off.
+    let near = |a: f64, b: u32| (a - f64::from(b)).abs() < 0.5;
     let mut lowest: f64 = 0.0;
     let mut hidden_below = None;
     for row in rows {
@@ -1040,7 +1047,11 @@ fn lowest_edge(rows: &[Value], window: Size) -> f64 {
             continue;
         };
         let number = |i: usize| bounds.get(i).and_then(Value::as_f64).unwrap_or(0.0);
-        if number(2) > 0.0 && number(3) > 0.0 {
+        let fills = near(number(0), 0)
+            && near(number(1), 0)
+            && near(number(2), window.width)
+            && near(number(3), window.height);
+        if number(2) > 0.0 && number(3) > 0.0 && !fills {
             lowest = lowest.max(number(1) + number(3));
         }
     }

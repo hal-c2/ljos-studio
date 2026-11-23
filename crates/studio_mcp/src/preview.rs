@@ -167,6 +167,9 @@ impl Open {
     /// to content keeps its height while what it lays out still reaches it,
     /// grows if that reaches further, and is laid out from its screen again
     /// only when that got shorter. An unchanged page is not resized at all.
+    /// A root that fills the window is not what it lays out (see
+    /// [`PreviewHost::extent`]), so a page that folds while it runs is
+    /// measured shorter here.
     pub fn keep_fit(&mut self) -> Result<(), PreviewError> {
         if self.fit == Fit::Content
             && self.size != self.screen
