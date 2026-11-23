@@ -560,22 +560,25 @@ fn enqueue(engine: &Engine, ws: ObjectId, job: Job) {
     admit(&queue, job, || pump(engine, ws));
 }
 
-/// Puts `job` in line, then `start`s the next job if none runs.
+/// Puts `job` in line, then `start`s the next job if none runs. A job joined
+/// or already waiting starts it too: one the pool could not take waits in
+/// an idle line for the next gesture, whatever that gesture is.
 fn admit(queue: &RefCell<Queue>, job: Job, start: impl FnOnce()) {
     {
         let mut q = queue.borrow_mut();
         // A refresh reads the whole session, so one waiting is enough.
-        if matches!(job, Job::Refresh) && q.jobs.iter().any(|j| matches!(j, Job::Refresh)) {
-            return;
+        let waiting_refresh =
+            matches!(job, Job::Refresh) && q.jobs.iter().any(|j| matches!(j, Job::Refresh));
+        if !waiting_refresh {
+            if let Some(turned) = wheel_of(&job)
+                && let Some(waiting) = waiting_wheel(&mut q.jobs, &job)
+            {
+                waiting["dx"] = json!(turned.dx + number(&waiting["dx"]));
+                waiting["dy"] = json!(turned.dy + number(&waiting["dy"]));
+            } else {
+                q.jobs.push_back(job);
+            }
         }
-        if let Some(turned) = wheel_of(&job)
-            && let Some(waiting) = waiting_wheel(&mut q.jobs, &job)
-        {
-            waiting["dx"] = json!(turned.dx + number(&waiting["dx"]));
-            waiting["dy"] = json!(turned.dy + number(&waiting["dy"]));
-            return;
-        }
-        q.jobs.push_back(job);
     }
     start();
 }
