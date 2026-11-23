@@ -9,7 +9,7 @@ expression: value
     "open_world": false,
     "read_only": false
   },
-  "description": "Write a bundle that runs without Studio: QML, theme, assets and own modules, never mocks or `.studio/`. `native`: `ljos-bundle.json` says how `ljos run` starts it. `web`: `ljos-site.json` is what ljos-web builds from with `build` (needs `run`). `dry_run` says what it would hold, writes nothing.",
+  "description": "Write a bundle that runs without Studio: QML, theme, assets, own modules; no mocks or `.studio/`. `native`: `ljos-bundle.json` says how `ljos run` starts it. `web`: ljos-web builds from `ljos-site.json`, here with `build` (needs `run`). `dry_run`: what it would hold; writes nothing.",
   "inputSchema": {
     "properties": {
       "build": {
@@ -19,7 +19,7 @@ expression: value
         "type": "boolean"
       },
       "entry": {
-        "description": "The document the app starts with, usually its shell (`Shell.qml`).",
+        "description": "The document the app starts with, usually `Shell.qml`.",
         "type": "string"
       },
       "ljos_web": {
