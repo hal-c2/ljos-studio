@@ -60,7 +60,10 @@ impl Harness {
     pub fn standing(&self, dir: Option<&Path>) -> Standing {
         Standing {
             path: self.path.clone(),
-            file: dir.map(|dir| dir.join(&self.path)),
+            file: dir.map(|dir| {
+                let root = dir.canonicalize().unwrap_or_else(|_| dir.to_owned());
+                (root, dir.join(&self.path))
+            }),
         }
     }
 }
@@ -71,8 +74,10 @@ impl Harness {
 #[derive(Debug)]
 pub(crate) struct Standing {
     pub path: String,
-    /// None in a project without a directory, which only its store reaches.
-    file: Option<PathBuf>,
+    /// The project's directory as it was when the file was written, and the
+    /// file. None in a project without a directory, which only its store
+    /// reaches.
+    file: Option<(PathBuf, PathBuf)>,
 }
 
 impl Standing {
@@ -88,9 +93,15 @@ impl Standing {
 
 impl Drop for Standing {
     fn drop(&mut self) {
-        if let Some(file) = &self.file {
+        if let Some((root, file)) = &self.file {
+            // The store's confinement is not at hand here: a directory
+            // swapped for a link since would lead out of the project.
+            let inside = file
+                .parent()
+                .and_then(|dir| dir.canonicalize().ok())
+                .is_some_and(|d| d.starts_with(root));
             // A person may have written their own file there since.
-            if std::fs::read_to_string(file).is_ok_and(|text| is_studios(&text)) {
+            if inside && std::fs::read_to_string(file).is_ok_and(|text| is_studios(&text)) {
                 // Already gone is as good.
                 let _ = std::fs::remove_file(file);
             }
@@ -579,6 +590,28 @@ mod tests {
         };
         drop(h.standing(Some(dir.path())));
         assert!(!file.exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_standing_harness_leaves_what_a_linked_directory_points_at() {
+        let dir = tempfile::tempdir().unwrap();
+        let project = dir.path().join("project");
+        let elsewhere = dir.path().join("elsewhere");
+        std::fs::create_dir_all(project.join("cards")).unwrap();
+        std::fs::create_dir_all(&elsewhere).unwrap();
+        let h = Harness {
+            path: "cards/.Card.preview.qml".to_owned(),
+            text: MARK.to_owned(),
+        };
+        let standing = h.standing(Some(&project));
+        // Swapped for a link to a marked file of another project.
+        std::fs::remove_dir(project.join("cards")).unwrap();
+        std::os::unix::fs::symlink(&elsewhere, project.join("cards")).unwrap();
+        let theirs = elsewhere.join(".Card.preview.qml");
+        std::fs::write(&theirs, MARK).unwrap();
+        drop(standing);
+        assert!(theirs.exists());
     }
 
     #[test]
