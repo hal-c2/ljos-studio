@@ -1253,6 +1253,33 @@ fn clicks_button(w: &mut UiWorld, name: String) -> StepResult {
     window.click_node(&button)
 }
 
+// Both clicks land before either's call is answered.
+#[when(
+    regex = r#"^the person clicks the buttons "([^"]+)" and "([^"]+)" without waiting between them$"#
+)]
+fn clicks_buttons_quickly(w: &mut UiWorld, first: String, second: String) -> StepResult {
+    let window = w.window()?;
+    let tree = window.tree();
+    let button = |name: &str| {
+        find(&tree, &|n| {
+            n.name == name && n.role == "button" && n.key.is_some()
+        })
+        .and_then(|n| n.key)
+        .ok_or_else(|| format!("no button {name:?}; the window holds {}", names(&tree)))
+    };
+    let keys = [button(&first)?, button(&second)?];
+    let mut driver = window.stage.drive();
+    for key in keys {
+        let at = driver
+            .aim_at_node(key)
+            .map_err(|why| format!("button {key:?} is not clicked: {why:?}"))?;
+        driver
+            .click(at, MouseButtons::LEFT, 1)
+            .map_err(drive_error)?;
+    }
+    window.rest()
+}
+
 #[when(regex = r#"^the pointer rests on the button "([^"]+)" until its tip has shown$"#)]
 fn rests_on_button(w: &mut UiWorld, name: String) -> StepResult {
     let window = w.window()?;
@@ -3090,6 +3117,21 @@ fn documents_says_why(w: &mut UiWorld) -> StepResult {
     (!text.is_empty())
         .then_some(())
         .ok_or_else(|| "the documents panel says nothing".to_owned())
+}
+
+#[then("the block's actions say no refusal")]
+fn block_actions_say_no_refusal(w: &mut UiWorld) -> StepResult {
+    let window = w.window()?;
+    let label = ljos_drive::find_below(window.engine(), window.root, "blockActionsRefusal")
+        .ok_or("the block's actions have no place for a refusal")?;
+    let text = window
+        .engine()
+        .read_by_name(label, "text")
+        .to_js_string()
+        .to_string();
+    text.is_empty()
+        .then_some(())
+        .ok_or_else(|| format!("the block's actions say {text:?}"))
 }
 
 #[then(regex = r#"^the code view marks "(.*)"$"#)]

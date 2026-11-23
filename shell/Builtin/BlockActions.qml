@@ -24,9 +24,10 @@ Column {
         return null
     }
     readonly property var slots: block === null ? [] : block.slots
-    // The tool asked and not yet answered, so another panel's answer is not
-    // taken for this one's.
+    // The tool asked and not yet answered, and what it was asked with: other
+    // panels ask the same tools, and their answers are not this one's.
     property string asked: ""
+    property var askedWith: null
     property string shell: ""
     property string refusal: ""
 
@@ -34,6 +35,21 @@ Column {
     spacing: Spacing.xxs
     Accessible.role: Accessible.Pane
     Accessible.name: "Block"
+
+    function ask(tool, args) {
+        refusal = ""
+        asked = tool
+        askedWith = args
+        workspace.dispatch(tool, args)
+    }
+
+    // Whether an answer is to this panel's call: the tool, and the document,
+    // slot and shell it was asked with.
+    function mine(tool, args) {
+        const own = askedWith
+        return tool === asked && own !== null && args !== null && args !== undefined
+            && args.doc === own.doc && args.slot === own.slot && args.shell === own.shell
+    }
 
     function root() {
         const layers = workspace.layers || []
@@ -44,26 +60,23 @@ Column {
         const parent = workspace.selected !== "" ? workspace.selected : root()
         if (name === "" || parent === "")
             return
-        refusal = ""
-        asked = "node_insert"
-        workspace.dispatch("node_insert", {doc: workspace.doc, parent: {node: parent}, slot: name})
+        ask("node_insert", {doc: workspace.doc, parent: {node: parent}, slot: name})
     }
 
     function makeShell() {
         if (block === null)
             return
-        refusal = ""
-        asked = "document_new"
         shell = block.name + "Shell.qml"
-        workspace.dispatch("document_new", {doc: shell, shell: block.module + "." + block.name})
+        ask("document_new", {doc: shell, shell: block.module + "." + block.name})
     }
 
     Connections {
         target: actions.workspace
-        function onAnswered(tool, answer) {
-            if (tool !== actions.asked)
+        function onAnswered(tool, answer, asked) {
+            if (!actions.mine(tool, asked))
                 return
             actions.asked = ""
+            actions.askedWith = null
             if (tool === "node_insert") {
                 slotName.text = ""
             } else if (tool === "document_new") {
@@ -72,10 +85,11 @@ Column {
                     actions.workspace.dispatch("preview_open", {doc: actions.shell})
             }
         }
-        function onRefused(tool, error) {
-            if (tool !== actions.asked)
+        function onRefused(tool, error, asked) {
+            if (!actions.mine(tool, asked))
                 return
             actions.asked = ""
+            actions.askedWith = null
             actions.refusal = error.message
         }
     }
