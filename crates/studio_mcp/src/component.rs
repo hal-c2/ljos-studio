@@ -373,8 +373,8 @@ fn alias_insertion(
     }
 }
 
-/// The strings the object's inner objects show, each made an alias of the
-/// new type so the instance says them and another instance can say others:
+/// Each string literal bound on the object's inner objects, made an alias of
+/// the new type so the instance says it and another instance can say another:
 /// `label.text: "Hi"` becomes `property alias labelText: label.text`, and
 /// the instance `labelText: "Hi"`. The file keeps the value too, as what an
 /// instance that sets none shows. Only an object with an id can be aliased,
@@ -397,7 +397,19 @@ fn exposed(node: &Node, tree: &[Node], outward: &mut Outward) -> Vec<String> {
         .cloned()
         .chain(node.bindings.iter().map(|b| b.name.clone()))
         .chain(outward.aliases.iter().map(|(name, ..)| name.clone()))
+        .chain(node.functions.iter().cloned())
+        .chain(node.signals.iter().map(|s| s.name.clone()))
         .collect();
+    // An alias `x` declares the signal `xChanged`, and QML refuses a member
+    // of that name beside it.
+    let changed: Vec<String> = node
+        .signals
+        .iter()
+        .map(|s| &s.name)
+        .chain(&node.functions)
+        .filter_map(|name| name.strip_suffix("Changed").map(str::to_owned))
+        .collect();
+    taken.extend(changed);
     let mut set = Vec::new();
     for inner in tree
         .iter()
@@ -406,8 +418,9 @@ fn exposed(node: &Node, tree: &[Node], outward: &mut Outward) -> Vec<String> {
         let Some(id) = &inner.id else { continue };
         let steps = &inner.path.0[node.path.0.len()..];
         let made_once = steps.iter().all(|s| matches!(s, Step::Child(_)))
+            // The object itself counts: what a `Repeater` holds is its delegate.
             && tree.iter().all(|outer| {
-                !(outer.start > node.start
+                !(outer.start >= node.start
                     && outer.start < inner.start
                     && inner.end <= outer.end
                     && VIEWS.contains(&outer.ty.rsplit('.').next().unwrap_or(&outer.ty)))
