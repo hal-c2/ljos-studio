@@ -1191,6 +1191,7 @@ pub(crate) fn logged(
 
 /// Which preview is open, and on which document: a wait's answer is of the
 /// preview it began on.
+#[cfg(feature = "native")]
 pub(crate) fn open_one(studio: &Mutex<Studio>) -> Option<(u64, String)> {
     let previews = lock(studio).previews.clone();
     preview::lock(&previews)
@@ -1201,6 +1202,7 @@ pub(crate) fn open_one(studio: &Mutex<Studio>) -> Option<(u64, String)> {
 
 /// As [`known_problems`], of the preview `open` names alone: `None` once
 /// it was closed or another was opened.
+#[cfg(feature = "native")]
 pub(crate) fn known_problems_of(
     studio: &Mutex<Studio>,
     open: &Option<(u64, String)>,
