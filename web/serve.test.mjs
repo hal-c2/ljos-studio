@@ -3,7 +3,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { compiledFirst, entryForQmlc, forQmlc } from "./serve.mjs";
+import { compiledFirst, entryForQmlc, forQmlc, saidOf } from "./serve.mjs";
 
 test("with no alias, qmlc is shown the project as it is", () => {
   const files = { "App/Media/qmldir": "module App.Media\n", "mocks/App/Media/qmldir": "module App.Media\n", "Parts/qmldir": "module Parts\n# block Card 1.0 Card.qml\n" };
@@ -49,4 +49,15 @@ test("an entry that is named as one is left as it is", () => {
 
 test("a hidden file that is not run is not compiled", () => {
   assert.deepEqual(compiledFirst({ "Main.qml": "app", "Blocks/.Card.preview.qml": "// Mine" }), ["Main.qml"]);
+});
+
+test("what the compiler says of a renamed entry is said of the project's file, and of no other", () => {
+  const said = saidOf(
+    "_Card_preview.qml:3:5: no such type\nOther/_Card_preview.qml:2:1: no such type\nin _Card_preview.qml.js",
+    "_Card_preview.qml",
+    ".Card.preview.qml",
+  );
+  assert.equal(said, ".Card.preview.qml:3:5: no such type\nOther/_Card_preview.qml:2:1: no such type\nin _Card_preview.qml.js");
+  assert.equal(saidOf("Blocks/_Card_preview.qml:1:1: x", "Blocks/_Card_preview.qml", "Blocks/.Card.preview.qml"), "Blocks/.Card.preview.qml:1:1: x");
+  assert.equal(saidOf("Main.qml:1:1: x", "Main.qml", "Main.qml"), "Main.qml:1:1: x");
 });

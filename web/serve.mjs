@@ -70,6 +70,15 @@ export function entryForQmlc(files, entry) {
   return { files: { ...others, [named]: text }, entry: named };
 }
 
+// What the compiler says of `entry`, said of `asked`, the project's name for
+// it. Only the whole path is: a file of the same name in another directory,
+// or one whose name merely starts with it, is left as it was said.
+export function saidOf(error, entry, asked) {
+  if (entry === asked) return error;
+  const at = entry.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return error.replace(new RegExp(`(?<![\\w./-])${at}(?![\\w.-])`, "g"), () => asked);
+}
+
 // What is compiled before a frame imports the entry: what an app can reach,
 // which a hidden file is not (`ljos run` reads none it is not given).
 export const compiledFirst = (files) =>
@@ -146,7 +155,7 @@ export async function start({ app, port = 0, record = false }) {
     } catch (e) {
       let error = String(e?.message ?? e).split(dir + "/").join("");
       // Said of the file the project has.
-      if (entry !== asked) error = error.split(entry).join(asked);
+      error = saidOf(error, entry, asked);
       if (record) compiled.push(error);
       return { status: 200, answer: { error } };
     }
