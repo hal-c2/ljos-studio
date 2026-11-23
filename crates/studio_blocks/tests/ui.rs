@@ -20,8 +20,8 @@ use ljos_mcp_core::{CallCtx, Cap, CapSet};
 use ljos_runtime::SystemClock;
 use serde_json::Value as Json;
 use studio_core::preview::{
-    Click, Declared, Input, LogLine, Picture, Placed, PreviewError, PreviewHost, PreviewSpec,
-    Reload, RestWatch, Size,
+    Click, Declared, Extent, Input, LogLine, Picture, Placed, PreviewError, PreviewHost,
+    PreviewSpec, Reload, RestWatch, Size,
 };
 use studio_mcp::{Studio, StudioServer};
 use studio_preview::NativeHost;
@@ -225,7 +225,7 @@ impl PreviewHost for SlowPictures {
         Ok(())
     }
 
-    fn extent(&mut self) -> Result<f64, PreviewError> {
+    fn extent(&mut self) -> Result<Extent, PreviewError> {
         self.3.look();
         self.0.extent()
     }

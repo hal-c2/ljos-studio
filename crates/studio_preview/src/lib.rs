@@ -22,8 +22,8 @@ use ljos_child::Reaped;
 use serde_json::{Map, Value, json};
 use studio_core::place::Rect;
 use studio_core::preview::{
-    Click, Declared, Input, LogLine, Picture, Placed, PreviewError, PreviewHost, PreviewSpec,
-    Reload, Rest, RestWatch, Size,
+    Click, Declared, Extent, Input, LogLine, Picture, Placed, PreviewError, PreviewHost,
+    PreviewSpec, Reload, Rest, RestWatch, Size,
 };
 use studio_core::scene3d::{Body, Camera, Scene, rotate};
 
@@ -550,7 +550,7 @@ impl PreviewHost for NativeHost {
         Ok(())
     }
 
-    fn extent(&mut self) -> Result<f64, PreviewError> {
+    fn extent(&mut self) -> Result<Extent, PreviewError> {
         let window = self.running()?.size;
         Ok(lowest_edge(&self.all_objects()?, window))
     }
@@ -1028,7 +1028,7 @@ const AIM_DEPTH: usize = 32;
 /// to its content such an item reaches the bottom whatever the page holds
 /// now, so it is left out and what it holds is measured instead. A page of
 /// nothing else reaches nowhere, 0.
-fn lowest_edge(rows: &[Value], window: Size) -> f64 {
+fn lowest_edge(rows: &[Value], window: Size) -> Extent {
     // Bounds are logical pixels; a scaled layout may round them off.
     let near = |a: f64, b: u32| (a - f64::from(b)).abs() < 0.5;
     let mut lowest: f64 = 0.0;
@@ -1055,7 +1055,10 @@ fn lowest_edge(rows: &[Value], window: Size) -> f64 {
             lowest = lowest.max(number(1) + number(3));
         }
     }
-    lowest
+    Extent {
+        reach: lowest,
+        window_sized: Vec::new(),
+    }
 }
 
 /// The inspector's locator for the object with the QML `id`.
@@ -1174,7 +1177,7 @@ mod tests {
             // Empty boxes are not drawn.
             { "depth": 1, "bounds": [0, 6000, 0, 0] },
         ]);
-        assert_eq!(lowest_edge(rows.as_array().unwrap(), WINDOW), 2000.0);
+        assert_eq!(lowest_edge(rows.as_array().unwrap(), WINDOW).reach, 2000.0);
     }
 
     const WINDOW: Size = Size {
@@ -1193,7 +1196,34 @@ mod tests {
             { "depth": 1, "bounds": [0, 0, 1280, 2000] },
             { "depth": 2, "bounds": [0, 0, 400, 1000] },
         ]);
-        assert_eq!(lowest_edge(rows.as_array().unwrap(), WINDOW), 1000.0);
+        assert_eq!(lowest_edge(rows.as_array().unwrap(), WINDOW).reach, 1000.0);
+    }
+
+    /// What it leaves out it names, by handle, else by its row: a page that
+    /// reaches as far as it did can still have changed, when an item the
+    /// size of the window is not any more.
+    #[test]
+    fn what_is_left_out_as_big_as_the_window_is_named() {
+        let rows = json!([
+            { "depth": 0, "handle": "h1", "bounds": [0, 0, 1280, 2000] },
+            { "depth": 1, "handle": "h2", "bounds": [0, 0, 1280, 2000] },
+            { "depth": 2, "handle": "h3", "bounds": [0, 0, 400, 1500] },
+            { "depth": 1, "bounds": [0, 0, 1280, 2000] },
+        ]);
+        let extent = lowest_edge(rows.as_array().unwrap(), WINDOW);
+        assert_eq!(extent.reach, 1500.0);
+        assert_eq!(extent.window_sized, ["h1", "h2", "#3"]);
+        // The item folds to within the rest: it reaches no further, but it
+        // is not left out any more.
+        let folded = json!([
+            { "depth": 0, "handle": "h1", "bounds": [0, 0, 1280, 2000] },
+            { "depth": 1, "handle": "h2", "bounds": [0, 0, 1280, 1000] },
+            { "depth": 2, "handle": "h3", "bounds": [0, 0, 400, 1500] },
+            { "depth": 1, "bounds": [0, 0, 1280, 2000] },
+        ]);
+        let extent = lowest_edge(folded.as_array().unwrap(), WINDOW);
+        assert_eq!(extent.reach, 1500.0);
+        assert_eq!(extent.window_sized, ["h1", "#3"]);
     }
 
     /// Nothing but items the size of the window measures nothing, which
@@ -1204,7 +1234,7 @@ mod tests {
             { "depth": 0, "bounds": [0, 0, 1280, 2000] },
             { "depth": 1, "bounds": [0, 0, 1280, 2000.25] },
         ]);
-        assert_eq!(lowest_edge(rows.as_array().unwrap(), WINDOW), 0.0);
+        assert_eq!(lowest_edge(rows.as_array().unwrap(), WINDOW).reach, 0.0);
     }
 
     #[test]

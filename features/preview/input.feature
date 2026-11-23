@@ -244,6 +244,49 @@ Feature: The preview is scrolled, typed into and made as tall as its page, as a 
       """
     Then the answer's "/state/resizes" is 0
 
+  Scenario: A preview grown to an item as wide as its window fits the rest when that item folds
+    Given the file "Sheet.qml":
+      """qml
+      import QtQuick
+
+      Item {
+          id: root
+
+          Rectangle {
+              id: sheet
+              width: parent.width
+              height: 2000
+              color: "white"
+          }
+
+          Rectangle {
+              width: 400
+              height: 1500
+              color: "red"
+
+              MouseArea {
+                  id: fold
+                  width: 100
+                  height: 100
+                  onClicked: sheet.height = 1000
+              }
+          }
+      }
+      """
+    And the agent has called the tool "preview_open" with:
+      """json
+      {"doc": "Sheet.qml", "fit": "content"}
+      """
+    And the agent has called the tool "preview_state" with:
+      """json
+      {"node": {"id": "sheet"}, "click": {"id": "fold"}, "read": ["height"]}
+      """
+    When the agent calls the tool "preview_open" with:
+      """json
+      {"doc": "Sheet.qml"}
+      """
+    Then the answer's "/size" is {"width": 1280, "height": 1500}
+
   Scenario: Fitted to the screen again, the preview is the screen's height
     Given the agent has called the tool "preview_open" with:
       """json

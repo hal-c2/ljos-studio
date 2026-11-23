@@ -184,7 +184,7 @@ impl Open {
     /// item the host left out made the preview that tall.
     pub fn keep_fit(&mut self) -> Result<(), PreviewError> {
         if self.fit == Fit::Content && self.size != self.screen {
-            let reach = self.host.extent()?.ceil();
+            let reach = self.host.extent()?.reach.ceil();
             if reach < f64::from(self.size.height) && self.measured != Some(reach) {
                 return self.refit();
             }
@@ -206,7 +206,7 @@ impl Open {
             return Ok(());
         }
         for _ in 0..FIT_ROUNDS {
-            let reach = self.host.extent()?.ceil();
+            let reach = self.host.extent()?.reach.ceil();
             let height = if reach >= f64::from(Size::MAX_SIDE) {
                 Size::MAX_SIDE
             } else {
