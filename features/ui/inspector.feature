@@ -384,3 +384,10 @@ Feature: The inspector shows colours and every declared property
   Scenario: A row being typed in draws its value, not a shortened copy
     When the person clicks in the inspector's "id"
     Then the inspector's "id" draws "root" itself
+
+  # At rest a value too long for its row shows its start and its end; typed
+  # in, it is all there, and scrolls with the caret.
+  Scenario: A value longer than its row is drawn whole while it is typed in
+    When the person sets "color" to "Colors.accent" in the inspector
+    And the person clicks in the inspector's "color"
+    Then the inspector's "color" draws "Colors.accent" itself
