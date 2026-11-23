@@ -386,21 +386,24 @@ fn open(studio: &Mutex<Studio>, a: OpenArgs) -> Result<OpenOut, SurfaceError> {
         // One preview at a time: the last one ends before the next starts.
         if let Some(mut last) = previews.open.take() {
             last.host.close();
-            if let Some(standing) = &last.harness {
+            if let Some(standing) = &mut last.harness {
                 standing.leave(store);
             }
         }
-        let standing = match &harness {
+        let mut standing = match &harness {
             Some(h) => {
+                // Held before it is written: another Studio whose preview
+                // of it ends meanwhile then leaves it.
+                let standing = h.standing(dir.as_deref());
                 write_harness(h)?;
-                Some(h.standing(dir.as_deref()))
+                Some(standing)
             }
             None => None,
         };
         let entry = harness.as_ref().map_or(a.doc.as_str(), |h| h.path.as_str());
         let mut host = hosts.make(dir.as_deref()).expect("checked: it runs here");
         if let Err(e) = host.open(&preview::spec(store, entry, size, &aliases)) {
-            if let Some(standing) = &standing {
+            if let Some(standing) = &mut standing {
                 standing.leave(store);
             }
             return Err(preview_error(e));
