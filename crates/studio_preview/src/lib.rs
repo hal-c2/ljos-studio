@@ -71,6 +71,8 @@ struct Running {
     log: PathBuf,
     /// The last generation a reload was reported applied at.
     reported: u64,
+    /// The window's size, as it was started or last resized.
+    size: Size,
 }
 
 impl std::fmt::Debug for NativeHost {
@@ -235,6 +237,7 @@ impl NativeHost {
             inspector,
             log,
             reported: 0,
+            size: spec.size,
         })
     }
 }
@@ -547,7 +550,8 @@ impl PreviewHost for NativeHost {
     }
 
     fn extent(&mut self) -> Result<f64, PreviewError> {
-        Ok(lowest_edge(&self.all_objects()?))
+        let window = self.running()?.size;
+        Ok(lowest_edge(&self.all_objects()?, window))
     }
 
     fn pick(&mut self, x: f64, y: f64) -> Result<Option<Declared>, PreviewError> {
@@ -1018,7 +1022,8 @@ const AIM_DEPTH: usize = 32;
 
 /// The lowest edge of the shown items in `app_objects` rows, in window
 /// pixels: what a hidden item holds is not shown, so it does not count.
-fn lowest_edge(rows: &[Value]) -> f64 {
+fn lowest_edge(rows: &[Value], window: Size) -> f64 {
+    let _ = window;
     let mut lowest: f64 = 0.0;
     let mut hidden_below = None;
     for row in rows {
@@ -1158,7 +1163,37 @@ mod tests {
             // Empty boxes are not drawn.
             { "depth": 1, "bounds": [0, 6000, 0, 0] },
         ]);
-        assert_eq!(lowest_edge(rows.as_array().unwrap()), 2000.0);
+        assert_eq!(lowest_edge(rows.as_array().unwrap(), WINDOW), 2000.0);
+    }
+
+    const WINDOW: Size = Size {
+        width: 1280,
+        height: 2000,
+    };
+
+    /// A root that fills the window, or a background as big as it, is as
+    /// tall as the window whatever the page holds: a page made shorter while
+    /// it runs is measured by what it lays out, not by the window it was
+    /// grown to.
+    #[test]
+    fn what_is_as_big_as_the_window_does_not_say_how_far_the_content_reaches() {
+        let rows = json!([
+            { "depth": 0, "bounds": [0, 0, 1280, 2000] },
+            { "depth": 1, "bounds": [0, 0, 1280, 2000] },
+            { "depth": 2, "bounds": [0, 0, 400, 1000] },
+        ]);
+        assert_eq!(lowest_edge(rows.as_array().unwrap(), WINDOW), 1000.0);
+    }
+
+    /// Nothing but items the size of the window measures nothing, which
+    /// fits a preview to its screen.
+    #[test]
+    fn a_page_of_only_window_sized_items_reaches_nowhere() {
+        let rows = json!([
+            { "depth": 0, "bounds": [0, 0, 1280, 2000] },
+            { "depth": 1, "bounds": [0, 0, 1280, 2000.25] },
+        ]);
+        assert_eq!(lowest_edge(rows.as_array().unwrap(), WINDOW), 0.0);
     }
 
     #[test]
