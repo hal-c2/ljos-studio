@@ -10,7 +10,8 @@ Feature: A block gets a slot, and a shell skins it
   both, and `import Ljos.Blocks`, in one edit; `blocks_list` then reports
   the slot. `document_new` with `shell` writes a shell of a block: an
   instance of it that replaces what each of its slots shows, a starting
-  point to restyle. `slot_contribute` with `node` skins one instance alone,
+  point to restyle, with a sample value for each property the block
+  requires, as a block opened alone is given one. `slot_contribute` with `node` skins one instance alone,
   setting the slot on it.
 
   Background:
@@ -151,6 +152,43 @@ Feature: A block gets a slot, and a shell skins it
       {"doc": "SwitchShell.qml"}
       """
     Then the preview shows "On"
+
+  @preview
+  Scenario: A shell sets what its block requires, so it loads
+    Given the studio tools are connected with the capabilities "inspect, mutate, run"
+    And the file "Blocks/qmldir":
+      """
+      module Blocks
+      # block NoteCard 1.0 NoteCard.qml Notes "One note"
+      """
+    And the file "Blocks/NoteCard.qml":
+      """qml
+      import QtQuick
+
+      Item {
+          id: note
+          required property string title
+      }
+      """
+    And the agent has called the tool "node_insert" with:
+      """json
+      {"doc": "Blocks/NoteCard.qml", "parent": {"id": "note"}, "slot": "face"}
+      """
+    When the agent calls the tool "document_new" with:
+      """json
+      {"doc": "NoteCardShell.qml", "shell": "Blocks.NoteCard"}
+      """
+    Then the file "NoteCardShell.qml" contains:
+      """qml
+      NoteCard {
+          id: noteCard
+          title: "Title"
+      """
+    When the agent calls the tool "preview_open" with:
+      """json
+      {"doc": "NoteCardShell.qml"}
+      """
+    Then the preview shows "Title"
 
   Scenario: A block with no slots has no shell
     When the agent calls the tool "document_new" with:

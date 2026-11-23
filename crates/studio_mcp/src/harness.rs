@@ -211,6 +211,22 @@ fn shows_nothing(nodes: &[Node], root: &Node, members: &[Member], block: bool) -
         && members.iter().any(|m| m.kind != MemberKind::Handler)
 }
 
+/// What a document made around the block in `file` sets on it, so that
+/// it can be made: each property it requires, as a harness sets it.
+pub(crate) fn required_sets(store: &dyn Store, file: &str) -> Vec<(String, String)> {
+    let Ok(text) = store.read(file) else {
+        return Vec::new();
+    };
+    let Some(root) = outline::outline(&text).and_then(|nodes| nodes.into_iter().next()) else {
+        return Vec::new();
+    };
+    let required: Vec<Member> = outline::members(&text, root.start)
+        .into_iter()
+        .filter(|m| m.required)
+        .collect();
+    sets(&required, &samples(store, file))
+}
+
 fn samples(store: &dyn Store, doc: &str) -> serde_json::Map<String, Value> {
     store
         .read(SAMPLES)
