@@ -418,7 +418,8 @@ Panel {
         }
         // In play mode the frame is the device: the wheel over it scrolls
         // the app, in the notches `app_scroll` takes, and one call carries
-        // what a turn of the event loop gathered.
+        // what a turn of the event loop gathered at one point. A turn at
+        // another point may be over another view, so it is a call of its own.
         property var playWheel: null
         function playScroll(event, horizontal) {
             const x = event.x / panel.zoom - panel.liveFrame.x + panel.viewX
@@ -434,7 +435,11 @@ Panel {
                 dx = dy
                 dy = 0
             }
-            const was = playWheel
+            let was = playWheel
+            if (was !== null && (was.x !== x || was.y !== y)) {
+                sendPlayWheel()
+                was = null
+            }
             playWheel = was !== null
                 ? {x: was.x, y: was.y, dx: was.dx + dx, dy: was.dy + dy}
                 : {x: x, y: y, dx: dx, dy: dy}

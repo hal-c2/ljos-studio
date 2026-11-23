@@ -11,8 +11,8 @@ Feature: A long page shows whole on the canvas and plays as it would on the devi
   the fold and what is there can be picked. In play mode the frame is the
   device: the wheel over it and a drag in it scroll the app, not the
   canvas, and keys pressed and text typed reach the app, so a form can be
-  filled in. Turns of the wheel that come while one is going in reach the
-  app together, and none waits for the page to stop. Each is a
+  filled in. Turns of the wheel at one point that come while one is going
+  in reach the app together, and none waits for the page to stop. Each is a
   `preview_open` or `preview_state` call an agent could make.
 
   Background:
