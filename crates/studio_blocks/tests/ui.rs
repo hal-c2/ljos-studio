@@ -4103,6 +4103,15 @@ fn shift_wheel_over_canvas(w: &mut UiWorld) -> StepResult {
 #[given("the person has turned the wheel over the empty canvas")]
 fn wheel_over_empty_canvas(w: &mut UiWorld) -> StepResult {
     let window = w.window()?;
+    // A lone document opens by itself, so a project of one has no empty
+    // canvas: the wheel would move that document's frame instead.
+    let preview = window.read_json("preview");
+    if !preview.is_null() {
+        return Err(format!(
+            "the canvas is not empty: the window shows {:?} with the preview {preview}",
+            window.read("doc").to_js_string()
+        ));
+    }
     let at = canvas_pane(window)?.center();
     let mut driver = window.stage.drive();
     let turned = WheelEvent::notches(at.x, at.y, 0.0, -3.0, driver.now());
@@ -4375,9 +4384,56 @@ fn fits(window: &Window, drawn: ljos::item::kurbo::Rect) -> StepResult {
         && drawn.x1 <= pane.x1 + 0.5
         && drawn.y1 <= pane.y1 + 0.5;
     let fills = drawn.width() >= 0.6 * pane.width() || drawn.height() >= 0.6 * pane.height();
-    (inside && fills)
-        .then_some(())
-        .ok_or_else(|| format!("{drawn:?} is drawn in a canvas at {pane:?}"))
+    (inside && fills).then_some(()).ok_or_else(|| {
+        format!(
+            "{drawn:?} is drawn in a canvas at {pane:?}; {}",
+            canvas_view(window)
+        )
+    })
+}
+
+/// The canvas panel: the one object in the window with a view and a fit
+/// to keep.
+fn canvas_panel(window: &Window) -> Option<ObjectId> {
+    let engine = window.engine();
+    let mut stack = vec![window.root];
+    while let Some(o) = stack.pop() {
+        if !engine.is_alive(o) {
+            continue;
+        }
+        if engine.property_index(o, "viewY").is_ok() && engine.property_index(o, "fitting").is_ok()
+        {
+            return Some(o);
+        }
+        stack.extend(engine.children(o));
+    }
+    None
+}
+
+/// Where the canvas's view is and whether it still keeps a fit, so a frame
+/// drawn out of place says whether a move of the person's or a fit put it
+/// there.
+fn canvas_view(window: &Window) -> String {
+    let Some(panel) = canvas_panel(window) else {
+        return "the window has no canvas panel".to_owned();
+    };
+    let engine = window.engine();
+    let number = |name: &str| engine.read_by_name(panel, name).to_number();
+    let text = |name: &str| engine.read_by_name(panel, name).to_js_string().to_string();
+    let fit = if engine.read_by_name(panel, "fitted").to_boolean() {
+        format!("fitted to {:?}", text("fitting"))
+    } else {
+        format!("not fitted (last fitted to {:?})", text("fitting"))
+    };
+    format!(
+        "the view is at ({}, {}) at zoom {}, {fit}, a fit waiting for the size {:?}, \
+         the frames {}",
+        number("viewX"),
+        number("viewY"),
+        number("zoom"),
+        text("fitWhenSized"),
+        text("arrangement"),
+    )
 }
 
 #[then(regex = r#"^the frame "([^"]+)" fits in the canvas$"#)]

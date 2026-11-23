@@ -34,16 +34,6 @@ Feature: The canvas shows the document running on a target
     Then the canvas has a frame "Desktop" of 1280 by 800
     And the frame "Desktop" shows a picture of the preview
 
-  # The view was the person's to keep once they had moved it, even with no
-  # frame on the canvas: the first document opened at 100 %, its frame's
-  # name and the top of the app above the canvas's edge.
-  @preview
-  Scenario: A turn of the wheel before any document is open leaves the first one fitted
-    Given the person has turned the wheel over the empty canvas
-    When the person opens "Main.qml" in the documents list
-    And the canvas has finished moving
-    Then the frame "Desktop" fits in the canvas
-
   @preview
   Scenario: Choosing a target lays the frame out for it
     Given the person has opened "Main.qml" in the documents list
