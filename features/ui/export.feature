@@ -131,6 +131,17 @@ Feature: A person exports a native app or a web site from Studio's window
     When the person clicks the button "Export"
     Then the export panel does not say "cut short"
 
+  # Nothing else says the list goes on: its last row, cut in half above
+  # the buttons, reads as the panel's own edge.
+  Scenario: A list longer than the panel shows its scroll bar
+    Given 900 files the bundle holds
+    When the person clicks the button "Export"
+    Then the export panel's list shows a scroll bar
+
+  Scenario: A list the panel holds whole shows none
+    When the person clicks the button "Export"
+    Then the export panel's list shows no scroll bar
+
   Rule: A site holds only what its code names, and the panel says so
 
     Scenario: A picture nothing names is listed as left out and not written
