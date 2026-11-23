@@ -364,7 +364,9 @@ fn open(studio: &Mutex<Studio>, a: OpenArgs) -> Result<OpenOut, SurfaceError> {
             mocked: aliases.iter().map(|m| m.module.clone()).collect(),
             ms: elapsed(),
         });
+        previews.starts += 1;
         previews.open = Some(Open {
+            started: previews.starts,
             host,
             doc: a.doc.clone(),
             target,
@@ -432,6 +434,8 @@ struct ToRead {
 
 /// A `preview_state` call with its input in.
 struct Acted {
+    /// The preview the input went to, by its `started`.
+    started: u64,
     to_read: Option<ToRead>,
     /// What a scroll or a swipe set moving, for a caller that waits for it.
     watch: Option<Box<dyn RestWatch>>,
@@ -444,12 +448,20 @@ struct Acted {
 /// turning the wheel goes on turning it while the page glides.
 fn state(studio: &Mutex<Studio>, ctx: &CallCtx, a: StateArgs) -> Result<StateOut, SurfaceError> {
     let waits = ctx.client.as_deref() != Some(studio_core::PERSON);
-    let Acted { to_read, watch } = state_input(studio, a, waits)?;
+    let Acted {
+        started,
+        to_read,
+        watch,
+    } = state_input(studio, a, waits)?;
     if let Some(watch) = watch
         && let Err(e) = watch.settle(SETTLE_MS)
     {
         let previews = lock(studio).previews.clone();
         let mut previews = preview::lock(&previews);
+        // One opened meanwhile did not fail: the wait was on the one before.
+        if previews.open.as_ref().map(|open| open.started) != Some(started) {
+            return Err(replaced());
+        }
         // The wait asks the inspector alone; whether the program behind it
         // ended, only the host can tell.
         let e = match (e, previews.open.as_mut()) {
@@ -463,7 +475,7 @@ fn state(studio: &Mutex<Studio>, ctx: &CallCtx, a: StateArgs) -> Result<StateOut
         return Err(preview_error(previews.failed(e)));
     }
     match to_read {
-        Some(to_read) => state_read(studio, to_read),
+        Some(to_read) => state_read(studio, started, to_read),
         None => Ok(StateOut {
             block: None,
             id: None,
@@ -472,6 +484,16 @@ fn state(studio: &Mutex<Studio>, ctx: &CallCtx, a: StateArgs) -> Result<StateOut
             variant: None,
         }),
     }
+}
+
+/// The preview an input went to was replaced while its page settled, by a
+/// call that came in meanwhile: what the new one shows is another app's.
+fn replaced() -> SurfaceError {
+    SurfaceError::new(
+        ErrorCode::StaleRef,
+        "another preview was opened while the page settled; nothing was read",
+    )
+    .with_details(json!({ "kind": "preview_replaced" }))
 }
 
 /// Puts the call's writes and input in, and says what to read after and
@@ -534,6 +556,7 @@ fn state_input(studio: &Mutex<Studio>, a: StateArgs, waits: bool) -> Result<Acte
             return Err(preview_error(previews.failed(e)));
         }
         return Ok(Acted {
+            started: open.started,
             to_read: None,
             watch: settling(open, &inputs, waits),
         });
@@ -598,6 +621,7 @@ fn state_input(studio: &Mutex<Studio>, a: StateArgs, waits: bool) -> Result<Acte
         show: a.show,
     };
     Ok(Acted {
+        started: open.started,
         to_read: Some(to_read),
         watch: settling(open, &inputs, waits),
     })
@@ -616,8 +640,9 @@ fn settling(open: &Open, inputs: &[Input], waits: bool) -> Option<Box<dyn RestWa
     }
 }
 
-/// Shows and reads what the call asked for, once its input is in.
-fn state_read(studio: &Mutex<Studio>, r: ToRead) -> Result<StateOut, SurfaceError> {
+/// Shows and reads what the call asked for, once its input is in, in the
+/// preview it went to (`started`).
+fn state_read(studio: &Mutex<Studio>, started: u64, r: ToRead) -> Result<StateOut, SurfaceError> {
     let ToRead {
         doc,
         address,
@@ -634,6 +659,9 @@ fn state_read(studio: &Mutex<Studio>, r: ToRead) -> Result<StateOut, SurfaceErro
         .open
         .as_mut()
         .ok_or_else(|| preview_error(PreviewError::NotOpen))?;
+    if open.started != started {
+        return Err(replaced());
+    }
     if let Some(show) = show {
         let known = show.is_empty()
             || studio

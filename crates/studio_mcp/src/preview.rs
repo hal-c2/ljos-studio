@@ -94,6 +94,9 @@ pub enum Fit {
 }
 
 pub(crate) struct Open {
+    /// Which preview this is, of those `Previews` started: a call that lets
+    /// go of the lock finds its own again, or knows it was replaced.
+    pub started: u64,
     pub host: Box<dyn PreviewHost>,
     pub doc: String,
     pub target: Option<Target>,
@@ -136,6 +139,8 @@ pub(crate) struct Previews {
     /// document's own preview hears of them.
     pub(crate) hidden_ids: BTreeSet<(String, String)>,
     pub open: Option<Open>,
+    /// How many previews were started: the last one's `started`.
+    pub starts: u64,
     pub events: Vec<PreviewEvent>,
     /// The host's log mark already read into `events`.
     pub log_mark: u64,
@@ -288,6 +293,7 @@ impl Previews {
     pub fn new(timer: Arc<dyn Timer>) -> Self {
         Self {
             open: None,
+            starts: 0,
             events: Vec::new(),
             log_mark: 0,
             timer,
@@ -611,6 +617,7 @@ mod tests {
             hidden: BTreeSet::new(),
             hidden_ids: BTreeSet::new(),
             open: Some(Open {
+                started: 1,
                 host: Box::new(Counting(count.clone())),
                 doc: "Main.qml".to_owned(),
                 target: None,
