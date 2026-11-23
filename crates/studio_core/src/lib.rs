@@ -1075,7 +1075,20 @@ impl Session {
                 touched
             }
             Op::State { node, .. } => vec![(handle(self, node)?, Some(STATES.to_owned()))],
-            Op::ReplaceMember { node, name, .. } => vec![(handle(self, node)?, Some(name.clone()))],
+            Op::ReplaceMember { node, name, text } => {
+                let h = handle(self, node)?;
+                // A rename writes the member under its new name as well: a
+                // write to that name read before it meets what it made.
+                let mut touched = vec![(h, Some(name.clone()))];
+                if let Some(to) = text
+                    .as_deref()
+                    .and_then(member_name)
+                    .filter(|to| to != name)
+                {
+                    touched.push((h, Some(to.to_owned())));
+                }
+                touched
+            }
             // Not planned: planning reads the text as it is now, and would
             // answer for what another writer did instead of naming them.
             Op::Interaction {

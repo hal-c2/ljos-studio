@@ -1231,6 +1231,43 @@ fn the_last_of_two_members_on_a_line_is_taken_out_with_the_semicolon_before_it()
 }
 
 #[test]
+fn a_stale_write_to_the_name_a_member_was_renamed_to_is_a_conflict() {
+    let mut s = session_of(CARD);
+    let g = s.generation("Main.qml").unwrap();
+    s.act_as("Ada", 0);
+    s.edit(
+        "Main.qml",
+        Some(g),
+        &replace("title", Some("property string name: \"Walk\"")),
+        false,
+    )
+    .unwrap();
+    s.act_as("agent", 0);
+    let set = |name: &str, value: &str| Op::SetBinding {
+        node: Address::Id("card".into()),
+        name: name.into(),
+        value: value.into(),
+    };
+    let err = s
+        .edit("Main.qml", Some(g), &set("name", "\"Run\""), false)
+        .unwrap_err();
+    assert!(
+        matches!(&err, Error::Conflict(c)
+            if c.author == "Ada" && c.name.as_deref() == Some("name")),
+        "{err:?}"
+    );
+    assert!(s.text("Main.qml").unwrap().0.contains("name: \"Walk\""));
+    // A name the rename did not make is written past it.
+    s.edit(
+        "Main.qml",
+        Some(g),
+        &set("onDoneChanged", "card.flip()"),
+        false,
+    )
+    .unwrap();
+}
+
+#[test]
 fn a_replacement_that_brings_an_object_or_a_second_member_is_refused() {
     let mut s = session_of(CARD);
     for text in [
