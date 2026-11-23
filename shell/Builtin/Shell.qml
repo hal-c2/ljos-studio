@@ -99,6 +99,17 @@ Item {
                             Layout.preferredHeight: 150
                         }
                     }
+                    // Beside the documents: what the open one offers when it is a block.
+                    Section {
+                        title: "Block"
+                        visible: blockActions.block !== null
+                        Layout.fillWidth: true
+                        BlockActions {
+                            id: blockActions
+                            workspace: workspace
+                            Layout.fillWidth: true
+                        }
+                    }
                     LayersPanel {
                         workspace: workspace
                         Layout.fillWidth: true

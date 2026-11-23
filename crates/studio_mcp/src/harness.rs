@@ -297,11 +297,13 @@ fn instance(name: &str, root: &Node, sets: &[(String, String)]) -> String {
     for (property, value) in sets {
         body.push_str(&format!("        {property}: {value}\n"));
     }
+    // The preview sizes the root to its frame, a whole screen wider than
+    // one card: the card stands in the middle of it, as on a board.
     format!(
         "{MARK}{name}.qml opened alone, with sample values.\n\
          import QtQuick\n\n\
          Item {{\n    width: subject.width\n    height: subject.height\n\n    \
-         {name} {{\n        id: subject\n{body}    }}\n}}\n"
+         {name} {{\n        id: subject\n        anchors.centerIn: parent\n{body}    }}\n}}\n"
     )
 }
 

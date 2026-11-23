@@ -3,7 +3,8 @@
 // is), "Make a shell" writes a document that skins every slot of the block.
 // Each is the call an agent makes over MCP: `node_insert` with `slot`, and
 // `document_new` with `shell`. Shown only while the open document is a
-// block; where it stands is the shell's choice.
+// block; where it stands is the shell's choice (the built-in one puts it
+// under the documents).
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
@@ -31,6 +32,8 @@ Column {
 
     visible: block !== null
     spacing: Spacing.xxs
+    Accessible.role: Accessible.Pane
+    Accessible.name: "Block"
 
     function root() {
         const layers = workspace.layers || []
