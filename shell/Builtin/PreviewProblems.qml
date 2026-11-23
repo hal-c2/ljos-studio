@@ -1,7 +1,7 @@
 // What is wrong in the running preview: a count, and on a click the warnings
 // and errors its last reload (or the app since) logged, each on the object
-// written on its line. Choosing one shows its document and selects that
-// object, the `node_select` an agent makes. The list is the workspace's
+// written on its line. Choosing one shows and previews its document and
+// selects that object, the `node_select` an agent makes. The list is the workspace's
 // `problems`, kept by Studio: it empties as each problem is fixed, so the
 // panel keeps only whether the person opened it. It comes and goes as they
 // type, so place it where that covers nothing and moves neither the code
@@ -41,8 +41,13 @@ Pane {
 
     function go(p) {
         const doc = p.file ?? ""
-        if (doc !== "" && doc !== workspace.doc && workspace.documents.indexOf(doc) >= 0)
+        if (doc !== "" && doc !== workspace.doc && workspace.documents.indexOf(doc) >= 0) {
             workspace.doc = doc
+            // As the documents list does: the canvas shows what an agent's
+            // preview would.
+            if (workspace.previews)
+                workspace.dispatch("preview_open", {doc: doc})
+        }
         if ((p.node ?? "") !== "" && doc !== "")
             workspace.dispatch("node_select", {doc: doc, nodes: [{node: p.node}]})
     }
@@ -132,8 +137,10 @@ Pane {
                 enabled: (modelData.node ?? "") !== "" || (modelData.file ?? "") !== ""
                 onClicked: panel.go(modelData)
                 Accessible.name: modelData.severity + ": " + modelData.message + (panel.where(modelData) === "" ? "" : ", " + panel.where(modelData))
-                ToolTip.visible: hovered && (modelData.node ?? "") !== ""
-                ToolTip.text: "Go to " + modelData.node
+                // Where a click goes, as the person knows it: the node's id is
+                // Studio's own.
+                ToolTip.visible: hovered && panel.where(modelData) !== ""
+                ToolTip.text: "Go to " + panel.where(modelData)
                 ToolTip.delay: 600
                 background: Rectangle {
                     color: row.down ? Colors.surfacePressed : row.hovered ? Colors.surfaceHover : "transparent"
@@ -153,9 +160,9 @@ Pane {
                         Layout.fillWidth: true
                         Label {
                             text: row.modelData.message
+                            // Whole: the list scrolls, and a cut message hides
+                            // what to fix.
                             wrapMode: Text.Wrap
-                            maximumLineCount: 2
-                            elide: Text.ElideRight
                             font.pixelSize: Typography.captionSize
                             color: Colors.text
                             Layout.fillWidth: true
