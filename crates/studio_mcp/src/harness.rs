@@ -10,6 +10,7 @@
 //! it as an entry like any other; the component's directory is its own, so
 //! it sees the same types and imports.
 
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use serde_json::Value;
@@ -162,7 +163,8 @@ pub(crate) fn harness(store: &dyn Store, doc: &str) -> Option<Harness> {
     if matches!(root_ty, "Window" | "ApplicationWindow") {
         return None;
     }
-    let members = outline::members(&text, root.start);
+    let mut members = outline::members(&text, root.start);
+    members.extend(inherited(store, doc));
     let samples = samples(store, doc);
     let sets = sets(&members, &samples);
     let block = is_block(store, dir, file);
@@ -236,10 +238,11 @@ pub(crate) fn required_sets(store: &dyn Store, file: &str, doc: &str) -> Vec<(St
     let Some(root) = outline::outline(&text).and_then(|nodes| nodes.into_iter().next()) else {
         return Vec::new();
     };
-    let required: Vec<Member> = outline::members(&text, root.start)
+    let mut required: Vec<Member> = outline::members(&text, root.start)
         .into_iter()
         .filter(|m| m.required)
         .collect();
+    required.extend(inherited(store, file));
     let mut given = samples(store, file);
     // A url is resolved against the file that binds it, and the samples
     // were given for a harness beside the block: from elsewhere the same
@@ -284,6 +287,34 @@ fn rebased(url: &str, from: &str, to: &str) -> Option<String> {
     let mut parts = vec![".."; here.len() - shared];
     parts.extend(&target[shared..]);
     Some(parts.join("/"))
+}
+
+/// What the bases of the component in `file` require that neither it nor
+/// a base between them binds or declares again: QML makes nothing with a
+/// required property unset, wherever it was declared.
+fn inherited(store: &dyn Store, file: &str) -> Vec<Member> {
+    let mut required = Vec::new();
+    let mut settled = HashSet::new();
+    for (i, link) in crate::signals::lineage(store, file).iter().enumerate() {
+        let Ok(text) = store.read(link) else {
+            continue;
+        };
+        let Some(root) = outline::outline(&text).and_then(|nodes| nodes.into_iter().next()) else {
+            continue;
+        };
+        let members = outline::members(&text, root.start);
+        if i > 0 {
+            required.extend(
+                members
+                    .iter()
+                    .filter(|m| m.required && !settled.contains(&m.name))
+                    .cloned(),
+            );
+        }
+        settled.extend(members.into_iter().map(|m| m.name));
+        settled.extend(root.bindings.into_iter().map(|b| b.name));
+    }
+    required
 }
 
 fn samples(store: &dyn Store, doc: &str) -> serde_json::Map<String, Value> {
@@ -548,6 +579,37 @@ mod tests {
             said("https://example.com/a.svg")
         );
         assert_eq!(set("CardShell.qml", "label"), said("icons/run.svg"));
+    }
+
+    #[test]
+    fn a_block_is_given_what_its_base_requires_and_it_does_not_set() {
+        let store = store(&[
+            (
+                "Blocks/Base.qml",
+                "import QtQuick\nItem {\n    required property string title\n    \
+                 required property int count\n    required property real level\n}\n",
+            ),
+            (
+                "Blocks/Card.qml",
+                "import QtQuick\nBase {\n    count: 2\n    property real level: 1\n    \
+                 required property bool done\n}\n",
+            ),
+            (SAMPLES, r#"{"Blocks/Card.qml": {"title": "Read"}}"#),
+        ]);
+        let sets = required_sets(&store, "Blocks/Card.qml", "CardShell.qml");
+        let named = |name: &str| {
+            sets.iter()
+                .find(|(n, _)| n == name)
+                .map(|(_, v)| v.as_str())
+        };
+        assert_eq!(named("done"), Some("false"));
+        // The base's, with the block's sample.
+        assert_eq!(named("title"), Some("\"Read\""));
+        // Bound or declared again by the block: set already.
+        assert_eq!(named("count"), None);
+        assert_eq!(named("level"), None);
+        let h = harness(&store, "Blocks/Card.qml").unwrap();
+        assert!(h.text.contains("title: \"Read\"\n"), "{}", h.text);
     }
 
     #[test]

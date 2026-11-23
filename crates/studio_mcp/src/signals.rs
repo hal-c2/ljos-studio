@@ -75,6 +75,8 @@ struct Found {
     /// The toolkit types `properties` and `signals` were read from, whose
     /// table says less than the types have.
     from_table: Vec<&'static str>,
+    /// The project files read, the type's own first and then its bases'.
+    files: Vec<String>,
 }
 
 impl Found {
@@ -506,6 +508,18 @@ fn types_of(store: &dyn Store) -> Types<'_> {
     }
 }
 
+/// The project file `file` is and those of the types it inherits from, in
+/// that order, as far as the project's files and `qmldir`s name them.
+pub(crate) fn lineage(store: &dyn Store, file: &str) -> Vec<String> {
+    let mut found = Found::default();
+    types_of(store).file(file, &mut found, 0);
+    let mut files = found.files;
+    // A chain that comes back to itself is read once.
+    let mut seen = HashSet::new();
+    files.retain(|f| seen.insert(f.clone()));
+    files
+}
+
 fn dir_of(file: &str) -> &str {
     file.rsplit_once('/').map_or("", |(dir, _)| dir)
 }
@@ -670,6 +684,7 @@ impl Types<'_> {
         let Ok(source) = self.store.read(file) else {
             return Described::Not;
         };
+        found.files.push(file.to_owned());
         let (Some(nodes), Some(imports)) = (
             studio_core::outline::outline(&source),
             studio_core::outline::imports(&source),
