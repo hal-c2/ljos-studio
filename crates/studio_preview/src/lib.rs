@@ -76,9 +76,6 @@ struct Running {
     log_read: u64,
     /// The fault it started with, until `logs` has told it.
     start_fault: Option<LogLine>,
-    /// The start's reload went unanswered while the app ran on: `logs`
-    /// asks for its fault again.
-    fault_unasked: bool,
     /// The `echoed` lines of the last answer of `app_logs`: stderr is
     /// written by a thread of its own, and may have them after that answer.
     echoed: BTreeSet<String>,
@@ -250,7 +247,6 @@ impl NativeHost {
             log,
             log_read: 0,
             start_fault: None,
-            fault_unasked: false,
             echoed: BTreeSet::new(),
             reported: Reported::default(),
             size: spec.size,
@@ -432,7 +428,7 @@ impl PreviewHost for NativeHost {
         let answer = PreviewHost::reload(self);
         match started(answer, &self.root)? {
             Started::Told(fault) => self.running()?.start_fault = fault,
-            Started::Unasked => self.running()?.fault_unasked = true,
+            Started::Unasked => self.running()?.reported.unasked = true,
         }
         Ok(())
     }
@@ -536,12 +532,10 @@ impl PreviewHost for NativeHost {
     }
 
     fn logs(&mut self, since: u64) -> Result<(Vec<LogLine>, u64), PreviewError> {
-        if self.running()?.fault_unasked {
+        if self.running()?.reported.unasked {
             let answer = PreviewHost::reload(self);
             if let Started::Told(fault) = started(answer, &self.root)? {
-                let running = self.running()?;
-                running.fault_unasked = false;
-                running.start_fault = fault;
+                self.running()?.start_fault = fault;
             }
         }
         // Before the call, so that what the app printed of it is either in
@@ -1276,6 +1270,9 @@ struct Reported {
     generation: u64,
     /// The last one failed.
     failed: bool,
+    /// The start's reload went unanswered while the app ran on: `logs`
+    /// asks for its fault again, until a reload is answered.
+    unasked: bool,
 }
 
 /// What a reload's answer says the preview did since the one `reported`
@@ -1287,7 +1284,11 @@ struct Reported {
 /// (a mistake taken back), which is applied at the generation already told.
 fn since(answer: &Value, reported: &mut Reported) -> Result<Reload, PreviewError> {
     let generation = answer["generation"].as_u64().unwrap_or(0);
-    let outcome = match reload(answer)? {
+    let outcome = reload(answer)?;
+    // Answered, it told the fault as it stands: asked again for the start's,
+    // the app would reload once more and lose what a person did in it.
+    reported.unasked = false;
+    let outcome = match outcome {
         Reload::Unchanged if reported.failed || generation > reported.generation => {
             Reload::Applied { generation }
         }
@@ -1297,7 +1298,7 @@ fn since(answer: &Value, reported: &mut Reported) -> Result<Reload, PreviewError
         Reload::Applied { generation } => {
             *reported = Reported {
                 generation,
-                failed: false,
+                ..Reported::default()
             };
         }
         Reload::Failed { .. } => reported.failed = true,
@@ -2057,5 +2058,27 @@ mod tests {
             Reload::Applied { generation: 0 }
         );
         assert_eq!(since(&unchanged, &mut reported).unwrap(), Reload::Unchanged);
+    }
+
+    #[test]
+    fn an_answered_reload_ends_the_wait_for_the_starts_fault() {
+        for answer in [
+            json!({ "outcome": "unchanged", "generation": 0 }),
+            json!({ "outcome": "failed", "generation": 0, "message": "no" }),
+        ] {
+            let mut reported = Reported {
+                unasked: true,
+                ..Reported::default()
+            };
+            since(&answer, &mut reported).unwrap();
+            assert!(!reported.unasked, "{answer}");
+        }
+        // One that says nothing a reload says answered nothing.
+        let mut reported = Reported {
+            unasked: true,
+            ..Reported::default()
+        };
+        assert!(since(&json!({}), &mut reported).is_err());
+        assert!(reported.unasked);
     }
 }
