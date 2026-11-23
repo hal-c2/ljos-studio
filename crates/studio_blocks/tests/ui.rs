@@ -79,6 +79,8 @@ struct SlowPictures(NativeHost, Arc<AtomicU64>, Arc<AtomicU64>, Scrolling);
 /// one did). A call that waited for the page to stop finds it stopped.
 #[derive(Debug, Clone, Copy)]
 struct Scrolled {
+    x: f64,
+    y: f64,
     dy: f64,
     still_moved: Option<bool>,
 }
@@ -207,13 +209,15 @@ impl PreviewHost for SlowPictures {
 
     fn input(&mut self, input: &Input) -> Result<(), PreviewError> {
         self.3.look();
-        let Input::Scroll { dy, .. } = *input else {
+        let Input::Scroll { x, y, dy, .. } = *input else {
             return self.0.input(input);
         };
         std::thread::sleep(Duration::from_millis(self.3.ms.load(Ordering::SeqCst)));
         self.0.input(input)?;
         let mut record = self.3.record.lock().unwrap_or_else(PoisonError::into_inner);
         record.push(Scrolled {
+            x,
+            y,
             dy,
             still_moved: None,
         });
@@ -4659,6 +4663,52 @@ fn wheel_down_ten_times(w: &mut UiWorld, target: String, x: f64, y: f64) -> Step
     }
     window.stage.drive().advance(1000).map_err(drive_error)?;
     window.rest()
+}
+
+// Both turns are sent before the window's next turn of its event loop, so
+// what it gathers in one is the two of them.
+#[when(
+    regex = r#"^the person turns the wheel down over the frame "([^"]+)" at (\d+), (\d+) and at once at (\d+), (\d+)$"#
+)]
+fn wheel_down_at_two_points(
+    w: &mut UiWorld,
+    target: String,
+    x1: f64,
+    y1: f64,
+    x2: f64,
+    y2: f64,
+) -> StepResult {
+    let window = w.window()?;
+    for (x, y) in [(x1, y1), (x2, y2)] {
+        let at = frame_point(window, &target, x, y)?;
+        window
+            .stage
+            .drive()
+            .wheel(at, Wheel::Notches(0.0, -1.0))
+            .map_err(drive_error)?;
+    }
+    window.stage.drive().advance(1000).map_err(drive_error)?;
+    window.rest()
+}
+
+#[then(regex = r"^the running app was given a scroll at (\d+), (\d+) and one at (\d+), (\d+)$")]
+fn scrolls_at_two_points(w: &mut UiWorld, x1: f64, y1: f64, x2: f64, y2: f64) -> StepResult {
+    let scrolls = w
+        .scrolls
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .clone();
+    // A point goes to the screen's whole pixels and back through the
+    // canvas's zoom, a few of the frame's pixels at a fitted one.
+    let at = |x: f64, y: f64| {
+        scrolls
+            .iter()
+            .any(|s| (s.x - x).abs() <= 4.0 && (s.y - y).abs() <= 4.0)
+    };
+    if !at(x1, y1) || !at(x2, y2) {
+        return Err(format!("the running app was given {scrolls:?}"));
+    }
+    Ok(())
 }
 
 #[then(regex = r"^the running app was given the (\d+) turns in at most (\d+) scrolls$")]

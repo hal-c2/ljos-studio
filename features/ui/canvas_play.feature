@@ -83,6 +83,11 @@ Feature: A long page shows whole on the canvas and plays as it would on the devi
     And no scroll waited for the page to stop
     And the running app's "page" has "contentY" above 0
 
+  Scenario: In play mode turns of the wheel at two points reach the app at each
+    Given the person has clicked the button "Play"
+    When the person turns the wheel down over the frame "Desktop" at 600, 400 and at once at 200, 400
+    Then the running app was given a scroll at 600, 400 and one at 200, 400
+
   Scenario: In play mode a drag in the frame flicks the app
     Given the person has clicked the button "Play"
     And the person has noted where the frame "Desktop" is
