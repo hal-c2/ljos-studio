@@ -1520,7 +1520,8 @@ impl Session {
         let (mut out, change, focus) = self.plan_op(path, before, op)?;
         let used = singleton_uses(&out);
         if used.len() > singleton_uses(before).len()
-            && matches!(imported(&out, ljos_design::module::URI), Imported::No)
+            // Under a name only, it gives `D.Colors`, not the bare `Colors`.
+            && !matches!(imported(&out, ljos_design::module::URI), Imported::Bare)
             && !declares_singleton_name(&out)
             && !self.design_would_take_a_name(path, &out, used)
         {
@@ -3896,7 +3897,9 @@ fn split_kept(at: usize, old: &str, new: &str, depth: u8, out: &mut Vec<Change>)
             .collect()
     };
     let (ol, nl) = (lines(old), lines(new));
-    if depth >= 8 || ol.is_empty() || nl.is_empty() || ol.len() * nl.len() > MAX_CELLS {
+    // Checked: on a 32-bit target two long texts' product wraps.
+    let cells = ol.len().checked_mul(nl.len());
+    if depth >= 8 || ol.is_empty() || nl.is_empty() || cells.is_none_or(|c| c > MAX_CELLS) {
         return whole(out);
     }
     // The longest run, in bytes, of equal lines: (bytes, old end, new end).

@@ -165,6 +165,31 @@ Feature: An edit brings the imports what it writes needs
       | import Ljos.Design      | Colors.accent   |
       | import Ljos.Design as D | D.Colors.accent |
 
+  # Only `D.Colors` reads the module through `import Ljos.Design as D`: a
+  # bare `Colors.accent` is a ReferenceError there, as with no import.
+  Scenario: A bare singleton in a file that imports the design module under a name brings it bare
+    Given the file "Named.qml":
+      """qml
+      import QtQuick
+      import Ljos.Design as D
+
+      Rectangle {
+          id: named
+      }
+      """
+    When the agent calls the tool "binding_set" with:
+      """json
+      {"doc": "Named.qml", "node": {"id": "named"}, "name": "color", "value": "Colors.accent"}
+      """
+    Then the file "Named.qml" contains:
+      """qml
+      import QtQuick
+      import Ljos.Design as D
+      import Ljos.Design
+
+      Rectangle {
+      """
+
   Scenario: The import is the same undo step, is told, and moves no other byte
     Given the file "Odd.qml":
       """qml
@@ -423,6 +448,52 @@ Feature: An edit brings the imports what it writes needs
     Then the agent is refused with "not_actionable"
     And the refusal's "/details/kind" is "unknown_type"
     And the file "Aliased.qml" does not contain "Slider {"
+
+  # The import an insert writes its object under is the one that has the
+  # object's type, wherever the agent lists it.
+  Scenario: An object is written under the module that has its type, not the first named
+    Given the file "Aliased.qml":
+      """qml
+      import QtQuick
+      import QtQuick.Controls as C
+
+      Item {
+          id: aliased
+      }
+      """
+    When the agent calls the tool "node_insert" with:
+      """json
+      {"doc": "Aliased.qml", "parent": {"id": "aliased"}, "text": "RowLayout { C.Button {} }", "import": ["QtQuick.Controls", "QtQuick.Layouts"]}
+      """
+    Then the file "Aliased.qml" contains "import QtQuick.Layouts"
+    And the file "Aliased.qml" contains "RowLayout {"
+    And the file "Aliased.qml" contains "C.Button {"
+    And the file "Aliased.qml" does not contain "C.RowLayout"
+
+  # What a module imported `as Ext` holds is written `Ext.Slider`: an import
+  # nothing here can read, under a name, says nothing about a bare `Slider`.
+  Scenario: A module nothing knows, imported under a name, doesn't keep a bare type's import out
+    Given the file "Elsewhere.qml":
+      """qml
+      import QtQuick
+      import Elsewhere.Things as Ext
+
+      Item {
+          id: elsewhere
+      }
+      """
+    When the agent calls the tool "node_insert" with:
+      """json
+      {"doc": "Elsewhere.qml", "parent": {"id": "elsewhere"}, "text": "Slider {}"}
+      """
+    Then the file "Elsewhere.qml" contains:
+      """qml
+      import QtQuick
+      import Elsewhere.Things as Ext
+      import QtQuick.Controls
+
+      Item {
+      """
 
   # qml6 6.11: a module's Button beats the file beside it.
   Scenario Outline: An import that would change what a name already is stays out

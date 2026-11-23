@@ -1388,3 +1388,14 @@ fn statements_one_after_another_are_a_handlers_block() {
         "console.log(\"a; b\")"
     );
 }
+
+// A script's column is no part of what it said: `Main.qml.js:21:7:` tells
+// the words after the column, as a document's `Main.qml:21:7:` does.
+#[test]
+fn a_script_place_drops_its_column() {
+    let is_file = |file: &str| file == "Main.qml";
+    let place = crate::preview::place_among("Main.qml.js:21:7: TypeError: x", &is_file);
+    assert_eq!(place, Some(("Main.qml".to_owned(), None, "TypeError: x")));
+    let place = crate::preview::place_among("Main.qml.js?text=3:21: TypeError: y", &is_file);
+    assert_eq!(place, Some(("Main.qml".to_owned(), None, "TypeError: y")));
+}

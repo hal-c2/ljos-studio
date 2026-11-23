@@ -326,7 +326,7 @@ impl<'s> Names<'s> {
         });
         if has_it {
             TypeIs::Known
-        } else if self.undescribed() {
+        } else if self.undescribed_bare() {
             TypeIs::Unsure
         } else {
             TypeIs::Missing
@@ -371,6 +371,18 @@ impl<'s> Names<'s> {
     /// Whether the document imports a module whose types nothing here knows.
     fn undescribed(&self) -> bool {
         self.scope.imports.iter().any(|import| self.unread(import))
+    }
+
+    /// Whether the document imports, with no name of its own, a module whose
+    /// types nothing here knows: what one imported `as Ext` holds is written
+    /// `Ext.Slider`, so a bare `Slider` is never one of its.
+    fn undescribed_bare(&self) -> bool {
+        self.scope.imports.iter().any(|import| {
+            let aliased = match import {
+                Import::Module { alias, .. } | Import::Path { alias, .. } => alias.is_some(),
+            };
+            !aliased && self.unread(import)
+        })
     }
 
     /// How many of the document's imports nothing here can read.

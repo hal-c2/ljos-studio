@@ -1001,6 +1001,40 @@ struct BlocksOut {
 
 const BLOCKS_PAGE: usize = 50;
 
+/// `imports` with the one that has `text`'s root type first: the import an
+/// insert may write the root under (`C.Button` where the file imports
+/// `QtQuick.Controls as C`). A root type known to come from none of them,
+/// say `RowLayout` among `["QtQuick.Controls", "QtQuick.Layouts"]` but not
+/// `Item`, is written under none, so the first is `None`. Of a type nothing
+/// here knows, the first named stays first.
+fn root_module_first(text: &str, imports: Vec<String>) -> Vec<Option<String>> {
+    let root = studio_core::outline::outline(text)
+        .and_then(|nodes| nodes.into_iter().next())
+        .map(|node| node.ty)
+        .filter(|ty| !ty.contains('.'));
+    let Some(root) = root else {
+        return imports.into_iter().map(Some).collect();
+    };
+    let has_root = |uri: &str| {
+        crate::signals::measured_in(&root).any(|had| had == uri)
+            || crate::toolkit::names(uri).is_some_and(|names| names.contains(&root))
+    };
+    let known = crate::signals::measured_in(&root).next().is_some()
+        || crate::toolkit::ALWAYS
+            .iter()
+            .any(|uri| crate::toolkit::names(uri).is_some_and(|n| n.contains(&root)));
+    let mut out: Vec<Option<String>> = imports.into_iter().map(Some).collect();
+    match out
+        .iter()
+        .position(|uri| uri.as_deref().is_some_and(has_root))
+    {
+        Some(at) => out[..=at].rotate_right(1),
+        None if known && !out.is_empty() => out.insert(0, None),
+        None => {}
+    }
+    out
+}
+
 /// What `node_insert` inserts and imports: its own `text` and `import`, or
 /// a block's.
 fn insert_text(
@@ -2317,10 +2351,11 @@ fn edits(studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
                     let toolkit = crate::loads::toolkit_imports(&studio, &a.doc, &text, &imports)?;
                     imports.extend(toolkit);
                     crate::loads::check_insert(&studio, &a.doc, &text, &imports)?;
-                    // The first module is the one the object's type may have
-                    // to be written under; the rest only come along.
-                    let mut modules = imports.into_iter();
-                    let import = modules.next();
+                    // The module that has the object's type is the one it may
+                    // have to be written under; the rest only come along.
+                    let mut modules = root_module_first(&text, imports).into_iter();
+                    let import = modules.next().flatten();
+                    let modules = modules.flatten();
                     let mut ops: Vec<Op> = modules.map(|module| Op::Import { module }).collect();
                     ops.push(Op::Insert {
                         parent: a.parent,
