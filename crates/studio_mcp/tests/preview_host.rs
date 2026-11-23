@@ -25,6 +25,8 @@ struct Seen {
     declared: Option<Declared>,
     /// The calls a second the host says it answers; 0 leaves Ljós's default.
     rate: u32,
+    /// How far down the page reaches, as `extent` answers; none refuses.
+    extent: Option<f64>,
 }
 
 struct Recorder(Arc<Mutex<Seen>>);
@@ -147,6 +149,14 @@ impl PreviewHost for Recorder {
 
     fn alive(&mut self) -> Result<(), PreviewError> {
         self.answer("alive")
+    }
+
+    fn extent(&mut self) -> Result<f64, PreviewError> {
+        self.answer("extent")?;
+        self.0.lock().unwrap().extent.ok_or(PreviewError::Refused {
+            code: "unsupported".to_owned(),
+            message: "no extent set".to_owned(),
+        })
     }
 
     fn click(&mut self, at: &Click) -> Result<(), PreviewError> {
@@ -338,6 +348,47 @@ fn reopening_changes_the_open_preview_in_place() {
     assert_eq!(out["target"], "phone");
     assert_eq!(f.calls(), ["alias App.Media mocks/App/Media"]);
     assert_eq!(*f.opened.lock().unwrap(), 1);
+}
+
+/// Opened again with nothing changed, a preview fitted to its content keeps
+/// its height: it is not laid out at its screen's height and back up.
+#[test]
+fn reopening_a_preview_fitted_to_its_content_resizes_nothing() {
+    let f = Fixture::new();
+    f.seen.lock().unwrap().extent = Some(2000.0);
+    let out = f
+        .call(
+            "preview_open",
+            json!({ "doc": "Shell.qml", "fit": "content" }),
+        )
+        .unwrap();
+    assert_eq!(out["size"], json!({ "width": 1280, "height": 2000 }));
+    f.calls();
+    let out = f
+        .call("preview_open", json!({ "doc": "Shell.qml" }))
+        .unwrap();
+    assert_eq!(out["size"], json!({ "width": 1280, "height": 2000 }));
+    assert_eq!(f.calls(), Vec::<String>::new());
+}
+
+/// One whose page got shorter is laid out at its screen's height again and
+/// measured there, so it gets shorter too.
+#[test]
+fn reopening_a_preview_fitted_to_a_page_that_got_shorter_makes_it_shorter() {
+    let f = Fixture::new();
+    f.seen.lock().unwrap().extent = Some(2000.0);
+    f.call(
+        "preview_open",
+        json!({ "doc": "Shell.qml", "fit": "content" }),
+    )
+    .unwrap();
+    f.calls();
+    f.seen.lock().unwrap().extent = Some(1000.0);
+    let out = f
+        .call("preview_open", json!({ "doc": "Shell.qml" }))
+        .unwrap();
+    assert_eq!(out["size"], json!({ "width": 1280, "height": 1000 }));
+    assert_eq!(f.calls(), ["resize 1280x800", "resize 1280x1000"]);
 }
 
 #[test]

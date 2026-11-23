@@ -69,6 +69,15 @@ Feature: The canvas is a surface without edges that pans and zooms
     And the canvas has finished moving
     Then the frame "Desktop" fits in the canvas
 
+  Scenario: A zoom chosen after Fit content left the frame's size alone stays when the target changes
+    Given the person has clicked the button "Fit content"
+    And the canvas has finished moving
+    And the person has pressed "Ctrl+1"
+    And the canvas has finished moving
+    When the person chooses the target "Phone"
+    And the canvas has finished moving
+    Then the zoom reads "100%"
+
   Scenario: The zoom stops at 2 %
     When the person zooms out with the button 30 times
     And the canvas has finished moving

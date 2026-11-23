@@ -214,6 +214,7 @@ Panel {
         const px = viewX + sx / zoom
         const py = viewY + sy / zoom
         fitted = false
+        fitWhenSized = ""
         glideTo(z, px - sx / z, py - sy / z, time === undefined ? stepTime : time)
     }
     function zoomBy(notches, atX, atY, time) {
@@ -222,6 +223,7 @@ Panel {
     function panBy(dx, dy) {
         glider.stop()
         fitted = false
+        fitWhenSized = ""
         viewX -= dx / zoom
         viewY -= dy / zoom
     }
@@ -287,11 +289,21 @@ Panel {
             fit(fitting, 0)
         }
     }
-    // The live frame's size when "Fit content" was pressed, until it changes.
+    // The live frame's size when "Fit content" was pressed, until it changes,
+    // the fit answers with that same size, or the person moves the view: a
+    // mark left behind would snap a later view back to the fit.
     property string fitWhenSized: ""
     function fitContent(on) {
         fitWhenSized = liveFrame.width + "x" + liveFrame.height
         workspace.dispatch("preview_open", {doc: workspace.doc, fit: on ? "content" : "screen"})
+    }
+    Connections {
+        target: panel.workspace
+        function onAnswered(tool, answer) {
+            if (tool === "preview_open" && answer && answer.size
+                    && panel.fitWhenSized === answer.size.width + "x" + answer.size.height)
+                panel.fitWhenSized = ""
+        }
     }
     onSideBySideChanged: Qt.callLater(() => fit("all", jumpTime))
 
@@ -1023,6 +1035,8 @@ Panel {
         // A US keyboard sends Shift+1 as "!" with Shift held, so both
         // spellings are listed.
         sequences: ["Shift+1", "Shift+!"]
+        // In play mode "!" is the app's to type.
+        enabled: !panel.playing
         onActivated: panel.fitAll()
     }
     Shortcut {
