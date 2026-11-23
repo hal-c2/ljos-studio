@@ -888,23 +888,33 @@ fn finish(engine: &Engine, ws: ObjectId, done: Done) {
                         let mut q = queue.borrow_mut();
                         changed = q.pixels != pixels || q.picture != generation;
                         if changed {
-                            q.image = Some(image);
+                            q.image = Some(image.clone());
                             q.picture = generation;
                             q.pixels = pixels;
                             q.shots += 1;
                         }
                     }
                     let mut preview = engine.get(ws, Workspace::PREVIEW).unwrap_or_default();
+                    let target = preview["target"].as_str().unwrap_or_default().to_owned();
+                    let text = engine.get(ws, Workspace::GENERATION).unwrap_or_default();
+                    // Another document's first picture can be the same as
+                    // the last one's, pixel for pixel: unchanged, it is
+                    // still kept for its target, whose pictures went when
+                    // that document was shown. A picture asked for before
+                    // the preview moved to this target has the shape of the
+                    // one before.
+                    let keep = {
+                        let q = queue.borrow();
+                        !target.is_empty()
+                            && same_shape(drawn, q.size)
+                            && (changed
+                                || q.kept.get(&target).is_none_or(|(_, t)| *t != text as u64))
+                    };
                     if let Some(fields) = preview.as_object_mut()
-                        && changed
+                        && (changed || keep)
                     {
-                        let target = fields["target"].as_str().unwrap_or_default().to_owned();
-                        let text = engine.get(ws, Workspace::GENERATION).unwrap_or_default();
                         let mut q = queue.borrow_mut();
-                        // A picture asked for before the preview moved to
-                        // this target has the shape of the one before.
-                        if !target.is_empty() && same_shape(drawn, q.size) {
-                            let image = q.image.clone().expect("just drawn");
+                        if keep {
                             q.kept.insert(target, (image, text as u64));
                         }
                         fields.insert("picture".to_owned(), json!(generation));
