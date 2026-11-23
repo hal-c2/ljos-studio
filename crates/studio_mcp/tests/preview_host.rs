@@ -432,6 +432,41 @@ fn reopening_a_preview_fitted_to_a_page_that_got_shorter_makes_it_shorter() {
     assert_eq!(f.calls(), ["resize 1280x800", "resize 1280x1000"]);
 }
 
+/// A host that cannot say how far its page reaches refuses a fit to
+/// content, whether the preview starts with it or changes to it. The fit it
+/// refused is not kept: the next open that names no fit is fitted to its
+/// screen, not refused for the fit asked before.
+#[test]
+fn a_refused_fit_to_content_leaves_the_preview_fitted_to_its_screen() {
+    let f = Fixture::new();
+    f.call(
+        "preview_open",
+        json!({ "doc": "Shell.qml", "fit": "content" }),
+    )
+    .unwrap_err();
+    let out = f
+        .call(
+            "preview_open",
+            json!({ "doc": "Shell.qml", "target": "phone" }),
+        )
+        .unwrap();
+    assert_eq!(out["started"], false);
+    assert_eq!(out["fit"], "screen");
+    f.call(
+        "preview_open",
+        json!({ "doc": "Shell.qml", "fit": "content" }),
+    )
+    .unwrap_err();
+    let out = f
+        .call(
+            "preview_open",
+            json!({ "doc": "Shell.qml", "target": "desktop" }),
+        )
+        .unwrap();
+    assert_eq!(out["fit"], "screen");
+    assert_eq!(out["size"], json!({ "width": 1280, "height": 800 }));
+}
+
 #[test]
 fn another_document_starts_another_preview() {
     let f = Fixture::new();
