@@ -3707,7 +3707,16 @@ fn replace_member(
                 let rest = behind.trim_start_matches([' ', '\t']);
                 let rest = rest.strip_prefix(';').unwrap_or(rest);
                 let rest = rest.trim_start_matches([' ', '\t']);
-                (member.start..line_end - rest.len(), String::new())
+                // The last on its line: the `;` and space that ended the one
+                // before it go instead, so the line doesn't end in `; `.
+                let start = if rest.trim().is_empty() {
+                    let kept = ahead.trim_end_matches([' ', '\t']);
+                    let kept = kept.strip_suffix(';').unwrap_or(kept);
+                    line_start + kept.trim_end_matches([' ', '\t']).len()
+                } else {
+                    member.start
+                };
+                (start..line_end - rest.len(), String::new())
             }
         }
         Some(text) => {
@@ -3746,9 +3755,21 @@ fn replace_member(
         &before[..range.start],
         &before[range.end..]
     );
-    if outline::outline(&out).is_none() {
+    let Some(nodes) = outline::outline(&out) else {
         return Err(Error::Invalid(format!(
             "`{name}` written that way would not parse"
+        )));
+    };
+    // What follows a member's first line may declare another member or an
+    // object. Either would be in the document without an edit saying so,
+    // and an object would move the paths after it while the edit says they
+    // stay the same.
+    if text.is_some()
+        && (outline::members(&out, object.start).len() != members.len()
+            || outline::outline(before).map(|n| n.len()) != Some(nodes.len()))
+    {
+        return Err(Error::Invalid(format!(
+            "`{name}` is replaced by one member, holding no object: insert objects with `node_insert`"
         )));
     }
     Ok(out)
