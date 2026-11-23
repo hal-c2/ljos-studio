@@ -1426,7 +1426,7 @@ fn shell_text(studio: &Studio, doc: &str, qualified: &str) -> Result<String, Sur
     out.push_str(&format!("\n{} {{\n    id: {id}\n", block.name));
     // An instance whose required properties are not set is not made.
     if let ljos_blocks::Origin::Qml { file } = &block.origin {
-        for (property, value) in crate::harness::required_sets(studio.session.store(), file) {
+        for (property, value) in crate::harness::required_sets(studio.session.store(), file, doc) {
             out.push_str(&format!("    {property}: {value}\n"));
         }
     }
