@@ -342,6 +342,7 @@ and the self-reskin are the other half.
   `slot`, into the selected object or the root) and "Make a shell"
   (`document_new` with `shell`, writing `<Block>Shell.qml` and opening it).
   It uses only `Ljos.Design` roles; where it stands is the shell's layout.
+  The built-in shell shows it as the "Block" section under the documents.
   `shell/Builtin/ProjectEntry.qml` opens a project of several documents on
   `Main.qml`, its entry, on the window's first look.
 
