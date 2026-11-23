@@ -295,7 +295,7 @@ fn place_after(message: &str, end: usize) -> Option<(String, Option<u32>, &str)>
     Some((file.to_owned(), Some(line), words))
 }
 
-/// `key.qml.js[?generation=N|?text=N]:line: rest`, the pin's name for the
+/// `key.qml.js[?generation=N|?text=N]:line[:column]: rest`, the pin's name for the
 /// program of `key.qml`. The line is the generated script's: line 21 there
 /// can be the document's 15, so it is never passed on as the document's.
 fn script_place<'a>(message: &'a str, is_file: &dyn Fn(&str) -> bool) -> Option<(String, &'a str)> {
@@ -308,9 +308,8 @@ fn script_place<'a>(message: &'a str, is_file: &dyn Fn(&str) -> bool) -> Option<
     if !(query.is_empty() || query.starts_with('?')) {
         return None;
     }
-    let (line, rest) = place.split_once(':')?;
-    line.parse::<u32>().ok()?;
-    Some((file, rest.trim_start()))
+    let (_, rest) = line_and_words(place)?;
+    Some((file, rest))
 }
 
 fn is_file_below(file: &str, root: &Path) -> bool {
