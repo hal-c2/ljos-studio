@@ -1527,20 +1527,26 @@ fn a_read_after_a_scroll_reads_nothing_when_its_object_was_replaced_while_it_set
     let server = f.server.clone();
     f.seen.lock().unwrap().during_settle = Some(Box::new(move || {
         let ctx = CallCtx::new(CapSet::of([Cap::Inspect, Cap::Mutate, Cap::Run]));
-        server
+        let removed = server
             .call(
                 "node_arrange",
                 &ctx,
                 json!({ "action": "remove", "doc": "Shell.qml", "nodes": [{ "id": "player1" }] }),
             )
-            .unwrap();
+            .unwrap_or_else(|e| panic!("the remove: {}", e.to_value()))
+            .structured;
+        // A path names an object in the generation it was read at: the
+        // `Text` is first once the player is gone.
+        let generation = removed["generation"]
+            .as_u64()
+            .unwrap_or_else(|| panic!("the remove's generation: {removed}"));
         server
             .call(
                 "node_arrange",
                 &ctx,
-                json!({ "action": "rename", "doc": "Shell.qml", "nodes": [{ "path": "root/0" }], "name": "player1" }),
+                json!({ "action": "rename", "doc": "Shell.qml", "generation": generation, "nodes": [{ "path": "root/0" }], "name": "player1" }),
             )
-            .unwrap();
+            .unwrap_or_else(|e| panic!("the rename: {}", e.to_value()));
     }));
     f.calls();
     let refused = f
