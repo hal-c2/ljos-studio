@@ -118,7 +118,9 @@ pub struct Extent {
     /// Logical pixels down to the lowest edge counted.
     pub reach: f64,
     /// The objects left out for being exactly the window's size, by the
-    /// host's name for each, in the page's order. A page that measures the
+    /// host's name for each, in the page's order. A name stays while other
+    /// objects come and go before it, so an unchanged page reads as one
+    /// however its lists grow or shrink elsewhere. A page that measures the
     /// same can still have changed: an item the preview was grown to is
     /// left out once the window is as tall, and counts again when it folds
     /// to within the rest, so this changes where `reach` does not.
