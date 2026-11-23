@@ -14,8 +14,8 @@
 //! A reader that must see the last write waits for that (`caught_up`).
 
 use std::{
-    collections::{BTreeSet, VecDeque},
-    path::Path,
+    collections::{BTreeSet, HashMap, VecDeque},
+    path::{Component, Path, PathBuf},
     sync::{Arc, Mutex, MutexGuard},
     time::Duration,
 };
@@ -178,6 +178,10 @@ pub(crate) struct Previews {
     /// What is wrong in the open preview now, one a line: the compiler's
     /// words where it said any, else what running the line logged first.
     pub problems: Vec<LogLine>,
+    /// Those of `problems` whose line holds other text now: a reload that
+    /// failed keeps what the last good text logged, and the object now
+    /// written on its line is not the one that logged it.
+    pub unplaced: Vec<LogLine>,
     /// A problem was dropped for want of room in `problems`, and may be
     /// wrong yet: its line isn't kept to look again.
     pub dropped: bool,
@@ -407,6 +411,7 @@ impl Previews {
             log_mark: 0,
             unlisted: Vec::new(),
             problems: Vec::new(),
+            unplaced: Vec::new(),
             dropped: false,
             dropped_placed: false,
             problems_seq: 0,
@@ -599,17 +604,6 @@ impl Previews {
         Ok(())
     }
 
-    /// The text of `line` of `file` as the preview reads it now, or the
-    /// file's where no line is told.
-    fn text_at(&self, file: Option<&str>, line: Option<u32>) -> Option<String> {
-        let text = std::fs::read_to_string(self.root.as_ref()?.join(file?)).ok()?;
-        let Some(line) = line else {
-            return Some(text);
-        };
-        let line = line.checked_sub(1)?;
-        text.lines().nth(line as usize).map(|l| l.trim().to_owned())
-    }
-
     /// After a reload. One that applied compiled, so no error of the
     /// compiler's outlasts it, whatever its line says; it keeps what else is
     /// wrong on lines it left as they were. One that failed keeps all of
@@ -620,26 +614,36 @@ impl Previews {
         if failed.is_none() && !self.dropped_placed {
             self.forget_dropped();
         }
+        let mut sources = Sources::new(self.root.as_deref());
         let held = std::mem::take(&mut self.held);
-        self.held = held
-            .into_iter()
-            .filter(|(p, _)| !(p.compiler && p.level == "error"))
-            .filter(|(p, text)| {
-                failed.is_some()
-                    || (text.is_some() && *text == self.text_at(p.file.as_deref(), p.line))
-            })
-            .collect();
+        self.unplaced.clear();
+        for (mut p, text) in held {
+            if p.compiler && p.level == "error" {
+                continue;
+            }
+            if sources.follow(&mut p, text.as_deref()) {
+                self.held.push((p, text));
+            } else if failed.is_some() {
+                self.unplaced.push(p.clone());
+                self.held.push((p, text));
+            }
+        }
         if let Some(failed) = failed {
-            let text = self.text_at(failed.file.as_deref(), failed.line);
+            let text = sources.text_at(failed.file.as_deref(), failed.line);
             self.held.push((failed, text));
         }
-        self.add_problems(lines);
+        self.add_problems_in(&mut sources, lines);
     }
 
     /// What was logged: the compiler's words win over what running the same
     /// line logged, whichever came first. Past [`LINES_KEPT`] the first
     /// problems stay and only the compiler's are added.
     fn add_problems(&mut self, lines: &[LogLine]) {
+        let mut sources = Sources::new(self.root.as_deref());
+        self.add_problems_in(&mut sources, lines);
+    }
+
+    fn add_problems_in(&mut self, sources: &mut Sources, lines: &[LogLine]) {
         for line in lines.iter().filter(|l| l.is_problem()) {
             let at = self.held.iter().position(|(p, _)| same_place(p, line));
             match at {
@@ -648,7 +652,7 @@ impl Previews {
                 }
                 Some(_) => {}
                 None if line.compiler || self.held.len() < LINES_KEPT => {
-                    let text = self.text_at(line.file.as_deref(), line.line);
+                    let text = sources.text_at(line.file.as_deref(), line.line);
                     self.held.push((line.clone(), text));
                 }
                 None => {
@@ -659,7 +663,7 @@ impl Previews {
                     }
                     if !self.dropped_placed {
                         self.dropped_placed =
-                            self.text_at(line.file.as_deref(), line.line).is_some();
+                            sources.text_at(line.file.as_deref(), line.line).is_some();
                     }
                 }
             }
@@ -710,10 +714,18 @@ impl Previews {
     }
 
     /// Reads the host's new log lines for the problems among them. They
-    /// join the events when those are read.
-    pub fn pull_problems(&mut self) {
-        if let Ok(lines) = self.read_logs() {
-            self.add_problems(&lines);
+    /// join the events when those are read. False when the log could not be
+    /// read for now: what it holds is still to be read, so the one asking
+    /// asks again.
+    pub fn pull_problems(&mut self) -> bool {
+        match self.logs_read() {
+            Ok(Some(lines)) => {
+                self.add_problems(&lines);
+                true
+            }
+            Ok(None) => false,
+            // Ended: nothing is left to read.
+            Err(_) => true,
         }
     }
 
@@ -731,8 +743,14 @@ impl Previews {
     /// the preview ended as they were read: its problems went with it, and
     /// none are to be put back.
     fn read_logs(&mut self) -> Result<Vec<LogLine>, PreviewError> {
+        self.logs_read().map(Option::unwrap_or_default)
+    }
+
+    /// As [`Previews::read_logs`], and `None` when the log could not be
+    /// read for now.
+    fn logs_read(&mut self) -> Result<Option<Vec<LogLine>>, PreviewError> {
         let Some(open) = &mut self.open else {
-            return Ok(Vec::new());
+            return Ok(Some(Vec::new()));
         };
         match open.host.logs(self.log_mark) {
             Ok((lines, next)) => {
@@ -740,15 +758,23 @@ impl Previews {
                 self.unlisted.extend_from_slice(&lines);
                 let over = self.unlisted.len().saturating_sub(LINES_KEPT);
                 self.unlisted.drain(..over);
-                Ok(lines)
+                Ok(Some(lines))
             }
             Err(e @ (PreviewError::Ended(_) | PreviewError::NotOpen)) => Err(self.failed(e)),
             Err(e) => {
+                // The mark stays, so the next read tries the same lines
+                // again. A failed reload is what the checks of whether the
+                // app shows its text look for; a log that went unread is
+                // not one.
                 open.behind = true;
-                self.events.push(PreviewEvent::ReloadFailed {
-                    message: e.to_string(),
-                });
-                Ok(Vec::new())
+                self.events.push(PreviewEvent::Log(LogLine {
+                    level: "warning".to_owned(),
+                    message: format!("Studio could not read the preview's log: {e}"),
+                    file: None,
+                    line: None,
+                    compiler: false,
+                }));
+                Ok(None)
             }
         }
     }
@@ -757,6 +783,7 @@ impl Previews {
     /// wrong in one. The preview that was open is the caller's to close.
     pub fn end(&mut self) -> Option<Open> {
         self.held.clear();
+        self.unplaced.clear();
         self.forget_dropped();
         self.unlisted.clear();
         if !self.problems.is_empty() {
@@ -816,6 +843,83 @@ pub(crate) fn spec(store: &dyn Store, doc: &str, size: Size, aliases: &[Alias]) 
         size,
         aliases: aliases.to_vec(),
         types,
+    }
+}
+
+/// The project's files as the preview reads them, each read once for a
+/// pass over the problems: a noisy file holds a thousand of them.
+struct Sources {
+    root: Option<PathBuf>,
+    read: HashMap<String, Option<String>>,
+}
+
+impl Sources {
+    fn new(root: Option<&Path>) -> Self {
+        Sources {
+            root: root.map(Path::to_owned),
+            read: HashMap::new(),
+        }
+    }
+
+    /// `file`'s text, if it is a file of the project. A name the app gave
+    /// is not trusted to stay in it: an absolute one would leave the root,
+    /// and a pipe or a device would never end its read.
+    fn file(&mut self, file: &str) -> Option<&str> {
+        let root = self.root.as_deref()?;
+        self.read
+            .entry(file.to_owned())
+            .or_insert_with(|| {
+                let name = Path::new(file);
+                let inside = name
+                    .components()
+                    .all(|c| matches!(c, Component::Normal(_) | Component::CurDir));
+                let path = root.join(name);
+                if inside && path.is_file() {
+                    std::fs::read_to_string(path).ok()
+                } else {
+                    None
+                }
+            })
+            .as_deref()
+    }
+
+    /// The text of `line` of `file` as the preview reads it now, or the
+    /// file's where no line is told.
+    fn text_at(&mut self, file: Option<&str>, line: Option<u32>) -> Option<String> {
+        let text = self.file(file?)?;
+        let Some(line) = line else {
+            return Some(text.to_owned());
+        };
+        let line = line.checked_sub(1)?;
+        text.lines().nth(line as usize).map(|l| l.trim().to_owned())
+    }
+
+    /// Whether `told`, the text `p` was told on, is still in its file, and
+    /// moves `p` to the line nearest its own that has it: neither Ljós nor
+    /// the app tells a problem again while its line is unchanged, and lines
+    /// put above it move it.
+    fn follow(&mut self, p: &mut LogLine, told: Option<&str>) -> bool {
+        let (Some(told), Some(file)) = (told, p.file.as_deref()) else {
+            return false;
+        };
+        let Some(text) = self.file(file) else {
+            return false;
+        };
+        let Some(line) = p.line else {
+            return text == told;
+        };
+        let at = line.saturating_sub(1) as usize;
+        let nearest = text
+            .lines()
+            .enumerate()
+            .filter(|(_, l)| l.trim() == told)
+            .min_by_key(|(n, _)| n.abs_diff(at))
+            .map(|(n, _)| n);
+        let Some(n) = nearest.and_then(|n| u32::try_from(n + 1).ok()) else {
+            return false;
+        };
+        p.line = Some(n);
+        true
     }
 }
 
@@ -1068,6 +1172,65 @@ mod tests {
         assert_eq!(placed.file.as_deref(), Some("Main.qml"));
         assert_eq!(placed.line, None);
         assert_eq!(placed.message, "TypeError: x");
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    fn held_warning(line: u32) -> LogLine {
+        warning(
+            "Main.qml",
+            line,
+            "Unable to assign [undefined] to QColor",
+            false,
+        )
+    }
+
+    #[test]
+    fn a_warning_follows_its_line_when_lines_are_put_above_it() {
+        let (mut p, _) = previews(VecDeque::new(), false);
+        let root = rooted(&mut p, "Item {\n    color: oops\n}\n");
+        p.start_problems(None, &[held_warning(2)]);
+        std::fs::write(
+            root.join("Main.qml"),
+            "Item {\n    x: 1\n    y: 1\n    color: oops\n}\n",
+        )
+        .unwrap();
+        p.start_problems(None, &[]);
+        assert_eq!(p.problems, [held_warning(4)]);
+        assert!(p.unplaced.is_empty());
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn a_failed_reload_keeps_a_warning_whose_line_went_but_places_it_nowhere() {
+        let (mut p, _) = previews(VecDeque::new(), false);
+        let root = rooted(&mut p, "Item {\n    color: oops\n}\n");
+        p.start_problems(None, &[held_warning(2)]);
+        std::fs::write(root.join("Main.qml"), "Item {\n    Text {}\n").unwrap();
+        let failed = failure("Main.qml:3:1: Expected `}`", p.root.as_deref());
+        p.start_problems(Some(failed), &[]);
+        assert!(p.problems.contains(&held_warning(2)), "{:?}", p.problems);
+        assert_eq!(p.unplaced, [held_warning(2)]);
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn only_the_projects_own_files_are_read_for_a_problems_text() {
+        let (mut p, _) = previews(VecDeque::new(), false);
+        let root = rooted(&mut p, "Item {}\n");
+        let outside = root.with_extension("outside.qml");
+        std::fs::write(&outside, "Item {}\n").unwrap();
+        let mut sources = Sources::new(Some(root.as_path()));
+        assert_eq!(
+            sources.text_at(Some("Main.qml"), Some(1)).as_deref(),
+            Some("Item {}")
+        );
+        let absolute = outside.to_str().unwrap();
+        assert_eq!(sources.text_at(Some(absolute), Some(1)), None);
+        let name = outside.file_name().unwrap().to_str().unwrap();
+        assert_eq!(sources.text_at(Some(&format!("../{name}")), Some(1)), None);
+        std::fs::create_dir_all(root.join("Dir.qml")).unwrap();
+        assert_eq!(sources.text_at(Some("Dir.qml"), None), None);
+        std::fs::remove_file(&outside).unwrap();
         std::fs::remove_dir_all(&root).unwrap();
     }
 

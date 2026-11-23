@@ -72,6 +72,19 @@ Feature: What is wrong in the preview reaches whoever made it wrong
     Then the answer's "/problems" has 1 entry
     And the answer's "/problems/0/line" is 11
 
+  # Neither Ljós nor the app tells a warning again while its binding is
+  # unchanged: a line put above it moves it, and it is followed there.
+  Scenario: The cause stays told when a line is put above it
+    Given the agent has called the tool "binding_set" with:
+      """json
+      {"doc": "Main.qml", "node": {"id": "card"}, "name": "border.color", "value": "transparent"}
+      """
+    When a person types in the code view of "Main.qml", replacing "id: root" with "id: root\n    opacity: 1"
+    And the agent calls the tool "preview_events"
+    Then the answer's "/problems" has 1 entry
+    And the answer's "/problems/0/line" is 12
+    And the answer's "/problems/0/node" is "$card"
+
   Scenario: A look at the app's rests still says what is wrong
     Given the agent has called the tool "binding_set" with:
       """json

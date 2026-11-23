@@ -569,16 +569,18 @@ impl Studio {
     pub(crate) fn problems(&mut self, lines: &[LogLine]) -> Vec<Problem> {
         let mut trees: std::collections::HashMap<String, Option<Vec<Written>>> =
             std::collections::HashMap::new();
-        let mocked = preview::lock(&self.previews)
-            .open
-            .as_ref()
-            .map(|open| open.mocked.clone())
-            .unwrap_or_default();
+        let (mocked, unplaced) = {
+            let previews = preview::lock(&self.previews);
+            let mocked = previews.open.as_ref().map(|open| open.mocked.clone());
+            (mocked.unwrap_or_default(), previews.unplaced.clone())
+        };
         lines
             .iter()
             .map(|l| {
                 let (file, line, message) = self.placed(l, &mocked);
-                let node = if file.is_empty() || line == 0 {
+                // One whose line holds other text now would link the
+                // object written there, not the one that logged it.
+                let node = if file.is_empty() || line == 0 || unplaced.contains(l) {
                     String::new()
                 } else {
                     let spans = trees
