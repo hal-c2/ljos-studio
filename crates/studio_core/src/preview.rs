@@ -396,8 +396,10 @@ pub trait PreviewHost: Send {
     }
 
     /// How far down (logical pixels) what the preview shows reaches: the
-    /// lowest edge of anything drawn, scrolled out of view or not. A host
-    /// that cannot tell refuses.
+    /// lowest edge of anything drawn, scrolled out of view or not. What is
+    /// exactly the window's size follows the window, not the page, and is
+    /// not counted; a page of nothing else answers 0, which fits the preview
+    /// to its screen. A host that cannot tell refuses.
     fn extent(&mut self) -> Result<f64, PreviewError> {
         Err(PreviewError::Refused {
             code: "unsupported".to_owned(),
