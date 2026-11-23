@@ -194,6 +194,56 @@ Feature: The preview is scrolled, typed into and made as tall as its page, as a 
       """
     Then the answer's "/size" is {"width": 1280, "height": 1000}
 
+  Scenario: A preview fitted to an item as wide as its window is not resized when opened again
+    Given the file "Tall.qml":
+      """qml
+      import QtQuick
+
+      Item {
+          id: root
+          property bool counting: false
+          property int resizes: 0
+          onHeightChanged: if (counting) resizes += 1
+
+          Rectangle {
+              id: page
+              width: parent.width
+              height: 2000
+              color: "white"
+
+              Rectangle {
+                  width: 400
+                  height: 1500
+                  color: "red"
+
+                  MouseArea {
+                      id: count
+                      width: 100
+                      height: 100
+                      onClicked: root.counting = true
+                  }
+              }
+          }
+      }
+      """
+    And the agent has called the tool "preview_open" with:
+      """json
+      {"doc": "Tall.qml", "fit": "content"}
+      """
+    And the agent has called the tool "preview_state" with:
+      """json
+      {"node": {"id": "root"}, "click": {"id": "count"}}
+      """
+    And the agent has called the tool "preview_open" with:
+      """json
+      {"doc": "Tall.qml"}
+      """
+    When the agent calls the tool "preview_state" with:
+      """json
+      {"node": {"id": "root"}, "read": ["resizes"]}
+      """
+    Then the answer's "/state/resizes" is 0
+
   Scenario: Fitted to the screen again, the preview is the screen's height
     Given the agent has called the tool "preview_open" with:
       """json
