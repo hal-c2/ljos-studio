@@ -83,6 +83,20 @@ test("a picture's path keeps its dollars", (t) => {
   assert.ok(readFileSync(join(site, "index.html"), "utf8").includes('href="./images/$$.svg"'));
 });
 
+// A browser asks a page with no icon for `/favicon.ico`, which no site has:
+// a 404 in the reader's console on the first load.
+test("a page with no icon asks the browser for none", (t) => {
+  const { site } = built(t, {});
+  const html = readFileSync(join(site, "index.html"), "utf8");
+  assert.ok(html.includes('<link rel="icon" href="data:," />'), html);
+});
+
+test("a page with an icon names only its own", (t) => {
+  const { site } = built(t, { icon: "images/logo.svg" });
+  const html = readFileSync(join(site, "index.html"), "utf8");
+  assert.deepEqual(html.match(/<link rel="icon"[^>]*>/g), ['<link rel="icon" href="./images/logo.svg" />']);
+});
+
 test("a site Studio built is replaced, and nothing is left beside it", (t) => {
   const { root, site, build } = built(t);
   const again = build({ STANDIN_ASSET: "next" });

@@ -3362,6 +3362,17 @@ fn export_field_reads(w: &mut UiWorld, name: String, pattern: String) -> StepRes
         .ok_or_else(|| format!("it reads {:?}", field.value))
 }
 
+#[then(regex = r#"^the export panel's list shows (a|no) scroll bar$"#)]
+fn export_list_scroll(w: &mut UiWorld, want: String) -> StepResult {
+    let shown = w
+        .window()?
+        .node("Export panel", None, "Scroll the bundle's contents")
+        .is_ok();
+    (shown == (want == "a"))
+        .then_some(())
+        .ok_or_else(|| format!("a scroll bar shown: {shown}"))
+}
+
 #[then(regex = r#"^the export panel has no "([^"]+)"$"#)]
 fn export_has_no(w: &mut UiWorld, name: String) -> StepResult {
     let tree = w.window()?.tree();
