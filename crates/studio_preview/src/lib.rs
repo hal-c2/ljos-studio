@@ -814,79 +814,18 @@ impl NativeHost {
         }
     }
 
-    /// The project's visible items, one line each, indented by depth. The
-    /// snapshot above them only names what has an accessible role, so a
-    /// card of a `Rectangle` and a `Text` shows here. What a style's or a
-    /// module's file declares is left out: it is not the document's to read.
+    /// The project's visible items, one line each, indented by depth; see
+    /// [`lines_of`].
     fn item_lines(&mut self, rows: &[Value]) -> Result<String, PreviewError> {
-        let mut lines = Vec::new();
-        let mut read = 0;
-        let mut hidden_below = None;
-        // A row names an object by its own type, and a document's root by
-        // the document. One object of each type in each file is asked what
-        // that type is, so a component made of a text is read as one.
-        let mut texts = HashMap::new();
-        for row in rows {
-            let depth = row["depth"].as_u64().unwrap_or(0);
-            if hidden_below.is_some_and(|hidden| depth > hidden) {
-                continue;
-            }
-            hidden_below = None;
-            if row["visible"] == false {
-                hidden_below = Some(depth);
-                continue;
-            }
-            let (Some(bounds), Some(at)) = (row["bounds"].as_array(), row["at"].as_str()) else {
-                continue;
-            };
-            let at = at.rsplit_once(':').map_or(at, |(line, _column)| line);
-            let Some((file, line)) = at.rsplit_once(':') else {
-                continue;
-            };
-            let file = self.document(file);
-            if file.contains("://") || file.starts_with('/') {
-                continue;
-            }
-            let number = |i: usize| bounds.get(i).and_then(Value::as_f64).unwrap_or(0.0);
-            let id = row["id"]
-                .as_str()
-                .map(|id| format!("#{id}"))
-                .unwrap_or_default();
-            // A row does not carry what a text says, and it is what tells
-            // one card of a list from the next.
-            let mut says = String::new();
-            let ty = row["type"].as_str().unwrap_or("object");
-            let key = (ty.to_owned(), file.clone());
-            let known = texts.get(&key).copied();
-            if known != Some(false)
-                && read < MOST_READ
-                && let Some(handle) = row["handle"].as_str()
-            {
-                let answer = self.call("app_inspect", json!({ "target": handle }))?;
-                let text = known.unwrap_or_else(|| is_text(&answer.structured));
-                texts.insert(key, text);
-                if text {
-                    read += 1;
-                    let rows = answer.structured["properties"].as_array();
-                    if let Some(text) = rows
-                        .and_then(|rows| rows.iter().find(|r| r["name"] == "text"))
-                        .map(value_of)
-                        .and_then(|v| v.as_str().map(str::to_owned))
-                    {
-                        says = format!(" {text:?}");
-                    }
-                }
-            }
-            lines.push(format!(
-                "{}{ty}{id} {},{} {}x{} {file}:{line}{says}",
-                "  ".repeat(usize::try_from(depth).unwrap_or(0)),
-                number(0),
-                number(1),
-                number(2),
-                number(3),
-            ));
-        }
-        Ok(lines.join("\n"))
+        let root = self.root.clone();
+        lines_of(
+            rows,
+            |file| document_of(&root, file),
+            |handle| {
+                self.call("app_inspect", json!({ "target": handle }))
+                    .map(|answer| answer.structured)
+            },
+        )
     }
 
     /// An `app_inspect` answer as a [`Placed`]; `None` for what is not an item.
@@ -945,23 +884,109 @@ impl NativeHost {
     /// A file the child names (a `file:` URL, as its engine does) as the
     /// store names it: relative to the project when it is below it.
     fn document(&self, file: &str) -> String {
-        let Some(path) = file.strip_prefix("file://") else {
-            return file.to_owned();
-        };
-        let path = PathBuf::from(percent_decoded(path));
-        let root = self
-            .root
-            .canonicalize()
-            .unwrap_or_else(|_| self.root.clone());
-        let path = path.canonicalize().unwrap_or(path);
-        match path.strip_prefix(&root) {
-            Ok(relative) => relative
-                .components()
-                .map(|c| c.as_os_str().to_string_lossy())
-                .collect::<Vec<_>>()
-                .join("/"),
-            Err(_) => file.to_owned(),
+        document_of(&self.root, file)
+    }
+}
+
+/// The project's visible items, one line each, indented by depth. The
+/// snapshot above them only names what has an accessible role, so a
+/// card of a `Rectangle` and a `Text` shows here. What a style's or a
+/// module's file declares is left out: it is not the document's to read.
+/// Every object asked counts against [`MOST_READ`], whether it is asked
+/// what it says or what its type is: past that the rest are listed
+/// without what they say, rather than waiting out the inspector's
+/// second.
+fn lines_of(
+    rows: &[Value],
+    document: impl Fn(&str) -> String,
+    mut inspect: impl FnMut(&str) -> Result<Value, PreviewError>,
+) -> Result<String, PreviewError> {
+    let mut lines = Vec::new();
+    let mut asked = 0;
+    let mut hidden_below = None;
+    // A row names an object by its own type, and a document's root by
+    // the document. One object of each type in each file is asked what
+    // that type is, so a component made of a text is read as one.
+    let mut texts = HashMap::new();
+    for row in rows {
+        let depth = row["depth"].as_u64().unwrap_or(0);
+        if hidden_below.is_some_and(|hidden| depth > hidden) {
+            continue;
         }
+        hidden_below = None;
+        if row["visible"] == false {
+            hidden_below = Some(depth);
+            continue;
+        }
+        let (Some(bounds), Some(at)) = (row["bounds"].as_array(), row["at"].as_str()) else {
+            continue;
+        };
+        let at = at.rsplit_once(':').map_or(at, |(line, _column)| line);
+        let Some((file, line)) = at.rsplit_once(':') else {
+            continue;
+        };
+        let file = document(file);
+        if file.contains("://") || file.starts_with('/') {
+            continue;
+        }
+        let number = |i: usize| bounds.get(i).and_then(Value::as_f64).unwrap_or(0.0);
+        let id = row["id"]
+            .as_str()
+            .map(|id| format!("#{id}"))
+            .unwrap_or_default();
+        // A row does not carry what a text says, and it is what tells
+        // one card of a list from the next.
+        let mut says = String::new();
+        let ty = row["type"].as_str().unwrap_or("object");
+        let key = (ty.to_owned(), file.clone());
+        let known = texts.get(&key).copied();
+        if known != Some(false)
+            && asked < MOST_READ
+            && let Some(handle) = row["handle"].as_str()
+        {
+            let answer = inspect(handle)?;
+            asked += 1;
+            let text = known.unwrap_or_else(|| is_text(&answer));
+            texts.insert(key, text);
+            if text {
+                let rows = answer["properties"].as_array();
+                if let Some(text) = rows
+                    .and_then(|rows| rows.iter().find(|r| r["name"] == "text"))
+                    .map(value_of)
+                    .and_then(|v| v.as_str().map(str::to_owned))
+                {
+                    says = format!(" {text:?}");
+                }
+            }
+        }
+        lines.push(format!(
+            "{}{ty}{id} {},{} {}x{} {file}:{line}{says}",
+            "  ".repeat(usize::try_from(depth).unwrap_or(0)),
+            number(0),
+            number(1),
+            number(2),
+            number(3),
+        ));
+    }
+    Ok(lines.join("\n"))
+}
+
+/// A file as the inspector names it, relative to the project when it is
+/// one of the project's.
+fn document_of(root: &Path, file: &str) -> String {
+    let Some(path) = file.strip_prefix("file://") else {
+        return file.to_owned();
+    };
+    let path = PathBuf::from(percent_decoded(path));
+    let root = root.canonicalize().unwrap_or_else(|_| root.to_owned());
+    let path = path.canonicalize().unwrap_or(path);
+    match path.strip_prefix(&root) {
+        Ok(relative) => relative
+            .components()
+            .map(|c| c.as_os_str().to_string_lossy())
+            .collect::<Vec<_>>()
+            .join("/"),
+        Err(_) => file.to_owned(),
     }
 }
 
@@ -1209,6 +1234,38 @@ fn tail(log: &Path) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_outline_asks_the_inspector_no_more_than_its_budget_and_reads_texts_first_met() {
+        // A Text, then more types than the budget, each asked once.
+        let mut rows = vec![json!({
+            "depth": 0, "bounds": [0, 0, 10, 10], "at": "Main.qml:3:5",
+            "type": "Text", "handle": "t",
+        })];
+        rows.extend((0..2 * MOST_READ).map(|i| {
+            json!({
+                "depth": 1, "bounds": [0, 0, 10, 10], "at": "Main.qml:4:5",
+                "type": format!("Kind{i}"), "handle": format!("k{i}"),
+            })
+        }));
+        let mut asked = 0;
+        let lines = lines_of(&rows, str::to_owned, |handle| {
+            asked += 1;
+            Ok(if handle == "t" {
+                json!({ "types": ["Text"], "properties": [{ "name": "text", "value": "Hi", "type": "string" }] })
+            } else {
+                json!({ "types": ["Item"] })
+            })
+        })
+        .unwrap();
+        assert_eq!(asked, MOST_READ);
+        assert!(
+            lines.starts_with("Text 0,0 10x10 Main.qml:3 \"Hi\""),
+            "{lines}"
+        );
+        // Past the budget a row is still listed, without what it says.
+        assert_eq!(lines.lines().count(), rows.len());
+    }
 
     #[test]
     fn the_lowest_shown_edge_is_how_far_the_content_reaches() {
