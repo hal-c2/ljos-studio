@@ -1198,6 +1198,30 @@ fn one_of_two_members_on_a_line_is_taken_out_with_its_semicolon() {
 }
 
 #[test]
+fn the_last_of_two_members_on_a_line_is_taken_out_with_the_semicolon_before_it() {
+    let mut s = session_of(CARD);
+    s.edit("Main.qml", None, &replace("toggled", None), false)
+        .unwrap();
+    let now = s.text("Main.qml").unwrap().0;
+    assert!(now.contains("\n    property bool done: false\n"), "{now}");
+}
+
+#[test]
+fn a_replacement_that_brings_an_object_or_a_second_member_is_refused() {
+    let mut s = session_of(CARD);
+    for text in [
+        "property int n: 2\nRectangle { id: added }",
+        "property int n: 2; property int m: 3",
+    ] {
+        let err = s
+            .edit("Main.qml", None, &replace("title", Some(text)), false)
+            .unwrap_err();
+        assert!(matches!(err, Error::Invalid(_)), "{text}: {err:?}");
+    }
+    assert_eq!(s.text("Main.qml").unwrap().0, CARD);
+}
+
+#[test]
 fn a_member_it_lacks_or_a_name_it_has_is_refused() {
     let mut s = session_of(CARD);
     let err = s
