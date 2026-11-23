@@ -36,7 +36,10 @@ Column {
     Accessible.role: Accessible.Pane
     Accessible.name: "Block"
 
+    // One call at a time: a second would take the first one's answer.
     function ask(tool, args) {
+        if (asked !== "")
+            return
         refusal = ""
         asked = tool
         askedWith = args
@@ -113,7 +116,8 @@ Column {
             width: actions.width - addSlot.width - Spacing.xxs
             placeholderText: "Slot name"
             Accessible.name: "New slot's name"
-            onAccepted: addSlot.clicked()
+            // Enter is the button: not while it waits on an answer.
+            onAccepted: if (addSlot.enabled) addSlot.clicked()
         }
         TextButton {
             id: addSlot
