@@ -1026,14 +1026,16 @@ const AIM_DEPTH: usize = 32;
 /// An item exactly as big as the `window` (a root that fills it, a
 /// background) follows the window, not the page: once a preview is grown
 /// to its content such an item reaches the bottom whatever the page holds
-/// now, so it is left out and what it holds is measured instead. A page of
-/// nothing else reaches nowhere, 0.
+/// now, so it is left out and what it holds is measured instead; it is
+/// named by its handle (by its row, `#n`, without one). A page of nothing
+/// else reaches nowhere, 0.
 fn lowest_edge(rows: &[Value], window: Size) -> Extent {
     // Bounds are logical pixels; a scaled layout may round them off.
     let near = |a: f64, b: u32| (a - f64::from(b)).abs() < 0.5;
     let mut lowest: f64 = 0.0;
+    let mut window_sized = Vec::new();
     let mut hidden_below = None;
-    for row in rows {
+    for (i, row) in rows.iter().enumerate() {
         let depth = row["depth"].as_u64().unwrap_or(0);
         if hidden_below.is_some_and(|hidden| depth > hidden) {
             continue;
@@ -1051,13 +1053,19 @@ fn lowest_edge(rows: &[Value], window: Size) -> Extent {
             && near(number(1), 0)
             && near(number(2), window.width)
             && near(number(3), window.height);
-        if number(2) > 0.0 && number(3) > 0.0 && !fills {
+        if fills {
+            window_sized.push(
+                row["handle"]
+                    .as_str()
+                    .map_or_else(|| format!("#{i}"), str::to_owned),
+            );
+        } else if number(2) > 0.0 && number(3) > 0.0 {
             lowest = lowest.max(number(1) + number(3));
         }
     }
     Extent {
         reach: lowest,
-        window_sized: Vec::new(),
+        window_sized,
     }
 }
 
