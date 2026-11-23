@@ -24,7 +24,7 @@ use serde_json::{Map, Value, json};
 use studio_core::place::Rect;
 use studio_core::preview::{
     Click, Declared, Extent, Input, LogLine, Picture, Placed, PreviewError, PreviewHost,
-    PreviewSpec, Reload, Rest, RestWatch, Size, place_in,
+    PreviewSpec, Reload, Rest, RestWatch, Size, place_among, place_in,
 };
 use studio_core::scene3d::{Body, Camera, Scene, rotate};
 
@@ -1317,6 +1317,16 @@ fn logged(e: &Value, root: &Path) -> LogLine {
         && let Some((f, l, rest)) = place_in(&message, Some(root))
     {
         (file, line, message) = (Some(f), l, rest.to_owned());
+    } else if let Some(named) = &file {
+        // The runtime names the place and still starts its message with it:
+        // the window says where once, beside the words.
+        let named = relative(named, root);
+        let at = place_among(&message, &|f| relative(f, root) == named)
+            .filter(|(f, ..)| relative(f, root) == named)
+            .map(|(_, l, rest)| (l, rest.to_owned()));
+        if let Some((l, rest)) = at {
+            (line, message) = (line.or(l), rest);
+        }
     }
     LogLine {
         level: e["level"].as_str().unwrap_or("info").to_owned(),
