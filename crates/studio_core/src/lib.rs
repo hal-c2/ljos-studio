@@ -739,6 +739,14 @@ impl Session {
         Ok(self.doc(path)?.generation)
     }
 
+    /// The generation the session holds, without reading the file again:
+    /// the text it last gave out, not a change another program made since.
+    /// None for a document it does not hold.
+    pub fn held_generation(&self, path: &str) -> Option<u64> {
+        let path = self.canonical(path).ok()?;
+        self.docs.get(&path).map(|doc| doc.generation)
+    }
+
     /// The document's objects, each with a handle. Fails while the text does
     /// not parse.
     pub fn tree(&mut self, path: &str) -> Result<(Vec<(String, Node)>, u64), Error> {

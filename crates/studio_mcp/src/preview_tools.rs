@@ -783,8 +783,8 @@ pub(crate) fn shown_screenshot(
         .max_size
         .unwrap_or(PICTURE_SIDE)
         .clamp(16, MAX_PICTURE_SIDE);
-    let mut studio = lock(studio);
-    // Its own handle: the document's text is read while it is held.
+    let studio = lock(studio);
+    // Its own handle: the document's generation is read while it is held.
     let all = studio.previews.clone();
     let mut previews = match picturing {
         Picturing::Latest => preview::caught_up(&all),
@@ -794,6 +794,13 @@ pub(crate) fn shown_screenshot(
             previews
         }
     };
+    // Read before the picture is taken and without reading the file: an
+    // edit landing while it is taken is newer than its pixels.
+    let shown = view::preview_of(&previews).map(|p| PictureOf {
+        text: studio.session.held_generation(&p.doc).unwrap_or(0),
+        doc: p.doc,
+        target: p.target,
+    });
     let open = previews
         .open
         .as_mut()
@@ -817,11 +824,6 @@ pub(crate) fn shown_screenshot(
         Ok(picture) => picture,
         Err(e) => return Err(preview_error(previews.failed(e))),
     };
-    let shown = view::preview_of(&previews).map(|p| PictureOf {
-        text: studio.session.text(&p.doc).map_or(0, |(_, g)| g),
-        doc: p.doc,
-        target: p.target,
-    });
     let out = ScreenshotOut {
         width: Some(picture.width),
         height: Some(picture.height),
