@@ -76,6 +76,9 @@ struct Running {
     log_read: u64,
     /// The fault it started with, until `logs` has told it.
     start_fault: Option<LogLine>,
+    /// The start's reload went unanswered while the app ran on: `logs`
+    /// asks for its fault again.
+    fault_unasked: bool,
     /// The `echoed` lines of the last answer of `app_logs`: stderr is
     /// written by a thread of its own, and may have them after that answer.
     echoed: BTreeSet<String>,
@@ -247,6 +250,7 @@ impl NativeHost {
             log,
             log_read: 0,
             start_fault: None,
+            fault_unasked: false,
             echoed: BTreeSet::new(),
             reported: Reported::default(),
             size: spec.size,
@@ -425,9 +429,11 @@ impl PreviewHost for NativeHost {
         // A project that does not compile starts all the same, and its
         // stderr can't be trusted with that: an app prints there too. Asked
         // to reload, Ljós answers the fault while one stands.
-        let started = PreviewHost::reload(self)?;
-        let fault = start_fault(started, &self.root);
-        self.running()?.start_fault = fault;
+        let answer = PreviewHost::reload(self);
+        match started(answer, &self.root)? {
+            Started::Told(fault) => self.running()?.start_fault = fault,
+            Started::Unasked => self.running()?.fault_unasked = true,
+        }
         Ok(())
     }
 
@@ -530,6 +536,14 @@ impl PreviewHost for NativeHost {
     }
 
     fn logs(&mut self, since: u64) -> Result<(Vec<LogLine>, u64), PreviewError> {
+        if self.running()?.fault_unasked {
+            let answer = PreviewHost::reload(self);
+            if let Started::Told(fault) = started(answer, &self.root)? {
+                let running = self.running()?;
+                running.fault_unasked = false;
+                running.start_fault = fault;
+            }
+        }
         // Before the call, so that what the app printed of it is either in
         // this answer or was in the last.
         let running = self.running()?;
@@ -1313,8 +1327,18 @@ fn logged(e: &Value, root: &Path) -> LogLine {
     let mut message = e["message"].as_str().unwrap_or_default().to_owned();
     let mut file = e["file"].as_str().map(str::to_owned);
     let mut line = e["line"].as_u64().and_then(|l| u32::try_from(l).ok());
+    // Named by URL, a file is one of the project's once taken from the
+    // root: `file:///p/Main.qml.js:21:` is Main.qml's program, not a file
+    // `Main.qml.js` with a line 21.
+    let in_project = |f: &str| {
+        let from_root = relative(f, root);
+        let path = Path::new(&from_root);
+        path.components()
+            .all(|c| matches!(c, std::path::Component::Normal(_)))
+            && root.join(path).is_file()
+    };
     if file.is_none()
-        && let Some((f, l, rest)) = place_in(&message, Some(root))
+        && let Some((f, l, rest)) = place_among(&message, &in_project)
     {
         (file, line, message) = (Some(f), l, rest.to_owned());
     } else if let Some(named) = &file {
@@ -1383,6 +1407,23 @@ fn below(path: &Path, root: &Path) -> Option<String> {
     Some(names.join("/"))
 }
 
+/// What a preview's first reload said of the fault it started with.
+#[derive(Debug, PartialEq)]
+enum Started {
+    Told(Option<LogLine>),
+    /// Not answered, and the app still runs: a call that did not get
+    /// through, or one it turned away for now, ends no preview.
+    Unasked,
+}
+
+fn started(answer: Result<Reload, PreviewError>, root: &Path) -> Result<Started, PreviewError> {
+    match answer {
+        Ok(reload) => Ok(Started::Told(start_fault(reload, root))),
+        Err(PreviewError::Transport(_) | PreviewError::Refused { .. }) => Ok(Started::Unasked),
+        Err(e) => Err(e),
+    }
+}
+
 /// The fault a preview started with, named as the project names it.
 fn start_fault(started: Reload, root: &Path) -> Option<LogLine> {
     let Reload::Failed { message } = started else {
@@ -1393,17 +1434,51 @@ fn start_fault(started: Reload, root: &Path) -> Option<LogLine> {
     Some(fault)
 }
 
+/// The most of the log read at once: a program that prints a line longer
+/// than this did so by mistake, and it is not held in memory to be read.
+const READ_AT_MOST: u64 = 1 << 20;
+
 /// The whole lines `log` has past the byte `from`, and where they end. One
-/// still being written is read next time, whole.
+/// still being written is read next time, whole. One longer than
+/// [`READ_AT_MOST`] is skipped to its end.
 fn unread(log: &Path, from: u64) -> Option<(String, u64)> {
     use std::io::{Read, Seek, SeekFrom};
     let mut file = File::open(log).ok()?;
-    file.seek(SeekFrom::Start(from)).ok()?;
+    let mut start = from;
     let mut bytes = Vec::new();
-    file.read_to_end(&mut bytes).ok()?;
-    let end = bytes.iter().rposition(|b| *b == b'\n')?;
-    let text = String::from_utf8_lossy(&bytes[..=end]).into_owned();
-    Some((text, from + end as u64 + 1))
+    // What was skipped is read past even when nothing after it is whole.
+    let skipped = |start: u64| (start > from).then(|| (String::new(), start));
+    loop {
+        file.seek(SeekFrom::Start(start)).ok()?;
+        bytes.clear();
+        file.by_ref()
+            .take(READ_AT_MOST)
+            .read_to_end(&mut bytes)
+            .ok()?;
+        if let Some(end) = bytes.iter().rposition(|b| *b == b'\n') {
+            let text = String::from_utf8_lossy(&bytes[..=end]).into_owned();
+            return Some((text, start + end as u64 + 1));
+        }
+        if (bytes.len() as u64) < READ_AT_MOST {
+            return skipped(start);
+        }
+        let mut at = start + READ_AT_MOST;
+        loop {
+            bytes.clear();
+            file.by_ref()
+                .take(READ_AT_MOST)
+                .read_to_end(&mut bytes)
+                .ok()?;
+            match bytes.iter().position(|b| *b == b'\n') {
+                Some(end) => {
+                    start = at + end as u64 + 1;
+                    break;
+                }
+                None if (bytes.len() as u64) < READ_AT_MOST => return skipped(start),
+                None => at += READ_AT_MOST,
+            }
+        }
+    }
 }
 
 /// The lines after the first of each message in `app_logs`' entries: on
@@ -1698,6 +1773,52 @@ mod tests {
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
+    #[test]
+    fn a_line_longer_than_a_read_is_skipped_and_what_follows_is_read() {
+        let dir = std::env::temp_dir().join(format!("studio-preview-long-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let log = dir.join("preview.log");
+        let long = vec![b'x'; 2 * READ_AT_MOST as usize];
+        std::fs::write(&log, &long).unwrap();
+        // Not ended yet: nothing is read, and nothing held.
+        assert!(unread(&log, 0).is_none());
+        let mut text = long;
+        text.extend_from_slice(b"\nwarn\nhal");
+        std::fs::write(&log, &text).unwrap();
+        let (read, to) = unread(&log, 0).unwrap();
+        assert_eq!(read, "warn\n");
+        assert_eq!(to, text.len() as u64 - 3);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_scripts_url_names_its_document_and_no_line() {
+        let root =
+            std::env::temp_dir().join(format!("studio-preview-script-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("Main.qml"), "import QtQuick\nItem {}\n").unwrap();
+        let entry = json!({
+            "level": "warning",
+            "message": format!("file://{}/Main.qml.js:21: TypeError: x", root.display()),
+        });
+        let line = logged(&entry, &root);
+        assert_eq!(line.file.as_deref(), Some("Main.qml"));
+        assert_eq!(line.line, None);
+        assert_eq!(line.message, "TypeError: x");
+        // A document's own URL keeps its line.
+        let entry = json!({
+            "level": "warning",
+            "message": format!("file://{}/Main.qml:2: ReferenceError: y", root.display()),
+        });
+        let line = logged(&entry, &root);
+        assert_eq!(
+            (line.file.as_deref(), line.line),
+            (Some("Main.qml"), Some(2))
+        );
+        assert_eq!(line.message, "ReferenceError: y");
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
     // The three below are what the pinned ljos printed and answered.
     #[test]
     fn a_clean_starts_log_is_no_problem_whatever_it_prints() {
@@ -1710,6 +1831,34 @@ mod tests {
         assert_eq!(said, []);
         let started = start_fault(Reload::Unchanged, Path::new("/p"));
         assert_eq!(started, None);
+    }
+
+    #[test]
+    fn a_start_whose_reload_goes_unanswered_stays_open_and_asks_again() {
+        let root = Path::new("/p");
+        let transient = [
+            PreviewError::Transport("the inspector did not answer".to_owned()),
+            PreviewError::Refused {
+                code: "rate_limited".to_owned(),
+                message: "too many calls".to_owned(),
+            },
+        ];
+        for e in transient {
+            assert_eq!(started(Err(e), root).unwrap(), Started::Unasked);
+        }
+        let ended = started(Err(PreviewError::Ended("exited".to_owned())), root);
+        assert!(matches!(ended, Err(PreviewError::Ended(_))));
+        let failed = Reload::Failed {
+            message: "Main.qml:3:1: Expected `}`".to_owned(),
+        };
+        let Started::Told(Some(fault)) = started(Ok(failed), root).unwrap() else {
+            panic!("a start that failed tells its fault");
+        };
+        assert_eq!(fault.level, "error");
+        assert_eq!(
+            started(Ok(Reload::Unchanged), root).unwrap(),
+            Started::Told(None)
+        );
     }
 
     #[test]

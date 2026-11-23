@@ -1118,6 +1118,23 @@ fn follow(engine: &Engine, ws: ObjectId) {
     }
 }
 
+/// How many times in a row the log's watcher tries again after a failure
+/// that may pass, before it leaves it to the next refresh.
+const LOG_TRIES: u32 = 6;
+
+/// How long the log's watcher waits after its `failed`th failure in a row,
+/// each twice the last; `None` once it has tried [`LOG_TRIES`] times.
+fn retry_in(failed: u32) -> Option<Duration> {
+    (failed <= LOG_TRIES).then(|| Duration::from_millis(LOOK_AT_MOST_EVERY_MS << failed))
+}
+
+/// A failure the next try may not meet: a call that did not get through,
+/// or one the preview turned away for now.
+fn passing(e: &studio_core::preview::PreviewError) -> bool {
+    use studio_core::preview::PreviewError;
+    matches!(e, PreviewError::Transport(_) | PreviewError::Refused { .. })
+}
+
 /// Starts waiting on what the previewed app logs, if not already waiting: a
 /// warning of a timer's or a click's is told by no write. Nothing polls,
 /// the wait answers when the app has logged.
@@ -1149,6 +1166,7 @@ fn watch_log(engine: &Engine, ws: ObjectId) {
                 .build()
                 .ok();
             let mut since = None;
+            let mut failed = 0;
             while let Some(runtime) = runtime.as_ref().filter(|_| !stop.is_stopped()) {
                 // The server is held to begin a wait, never through one.
                 let Some(Ok(waiting)) = weak
@@ -1157,24 +1175,50 @@ fn watch_log(engine: &Engine, ws: ObjectId) {
                 else {
                     break;
                 };
-                let count = runtime.block_on(async {
+                let answer = runtime.block_on(async {
                     tokio::select! {
-                        count = waiting => count.ok(),
+                        answer = waiting => Some(answer),
                         () = stop.woken.notified() => None,
                     }
                 });
-                let Some(count) = count else {
+                let read = match answer {
+                    None => break,
+                    Some(Ok(count)) if since == Some(count) => true,
+                    Some(Ok(count)) => {
+                        let Some(server) = weak.upgrade() else {
+                            break;
+                        };
+                        // Counted only once read: a read that failed leaves
+                        // the lines to read on the next try.
+                        let read = server.pull_problems();
+                        if read {
+                            since = Some(count);
+                        }
+                        read
+                    }
+                    Some(Err(e)) if passing(&e) => false,
+                    // Ended, closed, or a preview that cannot be watched.
+                    Some(Err(_)) => break,
+                };
+                failed = if read { 0 } else { failed + 1 };
+                // However often it logs, no more than a person can see.
+                let pause = if read {
+                    Some(Duration::from_millis(LOOK_AT_MOST_EVERY_MS))
+                } else {
+                    retry_in(failed)
+                };
+                let Some(pause) = pause else {
                     break;
                 };
-                if since != Some(count) {
-                    since = Some(count);
-                    let Some(server) = weak.upgrade() else {
-                        break;
-                    };
-                    server.pull_problems();
+                let stopped = runtime.block_on(async {
+                    tokio::select! {
+                        () = tokio::time::sleep(pause) => false,
+                        () = stop.woken.notified() => true,
+                    }
+                });
+                if stopped {
+                    break;
                 }
-                // However often it logs, no more than a person can see.
-                std::thread::sleep(Duration::from_millis(LOOK_AT_MOST_EVERY_MS));
             }
             // No preview to wait on. One that came meanwhile asked while
             // this waited; otherwise the next one's refresh starts it again.
@@ -1772,6 +1816,24 @@ mod tests {
     /// Workspace goes never runs, and would otherwise hold the follower for
     /// the whole of its wait. A running one holds the lane until it lands, so
     /// no scenario can tell this from the thread having been told to stop.
+    /// A watch that failed once is not left to the next refresh: a quiet
+    /// window would not see a warning logged meanwhile.
+    #[test]
+    fn a_log_watch_that_fails_for_now_tries_again_and_then_gives_up() {
+        use studio_core::preview::PreviewError;
+        assert!(passing(&PreviewError::Transport("reset".to_owned())));
+        assert!(passing(&PreviewError::Refused {
+            code: "busy".to_owned(),
+            message: "later".to_owned(),
+        }));
+        assert!(!passing(&PreviewError::Ended("exited".to_owned())));
+        assert!(!passing(&PreviewError::NotOpen));
+        let pauses: Vec<_> = (1..=LOG_TRIES).map(|n| retry_in(n).unwrap()).collect();
+        assert!(pauses.windows(2).all(|w| w[1] == w[0] * 2));
+        assert!(pauses[0] > Duration::from_millis(LOOK_AT_MOST_EVERY_MS));
+        assert_eq!(retry_in(LOG_TRIES + 1), None);
+    }
+
     #[test]
     fn a_queue_going_lets_go_of_the_looks_in_line() {
         let (landed, wait) = mpsc::channel();
