@@ -1026,17 +1026,30 @@ const AIM_DEPTH: usize = 32;
 /// An item exactly as big as the `window` (a root that fills it, a
 /// background) follows the window, not the page: once a preview is grown
 /// to its content such an item reaches the bottom whatever the page holds
-/// now, so it is left out and what it holds is measured instead; it is
-/// named by its handle (by its row, `#n`, without one). A page of nothing
-/// else reaches nowhere, 0.
+/// now, so it is left out and what it holds is measured instead. It is
+/// named by its handle; without one (a delegate's, a Loader's item), by the
+/// handle of the nearest item holding it that has one, its type and its
+/// depth, as `h1/Rectangle@2`: not by its row, which moves when a list
+/// makes or drops a delegate before it. A page of nothing else reaches
+/// nowhere, 0.
 fn lowest_edge(rows: &[Value], window: Size) -> Extent {
     // Bounds are logical pixels; a scaled layout may round them off.
     let near = |a: f64, b: u32| (a - f64::from(b)).abs() < 0.5;
     let mut lowest: f64 = 0.0;
     let mut window_sized = Vec::new();
     let mut hidden_below = None;
-    for (i, row) in rows.iter().enumerate() {
+    // The handles of the items holding this row, with their depths.
+    let mut holders: Vec<(u64, &str)> = Vec::new();
+    for row in rows {
         let depth = row["depth"].as_u64().unwrap_or(0);
+        while holders.last().is_some_and(|&(d, _)| d >= depth) {
+            holders.pop();
+        }
+        let holder = holders.last().map_or("", |&(_, h)| h);
+        let handle = row["handle"].as_str();
+        if let Some(handle) = handle {
+            holders.push((depth, handle));
+        }
         if hidden_below.is_some_and(|hidden| depth > hidden) {
             continue;
         }
@@ -1054,11 +1067,13 @@ fn lowest_edge(rows: &[Value], window: Size) -> Extent {
             && near(number(2), window.width)
             && near(number(3), window.height);
         if fills {
-            window_sized.push(
-                row["handle"]
-                    .as_str()
-                    .map_or_else(|| format!("#{i}"), str::to_owned),
-            );
+            window_sized.push(handle.map_or_else(
+                || {
+                    let ty = row["type"].as_str().unwrap_or("object");
+                    format!("{holder}/{ty}@{depth}")
+                },
+                str::to_owned,
+            ));
         } else if number(2) > 0.0 && number(3) > 0.0 {
             lowest = lowest.max(number(1) + number(3));
         }
@@ -1207,9 +1222,9 @@ mod tests {
         assert_eq!(lowest_edge(rows.as_array().unwrap(), WINDOW).reach, 1000.0);
     }
 
-    /// What it leaves out it names, by handle, else by its row: a page that
-    /// reaches as far as it did can still have changed, when an item the
-    /// size of the window is not any more.
+    /// What it leaves out it names, by handle, else by what holds it: a
+    /// page that reaches as far as it did can still have changed, when an
+    /// item the size of the window is not any more.
     #[test]
     fn what_is_left_out_as_big_as_the_window_is_named() {
         let rows = json!([
@@ -1220,7 +1235,7 @@ mod tests {
         ]);
         let extent = lowest_edge(rows.as_array().unwrap(), WINDOW);
         assert_eq!(extent.reach, 1500.0);
-        assert_eq!(extent.window_sized, ["h1", "h2", "#3"]);
+        assert_eq!(extent.window_sized, ["h1", "h2", "h1/object@1"]);
         // The item folds to within the rest: it reaches no further, but it
         // is not left out any more.
         let folded = json!([
@@ -1231,7 +1246,7 @@ mod tests {
         ]);
         let extent = lowest_edge(folded.as_array().unwrap(), WINDOW);
         assert_eq!(extent.reach, 1500.0);
-        assert_eq!(extent.window_sized, ["h1", "#3"]);
+        assert_eq!(extent.window_sized, ["h1", "h1/object@1"]);
     }
 
     /// One with no handle (a delegate's background, a Loader's item) is
