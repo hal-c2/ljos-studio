@@ -176,6 +176,7 @@ impl Open {
         if self.size != self.screen {
             self.host.resize(self.screen)?;
             self.size = self.screen;
+            self.measured = None;
         }
         self.grow()?;
         self.bumped(before);
@@ -211,10 +212,13 @@ impl Open {
     }
 
     /// Fitted to content, makes the preview as tall as what it lays out at
-    /// its present size, again while that grows; never shorter.
+    /// its present size, again while that grows; never shorter. What the
+    /// page measured is forgotten only once a resize the host took changes
+    /// what it means: a measure refused at the same height leaves it, so an
+    /// unchanged page asked again is still not laid out from its screen.
     fn grow(&mut self) -> Result<(), PreviewError> {
-        self.measured = None;
         if self.fit != Fit::Content {
+            self.measured = None;
             return Ok(());
         }
         for _ in 0..FIT_ROUNDS {
@@ -236,6 +240,7 @@ impl Open {
             };
             self.host.resize(size)?;
             self.size = size;
+            self.measured = None;
         }
         Ok(())
     }

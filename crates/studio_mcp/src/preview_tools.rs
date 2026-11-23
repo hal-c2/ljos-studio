@@ -220,6 +220,8 @@ fn change(
         open.host.resize(size)?;
         open.size = size;
         open.screen = size;
+        // What was measured belongs to the page at the old size.
+        open.measured = None;
     }
     open.target = target;
     let old = open.mocked.clone();
