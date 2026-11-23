@@ -475,6 +475,27 @@ mod tests {
     }
 
     #[test]
+    fn a_block_with_a_size_of_its_own_stands_at_it() {
+        let store = store(&[
+            (
+                "Blocks/qmldir",
+                "module Blocks\n# block Badge 1.0 Badge.qml\n",
+            ),
+            (
+                "Blocks/Badge.qml",
+                "import QtQuick\nRectangle {\n    width: 200\n    height: 100\n}\n",
+            ),
+        ]);
+        let h = harness(&store, "Blocks/Badge.qml").unwrap();
+        assert!(
+            h.text
+                .contains("Badge {\n        id: subject\n        anchors.centerIn: parent\n    }")
+        );
+        assert!(!h.text.contains("width: 320"));
+        assert!(!h.text.contains("height: 72"));
+    }
+
+    #[test]
     fn what_shows_itself_has_no_harness() {
         let store = store(&[
             ("Main.qml", "import QtQuick\nItem {\n    Rectangle {}\n}\n"),
