@@ -37,6 +37,8 @@ struct Seen {
     window: u32,
     /// What happens while a scroll or a swipe settles, outside Studio's lock.
     during_settle: Option<Box<dyn FnOnce() + Send>>,
+    /// What another program does while a picture is taken.
+    during_shot: Option<Box<dyn FnOnce() + Send>>,
     /// How many times `extent` was asked: the `n`th answers to the call
     /// `extent n`, so a test can fail one of a fit's measures.
     extents: usize,
@@ -125,6 +127,10 @@ impl PreviewHost for Recorder {
 
     fn screenshot(&mut self, max_side: u32) -> Result<Picture, PreviewError> {
         self.note(format!("screenshot {max_side}"))?;
+        let during = self.0.lock().unwrap().during_shot.take();
+        if let Some(during) = during {
+            during();
+        }
         Ok(Picture {
             png: b"\x89PNG".to_vec(),
             width: max_side,
@@ -894,6 +900,41 @@ fn a_burst_with_a_picture_after_every_write_stays_within_the_budget() {
     assert_within_the_budget(&f);
     // Each look saw the write before it, budget or no budget.
     assert_eq!(f.seen.lock().unwrap().reloads.len(), 20);
+}
+
+/// The picture is labelled with the text it was taken of: an edit that lands
+/// while it is taken is newer than its pixels, so a window keeping the
+/// picture still sees it is behind.
+#[test]
+fn a_picture_is_labelled_with_the_text_before_an_edit_that_lands_while_it_is_taken() {
+    let f = Fixture::new();
+    f.call("preview_open", json!({ "doc": "Shell.qml" }))
+        .unwrap();
+    let before = f
+        .server
+        .studio()
+        .lock()
+        .unwrap()
+        .session
+        .generation("Shell.qml")
+        .unwrap();
+    let shell = f._dir.path().join("Shell.qml");
+    f.seen.lock().unwrap().during_shot = Some(Box::new(move || {
+        std::fs::write(shell, SHELL.replace("\"x\"", "\"y\"")).unwrap();
+    }));
+    let ctx = CallCtx::new(CapSet::of([Cap::Inspect, Cap::Mutate, Cap::Run]));
+    let (_, shown) = f.server.shown_picture(&ctx, json!({})).unwrap();
+    assert_eq!(shown.unwrap().text, before);
+    // The edit is the session's once it next reads the file.
+    let after = f
+        .server
+        .studio()
+        .lock()
+        .unwrap()
+        .session
+        .generation("Shell.qml")
+        .unwrap();
+    assert_eq!(after, before + 1);
 }
 
 #[test]
