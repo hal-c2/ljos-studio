@@ -186,6 +186,31 @@ Feature: A project's assets
     And the refusal's "/details/documents/0" is ".studio/samples.json"
     And the file "assets/photo.png" exists
 
+  # JSON may escape any character of a string; the sample is what it decodes to.
+  Scenario: A picture a block's sample says with escapes stays
+    Given the file "assets/photo.png":
+      """
+      not looked at
+      """
+    And the file "Card.qml":
+      """qml
+      import QtQuick
+
+      Image { property url imageSource; source: imageSource }
+      """
+    And the file ".studio/samples.json":
+      """json
+      {"Card.qml": {"imageSource": "assets\/\u0070hoto.png"}}
+      """
+    When the agent calls the tool "project_open" with:
+      """json
+      {"asset": "remove", "name": "photo.png"}
+      """
+    Then the agent is refused with "not_actionable"
+    And the refusal's "/details/kind" is "asset_in_use"
+    And the refusal's "/details/documents/0" is ".studio/samples.json"
+    And the file "assets/photo.png" exists
+
   Scenario: What a document uses stays, and the refusal says which
     Given the file "assets/a.svg":
       """

@@ -189,7 +189,12 @@ pub(crate) fn remove(studio: &Studio, name: &str) -> Result<String, SurfaceError
     }
     let users: Vec<String> = files
         .into_iter()
-        .filter(|file| store.read(file).is_ok_and(|text| names_url(&text, &url)))
+        .filter(|file| {
+            store.read(file).is_ok_and(|text| match file.as_str() {
+                crate::harness::SAMPLES => samples_name_url(&text, &url),
+                _ => names_url(&text, &url),
+            })
+        })
         .collect();
     if !users.is_empty() {
         return Err(refused(
@@ -203,6 +208,24 @@ pub(crate) fn remove(studio: &Studio, name: &str) -> Result<String, SurfaceError
 }
 
 const SCRIPTS: [&str; 2] = ["js", "mjs"];
+
+/// Whether a value of the samples says `url`: as a harness reads it, decoded,
+/// since JSON may escape any character of a string. Samples that do not
+/// read are searched as written.
+fn samples_name_url(text: &str, url: &str) -> bool {
+    fn says(value: &serde_json::Value, url: &str) -> bool {
+        match value {
+            serde_json::Value::String(s) => names_url(s, url),
+            serde_json::Value::Array(items) => items.iter().any(|v| says(v, url)),
+            serde_json::Value::Object(map) => map.values().any(|v| says(v, url)),
+            _ => false,
+        }
+    }
+    match serde_json::from_str(text) {
+        Ok(value) => says(&value, url),
+        Err(_) => names_url(text, url),
+    }
+}
 
 /// Whether `text` says `url` as a whole path, however many `../` lead to it.
 /// A url a document builds at run time from parts is not seen here.
