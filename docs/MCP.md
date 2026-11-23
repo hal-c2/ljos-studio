@@ -181,9 +181,9 @@ shows it; the watcher's quiet time is not on that path.
 - DECISION: starting a preview needs `run` (it runs the project's code);
   looking at one that runs (`preview_screenshot`, `preview_events`) needs
   only `inspect`. The hidden file a document opened alone runs from (below)
-  is part of running it, so `run` writes it without `mutate` or `fs`: its
-  path is the document's own name, made hidden, and a file there Studio did
-  not write is never replaced. The project's code `run` starts reaches more
+  is part of running it, so `run` writes it, and the lock file a preview
+  holds beside it, without `mutate` or `fs`: its path is the document's own
+  name, made hidden, and a file there Studio did not write is never replaced. The project's code `run` starts reaches more
   than that.
 
 ## Selection from the canvas (S3)
@@ -389,7 +389,11 @@ instance. The instance is a hidden file beside the document
 (`.HabitCard.preview.qml`), which project_open, the documents list and export
 leave out. It goes when the preview ends (another one, a crash, another
 project, Studio closing); only a killed Studio leaves one, which the next
-preview of that component replaces. A file of that name Studio did not write
+preview of that component replaces. While a preview runs from it, that
+preview holds a locked file beside it (`.HabitCard.preview.qml.<run>.lock`),
+and a preview that ends leaves the stand-in to another Studio's preview of
+the same component that still holds one. A killed Studio's lock file, no
+longer locked, is removed by the next that looks. A file of that name Studio did not write
 is left alone, and the component then previews as itself. The document is not
 changed. In a browser, where only the store reaches the file, it goes when
 another preview opens or this one does not start; one whose preview ended

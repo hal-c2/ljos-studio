@@ -11,7 +11,9 @@
 //! it sees the same types and imports.
 
 use std::collections::HashSet;
+use std::fs::File;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use serde_json::Value;
 use studio_core::{
@@ -57,14 +59,19 @@ pub(crate) struct Harness {
 }
 
 impl Harness {
-    /// This harness as written into the project at `dir`.
+    /// This harness as written into the project at `dir`. Made before the
+    /// file is written: what holds it is seen by another Studio ending its
+    /// own preview of the component before the file is there to remove.
     pub fn standing(&self, dir: Option<&Path>) -> Standing {
+        let file = dir.map(|dir| {
+            let root = dir.canonicalize().unwrap_or_else(|_| dir.to_owned());
+            (root, dir.join(&self.path))
+        });
+        let held = file.as_ref().and_then(|(_, file)| hold(file));
         Standing {
             path: self.path.clone(),
-            file: dir.map(|dir| {
-                let root = dir.canonicalize().unwrap_or_else(|_| dir.to_owned());
-                (root, dir.join(&self.path))
-            }),
+            file,
+            held,
         }
     }
 }
@@ -79,12 +86,123 @@ pub(crate) struct Standing {
     /// file. None in a project without a directory, which only its store
     /// reaches.
     file: Option<(PathBuf, PathBuf)>,
+    /// This preview's hold on the file, which another Studio previewing the
+    /// same component from the project sees and so leaves the file.
+    held: Option<Held>,
+}
+
+/// A lock file beside a harness, locked while a preview runs from it. A
+/// lock, not a pid, says it lives: a killed Studio's is taken by the next
+/// that looks, as Studio's state directory is (`studio/src/state.rs`).
+#[derive(Debug)]
+struct Held {
+    lock: File,
+    path: PathBuf,
+}
+
+/// What a hold beside `file` is named: `<file>.<run>.<ext>`.
+fn hold_path(file: &Path, run: &str, ext: &str) -> Option<PathBuf> {
+    let mut name = file.file_name()?.to_os_string();
+    name.push(format!(".{run}.{ext}"));
+    Some(file.with_file_name(name))
+}
+
+/// Holds `file` for this preview. Made and locked under another name, then
+/// renamed into place, so no other Studio sees it unlocked and takes it
+/// for a killed one's.
+fn hold(file: &Path) -> Option<Held> {
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    // Unique among the holds of live runs: a pid is not reused while its
+    // run lives, and the count tells this run's apart.
+    let run = format!(
+        "{}-{}",
+        std::process::id(),
+        NEXT.fetch_add(1, Ordering::Relaxed)
+    );
+    let making = hold_path(file, &run, "making")?;
+    let lock = File::create(&making).ok()?;
+    let path = hold_path(file, &run, "lock")?;
+    if lock.try_lock().is_err() || std::fs::rename(&making, &path).is_err() {
+        // std opens files shareable for deletion, so it goes while open.
+        let _ = std::fs::remove_file(&making);
+        return None;
+    }
+    Some(Held { lock, path })
+}
+
+/// Whether a preview other than this one runs from `file`. A killed
+/// Studio's hold found on the way is removed.
+fn held_by_another(file: &Path) -> bool {
+    let (Some(dir), Some(name)) = (file.parent(), file.file_name()) else {
+        return false;
+    };
+    let prefix = format!("{}.", name.to_string_lossy());
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return false;
+    };
+    let mut held = false;
+    for entry in entries.flatten() {
+        let found = entry.file_name();
+        let found = found.to_string_lossy();
+        // Not followed: a link here is nobody's hold.
+        if !found.starts_with(&prefix)
+            || !found.ends_with(".lock")
+            || !entry.file_type().is_ok_and(|t| t.is_file())
+        {
+            continue;
+        }
+        let Ok(lock) = File::open(entry.path()) else {
+            continue;
+        };
+        match lock.try_lock() {
+            // Taken: its preview has ended. Removed while held, so no
+            // starting run's hold of that name is taken for it.
+            Ok(()) => {
+                let _ = std::fs::remove_file(entry.path());
+            }
+            // Refused: it lives, or it cannot be judged, and a file is
+            // never removed on a guess.
+            Err(_) => held = true,
+        }
+    }
+    held
 }
 
 impl Standing {
+    /// Lets go of this preview's hold, and says whether another preview
+    /// still runs from the file, which then stays.
+    fn release(&mut self) -> bool {
+        if let Some(held) = self.held.take() {
+            // Let go before it goes, so whoever looks next may take it.
+            let _ = held.lock.unlock();
+            let _ = std::fs::remove_file(&held.path);
+        }
+        // Outside the project, another's holds are not this Studio's to judge.
+        self.inside()
+            && self
+                .file
+                .as_ref()
+                .is_some_and(|(_, file)| held_by_another(file))
+    }
+
+    /// Whether the file's directory is still inside the project. The
+    /// store's confinement is not at hand here: a directory swapped for a
+    /// link since would lead out of it.
+    fn inside(&self) -> bool {
+        self.file.as_ref().is_some_and(|(root, file)| {
+            file.parent()
+                .and_then(|dir| dir.canonicalize().ok())
+                .is_some_and(|d| d.starts_with(root))
+        })
+    }
+
     /// Takes the file out through the project's store, which alone reaches
-    /// it in a project without a directory. A person's file there stays.
-    pub fn leave(&self, store: &dyn Store) {
+    /// it in a project without a directory. A person's file there stays,
+    /// and so does one another Studio's preview runs from.
+    pub fn leave(&mut self, store: &dyn Store) {
+        if self.release() {
+            return;
+        }
         if store.read(&self.path).is_ok_and(|text| is_studios(&text)) {
             // Already gone is as good.
             let _ = store.remove(&self.path);
@@ -94,15 +212,12 @@ impl Standing {
 
 impl Drop for Standing {
     fn drop(&mut self) {
-        if let Some((root, file)) = &self.file {
-            // The store's confinement is not at hand here: a directory
-            // swapped for a link since would lead out of the project.
-            let inside = file
-                .parent()
-                .and_then(|dir| dir.canonicalize().ok())
-                .is_some_and(|d| d.starts_with(root));
+        if self.release() {
+            return;
+        }
+        if let Some((_, file)) = self.file.as_ref().filter(|_| self.inside()) {
             // A person may have written their own file there since.
-            if inside && std::fs::read_to_string(file).is_ok_and(|text| is_studios(&text)) {
+            if std::fs::read_to_string(file).is_ok_and(|text| is_studios(&text)) {
                 // Already gone is as good.
                 let _ = std::fs::remove_file(file);
             }
@@ -628,6 +743,29 @@ mod tests {
     }
 
     #[test]
+    fn a_component_of_a_base_that_shows_nothing_is_shown_as_what_it_offers() {
+        let store = store(&[
+            (
+                "Base.qml",
+                "import QtQml\nQtObject {\n    required property string title\n}\n",
+            ),
+            ("Derived.qml", "import QtQml\nBase {}\n"),
+            (
+                "Win.qml",
+                "import QtQuick\nWindow {\n    required property int n\n}\n",
+            ),
+            ("Shown.qml", "import QtQuick\nWin {}\n"),
+        ]);
+        let h = harness(&store, "Derived.qml").expect("it requires a title");
+        assert!(h.text.contains("What it offers"), "{}", h.text);
+        // A QtObject has no size to give nor anchors to centre it by.
+        assert!(!h.text.contains("anchors.centerIn"), "{}", h.text);
+        assert!(h.text.contains("title: \"Title\""), "{}", h.text);
+        // A window is its own frame, whatever it is named.
+        assert_eq!(harness(&store, "Shown.qml"), None);
+    }
+
+    #[test]
     fn a_block_is_given_what_its_base_requires_and_it_does_not_set() {
         let store = store(&[
             (
@@ -733,29 +871,6 @@ mod tests {
     }
 
     #[test]
-    fn a_component_of_a_base_that_shows_nothing_is_shown_as_what_it_offers() {
-        let store = store(&[
-            (
-                "Base.qml",
-                "import QtQml\nQtObject {\n    required property string title\n}\n",
-            ),
-            ("Derived.qml", "import QtQml\nBase {}\n"),
-            (
-                "Win.qml",
-                "import QtQuick\nWindow {\n    required property int n\n}\n",
-            ),
-            ("Shown.qml", "import QtQuick\nWin {}\n"),
-        ]);
-        let h = harness(&store, "Derived.qml").expect("it requires a title");
-        assert!(h.text.contains("What it offers"), "{}", h.text);
-        // A QtObject has no size to give nor anchors to centre it by.
-        assert!(!h.text.contains("anchors.centerIn"), "{}", h.text);
-        assert!(h.text.contains("title: \"Title\""), "{}", h.text);
-        // A window is its own frame, whatever it is named.
-        assert_eq!(harness(&store, "Shown.qml"), None);
-    }
-
-    #[test]
     fn what_shows_itself_has_no_harness() {
         let store = store(&[
             ("Main.qml", "import QtQuick\nItem {\n    Rectangle {}\n}\n"),
@@ -816,8 +931,9 @@ mod tests {
             text: MARK.to_owned(),
         };
         let standing = h.standing(Some(&project));
-        // Swapped for a link to a marked file of another project.
-        std::fs::remove_dir(project.join("cards")).unwrap();
+        // Swapped for a link to a marked file of another project. The
+        // directory holds this preview's hold, so it goes with it.
+        std::fs::remove_dir_all(project.join("cards")).unwrap();
         std::os::unix::fs::symlink(&elsewhere, project.join("cards")).unwrap();
         let theirs = elsewhere.join(".Card.preview.qml");
         std::fs::write(&theirs, MARK).unwrap();
@@ -836,6 +952,42 @@ mod tests {
         };
         drop(h.standing(Some(dir.path())));
         assert_eq!(std::fs::read_to_string(&file).unwrap(), "// Mine\n");
+    }
+
+    #[test]
+    fn a_harness_another_studio_previews_from_stays_until_it_ends() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join(".Card.preview.qml");
+        std::fs::write(&file, MARK).unwrap();
+        let h = Harness {
+            path: ".Card.preview.qml".to_owned(),
+            text: MARK.to_owned(),
+        };
+        // Two Studios on one project, each previewing the component.
+        let first = h.standing(Some(dir.path()));
+        let mut second = h.standing(Some(dir.path()));
+        drop(first);
+        assert!(file.exists(), "removed while another preview ran from it");
+        second.leave(&studio_core::FsStore::new(dir.path()).unwrap());
+        assert!(!file.exists());
+        drop(second);
+        // Nothing of either preview is left in the project.
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 0);
+    }
+
+    #[test]
+    fn a_killed_studios_hold_keeps_no_harness() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join(".Card.preview.qml");
+        std::fs::write(&file, MARK).unwrap();
+        // What a killed Studio leaves: its hold, no longer locked.
+        std::fs::write(dir.path().join(".Card.preview.qml.1-0-0.lock"), "").unwrap();
+        let h = Harness {
+            path: ".Card.preview.qml".to_owned(),
+            text: MARK.to_owned(),
+        };
+        drop(h.standing(Some(dir.path())));
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 0);
     }
 
     #[test]
