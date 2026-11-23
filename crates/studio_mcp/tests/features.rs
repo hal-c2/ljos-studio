@@ -175,6 +175,10 @@ impl PreviewHost for Watched {
         self.0.extent()
     }
 
+    fn appearance(&mut self, dark: bool) -> Result<(), PreviewError> {
+        self.0.appearance(dark)
+    }
+
     fn close(&mut self) {
         self.0.close();
     }
