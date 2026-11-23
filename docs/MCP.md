@@ -420,8 +420,9 @@ that grows grows its preview, until `fit: "screen"` gives back the
 screen's height. A host that cannot say how tall its content is refuses
 (`not_actionable`, `refused`), and the fit it refused is not kept: the
 preview keeps the fit it had (a new one is fitted to its screen), so the
-next open that names no fit is not refused for it. The answer and the
-window's preview say `fit`.
+next open that names no fit is not refused for it. One refused after it
+grew the preview is put back to its screen's size when it goes back to
+fitting its screen. The answer and the window's preview say `fit`.
 
 - DECISION: a fitted preview is measured at its screen's height after a
   reload, not at the height it has: an item that fills the window (a

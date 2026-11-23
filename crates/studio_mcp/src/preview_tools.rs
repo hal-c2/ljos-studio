@@ -325,6 +325,7 @@ fn open(studio: &Mutex<Studio>, a: OpenArgs) -> Result<OpenOut, SurfaceError> {
         let mut reloads = Vec::new();
         let same = open.screen == size && open.fit == fit;
         let was = open.fit;
+        let before = open.size;
         let changed = change(open, size, target, state, &aliases, &mut reloads);
         // A new screen, fit or alias is laid out from the screen again; the
         // same ones keep the height fitted, not shrunk and grown back.
@@ -338,9 +339,9 @@ fn open(studio: &Mutex<Studio>, a: OpenArgs) -> Result<OpenOut, SurfaceError> {
         });
         // A fit the host refused, or one asked with a change it refused, is
         // not kept, or every later open that names no fit would be refused
-        // for it.
+        // for it; nor is what it had grown the preview to.
         if changed.is_err() {
-            open.fit = was;
+            open.undo_fit(was, before);
         }
         // A mock switched in starts the app again, with everything showing.
         let restarted = reloads
@@ -395,7 +396,7 @@ fn open(studio: &Mutex<Studio>, a: OpenArgs) -> Result<OpenOut, SurfaceError> {
         previews.write_hidden();
         let open = previews.open.as_mut().expect("just opened");
         if let Err(e) = open.refit() {
-            open.fit = Fit::Screen;
+            open.undo_fit(Fit::Screen, size);
             return Err(preview_error(previews.failed(e)));
         }
     }
