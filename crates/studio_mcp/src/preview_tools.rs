@@ -436,11 +436,16 @@ const SETTLE_MS: u64 = 3000;
 struct ToRead {
     doc: String,
     address: Address,
+    /// The object the address named when the input went in: one put in its
+    /// place while the page settled is another, and is not read for it.
+    handle: String,
     id: String,
     block: Option<String>,
+    /// The block's module, to say once it settles whether it runs mocked:
+    /// aliases may have come or gone meanwhile.
+    module: Option<String>,
     /// The block's published state, then what `read` asked for.
     names: Vec<String>,
-    mocked: bool,
     show: Option<String>,
 }
 
@@ -573,7 +578,7 @@ fn state_input(studio: &Mutex<Studio>, a: StateArgs, waits: bool) -> Result<Acte
             watch: settling(open, &inputs, waits),
         });
     };
-    let (_, node) = studio.session.resolve(&doc, &address).map_err(error)?;
+    let (handle, node) = studio.session.resolve(&doc, &address).map_err(error)?;
     let id = node.id.clone().ok_or_else(no_id)?;
     let registry = blocks::registry(studio.session.store());
     let text = studio.session.text(&doc).map_err(error)?.0.to_owned();
@@ -626,10 +631,11 @@ fn state_input(studio: &Mutex<Studio>, a: StateArgs, waits: bool) -> Result<Acte
     let to_read = ToRead {
         doc,
         address,
+        handle,
         id,
         block,
+        module: contract.map(|c| c.module.clone()),
         names,
-        mocked,
         show: a.show,
     };
     Ok(Acted {
@@ -658,10 +664,11 @@ fn state_read(studio: &Mutex<Studio>, started: u64, r: ToRead) -> Result<StateOu
     let ToRead {
         doc,
         address,
+        handle,
         id,
         block,
+        module,
         names,
-        mocked,
         show,
     } = r;
     let mut studio = lock(studio);
@@ -674,6 +681,21 @@ fn state_read(studio: &Mutex<Studio>, started: u64, r: ToRead) -> Result<StateOu
     if open.started != started {
         return Err(replaced());
     }
+    // Edits that came in while the page settled may have removed the object
+    // and given its id to another.
+    let (now, _) = studio.session.resolve(&doc, &address).map_err(error)?;
+    if now != handle {
+        return Err(SurfaceError::new(
+            ErrorCode::StaleRef,
+            format!(
+                "`{id}` was removed while the page settled and another has its id now; nothing was read"
+            ),
+        )
+        .with_details(json!({ "kind": "node_replaced" })));
+    }
+    let mocked = module
+        .as_deref()
+        .is_some_and(|m| open.mocked.iter().any(|a| a.module == m));
     if let Some(show) = show {
         let known = show.is_empty()
             || studio
