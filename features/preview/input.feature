@@ -157,6 +157,43 @@ Feature: The preview is scrolled, typed into and made as tall as its page, as a 
       """
     Then the answer's "/size" is {"width": 1280, "height": 3000}
 
+  Scenario: A preview fitted to its content gets shorter when the running page does
+    Given the file "Fold.qml":
+      """qml
+      import QtQuick
+
+      Item {
+          id: root
+
+          Rectangle {
+              id: panel
+              width: 400
+              height: 2000
+              color: "red"
+
+              MouseArea {
+                  id: fold
+                  width: 100
+                  height: 100
+                  onClicked: panel.height = 1000
+              }
+          }
+      }
+      """
+    And the agent has called the tool "preview_open" with:
+      """json
+      {"doc": "Fold.qml", "fit": "content"}
+      """
+    And the agent has called the tool "preview_state" with:
+      """json
+      {"node": {"id": "panel"}, "click": {"id": "fold"}, "read": ["height"]}
+      """
+    When the agent calls the tool "preview_open" with:
+      """json
+      {"doc": "Fold.qml"}
+      """
+    Then the answer's "/size" is {"width": 1280, "height": 1000}
+
   Scenario: Fitted to the screen again, the preview is the screen's height
     Given the agent has called the tool "preview_open" with:
       """json
