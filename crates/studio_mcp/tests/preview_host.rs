@@ -40,6 +40,9 @@ struct Seen {
     /// How many times `extent` was asked: the `n`th answers to the call
     /// `extent n`, so a test can fail one of a fit's measures.
     extents: usize,
+    /// On the `n`th measure the `tall` item folds to this height first, as a
+    /// page changes while it runs.
+    folds: Option<(usize, f64)>,
 }
 
 struct Recorder(Arc<Mutex<Seen>>);
@@ -170,6 +173,11 @@ impl PreviewHost for Recorder {
         let n = {
             let mut seen = self.0.lock().unwrap();
             seen.extents += 1;
+            if let Some((at, tall)) = seen.folds
+                && at == seen.extents
+            {
+                seen.tall = Some(tall);
+            }
             seen.extents
         };
         self.answer(&format!("extent {n}"))?;
@@ -541,6 +549,38 @@ fn reopening_a_preview_grown_to_an_item_folded_within_the_rest_fits_the_rest() {
     assert_eq!(f.calls(), ["resize 1280x800", "resize 1280x1500"]);
 }
 
+/// A reopen compares what the page measures with what it measured when it
+/// was last grown, and keeps the measure it compared: an item that folds
+/// after that measure is seen by the next reopen, which lays the page out
+/// again, and is not taken as what the unchanged page measures (review
+/// 6027993410).
+#[test]
+fn an_item_folded_after_a_reopen_measured_the_page_is_seen_by_the_next_reopen() {
+    let f = Fixture::new();
+    {
+        let mut seen = f.seen.lock().unwrap();
+        seen.tall = Some(2000.0);
+        seen.extent = Some(1500.0);
+    }
+    f.call(
+        "preview_open",
+        json!({ "doc": "Shell.qml", "fit": "content" }),
+    )
+    .unwrap();
+    f.calls();
+    // Just after the reopen's first measure.
+    let after = f.seen.lock().unwrap().extents + 2;
+    f.seen.lock().unwrap().folds = Some((after, 1000.0));
+    f.call("preview_open", json!({ "doc": "Shell.qml" }))
+        .unwrap();
+    f.calls();
+    let out = f
+        .call("preview_open", json!({ "doc": "Shell.qml" }))
+        .unwrap();
+    assert_eq!(out["size"], json!({ "width": 1280, "height": 1500 }));
+    assert_eq!(f.calls(), ["resize 1280x800", "resize 1280x1500"]);
+}
+
 /// A measure refused partway through a reopen, after the page measured what
 /// it did, leaves what it measured when it was last grown: the next reopen
 /// of the unchanged page resizes nothing (review 6027419412).
@@ -558,15 +598,15 @@ fn a_measure_refused_on_a_reopen_keeps_what_the_unchanged_page_measured() {
     )
     .unwrap();
     f.calls();
-    // The reopen measures once to see whether the page changed, then again
-    // as it grows: the second is refused.
-    let second = f.seen.lock().unwrap().extents + 2;
-    f.fail(&format!("extent {second}"), refused());
+    // The reopen measures the page to see whether it changed, and grows from
+    // that measure: the one measure it makes is refused.
+    let first = f.seen.lock().unwrap().extents + 1;
+    f.fail(&format!("extent {first}"), refused());
     f.call("preview_open", json!({ "doc": "Shell.qml" }))
         .unwrap_err();
     assert_eq!(
         f.seen.lock().unwrap().extents,
-        second,
+        first,
         "not the measure meant"
     );
     assert_eq!(f.calls(), Vec::<String>::new());
