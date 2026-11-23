@@ -139,7 +139,9 @@ if (page.description) {
   head.push(`<meta property="og:description" content="${html(page.description)}" />`);
 }
 head.push(`<meta property="og:title" content="${html(title)}" />`);
-if (page.icon) head.push(`<link rel="icon" href="./${html(page.icon)}" />`);
+// With no icon named, a browser asks for `/favicon.ico`, which no site
+// has: `data:,` is an icon of nothing, asked of nobody.
+head.push(`<link rel="icon" href="${page.icon ? `./${html(page.icon)}` : "data:,"}" />`);
 if (page.image) {
   head.push(`<meta property="og:image" content="./${html(page.image)}" />`);
   head.push(`<meta name="twitter:card" content="summary_large_image" />`);

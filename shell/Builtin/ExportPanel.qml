@@ -623,6 +623,7 @@ Popup {
         }
 
         ListView {
+            id: files
             objectName: "exportFiles"
             clip: true
             model: panel.buildSteps().concat(panel.lines(panel.answer))
@@ -630,7 +631,13 @@ Popup {
             Accessible.name: "Bundle contents"
             Layout.fillWidth: true
             Layout.fillHeight: true
-            ScrollBar.vertical: ScrollBar {}
+            ScrollBar.vertical: ScrollBar {
+                Accessible.name: "Scroll the bundle's contents"
+                // As the documents' bar: its last row, cut in half above the
+                // buttons, is all else that says the list goes on.
+                policy: ScrollBar.AlwaysOn
+                visible: files.contentHeight > files.height
+            }
 
             delegate: Label {
                 required property string modelData
