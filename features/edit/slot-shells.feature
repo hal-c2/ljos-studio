@@ -221,6 +221,38 @@ Feature: A block gets a slot, and a shell skins it
       """
     Then the file "BadgeShell.qml" contains "icon: \"Blocks/icons/run.svg\""
 
+  # A slot is set once, by the skin: QML refuses a property set twice in
+  # one object, so a required slot is not also given an empty list.
+  Scenario: A shell sets a required slot once, with its skin
+    Given the file "Blocks/qmldir":
+      """
+      module Blocks
+      # block Tray 1.0 Tray.qml Notes "One tray"
+      """
+    And the file "Blocks/Tray.qml":
+      """qml
+      import QtQuick
+      import Ljos.Blocks
+
+      Item {
+          id: tray
+          required property list<Contribution> face
+          required property string title
+          Slot {
+              id: slot1
+              name: "face"
+              contributions: tray.face
+          }
+      }
+      """
+    When the agent calls the tool "document_new" with:
+      """json
+      {"doc": "TrayShell.qml", "shell": "Blocks.Tray"}
+      """
+    Then the file "TrayShell.qml" contains "face: Contribution {"
+    And the file "TrayShell.qml" contains "title: \"Title\""
+    And the file "TrayShell.qml" does not contain "face: []"
+
   Scenario: A block with no slots has no shell
     When the agent calls the tool "document_new" with:
       """json

@@ -1424,9 +1424,13 @@ fn shell_text(studio: &Studio, doc: &str, qualified: &str) -> Result<String, Sur
         .find(|p| p.ty == "string")
         .map(|p| p.name.clone());
     out.push_str(&format!("\n{} {{\n    id: {id}\n", block.name));
-    // An instance whose required properties are not set is not made.
+    // An instance whose required properties are not set is not made. A
+    // slot is set below, by its skin: QML refuses a property set twice.
     if let ljos_blocks::Origin::Qml { file } = &block.origin {
-        for (property, value) in crate::harness::required_sets(studio.session.store(), file, doc) {
+        for (property, value) in crate::harness::required_sets(studio.session.store(), file, doc)
+            .into_iter()
+            .filter(|(property, _)| !block.slots.iter().any(|slot| slot.name == *property))
+        {
             out.push_str(&format!("    {property}: {value}\n"));
         }
     }
