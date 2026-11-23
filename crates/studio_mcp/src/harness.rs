@@ -227,9 +227,9 @@ fn shows_nothing(nodes: &[Node], root: &Node, members: &[Member], block: bool) -
         && members.iter().any(|m| m.kind != MemberKind::Handler)
 }
 
-/// What a document made around the block in `file` sets on it, so that
-/// it can be made: each property it requires, as a harness sets it.
-pub(crate) fn required_sets(store: &dyn Store, file: &str) -> Vec<(String, String)> {
+/// What a document `doc` made around the block in `file` sets on it, so
+/// that it can be made: each property it requires, as a harness sets it.
+pub(crate) fn required_sets(store: &dyn Store, file: &str, doc: &str) -> Vec<(String, String)> {
     let Ok(text) = store.read(file) else {
         return Vec::new();
     };
@@ -240,7 +240,50 @@ pub(crate) fn required_sets(store: &dyn Store, file: &str) -> Vec<(String, Strin
         .into_iter()
         .filter(|m| m.required)
         .collect();
-    sets(&required, &samples(store, file))
+    let mut given = samples(store, file);
+    // A url is resolved against the file that binds it, and the samples
+    // were given for a harness beside the block: from elsewhere the same
+    // picture is reached by another path. A string stays as given.
+    for member in required.iter().filter(|m| m.ty.as_deref() == Some("url")) {
+        if let Some(Value::String(url)) = given.get_mut(&member.name)
+            && let Some(moved) = rebased(url, directory(file), directory(doc))
+        {
+            *url = moved;
+        }
+    }
+    sets(&required, &given)
+}
+
+fn directory(file: &str) -> &str {
+    file.rsplit_once('/').map_or("", |(dir, _)| dir)
+}
+
+/// A relative `url`, said in the directory `from`, as said in `to` (both
+/// relative to the project). None for one that is absolute, has a scheme,
+/// or leaves the project: it reads the same anywhere, or is kept as given.
+fn rebased(url: &str, from: &str, to: &str) -> Option<String> {
+    let scheme = url
+        .split_once(':')
+        .is_some_and(|(head, _)| !head.is_empty() && !head.contains('/'));
+    if url.is_empty() || url.starts_with('/') || scheme {
+        return None;
+    }
+    let mut target: Vec<&str> = from.split('/').filter(|s| !s.is_empty()).collect();
+    for part in url.split('/') {
+        match part {
+            "" | "." => {}
+            ".." => {
+                target.pop()?;
+            }
+            part => target.push(part),
+        }
+    }
+    let (_, dirs) = target.split_last()?;
+    let here: Vec<&str> = to.split('/').filter(|s| !s.is_empty()).collect();
+    let shared = here.iter().zip(dirs).take_while(|(a, b)| a == b).count();
+    let mut parts = vec![".."; here.len() - shared];
+    parts.extend(&target[shared..]);
+    Some(parts.join("/"))
 }
 
 fn samples(store: &dyn Store, doc: &str) -> serde_json::Map<String, Value> {
@@ -468,6 +511,43 @@ mod tests {
         assert!(h.text.contains("count: 4\n"));
         assert!(!h.text.contains("width: 320"));
         assert!(h.text.contains("height: 72"));
+    }
+
+    #[test]
+    fn a_relative_url_sample_is_read_from_the_blocks_directory() {
+        let store = store(&[
+            (
+                "Blocks/Card.qml",
+                "import QtQuick\nItem {\n    required property url icon\n    \
+                 required property url back\n    required property url remote\n    \
+                 required property string label\n}\n",
+            ),
+            (
+                SAMPLES,
+                r#"{"Blocks/Card.qml": {"icon": "icons/run.svg", "back": "../art/a.svg",
+                    "remote": "https://example.com/a.svg", "label": "icons/run.svg"}}"#,
+            ),
+        ]);
+        let set = |doc: &str, name: &str| {
+            required_sets(&store, "Blocks/Card.qml", doc)
+                .into_iter()
+                .find(|(n, _)| n == name)
+                .map(|(_, v)| v)
+        };
+        let said = |v: &str| Some(format!("\"{v}\""));
+        assert_eq!(set("CardShell.qml", "icon"), said("Blocks/icons/run.svg"));
+        assert_eq!(set("CardShell.qml", "back"), said("art/a.svg"));
+        assert_eq!(
+            set("Other/CardShell.qml", "icon"),
+            said("../Blocks/icons/run.svg")
+        );
+        assert_eq!(set("Blocks/CardShell.qml", "icon"), said("icons/run.svg"));
+        // Not relative, or not a url: read the same anywhere.
+        assert_eq!(
+            set("CardShell.qml", "remote"),
+            said("https://example.com/a.svg")
+        );
+        assert_eq!(set("CardShell.qml", "label"), said("icons/run.svg"));
     }
 
     #[test]

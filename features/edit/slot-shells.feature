@@ -190,6 +190,37 @@ Feature: A block gets a slot, and a shell skins it
       """
     Then the preview shows "Title"
 
+  # A url is read where it is written: a shell beside the project's root
+  # reads the block's relative sample from the block's directory.
+  Scenario: A shell elsewhere reads a block's relative url sample from the block's directory
+    Given the file "Blocks/qmldir":
+      """
+      module Blocks
+      # block Badge 1.0 Badge.qml Notes "One badge"
+      """
+    And the file "Blocks/Badge.qml":
+      """qml
+      import QtQuick
+
+      Item {
+          id: badge
+          required property url icon
+      }
+      """
+    And the file ".studio/samples.json":
+      """json
+      {"Blocks/Badge.qml": {"icon": "icons/run.svg"}}
+      """
+    And the agent has called the tool "node_insert" with:
+      """json
+      {"doc": "Blocks/Badge.qml", "parent": {"id": "badge"}, "slot": "face"}
+      """
+    When the agent calls the tool "document_new" with:
+      """json
+      {"doc": "BadgeShell.qml", "shell": "Blocks.Badge"}
+      """
+    Then the file "BadgeShell.qml" contains "icon: \"Blocks/icons/run.svg\""
+
   Scenario: A block with no slots has no shell
     When the agent calls the tool "document_new" with:
       """json
