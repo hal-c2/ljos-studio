@@ -105,6 +105,11 @@ pub(crate) struct Open {
     /// The target's (or asked-for) size, before any fitting.
     pub screen: Size,
     pub fit: Fit,
+    /// What the page measured at the height it was last grown to, fitted to
+    /// content. An item the host leaves out because it is the window's size
+    /// can be what made the preview that tall, so an unchanged page can
+    /// measure shorter than the preview; it measures this again.
+    pub measured: Option<f64>,
     pub state: State,
     /// The aliases in force: empty when live.
     pub mocked: Vec<Alias>,
@@ -174,13 +179,15 @@ impl Open {
     /// only when that got shorter. An unchanged page is not resized at all.
     /// A root that fills the window is not what it lays out (see
     /// [`PreviewHost::extent`]), so a page that folds while it runs is
-    /// measured shorter here.
+    /// measured shorter here. One that measures what it did when it was
+    /// last grown has not changed, though it is shorter than the preview: an
+    /// item the host left out made the preview that tall.
     pub fn keep_fit(&mut self) -> Result<(), PreviewError> {
-        if self.fit == Fit::Content
-            && self.size != self.screen
-            && self.host.extent()?.ceil() < f64::from(self.size.height)
-        {
-            return self.refit();
+        if self.fit == Fit::Content && self.size != self.screen {
+            let reach = self.host.extent()?.ceil();
+            if reach < f64::from(self.size.height) && self.measured != Some(reach) {
+                return self.refit();
+            }
         }
         let before = self.size;
         if self.fit == Fit::Screen && self.size != self.screen {
@@ -194,6 +201,7 @@ impl Open {
     /// Fitted to content, makes the preview as tall as what it lays out at
     /// its present size, again while that grows; never shorter.
     fn grow(&mut self) -> Result<(), PreviewError> {
+        self.measured = None;
         if self.fit != Fit::Content {
             return Ok(());
         }
@@ -206,6 +214,7 @@ impl Open {
                 (reach.max(0.0) as u32).max(self.screen.height)
             };
             if height <= self.size.height {
+                self.measured = Some(reach);
                 break;
             }
             let size = Size {
@@ -624,6 +633,7 @@ mod tests {
                 size: Target::Desktop.size(),
                 screen: Target::Desktop.size(),
                 fit: Fit::Screen,
+                measured: None,
                 state: State::Live,
                 mocked: Vec::new(),
                 reloads,

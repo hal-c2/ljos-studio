@@ -381,6 +381,7 @@ fn open(studio: &Mutex<Studio>, a: OpenArgs) -> Result<OpenOut, SurfaceError> {
             size,
             screen: size,
             fit,
+            measured: None,
             state,
             mocked: aliases.clone(),
             reloads: VecDeque::new(),
