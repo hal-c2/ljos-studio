@@ -214,10 +214,12 @@ fn change(
     reloads: &mut Vec<Reload>,
 ) -> Result<(), PreviewError> {
     // Against the screen, not the size laid out: fitted to content that is
-    // taller, and an unchanged screen is no resize.
+    // taller, and an unchanged screen is no resize. The screen is the one
+    // asked for only once the host took it, so a refused one is asked again.
     if open.screen != size {
         open.host.resize(size)?;
         open.size = size;
+        open.screen = size;
     }
     open.target = target;
     let old = open.mocked.clone();
@@ -322,19 +324,19 @@ fn open(studio: &Mutex<Studio>, a: OpenArgs) -> Result<OpenOut, SurfaceError> {
         let same = open.screen == size && open.fit == fit;
         let was = open.fit;
         let changed = change(open, size, target, state, &aliases, &mut reloads);
-        open.screen = size;
-        open.fit = fit;
         // A new screen, fit or alias is laid out from the screen again; the
         // same ones keep the height fitted, not shrunk and grown back.
         let changed = changed.and_then(|()| {
+            open.fit = fit;
             if same && reloads.is_empty() {
                 open.keep_fit()
             } else {
                 open.refit()
             }
         });
-        // A fit the host refused is not kept, or every later open that names
-        // no fit would be refused for it.
+        // A fit the host refused, or one asked with a change it refused, is
+        // not kept, or every later open that names no fit would be refused
+        // for it.
         if changed.is_err() {
             open.fit = was;
         }
