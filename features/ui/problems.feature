@@ -190,6 +190,77 @@ Feature: The built-in shell shows what is wrong in the preview
     Then the window shows the document "Tile.qml"
     And the layers panel has "Rectangle mark" selected
 
+  Scenario: Choosing a problem in another document previews that document
+    Given the file "Tile.qml":
+      """qml
+      import QtQuick
+
+      Rectangle {
+          id: face
+          width: 80; height: 80
+
+          Rectangle {
+              id: mark
+              border.width: 2
+              border.color: transparent
+          }
+      }
+      """
+    And the file "Board.qml":
+      """qml
+      import QtQuick
+
+      Item {
+          width: 200; height: 120
+
+          Tile {}
+      }
+      """
+    And Studio's window shows the project
+    And the person has opened "Board.qml" in the documents list
+    When the person clicks "Show the problems"
+    And the person clicks "warning: `transparent` is not a name in sight: it is looked up when the program runs, Tile.qml:10"
+    Then the frame "Desktop" shows a picture of the preview
+    And the window does not say "Open a document to preview it"
+
+  Scenario: A problem's tip says where choosing it goes
+    Given the file "Tile.qml":
+      """qml
+      import QtQuick
+
+      Rectangle {
+          id: face
+          width: 80; height: 80
+
+          Rectangle {
+              id: mark
+              border.width: 2
+              border.color: transparent
+          }
+      }
+      """
+    And Studio's window shows the project
+    And the person has opened "Tile.qml" in the documents list
+    When the person clicks "Show the problems"
+    And the pointer rests on "warning: `transparent` is not a name in sight: it is looked up when the program runs, Tile.qml:10" until its tip has shown
+    Then the window says "Go to Tile.qml:10"
+
+  Scenario: A long problem is shown whole
+    Given the file "Tile.qml":
+      """qml
+      import QtQuick
+
+      Rectangle {
+          width: 80; height: 80
+          border.width: 2
+          border.color: aShadeOfGreyThatNoFileOfThisProjectHasEverDefined
+      }
+      """
+    And Studio's window shows the project
+    And the person has opened "Tile.qml" in the documents list
+    When the person clicks "Show the problems"
+    Then the problem "`aShadeOfGreyThatNoFileOfThisProjectHasEverDefined` is not a name in sight: it is looked up when the program runs" is shown whole
+
   Scenario: A person's copy of the shell restyles the problems like any panel
     Given Studio's window runs the person's shell, a copy of its own
     And the person's "PreviewProblems.qml" has "\"Problems\"" replaced with "\"Faults\""
