@@ -403,22 +403,30 @@ space) and `type` types text into what has the keyboard, so a click on a
 field and `type` fill it in. They go through the inspector's
 `app_scroll`, `app_touch`, `app_press` and `app_type`; a scroll or a
 swipe answers once the content has stopped (at most 3 s), so `read` says
-where it came to rest. Any of them stands for the click when `node` is
+where it came to rest. Another call may open another preview while it
+waits; then nothing is read (`stale_ref` with `details.kind`
+`preview_replaced`). Any of them stands for the click when `node` is
 left out.
 
 `preview_open {fit: "content"}` makes the preview as tall as what the
 document lays out: the lowest edge of anything shown, scrolled out of
-view or not, measured at the screen's size, and never shorter than the
+view or not, leaving out what is exactly the window's size (a root that
+fills it, a background), measured at the screen's size, and never shorter than the
 screen (at most 8192). It is measured again after each reload, so a page
 that grows grows its preview, until `fit: "screen"` gives back the
 screen's height. A host that cannot say how tall its content is refuses
 (`not_actionable`, `refused`). The answer and the window's preview say
 `fit`.
 
-- DECISION: a fitted preview is measured at its screen's height every
-  time, not at the height it has: an item that fills the window (a
+- DECISION: a fitted preview is measured at its screen's height after a
+  reload, not at the height it has: an item that fills the window (a
   `Flickable` with `anchors.fill`) would otherwise always reach its
-  bottom, and a page that got shorter would keep a tall preview.
+  bottom, and a page that got shorter would keep a tall preview. Opened
+  again unchanged, it keeps its height without a resize; what is exactly
+  the window's size is left out of the measure, so a page that got
+  shorter while it ran is still measured shorter and laid out again. A
+  root of a fixed height the preview was grown to is that size too, so
+  such a page is laid out again on each reopen, ending as tall as before.
 - DECISION: `scroll` and `swipe` act on the topmost object under their
   point whose centre is in the window, at that centre: `app_scroll` and
   `app_touch` take an object and no point (unlike `app_click`). On a long
