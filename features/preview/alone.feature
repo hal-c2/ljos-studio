@@ -11,7 +11,9 @@ Feature: A component or a store opened alone shows something
   So the preview runs one instance of it, with a sample value for each
   property it requires: one given in `.studio/samples.json` for the
   document, else one of its type. A block that shows nothing is shown as
-  what it offers, read from a live instance. The document is not changed.
+  what it offers, read from a live instance. A block that shows itself is
+  made the same way, so it keeps its own size in the middle of the frame
+  rather than being stretched over it. The document is not changed.
 
   Background:
     Given the file "Blocks/qmldir":
@@ -71,6 +73,39 @@ Feature: A component or a store opened alone shows something
       {"doc": "Blocks/HabitCard.qml", "at": {"x": 640, "y": 400}}
       """
     Then the answer's "/selection/0/doc" is "Blocks/HabitCard.qml"
+
+  Scenario: A block that shows itself stands at its own size in the middle of the frame
+    Given the file "Blocks/qmldir":
+      """
+      module Blocks
+      # block Badge 1.0 Badge.qml Badges "A badge with a word on it"
+      """
+    And the file "Blocks/Badge.qml":
+      """qml
+      import QtQuick
+
+      Rectangle {
+          width: 200
+          height: 100
+          color: "#6750a4"
+
+          Text { text: "Badge" }
+      }
+      """
+    And the agent has called the tool "preview_open" with:
+      """json
+      {"doc": "Blocks/Badge.qml", "size": {"width": 1280, "height": 800}}
+      """
+    When the agent calls the tool "node_select" with:
+      """json
+      {"doc": "Blocks/Badge.qml", "at": {"x": 20, "y": 20}}
+      """
+    Then the answer's "/selection" has 0 entries
+    When the agent calls the tool "node_select" with:
+      """json
+      {"doc": "Blocks/Badge.qml", "at": {"x": 640, "y": 400}}
+      """
+    Then the answer's "/selection/0/doc" is "Blocks/Badge.qml"
 
   Scenario: Samples given once for the document are used
     Given the file ".studio/samples.json":
