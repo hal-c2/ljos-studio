@@ -1494,7 +1494,12 @@ fn contribute_own(studio: &Mutex<Studio>, a: &ContributeArgs) -> Result<EditOut,
         .clone()
         .ok_or_else(|| SurfaceError::invalid_argument("give the instance's `slot`"))?;
     let mut studio = lock(studio);
-    let (handle, instance) = studio.session.resolve(&a.doc, node).map_err(error)?;
+    // The slot is judged on the object the caller read, so a path is
+    // followed only at the generation it was read at.
+    let (handle, instance) = studio
+        .session
+        .resolve_at(&a.doc, a.generation, node)
+        .map_err(error)?;
     let registry = blocks::registry(studio.session.store());
     let ty = instance.ty.rsplit('.').next().unwrap_or(&instance.ty);
     let offered: Vec<String> = registry
@@ -1526,8 +1531,10 @@ fn contribute_own(studio: &Mutex<Studio>, a: &ContributeArgs) -> Result<EditOut,
     let (text, _) = studio.session.text(&a.doc).map_err(error)?;
     let unit = studio_core::states::unit(text);
     let value = studio_core::slots::own(a.mode, a.order, &delegate, &unit).map_err(error)?;
+    // The caller's own address, so the edit checks it against its
+    // generation as any other edit does.
     let mut ops = vec![Op::SetBinding {
-        node: Address::Node(handle),
+        node: node.clone(),
         name: slot,
         value,
     }];
