@@ -7,7 +7,8 @@ use std::sync::{Arc, Mutex};
 use ljos_mcp_core::{CallCtx, Cap, CapSet};
 use serde_json::{Map, Value, json};
 use studio_core::preview::{
-    Click, Declared, LogLine, Picture, PreviewError, PreviewHost, PreviewSpec, Reload, Size,
+    Click, Declared, Input, LogLine, Picture, PreviewError, PreviewHost, PreviewSpec, Reload, Rest,
+    RestWatch, Size,
 };
 use studio_mcp::{Studio, StudioServer};
 
@@ -27,6 +28,8 @@ struct Seen {
     rate: u32,
     /// How far down the page reaches, as `extent` answers; none refuses.
     extent: Option<f64>,
+    /// What happens while a scroll or a swipe settles, outside Studio's lock.
+    during_settle: Option<Box<dyn FnOnce() + Send>>,
 }
 
 struct Recorder(Arc<Mutex<Seen>>);
@@ -172,8 +175,46 @@ impl PreviewHost for Recorder {
         Ok(self.0.lock().unwrap().declared.clone())
     }
 
+    fn input(&mut self, input: &Input) -> Result<(), PreviewError> {
+        self.note(match input {
+            Input::Scroll { dy, .. } => format!("scroll {dy}"),
+            Input::Swipe { dy, .. } => format!("swipe {dy}"),
+            Input::Press(keys) => format!("press {keys}"),
+            Input::Type(text) => format!("type {text}"),
+        })
+    }
+
+    fn rest_watch(&self) -> Option<Box<dyn RestWatch>> {
+        Some(Box::new(Settling(self.0.clone())))
+    }
+
     fn close(&mut self) {
         let _ = self.note("close".to_owned());
+    }
+}
+
+/// A page that comes to rest at once, after whatever `during_settle` does.
+struct Settling(Arc<Mutex<Seen>>);
+
+impl RestWatch for Settling {
+    fn wait(&self, _: Option<u64>, _: u64) -> Result<Rest, PreviewError> {
+        Err(PreviewError::NotOpen)
+    }
+
+    fn parked(
+        &self,
+        _: u64,
+        _: u64,
+    ) -> std::pin::Pin<Box<dyn Future<Output = Result<Rest, PreviewError>> + Send>> {
+        Box::pin(async { Err(PreviewError::NotOpen) })
+    }
+
+    fn settle(&self, _: u64) -> Result<(), PreviewError> {
+        let during = self.0.lock().unwrap().during_settle.take();
+        if let Some(during) = during {
+            during();
+        }
+        Ok(())
     }
 }
 
@@ -1149,4 +1190,45 @@ fn a_point_needs_a_preview_that_shows_the_text() {
         )
         .unwrap_err();
     assert_eq!(refused["details"]["kind"], "preview_behind");
+}
+
+/// A read waits for a scroll to settle outside Studio's lock, so another call
+/// may open another preview meanwhile. What it would read then is another
+/// app's, so it reads nothing and says why.
+#[test]
+fn a_read_after_a_scroll_reads_nothing_from_a_preview_opened_while_it_settled() {
+    let f = Fixture::new();
+    f.call("preview_open", json!({ "doc": "Shell.qml" }))
+        .unwrap();
+    let server = f.server.clone();
+    f.seen.lock().unwrap().during_settle = Some(Box::new(move || {
+        let ctx = CallCtx::new(CapSet::of([Cap::Inspect, Cap::Mutate, Cap::Run]));
+        server
+            .call("preview_open", &ctx, json!({ "doc": "Other.qml" }))
+            .unwrap();
+    }));
+    f.calls();
+    let refused = f
+        .call(
+            "preview_state",
+            json!({
+                "doc": "Shell.qml",
+                "node": { "id": "player1" },
+                "scroll": { "x": 10, "y": 10, "dy": -3 },
+                "read": ["playing"]
+            }),
+        )
+        .unwrap_err();
+    assert_eq!(refused["code"], "stale_ref", "{refused}");
+    assert_eq!(refused["details"]["kind"], "preview_replaced", "{refused}");
+    let calls = f.calls();
+    assert!(
+        !calls.iter().any(|c| c.starts_with("read ")),
+        "read the other preview: {calls:?}"
+    );
+    // The preview opened meanwhile is not taken for one that failed: opening
+    // it again finds it running.
+    f.call("preview_open", json!({ "doc": "Other.qml" }))
+        .unwrap();
+    assert_eq!(*f.opened.lock().unwrap(), 2);
 }
