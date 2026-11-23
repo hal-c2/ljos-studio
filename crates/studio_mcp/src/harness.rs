@@ -160,7 +160,13 @@ pub(crate) fn harness(store: &dyn Store, doc: &str) -> Option<Harness> {
     let nodes = outline::outline(&text)?;
     let root = nodes.first()?;
     let root_ty = short(&root.ty);
-    if matches!(root_ty, "Window" | "ApplicationWindow") {
+    // What the chain of the project's own bases ends in says what it is: a
+    // `Base {}` of a `QtObject` shows nothing, and has no size to be given.
+    let base_ty = toolkit_base(store, doc);
+    let is = |names: &[&str]| {
+        names.contains(&root_ty) || base_ty.as_deref().is_some_and(|ty| names.contains(&ty))
+    };
+    if is(&["Window", "ApplicationWindow"]) {
         return None;
     }
     let mut members = outline::members(&text, root.start);
@@ -168,7 +174,7 @@ pub(crate) fn harness(store: &dyn Store, doc: &str) -> Option<Harness> {
     let samples = samples(store, doc);
     let sets = sets(&members, &samples);
     let block = is_block(store, dir, file);
-    let store_like = shows_nothing(&nodes, root, &members, block);
+    let store_like = is(SHOW_NOTHING) || shows_nothing(&nodes, root, &members, block);
     let requires = members
         .iter()
         .any(|m| m.kind == MemberKind::Property && m.required);
@@ -190,6 +196,16 @@ pub(crate) fn harness(store: &dyn Store, doc: &str) -> Option<Harness> {
         return None;
     }
     Some(Harness { path, text })
+}
+
+/// The type the root of the last of `doc`'s bases in the project is, when
+/// it has any: one Studio does not find in the project's files.
+fn toolkit_base(store: &dyn Store, doc: &str) -> Option<String> {
+    let lineage = crate::signals::lineage(store, doc);
+    let last = lineage.last().filter(|last| *last != doc)?;
+    let text = store.read(last).ok()?;
+    let root = outline::outline(&text)?.into_iter().next()?;
+    Some(short(&root.ty).to_owned())
 }
 
 /// Whether the `qmldir` beside the file declares it a block.
@@ -714,6 +730,29 @@ mod tests {
         );
         assert!(!h.text.contains("width: 320"));
         assert!(!h.text.contains("height: 72"));
+    }
+
+    #[test]
+    fn a_component_of_a_base_that_shows_nothing_is_shown_as_what_it_offers() {
+        let store = store(&[
+            (
+                "Base.qml",
+                "import QtQml\nQtObject {\n    required property string title\n}\n",
+            ),
+            ("Derived.qml", "import QtQml\nBase {}\n"),
+            (
+                "Win.qml",
+                "import QtQuick\nWindow {\n    required property int n\n}\n",
+            ),
+            ("Shown.qml", "import QtQuick\nWin {}\n"),
+        ]);
+        let h = harness(&store, "Derived.qml").expect("it requires a title");
+        assert!(h.text.contains("What it offers"), "{}", h.text);
+        // A QtObject has no size to give nor anchors to centre it by.
+        assert!(!h.text.contains("anchors.centerIn"), "{}", h.text);
+        assert!(h.text.contains("title: \"Title\""), "{}", h.text);
+        // A window is its own frame, whatever it is named.
+        assert_eq!(harness(&store, "Shown.qml"), None);
     }
 
     #[test]
