@@ -1720,9 +1720,8 @@ fn enters_new_name(w: &mut UiWorld, name: String) -> StepResult {
 fn enters_slot_name(w: &mut UiWorld, name: String) -> StepResult {
     let window = w.window()?;
     let field = window.node("Block", Some("textinput"), "New slot's name")?;
-    window.click_shown(&field)?;
-    window.stage.drive().commit(&name).map_err(drive_error)?;
-    window.rest()
+    // Entered, not only typed: the field adds the slot when Enter takes it.
+    window.enter(&field, &name)
 }
 
 // Focus without a click: a click would drop a text selection by itself, and
