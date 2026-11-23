@@ -557,6 +557,11 @@ fn enqueue(engine: &Engine, ws: ObjectId, job: Job) {
     let Some(queue) = queue_of(engine, ws) else {
         return;
     };
+    admit(&queue, job, || pump(engine, ws));
+}
+
+/// Puts `job` in line, then `start`s the next job if none runs.
+fn admit(queue: &RefCell<Queue>, job: Job, start: impl FnOnce()) {
     {
         let mut q = queue.borrow_mut();
         // A refresh reads the whole session, so one waiting is enough.
@@ -572,7 +577,7 @@ fn enqueue(engine: &Engine, ws: ObjectId, job: Job) {
         }
         q.jobs.push_back(job);
     }
-    pump(engine, ws);
+    start();
 }
 
 /// A turn of the wheel the window sends: `preview_state` with a `scroll`
@@ -1625,5 +1630,35 @@ mod tests {
         });
         drop(queue);
         assert_eq!(wait.try_recv(), Err(mpsc::TryRecvError::Disconnected));
+    }
+
+    fn turn(dy: f64) -> Job {
+        Job::Call {
+            tool: "preview_state".to_owned(),
+            args: json!({"scroll": {"x": 600, "y": 400, "dx": 0, "dy": dy}}),
+            follows: false,
+        }
+    }
+
+    /// A job the pool could not take waits first in an idle line for the next
+    /// gesture to start it. A turn of the wheel that joins it, or a refresh
+    /// already waiting, is such a gesture too, or the line stalls.
+    #[test]
+    fn what_joins_a_job_waiting_in_an_idle_line_starts_it() {
+        let queue = RefCell::new(Queue::default());
+        queue.borrow_mut().jobs.push_back(turn(-1.0));
+        let mut started = false;
+        admit(&queue, turn(-2.0), || started = true);
+        assert!(
+            started,
+            "a joining turn of the wheel did not start the line"
+        );
+        assert_eq!(queue.borrow().jobs.len(), 1);
+
+        queue.borrow_mut().jobs.push_back(Job::Refresh);
+        let mut started = false;
+        admit(&queue, Job::Refresh, || started = true);
+        assert!(started, "a second refresh did not start the line");
+        assert_eq!(queue.borrow().jobs.len(), 2);
     }
 }
