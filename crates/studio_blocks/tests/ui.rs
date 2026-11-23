@@ -11,7 +11,7 @@ use std::sync::{Arc, Mutex, PoisonError, mpsc};
 use std::time::Duration;
 
 use cucumber::{World, gherkin::Step, given, then, when};
-use ljos::item::{DrawOp, MouseButtons, PointerEvent, WheelEvent, kurbo::Point};
+use ljos::item::{DrawOp, MouseButtons, Paint, PointerEvent, WheelEvent, kurbo::Point};
 use ljos::prelude::*;
 use ljos::testing::AccessibleNode;
 use ljos_dev::{DevSession, Host, Report};
@@ -1581,6 +1581,53 @@ fn row_holds(w: &mut UiWorld, name: String, want: String) -> StepResult {
     (field.value == want)
         .then_some(())
         .ok_or_else(|| format!("the row holds {:?}", field.value))
+}
+
+#[when(regex = r#"^the person clicks in the inspector's "([^"]+)"$"#)]
+fn clicks_in_row(w: &mut UiWorld, name: String) -> StepResult {
+    let window = w.window()?;
+    let field = window.typed_in("Inspector", &name)?;
+    window.click_node(&field)?;
+    window.rest()
+}
+
+/// What the row's own text draws in a colour that shows, counted in
+/// glyphs: one that holds its value but draws it in no colour is an empty
+/// box, and a shortened copy drawn over it is not the value.
+#[then(regex = r#"^the inspector's "([^"]+)" draws "(.*)" itself$"#)]
+fn row_draws(w: &mut UiWorld, name: String, want: String) -> StepResult {
+    let want = unescape(&want);
+    let window = w.window()?;
+    let field = window.typed_in("Inspector", &name)?;
+    if field.value != want {
+        return Err(format!("the row holds {:?}", field.value));
+    }
+    let key = field.key.ok_or("the row has no key")?;
+    let scene = &window.stage.scene;
+    let item = scene.accessible_item(key).ok_or("the row is no item")?;
+    let node = scene.node_of(item).ok_or("the row is not shown")?;
+    let drawn: usize = scene
+        .render_tree()
+        .node(node)
+        .and_then(|n| n.content())
+        .map(|c| {
+            c.ops()
+                .iter()
+                .map(|op| match op {
+                    DrawOp::Glyphs {
+                        run,
+                        paint: Paint::Solid(ink),
+                        ..
+                    } if ink.a > 0.0 => run.glyphs.len(),
+                    _ => 0,
+                })
+                .sum()
+        })
+        .unwrap_or(0);
+    let wanted = want.chars().count();
+    (drawn == wanted).then_some(()).ok_or_else(|| {
+        format!("its own text draws {drawn} glyphs that show, for {wanted} characters")
+    })
 }
 
 #[then(regex = r#"^the inspector's new property row holds "(.*)"$"#)]
