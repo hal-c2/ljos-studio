@@ -286,7 +286,12 @@ fn rebased(url: &str, from: &str, to: &str) -> Option<String> {
     let shared = here.iter().zip(dirs).take_while(|(a, b)| a == b).count();
     let mut parts = vec![".."; here.len() - shared];
     parts.extend(&target[shared..]);
-    Some(parts.join("/"))
+    let mut moved = parts.join("/");
+    // A directory keeps its slash: a binding appends a name to it.
+    if url.ends_with('/') {
+        moved.push('/');
+    }
+    Some(moved)
 }
 
 /// What the bases of the component in `file` require that neither it nor
@@ -579,6 +584,31 @@ mod tests {
             said("https://example.com/a.svg")
         );
         assert_eq!(set("CardShell.qml", "label"), said("icons/run.svg"));
+    }
+
+    #[test]
+    fn a_directory_url_sample_keeps_its_trailing_slash() {
+        let store = store(&[
+            (
+                "Blocks/Card.qml",
+                "import QtQuick\nItem {\n    required property url assetBase\n}\n",
+            ),
+            (SAMPLES, r#"{"Blocks/Card.qml": {"assetBase": "icons/"}}"#),
+        ]);
+        let set = |doc: &str| {
+            required_sets(&store, "Blocks/Card.qml", doc)
+                .into_iter()
+                .find(|(n, _)| n == "assetBase")
+                .map(|(_, v)| v)
+        };
+        // A binding appends a name to it: without the slash it names
+        // another file.
+        assert_eq!(set("Blocks/CardShell.qml").as_deref(), Some("\"icons/\""));
+        assert_eq!(set("CardShell.qml").as_deref(), Some("\"Blocks/icons/\""));
+        assert_eq!(
+            set("Other/CardShell.qml").as_deref(),
+            Some("\"../Blocks/icons/\"")
+        );
     }
 
     #[test]
