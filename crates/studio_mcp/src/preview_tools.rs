@@ -320,6 +320,7 @@ fn open(studio: &Mutex<Studio>, a: OpenArgs) -> Result<OpenOut, SurfaceError> {
         let open = previews.open.as_mut().expect("checked");
         let mut reloads = Vec::new();
         let same = open.screen == size && open.fit == fit;
+        let was = open.fit;
         let changed = change(open, size, target, state, &aliases, &mut reloads);
         open.screen = size;
         open.fit = fit;
@@ -332,6 +333,11 @@ fn open(studio: &Mutex<Studio>, a: OpenArgs) -> Result<OpenOut, SurfaceError> {
                 open.refit()
             }
         });
+        // A fit the host refused is not kept, or every later open that names
+        // no fit would be refused for it.
+        if changed.is_err() {
+            open.fit = was;
+        }
         // A mock switched in starts the app again, with everything showing.
         let restarted = reloads
             .iter()
@@ -384,6 +390,7 @@ fn open(studio: &Mutex<Studio>, a: OpenArgs) -> Result<OpenOut, SurfaceError> {
         previews.write_hidden();
         let open = previews.open.as_mut().expect("just opened");
         if let Err(e) = open.refit() {
+            open.fit = Fit::Screen;
             return Err(preview_error(previews.failed(e)));
         }
     }
