@@ -44,7 +44,7 @@ impl schemars::JsonSchema for Address {
 
     fn json_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
         schemars::json_schema!({
-            "description": "One of `node` (session handle), `id`, `path` (from `document_tree`; this text only).",
+            "description": "`node` (session handle), `id`, or `document_tree` `path` (this text only).",
             "type": "object",
             "additionalProperties": {"type": "string"},
             "minProperties": 1,

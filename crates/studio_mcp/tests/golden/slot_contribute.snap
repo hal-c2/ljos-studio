@@ -9,14 +9,14 @@ expression: value
     "open_world": false,
     "read_only": false
   },
-  "description": "Write a Contribution of QML `text` or a `block` to a block's slot (imports added once), or `remove` one. Refuses a slot no block offers (`blocks_list`).",
+  "description": "Write a Contribution of QML `text` or a `block` to a block's slot (imports added once), or `remove` one. Refuses a slot no `blocks_list` block offers.",
   "inputSchema": {
     "$defs": {
       "Address": {
         "additionalProperties": {
           "type": "string"
         },
-        "description": "One of `node` (session handle), `id`, `path` (from `document_tree`; this text only).",
+        "description": "`node` (session handle), `id`, or `document_tree` `path` (this text only).",
         "type": "object"
       }
     },
@@ -64,7 +64,7 @@ expression: value
         "type": "string"
       },
       "text": {
-        "description": "What it shows: one object in QML.",
+        "description": "One QML object to show.",
         "type": "string"
       }
     },

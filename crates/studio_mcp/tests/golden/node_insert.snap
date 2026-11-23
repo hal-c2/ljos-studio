@@ -9,7 +9,7 @@ expression: value
     "open_world": false,
     "read_only": false
   },
-  "description": "Insert in `parent` a QML object or a `block` from `blocks_list`, as a child at an index, or a member (function, signal, property, handler). It gets an id if it has none. Returns the handle.",
+  "description": "Insert in `parent` a QML object or a `blocks_list` `block`, as a child at an index, or a member (function, signal, property, handler). It gets an id if it has none. Returns the handle.",
   "inputSchema": {
     "properties": {
       "block": {
@@ -23,7 +23,7 @@ expression: value
         "type": "boolean"
       },
       "generation": {
-        "description": "The generation read; a `path` needs it (handles and ids are moved past others' edits).",
+        "description": "Generation read; a `path` needs it (handles and ids move past others' edits).",
         "type": "integer"
       },
       "id": {
@@ -42,7 +42,7 @@ expression: value
         "additionalProperties": {
           "type": "string"
         },
-        "description": "One of `node` (session handle), `id`, `path` (from `document_tree`; this text only).",
+        "description": "`node` (session handle), `id`, or `document_tree` `path` (this text only).",
         "type": "object"
       },
       "replace": {
@@ -54,7 +54,7 @@ expression: value
         "type": "string"
       },
       "text": {
-        "description": "One QML object or member (`function f() {}`, `signal s()`, `property int n`, `onClicked: f()`). With `block`: its inputs, or none for the bare block.",
+        "description": "One QML object or member (`function f() {}`, `signal s()`, `property int n`, `onClicked: f()`). With `block`: its inputs; none for it bare.",
         "type": "string"
       }
     },

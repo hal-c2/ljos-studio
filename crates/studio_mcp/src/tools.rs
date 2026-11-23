@@ -348,12 +348,12 @@ struct Inspected {
 #[serde(deny_unknown_fields)]
 struct InsertArgs {
     doc: String,
-    /// The generation read; a `path` needs it (handles and ids are moved past others' edits).
+    /// Generation read; a `path` needs it (handles and ids move past others' edits).
     generation: Option<u64>,
     parent: Address,
     /// Child position; default the end.
     index: Option<usize>,
-    /// One QML object or member (`function f() {}`, `signal s()`, `property int n`, `onClicked: f()`). With `block`: its inputs, or none for the bare block.
+    /// One QML object or member (`function f() {}`, `signal s()`, `property int n`, `onClicked: f()`). With `block`: its inputs; none for it bare.
     text: Option<String>,
     /// `Module.Name` from `blocks_list`, imported; `text` must be of its type.
     block: Option<String>,
@@ -373,7 +373,7 @@ struct InsertArgs {
 #[serde(deny_unknown_fields)]
 struct MoveArgs {
     doc: String,
-    /// The generation read; a `path` needs it (handles and ids are moved past others' edits).
+    /// Generation read; a `path` needs it (handles and ids move past others' edits).
     generation: Option<u64>,
     node: Address,
     parent: Address,
@@ -387,7 +387,7 @@ struct MoveArgs {
 #[serde(deny_unknown_fields)]
 struct RemoveArgs {
     doc: String,
-    /// The generation read; a `path` needs it (handles and ids are moved past others' edits).
+    /// Generation read; a `path` needs it (handles and ids move past others' edits).
     generation: Option<u64>,
     node: Address,
     /// Member name.
@@ -440,7 +440,7 @@ impl<T: JsonSchema> JsonSchema for Present<T> {
 #[serde(deny_unknown_fields)]
 struct PropertyArgs {
     doc: String,
-    /// The generation read; a `path` needs it (handles and ids are moved past others' edits).
+    /// Generation read; a `path` needs it (handles and ids move past others' edits).
     generation: Option<u64>,
     node: Address,
     /// `width`, `font.bold`; written grouped or dotted as the file already does.
@@ -455,7 +455,7 @@ struct PropertyArgs {
 #[serde(deny_unknown_fields)]
 struct BindingArgs {
     doc: String,
-    /// The generation read; a `path` needs it (handles and ids are moved past others' edits).
+    /// Generation read; a `path` needs it (handles and ids move past others' edits).
     generation: Option<u64>,
     node: Address,
     /// A property (`width`) or a handler (`onClicked`).
@@ -539,7 +539,7 @@ struct ContributeArgs {
     mode: Option<Mode>,
     /// Place among the slot's contributions.
     order: Option<i64>,
-    /// What it shows: one object in QML.
+    /// One QML object to show.
     text: Option<String>,
     /// Or a `Module.Name` from `blocks_list`, shown bare.
     block: Option<String>,
@@ -924,7 +924,7 @@ struct BlocksArgs {
     module: Option<String>,
     /// Also list `types`: toolkit types it can place.
     doc: Option<String>,
-    /// Only blocks and types whose name holds this, in any case.
+    /// Only blocks and types whose name holds this (any case).
     search: Option<String>,
     /// The last page's `next`.
     cursor: Option<String>,
@@ -2091,7 +2091,7 @@ fn edits(studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
         .with(
             ToolDef::new::<NodeArgs>(
                 "node_inspect",
-                "An object's bindings with byte ranges, own members, parent, children, states, transitions, flows, signals with arguments, and roles and rows of the data it sees (in a delegate, its list's).",
+                "An object's bindings with byte ranges, own members, parent, children, states, transitions, flows, signals with arguments, and its data's roles and rows (a delegate's: its list's).",
             )
             .answers::<Inspected>()
             .requires(Cap::Inspect),
@@ -2163,7 +2163,7 @@ fn edits(studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
         .with(
             ToolDef::new::<BlocksArgs>(
                 "blocks_list",
-                "The project's functional blocks with their contracts and `slots`; `node_insert` places one by `Module.Name`. Unreadable ones are in `errors`. With `doc`, `types` lists the toolkit types it can place, its imports first.",
+                "The project's functional blocks, with contracts and `slots`; `node_insert` places one by `Module.Name`. Unreadable ones are in `errors`. With `doc`, `types`: toolkit types it can place, imports first.",
             )
             .answers::<BlocksOut>()
             .requires(Cap::Inspect),
@@ -2205,7 +2205,7 @@ fn edits(studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
         .with(
             ToolDef::new::<InsertArgs>(
                 "node_insert",
-                "Insert in `parent` a QML object or a `block` from `blocks_list`, as a child at an index, or a member (function, signal, property, handler). It gets an id if it has none. Returns the handle.",
+                "Insert in `parent` a QML object or a `blocks_list` `block`, as a child at an index, or a member (function, signal, property, handler). It gets an id if it has none. Returns the handle.",
             )
             .answers::<EditOut>()
             .requires(Cap::Mutate)
@@ -2353,7 +2353,7 @@ fn edits(studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
         .with(
             ToolDef::new::<ContributeArgs>(
                 "slot_contribute",
-                "Write a Contribution of QML `text` or a `block` to a block's slot (imports added once), or `remove` one. Refuses a slot no block offers (`blocks_list`).",
+                "Write a Contribution of QML `text` or a `block` to a block's slot (imports added once), or `remove` one. Refuses a slot no `blocks_list` block offers.",
             )
             .answers::<EditOut>()
             .requires(Cap::Mutate)

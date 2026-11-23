@@ -16,7 +16,7 @@ expression: value
         "additionalProperties": {
           "type": "string"
         },
-        "description": "One of `node` (session handle), `id`, `path` (from `document_tree`; this text only).",
+        "description": "`node` (session handle), `id`, or `document_tree` `path` (this text only).",
         "type": "object"
       }
     },
