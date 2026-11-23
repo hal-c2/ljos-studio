@@ -27,6 +27,8 @@ export function servePreview({ element, mount, reload: remade, inspect, tell, co
   let base = null;
   // The aliases of the compile that is running: a reload that throws leaves it.
   let compiledWith = [];
+  // The files that compile names otherwise than the project, by its name.
+  let renamed = {};
   const told = new Set();
   let size = null;
   // An item root is laid out at the preview's size, as `ljos run --size`
@@ -42,6 +44,7 @@ export function servePreview({ element, mount, reload: remade, inspect, tell, co
   const inProject = (file) => {
     const path = file?.replace(/^projects\/\d+\//, "") ?? null;
     if (path === null) return null;
+    if (Object.hasOwn(renamed, path)) return renamed[path];
     // Only a module's own files move: one nested in it is compiled where it is.
     const dir = path.slice(0, path.lastIndexOf("/"));
     const alias = compiledWith.find((a) => a.module.replaceAll(".", "/") === dir);
@@ -113,6 +116,7 @@ export function servePreview({ element, mount, reload: remade, inspect, tell, co
     // Only now: a reload that throws leaves the old root running, and its
     // readers still watch the old compile's address.
     base = compiled.base ?? null;
+    renamed = compiled.renamed ?? {};
     compiledWith = aliases;
     told.clear();
     layOut();

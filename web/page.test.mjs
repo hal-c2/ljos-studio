@@ -10,7 +10,7 @@ import { test } from "node:test";
 import { TAG, VERSION } from "./preview.js";
 import { servePreview } from "./page.js";
 
-function page({ throwing, inspecting = true }) {
+function page({ throwing, inspecting = true, compiled = { component: {}, base: "/p/" }, picked = null }) {
   const mounted = new Set();
   const counts = { mounted: 0, remade: 0, told: 0 };
   const listeners = [];
@@ -30,9 +30,9 @@ function page({ throwing, inspecting = true }) {
       if (!mounted.has(root)) throw new Error("only a root mounted with { reloadable: true } can be reloaded");
       counts.remade += 1;
     },
-    inspect: inspecting ? () => ({ outline: () => ({ text: "the root" }) }) : undefined,
+    inspect: inspecting ? () => ({ outline: () => ({ text: "the root" }), pick: () => (picked ? { source: picked } : null) }) : undefined,
     tell: () => (counts.told += 1),
-    compile: async () => ({ component: {}, base: "/p/" }),
+    compile: async () => compiled,
     window: { console, addEventListener: (_, f) => listeners.push(f), location: { href: "http://page/" } },
     parent,
   });
@@ -119,4 +119,18 @@ test("a running page built without the inspector still waits on ljos-web", async
     assert.deepEqual([request.call, answer.answer], [request.call, "not_supported"]);
     assert.equal(typeof answer.ljos_web_request, "number");
   }
+});
+
+// The dev server compiles Studio's stand-in (`.Card.preview.qml`) under a
+// name qmlc takes; what is picked in it is in the project's file, not in one
+// the project has never had.
+test("what is picked in a file compiled under another name is named as the project names it", async () => {
+  const { ask } = page({
+    throwing: () => false,
+    compiled: { component: {}, base: "/p/", renamed: { "Blocks/_Card_preview.qml": "Blocks/.Card.preview.qml" } },
+    picked: { file: "projects/3/Blocks/_Card_preview.qml", line: 8, column: 5 },
+  });
+  await ask(opened);
+  const answer = await ask({ call: "pick", x: 1, y: 1 });
+  assert.deepEqual(answer.declared, { file: "Blocks/.Card.preview.qml", line: 8, column: 5 });
 });
