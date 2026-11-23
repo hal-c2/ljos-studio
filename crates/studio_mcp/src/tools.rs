@@ -1424,6 +1424,12 @@ fn shell_text(studio: &Studio, doc: &str, qualified: &str) -> Result<String, Sur
         .find(|p| p.ty == "string")
         .map(|p| p.name.clone());
     out.push_str(&format!("\n{} {{\n    id: {id}\n", block.name));
+    // An instance whose required properties are not set is not made.
+    if let ljos_blocks::Origin::Qml { file } = &block.origin {
+        for (property, value) in crate::harness::required_sets(studio.session.store(), file) {
+            out.push_str(&format!("    {property}: {value}\n"));
+        }
+    }
     for slot in &block.slots {
         out.push_str(&format!(
             "    {}: Contribution {{\n        mode: Contribution.Replace\n        delegate: Component {{\n            Rectangle {{\n                implicitWidth: 160\n                implicitHeight: 48\n                radius: 8\n                color: \"#e8e8ec\"\n",
