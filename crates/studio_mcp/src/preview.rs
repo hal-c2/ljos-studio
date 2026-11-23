@@ -178,7 +178,7 @@ impl Open {
             self.size = self.screen;
             self.measured = None;
         }
-        self.grow()?;
+        self.grow(None)?;
         self.bumped(before);
         Ok(())
     }
@@ -194,19 +194,22 @@ impl Open {
     /// changed, though it is shorter than the preview: an item the host left
     /// out made the preview that tall. That item folded to within the rest
     /// reaches no further, but is no longer left out, so the page is laid
-    /// out again.
+    /// out again. It grows from the measure it compared, so what it keeps
+    /// is what it compared: a page that changes after is seen next time.
     pub fn keep_fit(&mut self) -> Result<(), PreviewError> {
+        let mut compared = None;
         if self.fit == Fit::Content && self.size != self.screen {
             let now = measure(self.host.as_mut())?;
             if now.reach < f64::from(self.size.height) && self.measured.as_ref() != Some(&now) {
                 return self.refit();
             }
+            compared = Some(now);
         }
         let before = self.size;
         if self.fit == Fit::Screen && self.size != self.screen {
             return self.refit();
         }
-        self.grow()?;
+        self.grow(compared)?;
         self.bumped(before);
         Ok(())
     }
@@ -216,13 +219,18 @@ impl Open {
     /// page measured is forgotten only once a resize the host took changes
     /// what it means: a measure refused at the same height leaves it, so an
     /// unchanged page asked again is still not laid out from its screen.
-    fn grow(&mut self) -> Result<(), PreviewError> {
+    /// `first` is what the page measured at its present size just now,
+    /// if it was: the first round takes it rather than measuring again.
+    fn grow(&mut self, mut first: Option<Extent>) -> Result<(), PreviewError> {
         if self.fit != Fit::Content {
             self.measured = None;
             return Ok(());
         }
         for _ in 0..FIT_ROUNDS {
-            let extent = measure(self.host.as_mut())?;
+            let extent = match first.take() {
+                Some(extent) => extent,
+                None => measure(self.host.as_mut())?,
+            };
             let reach = extent.reach;
             let height = if reach >= f64::from(Size::MAX_SIDE) {
                 Size::MAX_SIDE
