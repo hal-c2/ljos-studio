@@ -669,17 +669,20 @@ impl StudioServer {
 
     /// For a window, after [`StudioServer::logged`]: reads what the app
     /// logged, and tells the windows only if that changed what is wrong.
-    pub fn pull_problems(&self) {
+    /// False when the log could not be read for now, so the count
+    /// [`StudioServer::logged`] answered is not yet read.
+    pub fn pull_problems(&self) -> bool {
         let previews = lock(&self.studio).previews.clone();
-        let changed = {
+        let (read, changed) = {
             let mut previews = preview::lock(&previews);
             let was = (previews.problems_seq, previews.ends);
-            previews.pull_problems();
-            (previews.problems_seq, previews.ends) != was
+            let read = previews.pull_problems();
+            (read, (previews.problems_seq, previews.ends) != was)
         };
         if changed {
             lock(&self.studio).watchers.tell();
         }
+        read
     }
 
     /// `preview_screenshot` for a window: what the preview shows now, even
@@ -941,11 +944,19 @@ impl StudioServer {
         if reply.structured["rests"].as_u64() != Some(rests) {
             return Ok(reply);
         }
+        let open = preview_tools::open_one(&self.studio);
         let parked = preview_tools::parked(&self.studio, rests, wait_ms)?;
         let rest = parked.await.map_err(preview_tools::preview_error)?;
         reply.structured["rests"] = json!(rest.rests);
-        // Another caller's edit may have broken or fixed something meanwhile.
-        let problems = preview_tools::known_problems(&self.studio);
+        // Another caller's edit may have broken or fixed something meanwhile;
+        // another preview's problems are not this rest's.
+        let Some(problems) = preview_tools::known_problems_of(&self.studio, &open) else {
+            return Err(preview_tools::preview_error(
+                studio_core::preview::PreviewError::Ended(
+                    "the preview the wait was on was closed or changed meanwhile".to_owned(),
+                ),
+            ));
+        };
         if let Some(out) = reply.structured.as_object_mut() {
             // With what the look said of them: its cut, and the warnings
             // among them.

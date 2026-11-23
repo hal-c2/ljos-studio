@@ -11,6 +11,7 @@ use studio_core::preview::{
     Click, Declared, Extent, Input, LogLine, Picture, PreviewError, PreviewHost, PreviewSpec,
     Reload, Rest, RestWatch, Size,
 };
+use studio_mcp::timer::Timer as _;
 use studio_mcp::{Studio, StudioServer};
 
 #[derive(Default)]
@@ -53,6 +54,41 @@ struct Seen {
     /// The host can be waited on: it rested once, and rests again as soon as
     /// a wait parks.
     watches: bool,
+    /// As `watches`, but a parked wait first says it parked, then rests
+    /// only once let go.
+    gate: Option<Gate>,
+}
+
+#[derive(Clone)]
+struct Gate {
+    parked: std::sync::mpsc::Sender<()>,
+    go: Arc<Mutex<std::sync::mpsc::Receiver<()>>>,
+}
+
+impl RestWatch for Gate {
+    fn wait(&self, since: Option<u64>, wait_ms: u64) -> Result<Rest, PreviewError> {
+        RestsOnceMore.wait(since, wait_ms)
+    }
+
+    fn parked(
+        &self,
+        since: u64,
+        _wait_ms: u64,
+    ) -> std::pin::Pin<Box<dyn Future<Output = Result<Rest, PreviewError>> + Send>> {
+        let gate = self.clone();
+        Box::pin(async move {
+            let _ = gate.parked.send(());
+            let _ = gate.go.lock().unwrap().recv();
+            Ok(Rest {
+                rests: since + 1,
+                wake_in_ms: None,
+            })
+        })
+    }
+
+    fn settle(&self, _: u64) -> Result<(), PreviewError> {
+        Ok(())
+    }
 }
 
 struct RestsOnceMore;
@@ -279,7 +315,12 @@ impl PreviewHost for Recorder {
     /// One that comes to rest at once, after whatever `during_settle`
     /// does; with `watches`, one that rests again as soon as a wait parks.
     fn rest_watch(&self) -> Option<Box<dyn RestWatch>> {
-        let watches = self.0.lock().unwrap().watches;
+        let seen = self.0.lock().unwrap();
+        if let Some(gate) = &seen.gate {
+            return Some(Box::new(gate.clone()));
+        }
+        let watches = seen.watches;
+        drop(seen);
         Some(if watches {
             Box::new(RestsOnceMore)
         } else {
@@ -332,6 +373,14 @@ impl Fixture {
     /// `arrange` changes the project before Studio opens it: after, Studio
     /// hears of it as of any other program's change.
     fn with(arrange: impl FnOnce(&std::path::Path)) -> Self {
+        Self::timed(arrange, None)
+    }
+
+    /// [`Fixture::with`], on `timer` where one is given.
+    fn timed(
+        arrange: impl FnOnce(&std::path::Path),
+        timer: Option<Arc<dyn studio_mcp::timer::Timer>>,
+    ) -> Self {
         let dir = tempfile::tempdir().unwrap();
         let files = [
             (
@@ -361,7 +410,11 @@ impl Fixture {
         arrange(dir.path());
         let seen = Arc::new(Mutex::new(Seen::default()));
         let opened = Arc::new(Mutex::new(0));
-        let mut studio = Studio::open(dir.path()).unwrap().with_previews(Arc::new({
+        let studio = match timer {
+            Some(timer) => Studio::open_with_timer(dir.path(), timer),
+            None => Studio::open(dir.path()),
+        };
+        let mut studio = studio.unwrap().with_previews(Arc::new({
             let seen = seen.clone();
             let opened = opened.clone();
             move |_| {
@@ -1647,7 +1700,18 @@ fn logs_that_cannot_be_read_end_the_preview_only_when_it_is_over() {
     f.fail("logs", refused());
     let out = f.call("preview_events", json!({})).unwrap();
     assert_eq!(out["open"], true);
-    assert!(event_kinds(out["events"].as_array().unwrap()).contains(&"reload_failed".to_owned()));
+    // A log that was not read is no reload that failed: the checks that
+    // look for one would take the app to be behind its text.
+    let events = out["events"].as_array().unwrap();
+    assert!(!event_kinds(events).contains(&"reload_failed".to_owned()));
+    assert!(
+        events.iter().any(|e| e["kind"] == "log"
+            && e["level"] == "warning"
+            && e["message"]
+                .as_str()
+                .is_some_and(|m| m.contains("could not read the preview's log"))),
+        "{events:?}"
+    );
     f.calls();
     // The one reading after it asks for the reload it may have missed.
     f.call("preview_screenshot", json!({})).unwrap();
@@ -2050,9 +2114,17 @@ fn an_app_that_warns_without_end_has_bounded_problems() {
 
 /// A project whose `Main.qml` can be written, its preview open.
 fn writable() -> Fixture {
-    let f = Fixture::with(|dir| {
-        std::fs::write(dir.join("Main.qml"), ROOTED).unwrap();
-    });
+    writable_on(None)
+}
+
+/// [`writable`], on `timer` where one is given.
+fn writable_on(timer: Option<Arc<dyn studio_mcp::timer::Timer>>) -> Fixture {
+    let f = Fixture::timed(
+        |dir| {
+            std::fs::write(dir.join("Main.qml"), ROOTED).unwrap();
+        },
+        timer,
+    );
     f.call("preview_open", json!({ "doc": "Main.qml" }))
         .unwrap();
     f
@@ -2060,7 +2132,12 @@ fn writable() -> Fixture {
 
 /// [`writable`], its app having warned 1200 times.
 fn warned_without_end() -> Fixture {
-    let f = writable();
+    warned_without_end_on(None)
+}
+
+/// [`warned_without_end`], on `timer` where one is given.
+fn warned_without_end_on(timer: Option<Arc<dyn studio_mcp::timer::Timer>>) -> Fixture {
+    let f = writable_on(timer);
     for round in 0..12 {
         f.seen.lock().unwrap().later = (0..100).map(|i| warned(&format!("{round}.{i}"))).collect();
         f.server.pull_problems();
@@ -2190,6 +2267,42 @@ fn a_parked_wait_answers_within_the_cap() {
     assert_eq!(out["rests"], 2, "the wait didn't park");
     assert_within_the_cap(&out);
     assert_eq!(out["truncated"], true, "the cut isn't said");
+}
+
+/// A rest is of the preview the wait began on: one closed meanwhile has
+/// no problems to tell with it, and another's are not its.
+#[test]
+fn a_wait_whose_preview_closed_meanwhile_says_so() {
+    use ljos_mcp_core::McpSurface as _;
+
+    let f = warned_without_end();
+    let (parked, on_park) = std::sync::mpsc::channel();
+    let (let_go, go) = std::sync::mpsc::channel();
+    f.seen.lock().unwrap().gate = Some(Gate {
+        parked,
+        go: Arc::new(Mutex::new(go)),
+    });
+    let ctx = CallCtx::new(CapSet::of([Cap::Inspect]));
+    let args = json!({ "wait_ms": 1000, "rests": 1 });
+    let waited = std::thread::scope(|scope| {
+        let waiting = scope.spawn(|| {
+            tokio::runtime::Builder::new_current_thread()
+                .build()
+                .unwrap()
+                .block_on(f.server.call_tool("preview_events", &ctx, args))
+        });
+        on_park
+            .recv_timeout(std::time::Duration::from_secs(60))
+            .expect("the wait didn't park");
+        f.call("preview_close", json!({})).unwrap();
+        let_go.send(()).unwrap();
+        waiting.join().unwrap()
+    });
+    let Err(e) = waited else {
+        panic!("a closed preview's rest was answered with its problems");
+    };
+    let e = e.to_value().to_string();
+    assert!(e.contains("closed or changed meanwhile"), "{e}");
 }
 
 /// How many problems there are to tell.
@@ -2376,9 +2489,29 @@ fn an_error_too_long_for_an_emptied_change_is_counted_and_takes_none_of_it() {
     );
 }
 
+/// The time of day, but a catch-up asked for never comes: the reading that
+/// follows is what reloads, however long the test took to get there.
+struct NoCatchUp(studio_mcp::timer::ThreadTimer);
+
+impl studio_mcp::timer::Timer for NoCatchUp {
+    fn now(&self) -> std::time::Duration {
+        self.0.now()
+    }
+
+    fn wall(&self) -> std::time::Duration {
+        self.0.wall()
+    }
+
+    fn after(&self, _: std::time::Duration, _: Box<dyn FnOnce() + Send>) {}
+
+    fn wait(&self, delay: std::time::Duration) -> bool {
+        self.0.wait(delay)
+    }
+}
+
 #[test]
 fn an_answer_cut_twice_names_both_cuts() {
-    let f = warned_without_end();
+    let f = warned_without_end_on(Some(Arc::new(NoCatchUp(Default::default()))));
     let since = f
         .call("preview_events", json!({ "since": 1_000_000 }))
         .unwrap()["next"]

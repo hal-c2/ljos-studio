@@ -1189,6 +1189,35 @@ pub(crate) fn logged(
     Ok(watch_of(studio)?.logged(since, wait_ms.min(3_600_000)))
 }
 
+/// Which preview is open, and on which document: a wait's answer is of the
+/// preview it began on.
+pub(crate) fn open_one(studio: &Mutex<Studio>) -> Option<(u64, String)> {
+    let previews = lock(studio).previews.clone();
+    let open = preview::lock(&previews)
+        .open
+        .as_ref()
+        .map(|o| (o.started, o.doc.clone()));
+    open
+}
+
+/// As [`known_problems`], of the preview `open` names alone: `None` once
+/// it was closed or another was opened.
+pub(crate) fn known_problems_of(
+    studio: &Mutex<Studio>,
+    open: &Option<(u64, String)>,
+) -> Option<Vec<Value>> {
+    let previews = lock(studio).previews.clone();
+    let lines = {
+        let previews = preview::lock(&previews);
+        let now = previews.open.as_ref().map(|o| (o.started, o.doc.clone()));
+        if now != *open {
+            return None;
+        }
+        most_urgent_first(previews.problems.clone())
+    };
+    Some(answered(&lock(studio).problems(&lines)))
+}
+
 /// What is known to be wrong in the preview, asking it nothing: a window
 /// waits after every rest, and each wait would be one more call of the app.
 pub(crate) fn known_problems(studio: &Mutex<Studio>) -> Vec<Value> {
