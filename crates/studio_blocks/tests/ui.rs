@@ -4158,6 +4158,199 @@ fn canvas_pane(window: &Window) -> Result<ljos::item::kurbo::Rect, String> {
         .ok_or_else(|| "no canvas pane".to_owned())
 }
 
+/// As a person dragging the window's edge makes it: the window's root
+/// takes the size, and the panels share what is left as they would.
+#[given(regex = r"^Studio's window is (\d+) by (\d+)$")]
+#[when(regex = r"^Studio's window is made (\d+) by (\d+)$")]
+fn window_sized(w: &mut UiWorld, width: f64, height: f64) -> StepResult {
+    let window = w.window()?;
+    window
+        .stage
+        .scene
+        .set_viewport(ljos::item::kurbo::Rect::new(0.0, 0.0, width, height));
+    let root = window.root;
+    for (prop, v) in [
+        (ljos_quick::Item::WIDTH, width),
+        (ljos_quick::Item::HEIGHT, height),
+    ] {
+        window
+            .engine()
+            .set(root, prop, v)
+            .map_err(|e| e.to_string())?;
+    }
+    window.rest()?;
+    let pane = canvas_pane(window)?;
+    (pane.x1 <= width + 0.5)
+        .then_some(())
+        .ok_or_else(|| format!("the canvas is at {pane:?} in a window {width} wide"))
+}
+
+/// Every node the window draws, with where it is.
+fn drawn_nodes(window: &Window) -> Vec<(String, String, ljos::item::kurbo::Rect)> {
+    let mut out = Vec::new();
+    window.stage.scene.accessibility_tree().walk(|_, _, d| {
+        let b = d.bounds;
+        out.push((
+            ljos_a11y::role_word(d.role),
+            d.name.to_string(),
+            ljos::item::kurbo::Rect::new(b.x0, b.y0, b.x1, b.y1),
+        ));
+    });
+    out
+}
+
+fn inside(rect: ljos::item::kurbo::Rect, pane: ljos::item::kurbo::Rect) -> bool {
+    rect.x0 >= pane.x0 - 0.5
+        && rect.y0 >= pane.y0 - 0.5
+        && rect.x1 <= pane.x1 + 0.5
+        && rect.y1 <= pane.y1 + 0.5
+}
+
+#[then(regex = r#"^the frame "([^"]+)"'s name, state and layout button show whole in the canvas$"#)]
+fn frame_header_whole(w: &mut UiWorld, target: String) -> StepResult {
+    let window = w.window()?;
+    let pane = canvas_pane(window)?;
+    let named = format!("{target} · ");
+    let pill = format!("{target} layout");
+    let drawn = drawn_nodes(window);
+    let mut parts = Vec::new();
+    for (what, test) in [
+        (
+            "name",
+            &(|role: &str, name: &str| role == "label" && name.starts_with(&named))
+                as &dyn Fn(&str, &str) -> bool,
+        ),
+        ("state", &|role: &str, name: &str| {
+            role == "label" && (name == "No state" || name.starts_with("State "))
+        }),
+        ("layout button", &|role: &str, name: &str| {
+            role == "button"
+                && (name == pill || (name.starts_with("Edit ") && name.ends_with(" layout")))
+        }),
+    ] {
+        let (_, name, rect) = drawn
+            .iter()
+            .find(|(role, name, _)| test(role, name))
+            .ok_or_else(|| format!("the canvas draws no {what} for the frame {target:?}"))?;
+        parts.push((what, name.clone(), *rect));
+    }
+    let mut wrong = Vec::new();
+    for (what, name, rect) in &parts {
+        if !inside(*rect, pane) {
+            wrong.push(format!("its {what} {name:?} at {rect:?}"));
+        }
+    }
+    // Cut to fit is not whole either: the name reads in full.
+    let label = ljos_drive::find_below(window.engine(), window.root, "frameLabel")
+        .ok_or("no frame label")?;
+    let width = window.engine().read_by_name(label, "width").to_number();
+    let full = window
+        .engine()
+        .read_by_name(label, "implicitWidth")
+        .to_number();
+    if width < full - 0.5 {
+        wrong.push(format!("its name cut to {width} of {full}"));
+    }
+    wrong
+        .is_empty()
+        .then_some(())
+        .ok_or_else(|| format!("in a canvas at {pane:?}: {}", wrong.join("; ")))
+}
+
+#[then(regex = r"^the canvas's (\d+) tools for the selection show whole in the canvas, apart$")]
+fn selection_tools_whole(w: &mut UiWorld, count: usize) -> StepResult {
+    let window = w.window()?;
+    let pane = canvas_pane(window)?;
+    let tools: Vec<_> = drawn_nodes(window)
+        .into_iter()
+        .filter(|(role, name, rect)| {
+            role == "button"
+                && (name.starts_with("Align ") || name.starts_with("Wrap in ") || name == "Unwrap")
+                && rect.intersect(pane).area() > 0.0
+        })
+        .collect();
+    let mut wrong = Vec::new();
+    if tools.len() != count {
+        wrong.push(format!(
+            "{} tools: {:?}",
+            tools.len(),
+            tools.iter().map(|t| &t.1).collect::<Vec<_>>()
+        ));
+    }
+    for (i, (_, tool, rect)) in tools.iter().enumerate() {
+        if !inside(*rect, pane) {
+            wrong.push(format!("{tool:?} at {rect:?}"));
+        }
+        for (_, other, at) in &tools[i + 1..] {
+            if rect.intersect(*at).area() > 0.0 {
+                wrong.push(format!("{tool:?} at {rect:?} over {other:?} at {at:?}"));
+            }
+        }
+    }
+    wrong
+        .is_empty()
+        .then_some(())
+        .ok_or_else(|| format!("in a canvas at {pane:?}: {}", wrong.join("; ")))
+}
+
+/// The tools floating at the canvas's foot, by their names.
+const CANVAS_BAR_TOOLS: [&str; 11] = [
+    "Select",
+    "Hand",
+    "Draw rectangle",
+    "Draw text",
+    "Play",
+    "Side by side",
+    "Zoom out",
+    "Zoom",
+    "Zoom in",
+    "Fit",
+    "Fit content",
+];
+
+#[then(regex = r#"^the canvas's bars cover neither "([^"]+)" nor each other, all in the canvas$"#)]
+fn bars_clear(w: &mut UiWorld, said: String) -> StepResult {
+    let window = w.window()?;
+    let pane = canvas_pane(window)?;
+    let drawn = drawn_nodes(window);
+    let (_, _, words) = drawn
+        .iter()
+        .find(|(role, name, _)| role == "label" && *name == said)
+        .ok_or_else(|| format!("the canvas does not say {said:?}"))?;
+    let mut tools = Vec::new();
+    for tool in CANVAS_BAR_TOOLS {
+        let (_, _, rect) = drawn
+            .iter()
+            .find(|(role, name, rect)| {
+                name == tool && role != "label" && rect.intersect(pane).area() > 0.0
+            })
+            .ok_or_else(|| format!("the canvas has no {tool:?}"))?;
+        tools.push((tool, *rect));
+    }
+    let mut wrong = Vec::new();
+    if !inside(*words, pane) {
+        wrong.push(format!("{said:?} at {words:?}"));
+    }
+    for (i, (tool, rect)) in tools.iter().enumerate() {
+        if !inside(*rect, pane) {
+            wrong.push(format!("{tool:?} at {rect:?}"));
+        }
+        // With the bar's padding around it: the bar is opaque.
+        if rect.inflate(4.0, 4.0).intersect(*words).area() > 0.0 {
+            wrong.push(format!("{tool:?} at {rect:?} over {said:?} at {words:?}"));
+        }
+        for (other, at) in &tools[i + 1..] {
+            if rect.intersect(*at).area() > 0.0 {
+                wrong.push(format!("{tool:?} at {rect:?} over {other:?} at {at:?}"));
+            }
+        }
+    }
+    wrong
+        .is_empty()
+        .then_some(())
+        .ok_or_else(|| format!("in a canvas at {pane:?}: {}", wrong.join("; ")))
+}
+
 /// Within the canvas, and filling it along one side but for its margins.
 fn fits(window: &Window, drawn: ljos::item::kurbo::Rect) -> StepResult {
     let pane = canvas_pane(window)?;
