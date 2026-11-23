@@ -374,3 +374,13 @@ Feature: The inspector shows colours and every declared property
     Then the file "Main.qml" says "id: renamed"
     When the person clicks the button "Undo"
     Then the file "Main.qml" says "id: other"
+
+  # A field that holds its value but draws it in no colour is an empty box,
+  # to a person, while a reader still hears the value.
+  Scenario: A row draws the value it holds
+    Then the inspector's "id" draws "root" itself
+    And the inspector's "width" draws "100" itself
+
+  Scenario: A row being typed in draws its value, not a shortened copy
+    When the person clicks in the inspector's "id"
+    Then the inspector's "id" draws "root" itself
