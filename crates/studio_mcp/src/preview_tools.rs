@@ -917,12 +917,16 @@ pub(crate) fn pick(
     // The stand-in's one instance of the document is the document's root: it
     // is written there only because nothing else makes one, and a runtime
     // names an instance's root where the instance is written.
-    let instance = open.harness.as_ref().is_some_and(|h| {
-        h.path == declared.file
-            && studio.session.store().read(&h.path).is_ok_and(|text| {
-                crate::harness::instance_line(&text) == Some(declared.line as usize)
-            })
-    });
+    let in_harness = open
+        .harness
+        .as_ref()
+        .is_some_and(|h| h.path == declared.file);
+    let instance = in_harness
+        && studio
+            .session
+            .store()
+            .read(&declared.file)
+            .is_ok_and(|text| crate::harness::instance_line(&text) == Some(declared.line as usize));
     if instance {
         drop(previews);
         let (tree, _) = studio.session.tree(doc).map_err(error)?;
@@ -933,6 +937,11 @@ pub(crate) fn pick(
             return Ok(None);
         }
         return Ok(Some((doc.to_owned(), handle)));
+    }
+    // Around the instance is only the stand-in's own frame: no part of the
+    // document, and not one to edit either.
+    if in_harness {
+        return Ok(None);
     }
     let mut scene = None;
     if studio.session.store().exists(&declared.file) {

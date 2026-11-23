@@ -149,13 +149,16 @@ pub(crate) fn harness(store: &dyn Store, doc: &str) -> Option<Harness> {
     let members = outline::members(&text, root.start);
     let samples = samples(store, doc);
     let sets = sets(&members, &samples);
-    let store_like = shows_nothing(&nodes, root, &members, is_block(store, dir, file));
+    let block = is_block(store, dir, file);
+    let store_like = shows_nothing(&nodes, root, &members, block);
     let requires = members
         .iter()
         .any(|m| m.kind == MemberKind::Property && m.required);
     let text = if store_like {
         sheet(name, &members, &sets)
-    } else if requires {
+    } else if requires || block {
+        // A block is a part, not an app: shown as itself, its root would be
+        // stretched to the whole frame, a card as wide as a screen.
         instance(name, root, &sets)
     } else {
         return None;
