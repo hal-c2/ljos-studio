@@ -28,6 +28,13 @@ struct Seen {
     rate: u32,
     /// How far down the page reaches, as `extent` answers; none refuses.
     extent: Option<f64>,
+    /// A full-width item this tall at the top of the page: it reaches its
+    /// bottom while the window is shorter or taller, and once the window is
+    /// exactly as tall the host leaves it out, as it does whatever is the
+    /// window's size, so only `extent` is measured.
+    tall: Option<f64>,
+    /// The window's height, as the host was last opened or resized to.
+    window: u32,
     /// What happens while a scroll or a swipe settles, outside Studio's lock.
     during_settle: Option<Box<dyn FnOnce() + Send>>,
 }
@@ -76,6 +83,7 @@ impl PreviewHost for Recorder {
             spec.size.height,
             aliases.join(",")
         ))?;
+        self.0.lock().unwrap().window = spec.size.height;
         Ok(())
     }
 
@@ -105,6 +113,7 @@ impl PreviewHost for Recorder {
 
     fn resize(&mut self, size: Size) -> Result<(), PreviewError> {
         self.note(format!("resize {}x{}", size.width, size.height))?;
+        self.0.lock().unwrap().window = size.height;
         Ok(())
     }
 
@@ -156,9 +165,14 @@ impl PreviewHost for Recorder {
 
     fn extent(&mut self) -> Result<f64, PreviewError> {
         self.answer("extent")?;
-        self.0.lock().unwrap().extent.ok_or(PreviewError::Refused {
+        let seen = self.0.lock().unwrap();
+        let extent = seen.extent.ok_or(PreviewError::Refused {
             code: "unsupported".to_owned(),
             message: "no extent set".to_owned(),
+        })?;
+        Ok(match seen.tall {
+            Some(tall) if f64::from(seen.window) != tall => extent.max(tall),
+            _ => extent,
         })
     }
 
@@ -430,6 +444,57 @@ fn reopening_a_preview_fitted_to_a_page_that_got_shorter_makes_it_shorter() {
         .unwrap();
     assert_eq!(out["size"], json!({ "width": 1280, "height": 1000 }));
     assert_eq!(f.calls(), ["resize 1280x800", "resize 1280x1000"]);
+}
+
+/// A page as tall as the preview was grown to, because of one item the
+/// host now leaves out (it is the window's size), measures shorter than the
+/// preview while nothing changed: opened again, it is not laid out at its
+/// screen's height and back up.
+#[test]
+fn reopening_a_preview_grown_to_an_item_as_big_as_its_window_resizes_nothing() {
+    let f = Fixture::new();
+    {
+        let mut seen = f.seen.lock().unwrap();
+        seen.tall = Some(2000.0);
+        seen.extent = Some(1500.0);
+    }
+    let out = f
+        .call(
+            "preview_open",
+            json!({ "doc": "Shell.qml", "fit": "content" }),
+        )
+        .unwrap();
+    assert_eq!(out["size"], json!({ "width": 1280, "height": 2000 }));
+    f.calls();
+    let out = f
+        .call("preview_open", json!({ "doc": "Shell.qml" }))
+        .unwrap();
+    assert_eq!(out["size"], json!({ "width": 1280, "height": 2000 }));
+    assert_eq!(f.calls(), Vec::<String>::new());
+}
+
+/// When that item gets shorter, the page measures differently, so the
+/// preview is laid out from its screen again and gets shorter with it.
+#[test]
+fn reopening_a_preview_grown_to_an_item_that_got_shorter_makes_it_shorter() {
+    let f = Fixture::new();
+    {
+        let mut seen = f.seen.lock().unwrap();
+        seen.tall = Some(2000.0);
+        seen.extent = Some(1500.0);
+    }
+    f.call(
+        "preview_open",
+        json!({ "doc": "Shell.qml", "fit": "content" }),
+    )
+    .unwrap();
+    f.calls();
+    f.seen.lock().unwrap().tall = Some(1700.0);
+    let out = f
+        .call("preview_open", json!({ "doc": "Shell.qml" }))
+        .unwrap();
+    assert_eq!(out["size"], json!({ "width": 1280, "height": 1700 }));
+    assert_eq!(f.calls(), ["resize 1280x800", "resize 1280x1700"]);
 }
 
 /// A host that cannot say how far its page reaches refuses a fit to
