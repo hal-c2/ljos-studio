@@ -176,9 +176,10 @@ Popup {
             }
         }
         // A Studio that does not list its tools has only the rows above.
+        // Picking one keeps the palette open for its arguments.
         const tools = ws["tools"] || []
         for (const tool of tools)
-            out.push(row(tool.name, "", tool.description, () => ask(tool)))
+            out.push(Object.assign(row(tool.name, "", tool.description, () => ask(tool)), {asks: true}))
         return out
     }
 
@@ -263,7 +264,8 @@ Popup {
             return
         recent = [a.name].concat(recent.filter(n => n !== a.name)).slice(0, 12)
         // The palette closes first: what runs may open a panel of its own.
-        if (asking === null)
+        // A row that asks for more keeps it open to be answered.
+        if (!a.asks)
             close()
         a.run()
     }
