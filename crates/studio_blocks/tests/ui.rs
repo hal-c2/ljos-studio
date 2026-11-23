@@ -1301,16 +1301,31 @@ fn clicks_buttons_quickly(w: &mut UiWorld, first: String, second: String) -> Ste
 
 #[when(regex = r#"^the pointer rests on the button "([^"]+)" until its tip has shown$"#)]
 fn rests_on_button(w: &mut UiWorld, name: String) -> StepResult {
+    rests_on(w, &name, Some("button"))
+}
+
+#[when(regex = r#"^the pointer rests on "(.+)" until its tip has shown$"#)]
+fn rests_on_named(w: &mut UiWorld, name: String) -> StepResult {
+    rests_on(w, &name, None)
+}
+
+fn rests_on(w: &mut UiWorld, name: &str, role: Option<&str>) -> StepResult {
     let window = w.window()?;
     let tree = window.tree();
-    let button = find(&tree, &|n| {
-        n.name == name && n.role == "button" && n.key.is_some()
+    let node = find(&tree, &|n| {
+        n.name == name && role.is_none_or(|r| n.role == r) && n.key.is_some()
     })
     .cloned()
-    .ok_or_else(|| format!("no button {name:?}; the window holds {}", names(&tree)))?;
+    .ok_or_else(|| {
+        format!(
+            "no {}{name:?}; the window holds {}",
+            role.map(|r| format!("{r} ")).unwrap_or_default(),
+            names(&tree)
+        )
+    })?;
     let mut driver = window.stage.drive();
     let at = driver
-        .aim_at_node(button.key.ok_or("the button has no key")?)
+        .aim_at_node(node.key.ok_or("it has no key")?)
         .map_err(|why| format!("{name:?} is not reached: {why:?}"))?;
     driver.move_to(at).map_err(drive_error)?;
     // Longer than the tip's delay.
@@ -2339,6 +2354,43 @@ fn window_says(w: &mut UiWorld, want: String) -> StepResult {
     find(&tree, &|n| n.name == want)
         .map(drop)
         .ok_or_else(|| format!("the window does not say {want:?}"))
+}
+
+/// A problem's words as the list shows them: every text that holds them
+/// shows them all, with none cut off at a line or an ellipsis.
+#[then(regex = r#"^the problem "(.+)" is shown whole$"#)]
+fn problem_shown_whole(w: &mut UiWorld, want: String) -> StepResult {
+    let window = w.window()?;
+    let engine = window.engine();
+    let mut texts = Vec::new();
+    let mut stack = vec![window.root];
+    while let Some(obj) = stack.pop() {
+        if engine.read_by_name(obj, "text").to_js_string().to_string() == want
+            && engine.read_by_name(obj, "visible") == Value::Bool(true)
+        {
+            texts.push(obj);
+        }
+        stack.extend(engine.children(obj));
+    }
+    if texts.is_empty() {
+        return Err(format!("no text shows {want:?}"));
+    }
+    texts
+        .iter()
+        .all(|&t| engine.read_by_name(t, "truncated") == Value::Bool(false))
+        .then_some(())
+        .ok_or_else(|| {
+            let lines: Vec<_> = texts
+                .iter()
+                .map(|&t| {
+                    engine
+                        .read_by_name(t, "lineCount")
+                        .to_js_string()
+                        .to_string()
+                })
+                .collect();
+            format!("{want:?} is cut off; its texts show {lines:?} lines")
+        })
 }
 
 #[then(regex = r#"^the window does not say "(.*)"$"#)]

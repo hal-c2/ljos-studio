@@ -1767,6 +1767,24 @@ mod tests {
     }
 
     #[test]
+    fn a_warning_that_comes_with_its_place_does_not_say_it_again() {
+        // As `app_logs` answers a runtime warning: the place read out of the
+        // message, and the message as the runtime wrote it.
+        let line = logged(
+            &json!({
+                "level": "warning",
+                "message": "file:///p/ui/Card.qml:40:13: Unable to assign [undefined] to QColor",
+                "file": "file:///p/ui/Card.qml",
+                "line": 40
+            }),
+            Path::new("/p"),
+        );
+        assert_eq!(line.file.as_deref(), Some("ui/Card.qml"));
+        assert_eq!(line.line, Some(40));
+        assert_eq!(line.message, "Unable to assign [undefined] to QColor");
+    }
+
+    #[test]
     fn a_file_url_is_decoded_before_it_is_named_from_the_project() {
         let line = logged(
             &json!({ "level": "warning", "message": "file:///My Projects/a%23b/ui/Main.qml:6: oops" }),
