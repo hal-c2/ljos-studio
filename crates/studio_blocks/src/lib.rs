@@ -33,7 +33,7 @@ use ljos::task::{self, Lane};
 use ljos_mcp_core::{CallCtx, Cap, CapSet, McpSurface};
 use serde_json::{Value as Json, json};
 use studio_mcp::StudioServer;
-use studio_mcp::view::{Shown, View};
+use studio_mcp::view::{PictureOf, View};
 
 /// Declares `Studio.Workspace`, `Studio.PreviewPicture` and
 /// `Studio.ShellStatus`.
@@ -541,7 +541,7 @@ enum Done {
         /// Width, height, pixels, and what the pixels hash to.
         picture: Result<(u32, u32, Vec<u8>, u64), String>,
         /// What it was taken of.
-        shown: Option<Shown>,
+        shown: Option<PictureOf>,
     },
 }
 
@@ -903,7 +903,7 @@ fn finish(engine: &Engine, ws: ObjectId, done: Done) {
                     let mut preview = engine.get(ws, Workspace::PREVIEW).unwrap_or_default();
                     let keep = shown.and_then(|shown| {
                         let q = queue.borrow();
-                        let now = Shown {
+                        let now = PictureOf {
                             doc: q.previewed.clone(),
                             target: preview["target"].as_str().unwrap_or_default().to_owned(),
                             text: engine.get(ws, Workspace::GENERATION).unwrap_or_default() as u64,
@@ -1186,8 +1186,8 @@ fn same_shape(drawn: (u32, u32), size: (u32, u32)) -> bool {
 /// fitted to its content changes shape on its target.
 fn kept_slot(
     q: &Queue,
-    shown: &Shown,
-    now: &Shown,
+    shown: &PictureOf,
+    now: &PictureOf,
     drawn: (u32, u32),
     changed: bool,
 ) -> Option<(String, u64)> {
@@ -1670,8 +1670,8 @@ mod tests {
         assert_eq!(wait.try_recv(), Err(mpsc::TryRecvError::Disconnected));
     }
 
-    fn shown(doc: &str, target: &str, text: u64) -> Shown {
-        Shown {
+    fn shown(doc: &str, target: &str, text: u64) -> PictureOf {
+        PictureOf {
             doc: doc.to_owned(),
             target: target.to_owned(),
             text,

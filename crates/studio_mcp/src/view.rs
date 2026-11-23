@@ -115,7 +115,7 @@ pub struct TokenRow {
 /// under: one that lands after the preview moved is not a picture of where
 /// it is then.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Shown {
+pub struct PictureOf {
     pub doc: String,
     /// As [`Previewed::target`] names it.
     pub target: String,
