@@ -6,9 +6,10 @@ Feature: An object becomes a component of the project
   the document and leaves an instance of it where it was, with the id and the
   place. One undo takes back both files. An id only the new file can see would
   break what reads it, so a read of a property becomes an alias, and what no
-  alias can carry is refused, naming it. A string an inner object with an id
-  shows becomes an alias too, set on the instance: another instance can say
-  another, and the file keeps it as what one that sets none shows.
+  alias can carry is refused, naming it. A string literal bound on an inner
+  object with an id becomes an alias too, set on the instance: another
+  instance can say another, and the file keeps it as what one that sets none
+  shows.
 
   Background:
     Given the file "Main.qml":
@@ -194,6 +195,49 @@ Feature: An object becomes a component of the project
       """
     Then the answer's "/aliases" is ["labelText"]
     And the file "Named.qml" does not contain "labelObjectName"
+
+  Scenario: What a Repeater holds is its delegate, so it is no alias
+    Given the file "Rows.qml":
+      """qml
+      import QtQuick
+
+      Column {
+          Repeater {
+              id: rows
+              model: 2
+              Text { id: label; text: "Hi" }
+          }
+      }
+      """
+    When the agent calls the tool "node_arrange" with:
+      """json
+      {"action": "component_extract", "doc": "Rows.qml", "nodes": [{"id": "rows"}], "name": "LabelRows"}
+      """
+    Then the file "LabelRows.qml" does not contain "alias"
+    And the file "Rows.qml" does not contain "labelText"
+
+  Scenario: An alias is not named like a change signal the object declares
+    Given the file "Told.qml":
+      """qml
+      import QtQuick
+
+      Item {
+          Rectangle {
+              id: card
+              signal labelTextChanged()
+              Text {
+                  id: label
+                  text: "Hi"
+              }
+          }
+      }
+      """
+    When the agent calls the tool "node_arrange" with:
+      """json
+      {"action": "component_extract", "doc": "Told.qml", "nodes": [{"id": "card"}], "name": "Card"}
+      """
+    Then the answer's "/aliases" is ["labelText1"]
+    And the file "Card.qml" contains "property alias labelText1: label.text"
 
   Scenario: A property read from outside becomes an alias, only where it has to
     Given the file "Reads.qml":
