@@ -134,3 +134,16 @@ test("what is picked in a file compiled under another name is named as the proje
   const answer = await ask({ call: "pick", x: 1, y: 1 });
   assert.deepEqual(answer.declared, { file: "Blocks/.Card.preview.qml", line: 8, column: 5 });
 });
+
+// An aliased module's files are compiled at the module's path; a stand-in
+// there is also renamed. Its project file is the one in the alias's directory.
+test("what is picked in a renamed file of an aliased module is named by the alias's directory", async () => {
+  const { ask } = page({
+    throwing: () => false,
+    compiled: { component: {}, base: "/p/", renamed: { "App/Data/_Card_preview.qml": "App/Data/.Card.preview.qml" } },
+    picked: { file: "projects/3/App/Data/_Card_preview.qml", line: 8, column: 5 },
+  });
+  await ask({ ...opened, aliases: [{ module: "App.Data", dir: "mocks/data" }] });
+  const answer = await ask({ call: "pick", x: 1, y: 1 });
+  assert.deepEqual(answer.declared, { file: "mocks/data/.Card.preview.qml", line: 8, column: 5 });
+});
