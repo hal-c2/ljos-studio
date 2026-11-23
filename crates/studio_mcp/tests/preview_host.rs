@@ -11,7 +11,6 @@ use studio_core::preview::{
     Click, Declared, Extent, Input, LogLine, Picture, PreviewError, PreviewHost, PreviewSpec,
     Reload, Rest, RestWatch, Size,
 };
-use studio_mcp::timer::Timer as _;
 use studio_mcp::{Studio, StudioServer};
 
 #[derive(Default)]
