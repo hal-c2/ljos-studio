@@ -615,14 +615,31 @@ impl Previews {
             self.forget_dropped();
         }
         let mut sources = Sources::new(self.root.as_deref());
-        let held = std::mem::take(&mut self.held);
+        let held: Vec<_> = std::mem::take(&mut self.held)
+            .into_iter()
+            .filter(|(p, _)| !(p.compiler && p.level == "error"))
+            .collect();
         self.unplaced.clear();
-        for (mut p, text) in held {
-            if p.compiler && p.level == "error" {
-                continue;
+        // Two lines can read alike, and each is told once: those whose own
+        // line is unchanged keep it first, then one whose line went takes the
+        // nearest alike that none holds, or none.
+        let mut placed: Vec<Option<LogLine>> = vec![None; held.len()];
+        let mut taken: Vec<LogLine> = Vec::new();
+        for unchanged in [true, false] {
+            for ((p, text), at) in held.iter().zip(placed.iter_mut()) {
+                if at.is_some() || sources.stays(p, text.as_deref()) != unchanged {
+                    continue;
+                }
+                let mut p = p.clone();
+                if sources.follow(&mut p, text.as_deref(), &taken) {
+                    taken.push(p.clone());
+                    *at = Some(p);
+                }
             }
-            if sources.follow(&mut p, text.as_deref()) {
-                self.held.push((p, text));
+        }
+        for ((p, text), at) in held.into_iter().zip(placed) {
+            if let Some(at) = at {
+                self.held.push((at, text));
             } else if failed.is_some() {
                 self.unplaced.push(p.clone());
                 self.held.push((p, text));
@@ -894,11 +911,18 @@ impl Sources {
         text.lines().nth(line as usize).map(|l| l.trim().to_owned())
     }
 
+    /// Whether the line `p` is on still reads `told`, the text it was told on.
+    fn stays(&mut self, p: &LogLine, told: Option<&str>) -> bool {
+        told.is_some()
+            && p.line.is_some()
+            && self.text_at(p.file.as_deref(), p.line).as_deref() == told
+    }
+
     /// Whether `told`, the text `p` was told on, is still in its file, and
-    /// moves `p` to the line nearest its own that has it: neither Ljós nor
-    /// the app tells a problem again while its line is unchanged, and lines
-    /// put above it move it.
-    fn follow(&mut self, p: &mut LogLine, told: Option<&str>) -> bool {
+    /// moves `p` to the line nearest its own that has it and where no problem
+    /// of `taken` with its words is: neither Ljós nor the app tells a problem
+    /// again while its line is unchanged, and lines put above it move it.
+    fn follow(&mut self, p: &mut LogLine, told: Option<&str>, taken: &[LogLine]) -> bool {
         let (Some(told), Some(file)) = (told, p.file.as_deref()) else {
             return false;
         };
@@ -913,6 +937,12 @@ impl Sources {
             .lines()
             .enumerate()
             .filter(|(_, l)| l.trim() == told)
+            .filter(|(n, _)| {
+                let line = u32::try_from(n + 1).ok();
+                !taken
+                    .iter()
+                    .any(|t| t.line == line && t.file == p.file && t.message == p.message)
+            })
             .min_by_key(|(n, _)| n.abs_diff(at))
             .map(|(n, _)| n);
         let Some(n) = nearest.and_then(|n| u32::try_from(n + 1).ok()) else {
@@ -1197,6 +1227,32 @@ mod tests {
         p.start_problems(None, &[]);
         assert_eq!(p.problems, [held_warning(4)]);
         assert!(p.unplaced.is_empty());
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn a_warning_on_a_line_mended_goes_though_another_line_reads_as_it_did() {
+        let (mut p, _) = previews(VecDeque::new(), false);
+        let text = "Item {\n    color: oops\n    x: 1\n    color: oops\n}\n";
+        let root = rooted(&mut p, text);
+        p.start_problems(None, &[held_warning(2), held_warning(4)]);
+        let mended = "Item {\n    color: \"red\"\n    x: 1\n    color: oops\n}\n";
+        std::fs::write(root.join("Main.qml"), mended).unwrap();
+        p.start_problems(None, &[]);
+        assert_eq!(p.problems, [held_warning(4)]);
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn warnings_on_lines_that_read_alike_each_follow_their_own() {
+        let (mut p, _) = previews(VecDeque::new(), false);
+        let text = "Item {\n    color: oops\n    x: 1\n    color: oops\n}\n";
+        let root = rooted(&mut p, text);
+        p.start_problems(None, &[held_warning(2), held_warning(4)]);
+        let above = "Item {\n    y: 1\n    color: oops\n    x: 1\n    color: oops\n}\n";
+        std::fs::write(root.join("Main.qml"), above).unwrap();
+        p.start_problems(None, &[]);
+        assert_eq!(p.problems, [held_warning(3), held_warning(5)]);
         std::fs::remove_dir_all(&root).unwrap();
     }
 
