@@ -33,7 +33,7 @@ use ljos::task::{self, Lane};
 use ljos_mcp_core::{CallCtx, Cap, CapSet, McpSurface};
 use serde_json::{Value as Json, json};
 use studio_mcp::StudioServer;
-use studio_mcp::view::View;
+use studio_mcp::view::{Shown, View};
 
 /// Declares `Studio.Workspace`, `Studio.PreviewPicture` and
 /// `Studio.ShellStatus`.
@@ -540,6 +540,8 @@ enum Done {
         looks: Vec<mpsc::Sender<()>>,
         /// Width, height, pixels, and what the pixels hash to.
         picture: Result<(u32, u32, Vec<u8>, u64), String>,
+        /// What it was taken of.
+        shown: Option<Shown>,
     },
 }
 
@@ -748,10 +750,12 @@ fn run(server: &StudioServer, writes: &AtomicU64, doc: &str, job: Job) -> Done {
         }
         Job::Picture { generation, looks } => {
             let args = json!({"format": "png", "max_size": 1280});
+            let mut shown = None;
             let picture = server
                 .shown_picture(&person(), args)
                 .map_err(|e| e.to_string())
-                .and_then(|reply| {
+                .and_then(|(reply, taken_of)| {
+                    shown = taken_of;
                     let image = reply
                         .images
                         .into_iter()
@@ -767,6 +771,7 @@ fn run(server: &StudioServer, writes: &AtomicU64, doc: &str, job: Job) -> Done {
                 generation,
                 looks,
                 picture,
+                shown,
             }
         }
     }
@@ -869,6 +874,7 @@ fn finish(engine: &Engine, ws: ObjectId, done: Done) {
             generation,
             looks,
             picture,
+            shown,
         } => {
             let Some(queue) = queue_of(engine, ws) else {
                 return;
@@ -895,27 +901,21 @@ fn finish(engine: &Engine, ws: ObjectId, done: Done) {
                         }
                     }
                     let mut preview = engine.get(ws, Workspace::PREVIEW).unwrap_or_default();
-                    let target = preview["target"].as_str().unwrap_or_default().to_owned();
-                    let text = engine.get(ws, Workspace::GENERATION).unwrap_or_default();
-                    // Another document's first picture can be the same as
-                    // the last one's, pixel for pixel: unchanged, it is
-                    // still kept for its target, whose pictures went when
-                    // that document was shown. A picture asked for before
-                    // the preview moved to this target has the shape of the
-                    // one before.
-                    let keep = {
+                    let keep = shown.and_then(|shown| {
                         let q = queue.borrow();
-                        !target.is_empty()
-                            && same_shape(drawn, q.size)
-                            && (changed
-                                || q.kept.get(&target).is_none_or(|(_, t)| *t != text as u64))
-                    };
+                        let now = Shown {
+                            doc: q.previewed.clone(),
+                            target: preview["target"].as_str().unwrap_or_default().to_owned(),
+                            text: engine.get(ws, Workspace::GENERATION).unwrap_or_default() as u64,
+                        };
+                        kept_slot(&q, &shown, &now, drawn, changed)
+                    });
                     if let Some(fields) = preview.as_object_mut()
-                        && (changed || keep)
+                        && (changed || keep.is_some())
                     {
                         let mut q = queue.borrow_mut();
-                        if keep {
-                            q.kept.insert(target, (image, text as u64));
+                        if let Some((target, text)) = keep {
+                            q.kept.insert(target, (image, text));
                         }
                         fields.insert("picture".to_owned(), json!(generation));
                         fields.insert("shots".to_owned(), json!(q.shots));
@@ -1173,6 +1173,27 @@ fn same_shape(drawn: (u32, u32), size: (u32, u32)) -> bool {
     let (w, h) = (f64::from(drawn.0), f64::from(drawn.1));
     let (sw, sh) = (f64::from(size.0), f64::from(size.1));
     w > 0.0 && sw > 0.0 && ((w / h) - (sw / sh)).abs() <= 2.0 / h.min(w)
+}
+
+/// The target a picture is kept for, and the document's generation it is
+/// labelled with, if it is kept: `shown` is what it was taken of, `now` the
+/// document, target and generation the window shows. Another document's
+/// first picture can be the same as the last one's, pixel for pixel:
+/// unchanged, it is still kept for its target, whose pictures went when that
+/// document was shown. A picture asked for before the preview moved to this
+/// target has the shape of the one before.
+fn kept_slot(
+    q: &Queue,
+    _shown: &Shown,
+    now: &Shown,
+    drawn: (u32, u32),
+    changed: bool,
+) -> Option<(String, u64)> {
+    let target = &now.target;
+    (!target.is_empty()
+        && same_shape(drawn, q.size)
+        && (changed || q.kept.get(target).is_none_or(|(_, t)| *t != now.text)))
+    .then(|| (target.clone(), now.text))
 }
 
 /// `preview.kept`: each target with a kept picture, and the document's
@@ -1643,6 +1664,46 @@ mod tests {
         });
         drop(queue);
         assert_eq!(wait.try_recv(), Err(mpsc::TryRecvError::Disconnected));
+    }
+
+    fn shown(doc: &str, target: &str, text: u64) -> Shown {
+        Shown {
+            doc: doc.to_owned(),
+            target: target.to_owned(),
+            text,
+        }
+    }
+
+    /// A picture is kept for the target it was taken on, labelled with the
+    /// text it showed. One that lands after the window moved to another
+    /// document or target, of the same shape, is not kept for where the
+    /// window is then (review comment 7079316842): the move asks for a
+    /// picture of its own.
+    #[test]
+    #[allow(clippy::field_reassign_with_default)]
+    fn a_picture_is_kept_only_for_what_it_was_taken_of() {
+        // Not built with `..Default::default()`: a queue's drop stops its
+        // follower, so its fields cannot be moved out of one.
+        let mut q = Queue::default();
+        q.previewed = "Copy.qml".to_owned();
+        q.size = (1280, 800);
+        let now = shown("Copy.qml", "Desktop", 7);
+        let drawn = (1280, 800);
+        assert_eq!(
+            kept_slot(&q, &shown("Main.qml", "Desktop", 7), &now, drawn, true),
+            None,
+            "another document's picture was kept"
+        );
+        assert_eq!(
+            kept_slot(&q, &shown("Copy.qml", "Tablet", 7), &now, drawn, true),
+            None,
+            "another target's picture was kept"
+        );
+        assert_eq!(
+            kept_slot(&q, &shown("Copy.qml", "Desktop", 6), &now, drawn, true),
+            Some(("Desktop".to_owned(), 6)),
+            "not labelled with the text it showed"
+        );
     }
 
     fn turn(dy: f64) -> Job {

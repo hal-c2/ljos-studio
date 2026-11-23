@@ -24,6 +24,7 @@ use studio_core::{
 use crate::{
     Studio, blocks, error, lock,
     preview::{self, Fit, Open, State},
+    view::{self, Shown},
 };
 
 /// Pictures are this many pixels on their longest side unless asked for
@@ -767,17 +768,28 @@ pub(crate) fn screenshot(
     args: Value,
     picturing: Picturing,
 ) -> Result<ToolReply, SurfaceError> {
+    shown_screenshot(studio, args, picturing).map(|(reply, _)| reply)
+}
+
+/// [`screenshot`], with what the picture was taken of: none for an outline.
+pub(crate) fn shown_screenshot(
+    studio: &Mutex<Studio>,
+    args: Value,
+    picturing: Picturing,
+) -> Result<(ToolReply, Option<Shown>), SurfaceError> {
     let a: ScreenshotArgs = serde_json::from_value(if args.is_null() { json!({}) } else { args })
         .map_err(|e| SurfaceError::invalid_argument(e.to_string()))?;
     let side = a
         .max_size
         .unwrap_or(PICTURE_SIDE)
         .clamp(16, MAX_PICTURE_SIDE);
-    let studio = lock(studio);
+    let mut studio = lock(studio);
+    // Its own handle: the document's text is read while it is held.
+    let all = studio.previews.clone();
     let mut previews = match picturing {
-        Picturing::Latest => preview::caught_up(&studio.previews),
+        Picturing::Latest => preview::caught_up(&all),
         Picturing::AsShown => {
-            let mut previews = preview::lock(&studio.previews);
+            let mut previews = preview::lock(&all);
             previews.catch_up();
             previews
         }
@@ -796,14 +808,20 @@ pub(crate) fn screenshot(
             outline: Some(outline),
             ..ScreenshotOut::default()
         };
-        return Ok(ToolReply::from(
-            serde_json::to_value(out).map_err(internal)?,
+        return Ok((
+            ToolReply::from(serde_json::to_value(out).map_err(internal)?),
+            None,
         ));
     }
     let picture = match open.host.screenshot(side) {
         Ok(picture) => picture,
         Err(e) => return Err(preview_error(previews.failed(e))),
     };
+    let shown = view::preview_of(&previews).map(|p| Shown {
+        text: studio.session.text(&p.doc).map_or(0, |(_, g)| g),
+        doc: p.doc,
+        target: p.target,
+    });
     let out = ScreenshotOut {
         width: Some(picture.width),
         height: Some(picture.height),
@@ -811,7 +829,10 @@ pub(crate) fn screenshot(
         outline: None,
     };
     let structured = serde_json::to_value(out).map_err(internal)?;
-    Ok(ToolReply::from(structured).with_image("image/png", picture.png))
+    Ok((
+        ToolReply::from(structured).with_image("image/png", picture.png),
+        shown,
+    ))
 }
 
 /// The document object the open preview of `doc` shows at `x`, `y`: as
