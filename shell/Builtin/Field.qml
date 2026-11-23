@@ -64,11 +64,13 @@ TextField {
     verticalAlignment: TextInput.AlignVCenter
     font.pixelSize: Typography.bodySize
     readonly property color ink: !enabled ? Colors.textDisabled : bound || token ? Colors.link : Colors.text
-    readonly property bool cut: !activeFocus && text !== ""
+    // Not `cut`: that is the field's own method, and Ljós reads the name as
+    // the method, not as a property declared over it. A method is true.
+    readonly property bool shortened: !activeFocus && text !== ""
         && contentWidth > width - leftPadding - rightPadding
-    // The cut copy below draws it while it is cut; the field's own text is
+    // The shortened copy below draws it while it is; the field's own text is
     // still there for the caret, a selection and a reader.
-    color: cut ? "transparent" : ink
+    color: shortened ? "transparent" : ink
     placeholderTextColor: Colors.textMuted
     selectionColor: Colors.surfaceSelected
     selectedTextColor: Colors.text
@@ -141,7 +143,7 @@ TextField {
         }
     }
     Text {
-        visible: field.cut
+        visible: field.shortened
         x: field.leftPadding
         width: field.width - field.leftPadding - field.rightPadding
         anchors.verticalCenter: parent.verticalCenter
