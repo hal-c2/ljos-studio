@@ -150,7 +150,10 @@ export async function start({ app, port = 0, record = false }) {
       if (record) compiled.push(error);
       return { status: 200, answer: { error } };
     }
-    return { status: 200, answer: { url: `/preview/projects/${n}/${entry}?import`, base: `/preview/projects/${n}/` } };
+    // What the compile names otherwise than the project does, so that what
+    // is said of it later (a pick) is said of the project's file.
+    const renamed = entry !== asked ? { [entry]: asked } : undefined;
+    return { status: 200, answer: { url: `/preview/projects/${n}/${entry}?import`, base: `/preview/projects/${n}/`, renamed } };
   };
 
   const dist = join(app, "dist");

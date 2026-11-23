@@ -914,6 +914,26 @@ pub(crate) fn pick(
     let Some(mut declared) = open.host.pick(x, y).map_err(preview_error)? else {
         return Ok(None);
     };
+    // The stand-in's one instance of the document is the document's root: it
+    // is written there only because nothing else makes one, and a runtime
+    // names an instance's root where the instance is written.
+    let instance = open.harness.as_ref().is_some_and(|h| {
+        h.path == declared.file
+            && studio.session.store().read(&h.path).is_ok_and(|text| {
+                crate::harness::instance_line(&text) == Some(declared.line as usize)
+            })
+    });
+    if instance {
+        drop(previews);
+        let (tree, _) = studio.session.tree(doc).map_err(error)?;
+        let Some((handle, _)) = tree.into_iter().next() else {
+            return Ok(None);
+        };
+        if studio.locked.contains(&handle) {
+            return Ok(None);
+        }
+        return Ok(Some((doc.to_owned(), handle)));
+    }
     let mut scene = None;
     if studio.session.store().exists(&declared.file) {
         let (_, node) = studio

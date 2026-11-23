@@ -115,6 +115,14 @@ fn stands_in(store: &dyn Store, path: &str) -> bool {
         && store.read(path).is_ok_and(|text| is_studios(&text))
 }
 
+/// The line, one-based, a harness's text declares its one instance of the
+/// document on, as a runtime names that object.
+pub(crate) fn instance_line(text: &str) -> Option<usize> {
+    // The instance's `id: subject` is on the line after its own: its index
+    // counted from 0 is the instance's line counted from 1.
+    text.lines().position(|line| line.trim() == "id: subject")
+}
+
 fn short(ty: &str) -> &str {
     ty.rsplit('.').next().unwrap_or(ty)
 }
@@ -403,6 +411,8 @@ mod tests {
         assert!(h.text.contains("done: false\n"));
         assert!(!h.text.contains("count:"));
         assert!(outline::outline(&h.text).is_some());
+        let line = instance_line(&h.text).unwrap();
+        assert_eq!(h.text.lines().nth(line - 1).map(str::trim), Some("Card {"));
     }
 
     #[test]
@@ -457,6 +467,11 @@ mod tests {
         assert!(h.text.contains("\"add(title)\""));
         assert!(h.text.contains("\"added(string title)\""));
         assert!(outline::outline(&h.text).is_some());
+        let line = instance_line(&h.text).unwrap();
+        assert_eq!(
+            h.text.lines().nth(line - 1).map(str::trim),
+            Some("HabitStore {")
+        );
     }
 
     #[test]
