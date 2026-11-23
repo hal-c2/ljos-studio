@@ -4096,6 +4096,18 @@ fn shift_wheel_over_canvas(w: &mut UiWorld) -> StepResult {
     Ok(())
 }
 
+#[given("the person has turned the wheel over the empty canvas")]
+fn wheel_over_empty_canvas(w: &mut UiWorld) -> StepResult {
+    let window = w.window()?;
+    let at = canvas_pane(window)?.center();
+    let mut driver = window.stage.drive();
+    let turned = WheelEvent::notches(at.x, at.y, 0.0, -3.0, driver.now());
+    driver.send_wheel(&turned);
+    driver.settle().map_err(drive_error)?;
+    window.stage.drive().advance(1000).map_err(drive_error)?;
+    window.rest()
+}
+
 #[then(regex = r#"^the frame "([^"]+)" has moved across and not down$"#)]
 fn moved_across(w: &mut UiWorld, target: String) -> StepResult {
     let before = w.frame_before.ok_or("no place noted")?;
