@@ -789,7 +789,7 @@ impl Window {
     fn open_panel(&mut self, panel: &str) -> StepResult {
         let tab = match panel {
             "Palette" => "Insert tab",
-            "Layers" | "Documents" => "Layers tab",
+            "Layers" | "Documents" | "Block" => "Layers tab",
             "Inspector" => "Design tab",
             "Tokens" => "Tokens tab",
             "Flow" => "Flow tab",
@@ -1711,6 +1711,15 @@ fn replaces_in_code(w: &mut UiWorld, old: String, new: String) -> StepResult {
 fn enters_new_name(w: &mut UiWorld, name: String) -> StepResult {
     let window = w.window()?;
     let field = window.node("Documents", Some("textinput"), "New document's name")?;
+    window.click_shown(&field)?;
+    window.stage.drive().commit(&name).map_err(drive_error)?;
+    window.rest()
+}
+
+#[when(regex = r#"^the person enters "([^"]+)" as the block's new slot's name$"#)]
+fn enters_slot_name(w: &mut UiWorld, name: String) -> StepResult {
+    let window = w.window()?;
+    let field = window.node("Block", Some("textinput"), "New slot's name")?;
     window.click_shown(&field)?;
     window.stage.drive().commit(&name).map_err(drive_error)?;
     window.rest()

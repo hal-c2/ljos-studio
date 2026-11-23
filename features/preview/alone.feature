@@ -61,6 +61,17 @@ Feature: A component or a store opened alone shows something
     Then the preview shows "Title"
     And the file "Blocks/HabitCard.qml" does not contain "Title"
 
+  Scenario: A component alone stands in the middle of the frame
+    Given the agent has called the tool "preview_open" with:
+      """json
+      {"doc": "Blocks/HabitCard.qml", "size": {"width": 1280, "height": 800}}
+      """
+    When the agent calls the tool "node_select" with:
+      """json
+      {"doc": "Blocks/HabitCard.qml", "at": {"x": 640, "y": 400}}
+      """
+    Then the answer's "/selection/0/doc" is "Blocks/HabitCard.qml"
+
   Scenario: Samples given once for the document are used
     Given the file ".studio/samples.json":
       """json

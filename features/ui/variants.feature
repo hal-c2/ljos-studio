@@ -206,3 +206,11 @@ Feature: A person edits variants and slots in Studio's window
     When the person contributes "Text { text: \"Shuffle\" }" to the slot "controls" from the palette
     Then the layers panel lists "Item root, Text label, Player player1, Contribution contribution1, Component, Text"
     And the history lists "contribute to controls"
+
+  Scenario: A block's own document offers to add a slot and make a shell
+    Given the person has opened "App/Media/Player.qml" in the documents list
+    When the person enters "artwork" as the block's new slot's name
+    Then the file "App/Media/Player.qml" says "property list<Contribution> artwork"
+    When the person clicks the button "Make a shell"
+    Then the file "PlayerShell.qml" says "artwork: Contribution {"
+    And the file "PlayerShell.qml" says "controls: Contribution {"
