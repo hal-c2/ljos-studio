@@ -214,3 +214,12 @@ Feature: A person edits variants and slots in Studio's window
     When the person clicks the button "Make a shell"
     Then the file "PlayerShell.qml" says "artwork: Contribution {"
     And the file "PlayerShell.qml" says "controls: Contribution {"
+
+  # Each panel asks the same tools; an answer is the asker's alone.
+  Scenario: The block's actions take only their own answer, not another panel's
+    Given the person has opened "App/Media/Player.qml" in the documents list
+    When the person enters "Main.qml" as the new document's name
+    And the person clicks the buttons "New document" and "Make a shell" without waiting between them
+    Then the documents panel says why it made no document
+    And the block's actions say no refusal
+    And the window shows the document "PlayerShell.qml"
