@@ -63,6 +63,28 @@ Feature: A component or a store opened alone shows something
     Then the preview shows "Title"
     And the file "Blocks/HabitCard.qml" does not contain "Title"
 
+  Scenario: A component named like a QtQuick type is the one shown
+    Given the file "Blocks/Row.qml":
+      """qml
+      import QtQuick
+
+      Rectangle {
+          required property string title
+          implicitWidth: 200
+          implicitHeight: 40
+
+          Text {
+              Accessible.role: Accessible.StaticText
+              text: parent.title
+          }
+      }
+      """
+    When the agent calls the tool "preview_open" with:
+      """json
+      {"doc": "Blocks/Row.qml"}
+      """
+    Then the preview shows "Title"
+
   Scenario: A component alone stands in the middle of the frame
     Given the agent has called the tool "preview_open" with:
       """json
