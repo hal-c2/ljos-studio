@@ -906,8 +906,11 @@ fn lines_of(
     let mut hidden_below = None;
     // A row names an object by its own type, and a document's root by
     // the document. One object of each type in each file is asked what
-    // that type is, so a component made of a text is read as one.
+    // that type is, so a component made of a text is read as one. The
+    // root of `Text.qml` and a `Text` inside it are two: a root is the
+    // first row of its file under a row of another file.
     let mut texts = HashMap::new();
+    let mut files_above: Vec<(u64, String)> = Vec::new();
     for row in rows {
         let depth = row["depth"].as_u64().unwrap_or(0);
         if hidden_below.is_some_and(|hidden| depth > hidden) {
@@ -938,7 +941,12 @@ fn lines_of(
         // one card of a list from the next.
         let mut says = String::new();
         let ty = row["type"].as_str().unwrap_or("object");
-        let key = (ty.to_owned(), file.clone());
+        while files_above.last().is_some_and(|(above, _)| *above >= depth) {
+            files_above.pop();
+        }
+        let root = files_above.last().is_none_or(|(_, above)| *above != file);
+        files_above.push((depth, file.clone()));
+        let key = (ty.to_owned(), file.clone(), root);
         let known = texts.get(&key).copied();
         if known != Some(false)
             && asked < MOST_READ
@@ -1265,6 +1273,34 @@ mod tests {
         );
         // Past the budget a row is still listed, without what it says.
         assert_eq!(lines.lines().count(), rows.len());
+    }
+
+    #[test]
+    fn a_documents_root_is_not_taken_for_a_text_of_its_name_inside_it() {
+        // `Text.qml`: its root is named by the document, and is no text; a
+        // `Text` inside it is one.
+        let rows = vec![
+            json!({
+                "depth": 0, "bounds": [0, 0, 10, 10], "at": "Text.qml:3:1",
+                "type": "Text", "handle": "root",
+            }),
+            json!({
+                "depth": 1, "bounds": [0, 0, 10, 10], "at": "Text.qml:4:5",
+                "type": "Text", "handle": "inner",
+            }),
+        ];
+        let lines = lines_of(&rows, str::to_owned, |handle| {
+            Ok(if handle == "inner" {
+                json!({ "types": ["Text"], "properties": [{ "name": "text", "value": "Hi", "type": "string" }] })
+            } else {
+                json!({ "types": ["Item"] })
+            })
+        })
+        .unwrap();
+        assert!(
+            lines.ends_with("  Text 0,0 10x10 Text.qml:4 \"Hi\""),
+            "{lines}"
+        );
     }
 
     #[test]
