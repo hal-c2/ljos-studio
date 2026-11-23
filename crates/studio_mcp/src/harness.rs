@@ -25,6 +25,11 @@ pub(crate) const SAMPLES: &str = ".studio/samples.json";
 /// How each harness starts, which tells Studio's file from a person's.
 const MARK: &str = "// Studio's preview of ";
 
+/// What a harness imports QtQuick as. The document's type is named bare,
+/// which only its own directory then answers: imported bare, QtQuick's
+/// `Row` would be made for a `Row.qml`.
+const QUICK: &str = "StudioQuick";
+
 /// Types that show nothing: an object holding only these is a store.
 const SHOW_NOTHING: &[&str] = &[
     "QtObject",
@@ -328,8 +333,8 @@ fn instance(name: &str, root: &Node, sets: &[(String, String)]) -> String {
     // one card: the card stands in the middle of it, as on a board.
     format!(
         "{MARK}{name}.qml opened alone, with sample values.\n\
-         import QtQuick\n\n\
-         Item {{\n    width: subject.width\n    height: subject.height\n\n    \
+         import QtQuick as {QUICK}\n\n\
+         {QUICK}.Item {{\n    width: subject.width\n    height: subject.height\n\n    \
          {name} {{\n        id: subject\n        anchors.centerIn: parent\n{body}    }}\n}}\n"
     )
 }
@@ -350,7 +355,7 @@ fn sheet(name: &str, members: &[Member], sets: &[(String, String)]) -> String {
             return;
         }
         lines.push(format!(
-            "        Text {{ text: {}; font.bold: true; topPadding: 8; color: \"#1c1b1f\"; Accessible.role: Accessible.StaticText }}",
+            "        {QUICK}.Text {{ text: {}; font.bold: true; topPadding: 8; color: \"#1c1b1f\"; {QUICK}.Accessible.role: {QUICK}.Accessible.StaticText }}",
             quoted(title)
         ));
         for m in of_kind {
@@ -374,7 +379,7 @@ fn sheet(name: &str, members: &[Member], sets: &[(String, String)]) -> String {
                 MemberKind::Handler => return,
             };
             lines.push(format!(
-                "        Text {{ text: {line}; color: \"#1c1b1f\"; width: parent.width; wrapMode: Text.Wrap; Accessible.role: Accessible.StaticText }}"
+                "        {QUICK}.Text {{ text: {line}; color: \"#1c1b1f\"; width: parent.width; wrapMode: {QUICK}.Text.Wrap; {QUICK}.Accessible.role: {QUICK}.Accessible.StaticText }}"
             ));
         }
     };
@@ -386,18 +391,18 @@ fn sheet(name: &str, members: &[Member], sets: &[(String, String)]) -> String {
     format!(
         "{MARK}{name}.qml opened alone: it shows nothing itself,\n\
          // so this is what it offers, read from a live instance.\n\
-         import QtQuick\n\n\
-         Rectangle {{\n    id: root\n    width: 420\n    height: sheet.implicitHeight + 32\n    \
+         import QtQuick as {QUICK}\n\n\
+         {QUICK}.Rectangle {{\n    id: root\n    width: 420\n    height: sheet.implicitHeight + 32\n    \
          color: \"#f6f6f8\"\n\n    \
          function shown(value) {{\n        \
          if (value === null || value === undefined)\n            return String(value)\n        \
          if (value.count !== undefined)\n            return value.count + \" rows\"\n        \
          return String(value)\n    }}\n\n    \
          {name} {{\n        id: subject\n{set}    }}\n\n    \
-         Column {{\n        id: sheet\n        x: 16\n        y: 16\n        \
+         {QUICK}.Column {{\n        id: sheet\n        x: 16\n        y: 16\n        \
          width: parent.width - 32\n        spacing: 4\n\n        \
-         Text {{ text: {title}; font.pixelSize: 20; font.bold: true; color: \"#1c1b1f\"; Accessible.role: Accessible.StaticText }}\n        \
-         Text {{ text: \"Shows nothing itself. What it offers:\"; color: \"#5f5d66\"; Accessible.role: Accessible.StaticText }}\n\
+         {QUICK}.Text {{ text: {title}; font.pixelSize: 20; font.bold: true; color: \"#1c1b1f\"; {QUICK}.Accessible.role: {QUICK}.Accessible.StaticText }}\n        \
+         {QUICK}.Text {{ text: \"Shows nothing itself. What it offers:\"; color: \"#5f5d66\"; {QUICK}.Accessible.role: {QUICK}.Accessible.StaticText }}\n\
          {lines}\n    }}\n}}\n"
     )
 }
@@ -464,6 +469,20 @@ mod tests {
         let h = harness(&store, "Row.qml").unwrap();
         assert!(h.text.contains("width: 320"));
         assert!(!h.text.contains("height: 72"));
+    }
+
+    #[test]
+    fn a_document_named_like_a_quick_type_is_the_one_made() {
+        let store = store(&[(
+            "Row.qml",
+            "import QtQuick\nItem {\n    required property string name\n}\n",
+        )]);
+        let h = harness(&store, "Row.qml").unwrap();
+        assert!(h.text.contains("import QtQuick as StudioQuick\n"));
+        assert!(!h.text.contains("import QtQuick\n"));
+        assert!(h.text.contains("StudioQuick.Item {"));
+        assert!(h.text.contains("    Row {\n        id: subject\n"));
+        assert!(outline::outline(&h.text).is_some());
     }
 
     #[test]
