@@ -19,7 +19,7 @@ expression: value
         "type": "boolean"
       },
       "generation": {
-        "description": "The generation read; a `path` needs it (handles and ids are moved past others' edits).",
+        "description": "Generation read; a `path` needs it (handles and ids move past others' edits).",
         "type": "integer"
       },
       "name": {
@@ -30,7 +30,7 @@ expression: value
         "additionalProperties": {
           "type": "string"
         },
-        "description": "One of `node` (session handle), `id`, `path` (from `document_tree`; this text only).",
+        "description": "`node` (session handle), `id`, or `document_tree` `path` (this text only).",
         "type": "object"
       },
       "value": {

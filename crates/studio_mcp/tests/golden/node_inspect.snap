@@ -9,7 +9,7 @@ expression: value
     "open_world": false,
     "read_only": true
   },
-  "description": "An object's bindings with byte ranges, own members, parent, children, states, transitions, flows, signals with arguments, and roles and rows of the data it sees (in a delegate, its list's).",
+  "description": "An object's bindings with byte ranges, own members, parent, children, states, transitions, flows, signals with arguments, and its data's roles and rows (a delegate's: its list's).",
   "inputSchema": {
     "properties": {
       "doc": {
@@ -19,7 +19,7 @@ expression: value
         "additionalProperties": {
           "type": "string"
         },
-        "description": "One of `node` (session handle), `id`, `path` (from `document_tree`; this text only).",
+        "description": "`node` (session handle), `id`, or `document_tree` `path` (this text only).",
         "type": "object"
       }
     },
