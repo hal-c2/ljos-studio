@@ -394,7 +394,16 @@ fn open(studio: &Mutex<Studio>, a: OpenArgs) -> Result<OpenOut, SurfaceError> {
             Some(h) => {
                 // Held before it is written: another Studio whose preview
                 // of it ends meanwhile then leaves it.
-                let standing = h.standing(dir.as_deref());
+                let standing = h.standing(dir.as_deref()).ok_or_else(|| {
+                    SurfaceError::new(
+                        ErrorCode::NotActionable,
+                        format!(
+                            "the preview's harness `{}` cannot be held: Studio makes a lock file beside it and `.studio/preview.lock`",
+                            h.path
+                        ),
+                    )
+                    .with_details(json!({ "kind": "harness_unheld" }))
+                })?;
                 write_harness(h)?;
                 Some(standing)
             }

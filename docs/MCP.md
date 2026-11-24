@@ -407,6 +407,12 @@ otherwise stays hidden until that component is previewed again.
 - A file is taken out only while the directory it was written in is still
   inside the project: a directory swapped for a link to elsewhere since
   keeps what it points at.
+- A link where Studio's preview files go (the stand-in, a lock file,
+  `.studio/preview.lock`) is never followed: Studio makes nothing through
+  one, reads no marker through one and removes no link it finds there.
+- A stand-in is written only once it is held: where the lock file or
+  `.studio/preview.lock` cannot be made, `preview_open` is refused
+  (`not_actionable`, kind `harness_unheld`) and nothing is written.
 
 - DECISION: only a block a qmldir declares is taken for a store when its root
   is an `Item`, so an app's own `Item` documents preview as they are.
