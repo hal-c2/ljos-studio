@@ -9,7 +9,7 @@ expression: value
     "open_world": false,
     "read_only": false
   },
-  "description": "Open a project directory below the workspace, or describe the open one. Opening starts a new session: handles and history end. `asset` lists, imports or removes the project's pictures and fonts.",
+  "description": "Open a project directory below the workspace, or describe the open one. Opening starts a new session: handles and history end. `asset` manages its pictures and fonts.",
   "inputSchema": {
     "properties": {
       "asset": {
@@ -34,7 +34,7 @@ expression: value
         "type": "string"
       },
       "path": {
-        "description": "A directory below the workspace, relative or absolute (`.` is the workspace). Left out, describes the open project.",
+        "description": "Relative or absolute (`.` is the workspace). Left out, describes the open project.",
         "type": "string"
       }
     },

@@ -184,9 +184,9 @@ struct EventsArgs {
     /// An earlier answer's `next`; 0 or left out: from the start.
     #[serde(alias = "next")]
     since: Option<usize>,
-    /// Instead of events, wait up to this long (3 600 000 at most) for the app to rest past `rests`.
+    /// Wait up to this long instead (3 600 000 at most).
     wait_ms: Option<u64>,
-    /// The `rests` of an earlier answer; left out, the answer comes at once.
+    /// An earlier answer's `rests`; left out, the answer comes at once.
     rests: Option<u64>,
 }
 
@@ -1339,7 +1339,7 @@ pub(crate) fn add(registry: ToolRegistry, studio: &Arc<Mutex<Studio>>) -> ToolRe
         .with(
             ToolDef::new::<OpenArgs>(
                 "preview_open",
-                "Run a document in a preview for a target with live blocks or the mock modules. On the open preview it changes size, fit or state in place; `state_kept` says whether the app's state survived.",
+                "Run a document in a preview for a target, live or mocked (`state`). On the open preview it changes size, fit or state in place; `state_kept` says whether the app's state survived.",
             )
             .answers::<OpenOut>()
             .requires(Cap::Run)

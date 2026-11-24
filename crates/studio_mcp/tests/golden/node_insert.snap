@@ -9,7 +9,7 @@ expression: value
     "open_world": false,
     "read_only": false
   },
-  "description": "Insert in `parent` a QML object or a `blocks_list` `block`, as a child at an index, or a member (function, signal, property, handler). It gets an id if it has none. Returns the handle.",
+  "description": "Insert in `parent` a QML object or a `blocks_list` `block`, as a child at an index, or a member. It gets an id if it has none. Returns the handle.",
   "inputSchema": {
     "properties": {
       "block": {

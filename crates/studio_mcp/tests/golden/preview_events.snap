@@ -13,7 +13,7 @@ expression: value
   "inputSchema": {
     "properties": {
       "rests": {
-        "description": "The `rests` of an earlier answer; left out, the answer comes at once.",
+        "description": "An earlier answer's `rests`; left out, the answer comes at once.",
         "type": "integer"
       },
       "since": {
@@ -21,7 +21,7 @@ expression: value
         "type": "integer"
       },
       "wait_ms": {
-        "description": "Instead of events, wait up to this long (3 600 000 at most) for the app to rest past `rests`.",
+        "description": "Wait up to this long instead (3 600 000 at most).",
         "type": "integer"
       }
     },
