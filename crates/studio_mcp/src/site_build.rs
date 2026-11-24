@@ -497,8 +497,16 @@ fn reply(stream: &mut TcpStream, status: &str, file: Option<(&Path, &[u8])>, bod
     let (kind, bytes) = file.map_or(("text/plain; charset=utf-8", &b""[..]), |(at, b)| {
         (kind(at), b)
     });
+    // A picture is a document of its own when opened by its address; one
+    // brought in from anywhere runs no script with the site's origin.
+    let policy = if kind == "image/svg+xml" {
+        "Content-Security-Policy: sandbox; default-src 'none'; script-src 'none'; \
+         style-src 'unsafe-inline'; img-src data:\r\n"
+    } else {
+        ""
+    };
     let head = format!(
-        "HTTP/1.1 {status}\r\nContent-Type: {kind}\r\nContent-Length: {}\r\n\
+        "HTTP/1.1 {status}\r\nContent-Type: {kind}\r\nContent-Length: {}\r\n{policy}\
          Cache-Control: no-cache\r\nX-Content-Type-Options: nosniff\r\nConnection: close\r\n\r\n",
         bytes.len()
     );
