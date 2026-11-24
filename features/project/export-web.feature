@@ -506,8 +506,8 @@ Feature: A project is exported for ljos-web to build a site from
 
   Rule: A site has a title, a description and pictures of its own
 
-    Scenario: The project's site.json gives the page its title, description and icon
-      Given the file "site.json":
+    Scenario: The project's ljos-page.json gives the page its title, description and icon
+      Given the file "ljos-page.json":
         """json
         {"title": "Media", "description": "Plays one source", "icon": "images/logo.svg"}
         """
@@ -518,17 +518,17 @@ Feature: A project is exported for ljos-web to build a site from
       Then the answer's "/manifest/page" is {"title": "Media", "description": "Plays one source", "icon": "images/logo.svg"}
       And the answer's "/manifest/left_out" has the entry:
         """json
-        {"path": "site.json", "why": "the page's title, description and pictures, which the manifest's page holds"}
+        {"path": "ljos-page.json", "why": "the page's title, description and pictures, which the manifest's page holds"}
         """
-      And the file "build/web/site.json" does not exist
+      And the file "build/web/ljos-page.json" does not exist
 
-    Scenario: An export given the page writes it into the project's site.json
+    Scenario: An export given the page writes it into the project's ljos-page.json
       When the agent calls the tool "export" with:
         """json
         {"entry": "Shell.qml", "target": "web", "page": {"title": "Media", "image": "images/logo.svg"}}
         """
       Then the answer's "/manifest/page" is {"title": "Media", "image": "images/logo.svg"}
-      And the file "site.json" is:
+      And the file "ljos-page.json" is:
         """json
         {
           "title": "Media",
@@ -536,13 +536,13 @@ Feature: A project is exported for ljos-web to build a site from
         }
         """
 
-    Scenario: A dry run shows the page it was given and writes no site.json
+    Scenario: A dry run shows the page it was given and writes no ljos-page.json
       When the agent calls the tool "export" with:
         """json
         {"entry": "Shell.qml", "target": "web", "dry_run": true, "page": {"title": "Media"}}
         """
       Then the answer's "/manifest/page/title" is "Media"
-      And the file "site.json" does not exist
+      And the file "ljos-page.json" does not exist
 
     # The project's own file of that name is config its code reads, not
     # the page: Studio's page has a name of Ljós's own.
@@ -584,6 +584,12 @@ Feature: A project is exported for ljos-web to build a site from
         """json
         {"feed": "https://example.org/feed.json"}
         """
+      And the file "ljos-page.json" is:
+        """json
+        {
+          "title": "Media"
+        }
+        """
 
     Scenario: A picture of the page that is no file of the site is refused
       When the agent calls the tool "export" with:
@@ -593,7 +599,7 @@ Feature: A project is exported for ljos-web to build a site from
       Then the agent is refused with "invalid_argument"
       And the refusal's "/details/kind" is "page_file"
       And the refusal's "/details/path" is ".studio/review.json"
-      And the file "site.json" does not exist
+      And the file "ljos-page.json" does not exist
       And the file "build/web/ljos-site.json" does not exist
 
   # Building needs ljos-web's compiler, runtime and bundler, which Studio
@@ -668,7 +674,7 @@ Feature: A project is exported for ljos-web to build a site from
       Then the agent is refused with "busy"
       And the refusal's "/details/kind" is "build_running"
       And the file "build/web/ljos-site.json" does not exist
-      And the file "site.json" does not exist
+      And the file "ljos-page.json" does not exist
 
     Scenario: A bundle is written again once its build has ended
       Given a site is being built from "build/web"

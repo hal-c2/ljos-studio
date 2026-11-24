@@ -670,11 +670,13 @@ start of a path a name is made from (`"icons/" + name + ".svg"` keeps
 `icons/`). Every other file is in `left_out` with "nothing the site's code
 names", so a picture outside `assets/` that nobody uses is not shipped.
 
-`page` is kept in the project's `site.json` (written by a real export that
-is given one, read by one that is not; it is in `left_out` itself, since the
-manifest holds it). Its `icon` and `image` are paths of the project's
+`page` is kept in the project's `ljos-page.json` (written by a real export
+that is given one, read by one that is not; it is in `left_out` itself, since
+the manifest holds it). The name is Ljós's: a `site.json` of the project's
+is one of its files like any other, and the page is not in `.studio/`, which
+holds nothing a site is built from. Its `icon` and `image` are paths of the project's
 files: one that is not a file of the site is refused (`invalid_argument`,
-`page_file`, `details.path`), as is a `site.json` that is not a page
+`page_file`, `details.path`), as is a `ljos-page.json` that is not a page
 (`page`) and a `page` or `build` for `native` (`page_target`,
 `build_target`). `open`, `ljos_web` and `qmlc` are a build's: without
 `build: true` they are refused (`needs_build`, `details.argument`) before

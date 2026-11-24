@@ -1130,7 +1130,7 @@ terminal. `features/ui/export.feature`, `features/project/export-web.feature`,
   and downloads nothing. A dry run with `build` says only that, which is
   the panel's verdict.
 - **A site, not an app in a page.** The page's title, description, icon
-  and picture for shared links are the project's `site.json`, written by
+  and picture for shared links are the project's `ljos-page.json`, written by
   an export given `page` and read by one that is not. The builder writes
   them into the head (`<title>`, `description`, `og:*`, `rel=icon`) and
   copies the two pictures, since Vite does not read the head.

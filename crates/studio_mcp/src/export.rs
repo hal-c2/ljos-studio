@@ -147,7 +147,7 @@ struct ExportArgs {
     #[serde(default)]
     dry_run: bool,
     // The site's title, description and pictures (web): written into the
-    // project's `site.json`, which is read when this is not given.
+    // project's `ljos-page.json`, which is read when this is not given.
     page: Option<Page>,
     // Build the site from the bundle with ljos-web, into `<out>-site`, and
     // serve it on this machine (web; needs `run`). With `dry_run`, only say
@@ -719,13 +719,16 @@ fn plan(
     Ok(manifest)
 }
 
-/// The project's page of its site, at its top.
-pub const SITE_PAGE: &str = "site.json";
+/// The project's page of its site, at its top. The name is Ljós's, like the
+/// manifests': a `site.json` of the project's is config its code may read,
+/// shipped when the code names it like any other file. It is not kept in
+/// `.studio/`, which is deletable and holds nothing the site is built from.
+pub const SITE_PAGE: &str = "ljos-page.json";
 const PAGE_WHY: &str =
     "the page's title, description and pictures, which the manifest's page holds";
 const UNNAMED_WHY: &str = "nothing the site's code names";
 
-/// The page `site.json` gives, if the project has one among its files.
+/// The page `ljos-page.json` gives, if the project has one among its files.
 fn site_page(root: &Path, files: &[FileEntry]) -> Result<Option<Page>, SurfaceError> {
     if !files.iter().any(|f| f.path == SITE_PAGE) {
         return Ok(None);
@@ -756,7 +759,7 @@ fn is_code(path: &str) -> bool {
 /// brought in as an asset (asked for, so shipped before anything names it),
 /// and the files its code names by a string (`"images/logo.svg"`, or a directory or the
 /// start of a path a name is made from: `"icons/" + name + ".svg"`); every
-/// other file is left out, saying why, as is `site.json`, which the
+/// other file is left out, saying why, as is `ljos-page.json`, which the
 /// manifest's page holds. A picture of the page must be one of the files.
 fn reached(
     root: &Path,
@@ -1970,7 +1973,8 @@ mod tests {
         write("images/icon.png", "");
         write("images/unused.svg", "");
         write("theme.json", "{}");
-        write("site.json", "{}");
+        write("site.json", "{\"feed\": \"feed.json\"}");
+        write("ljos-page.json", "{}");
         let (files, _, left_out) = walk(&root).unwrap();
         let page = Page {
             icon: Some("images/icon.png".to_owned()),
@@ -2001,7 +2005,11 @@ mod tests {
             .collect();
         assert_eq!(
             left,
-            [("images/unused.svg", UNNAMED_WHY), ("site.json", PAGE_WHY)]
+            [
+                ("images/unused.svg", UNNAMED_WHY),
+                ("ljos-page.json", PAGE_WHY),
+                ("site.json", UNNAMED_WHY)
+            ]
         );
         let elsewhere = Page {
             image: Some("../secret.png".to_owned()),
