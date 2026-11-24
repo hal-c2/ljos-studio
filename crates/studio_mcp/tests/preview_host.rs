@@ -58,6 +58,9 @@ struct Seen {
     gate: Option<Gate>,
 }
 
+/// How long a parked wait waits to be let go before it fails.
+const GATE_WAIT: std::time::Duration = std::time::Duration::from_secs(60);
+
 #[derive(Clone)]
 struct Gate {
     parked: std::sync::mpsc::Sender<()>,
@@ -77,7 +80,13 @@ impl RestWatch for Gate {
         let gate = self.clone();
         Box::pin(async move {
             let _ = gate.parked.send(());
-            let _ = gate.go.lock().unwrap().recv();
+            // Bounded: a test that fails before it lets the wait go would
+            // leave its scope joining this thread for ever, and its own
+            // failure unsaid.
+            let go = gate.go.lock().unwrap().recv_timeout(GATE_WAIT);
+            go.map_err(|e| {
+                PreviewError::Ended(format!("the test did not let the parked wait go: {e}"))
+            })?;
             Ok(Rest {
                 rests: since + 1,
                 wake_in_ms: None,
@@ -2290,10 +2299,15 @@ fn a_wait_whose_preview_closed_meanwhile_says_so() {
                 .unwrap()
                 .block_on(f.server.call_tool("preview_events", &ctx, args))
         });
+        // Dropped with the scope's body if it fails: the parked wait is
+        // then let go at once, and the failure is what the test says.
+        let let_go = let_go;
         on_park
-            .recv_timeout(std::time::Duration::from_secs(60))
+            .recv_timeout(GATE_WAIT)
             .expect("the wait didn't park");
-        f.call("preview_close", json!({})).unwrap();
+        // As Studio's window closes it: there is no tool for it.
+        let close = f.server.studio().lock().unwrap().preview_closer();
+        close();
         let_go.send(()).unwrap();
         waiting.join().unwrap()
     });
