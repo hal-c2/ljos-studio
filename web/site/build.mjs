@@ -61,7 +61,14 @@ function notOurs(dir) {
   if (!there.isDirectory()) return other;
   const found = contents(dir);
   if (!lstatSync(join(dir, STAMP), { throwIfNoEntry: false })?.isFile()) return found.size ? other : null;
-  const stamp = readFileSync(join(dir, STAMP), "utf8");
+  let stamp;
+  try {
+    stamp = readFileSync(join(dir, STAMP), "utf8");
+  } catch (e) {
+    // Gone unreadable, or replaced, since it was looked at: what it would
+    // vouch for cannot be told, so it is refused like any other.
+    return `has a ${STAMP} that could not be read (${e.code ?? e.message})`;
+  }
   let wrote;
   try {
     wrote = new Map(Object.entries(JSON.parse(stamp).files));
