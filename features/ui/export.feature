@@ -57,6 +57,13 @@ Feature: A person exports a native app or a web site from Studio's window
     When the person presses "Escape"
     Then the export panel is closed
 
+  # A person at the keyboard sees which target the keys are on.
+  Scenario: The target the keyboard is on shows a ring, and the other does not
+    When the person clicks the button "Export"
+    And the person presses "Tab" until the export panel's "Web site" has the keyboard's focus
+    Then the export panel's "Web site" shows a focus ring
+    And the export panel's "Native app" shows no focus ring
+
   Scenario: Writing the bundle writes the manifest and says how to start it
     Given the person has clicked the button "Export"
     When the person clicks the button "Write bundle"

@@ -557,6 +557,45 @@ mod tests {
         assert_eq!(names_in(dir.path()), ["theme.json"]);
     }
 
+    fn no_links(_: &Path, _: &Path) -> std::io::Result<()> {
+        Err(std::io::ErrorKind::Unsupported.into())
+    }
+
+    // FAT, some network and FUSE file systems make no links: the theme is
+    // still seeded there, and still never replaces one that is there.
+    #[test]
+    fn a_theme_is_seeded_where_files_cannot_be_linked() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("theme.json");
+        let written = publish_new_by(
+            &file,
+            |out| std::io::Write::write_all(out, THEME.as_bytes()),
+            no_links,
+        )
+        .unwrap();
+        assert!(written);
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), THEME);
+        assert_eq!(names_in(dir.path()), ["theme.json"]);
+    }
+
+    #[test]
+    fn a_theme_written_meanwhile_where_files_cannot_be_linked_is_kept() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("theme.json");
+        let written = publish_new_by(
+            &file,
+            |out| {
+                std::io::Write::write_all(out, THEME.as_bytes())?;
+                std::fs::write(&file, "{}")
+            },
+            no_links,
+        )
+        .unwrap();
+        assert!(!written);
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), "{}");
+        assert_eq!(names_in(dir.path()), ["theme.json"]);
+    }
+
     #[test]
     fn the_state_is_never_in_the_shared_temporary_directory() {
         let os = |s: &str| Some(OsString::from(s));

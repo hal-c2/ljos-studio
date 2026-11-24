@@ -60,8 +60,18 @@ Feature: An object's own API is written in the inspector
     When the person selects "Item root" in the layers panel
     And the person sets "Member name" to "2total" in the inspector
     And the person clicks the button "Add the member"
-    Then the file "Main.qml" does not say "2total"
+    Then the inspector's "API" section says something with "that member does not fit"
+    And the file "Main.qml" does not say "2total"
     And the inspector's "Member name" holds "2total"
+
+  # What is typed while the member before it is being added is a new one,
+  # and the answer about the one before does not empty it.
+  Scenario: A member typed while the one before it is added is kept
+    When the person selects "Item root" in the layers panel
+    And the person sets "Member name" to "first" in the inspector
+    And the person clicks the button "Add the member" and types "second" in the inspector's "Member name" before its answer
+    Then the file "Main.qml" says "property var first"
+    And the inspector's "Member name" holds "second"
 
   Scenario: A handler is written over several lines
     When the person selects "Item root" in the layers panel
@@ -85,6 +95,12 @@ Feature: An object's own API is written in the inspector
     When the person replaces "height: 10 }" with "height: 10; signal tapped }" in the code view
     And the person selects "Rectangle inner" in the layers panel
     Then the inspector lists the members "label, tapped"
+
+  # A brace in a regular expression is the expression's, not the object's.
+  Scenario: A brace in a function's regular expression ends nothing
+    When the person replaces "signal done(int code)" with "function hasBrace(s) { return /[}]/.test(s) }\n    signal done(int code)" in the code view
+    And the person selects "Item root" in the layers panel
+    Then the inspector lists the members "count, hasBrace, done"
 
   # Inside a string the lines are the string's: the inspector trims none of
   # them. (Setting the value indents each later line by the handler's own
@@ -122,3 +138,13 @@ Feature: An object's own API is written in the inspector
     When the person types "const k = String(code).length / 2 + \"/\" + `a\n  b  \nc`\nconsole.log(k)" in the inspector's "Handler for done" and leaves it
     And the person clicks the button "Write the done handler"
     Then the file "Main.qml" says "b  \n"
+
+  # A word ends at a space or a line's end: `else` and `return` after a word
+  # on the line before are still words that a regular expression follows.
+  Scenario: A regular expression after `else return` starts no string
+    Given the person has selected "Item root" in the layers panel
+    And the person has clicked the button "Edit the done handler"
+    And the person has typed "const t = String(code)\nif (t) count = 1\nelse return /`/.test(t)\nconsole.log(t)" in the inspector's "Handler for done" and left it
+    And the person has clicked the button "Write the done handler"
+    When the person clicks the button "Edit the done handler"
+    Then the inspector's "Handler for done" holds "const t = String(code)\nif (t) count = 1\nelse return /`/.test(t)\nconsole.log(t)"

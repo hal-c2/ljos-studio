@@ -63,8 +63,15 @@ Feature: The inspector shows what a kind of object is about
     And the person chooses "Title" in the inspector's "Text style"
     Then the file "Main.qml" says "font.weight: Typography.titleWeight"
     And the file "Main.qml" does not say "Typography.titleSize"
-    And the inspector says something with "held by Ada"
+    And the inspector's "Text" section says something with "held by Ada"
     And the window shows a refusal that says "held by Ada"
+
+  # A quote of either kind is text: a word typed over it may be meant as text.
+  Scenario: A word typed over text in single quotes can be written as text
+    When the person replaces "text: \"Hello\"" with "text: 'Hello'" in the code view
+    And the person selects "Text title" in the layers panel
+    And the person sets "text" to "cube" in the inspector
+    Then the inspector has the button "Write cube as text"
 
   Scenario: A text is aligned with a press, and a second press lets it go
     When the person selects "Text title" in the layers panel
@@ -103,6 +110,14 @@ Feature: The inspector shows what a kind of object is about
     And the person clicks the button "Fit the height to the content"
     Then the file "Main.qml" says "contentHeight: card.height"
 
+  # Its content is what all of it covers when more than one thing is in it.
+  Scenario: A scrolling area holding more than one thing holds all of them
+    When the person replaces "Column { id: content; Rectangle { width: 10; height: 400 } }" with "Rectangle { id: header; width: 10; height: 100 }\n        Rectangle { y: 500; width: 10; height: 100 }" in the code view
+    And the person selects "Flickable scroller" in the layers panel
+    And the person clicks the button "Fit the height to the content"
+    Then the file "Main.qml" says "contentHeight: contentItem.childrenRect.height"
+    And the file "Main.qml" does not say "header.height"
+
   Scenario: A plain box is given a fill
     When the person selects "Item root" in the layers panel
     And the person clicks the button "Give it a fill"
@@ -118,6 +133,22 @@ Feature: The inspector shows what a kind of object is about
     And the file "Main.qml" says "color: Colors.canvas"
     And the file "Main.qml" does not say "Colors.surface"
 
+  # One fill at a time: what is asked is filled as what it was asked for.
+  Scenario: A fill waiting for its answer cannot be asked for again
+    When the person selects "Item root" in the layers panel
+    And the person clicks the button "Give it a fill", which is disabled until its answer
+    Then the file "Main.qml" says "color: Colors.canvas"
+
+  # The box is turned into one with a fill in every state, so its fill is
+  # its own, not a state's.
+  Scenario: A box given a fill while a state is picked is filled in every state
+    Given the person has selected "Item root" in the layers panel
+    And the person has added the state "night" in the inspector
+    And the person has picked the state "night" in the inspector
+    When the person clicks the button "Give it a fill"
+    Then the file "Main.qml" says "color: Colors.canvas"
+    And the file "Main.qml" does not say "PropertyChanges"
+
   # The theme's names are written the way the file imports them.
   Scenario: A style is written with the name the theme is imported as
     When the person replaces "import Ljos.Design" with "import Ljos.Design as Design" in the code view
@@ -131,3 +162,11 @@ Feature: The inspector shows what a kind of object is about
     And the person selects "Item root" in the layers panel
     And the person clicks the button "Give it a fill"
     Then the file "Main.qml" says "color: Design.Colors.canvas"
+
+  # An import in a comment is no import.
+  Scenario: A theme named only in a comment is not how the file imports it
+    When the person replaces "import QtQuick\n" with "/*\nimport Ljos.Design as Design\n*/\nimport QtQuick\n" in the code view
+    And the person selects "Item root" in the layers panel
+    And the person clicks the button "Give it a fill"
+    Then the file "Main.qml" says "color: Colors.canvas"
+    And the file "Main.qml" does not say "Design.Colors"
