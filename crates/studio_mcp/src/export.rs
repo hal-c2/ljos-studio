@@ -2289,4 +2289,50 @@ b.png"
         let refusal = reached(&root, files, Vec::new(), None, Some(&elsewhere)).unwrap_err();
         assert_eq!(refusal.to_value()["error"]["details"]["kind"], "page_file");
     }
+
+    // `n++ / 2` divides: the `/` after a postfix `++` follows a value.
+    #[test]
+    fn a_division_after_a_postfix_operator_starts_no_regular_expression() {
+        let text = r#"
+            n++ / 2; const icon = "images/logo.svg";
+            m-- / 3; var b = 'b.png';
+            x = ++k / 2; var c = "c.png"
+        "#;
+        assert_eq!(literals(text), ["images/logo.svg", "b.png", "c.png"]);
+    }
+
+    // The code names `site.json`, which names `feed.json`, which names a
+    // picture: each is a file the site reads.
+    #[test]
+    fn a_kept_json_file_names_files_as_code_does() {
+        let project = tempfile::tempdir().unwrap();
+        let root = project.path().canonicalize().unwrap();
+        let write = |path: &str, text: &[u8]| {
+            let at = root.join(path);
+            fs::create_dir_all(at.parent().unwrap()).unwrap();
+            fs::write(at, text).unwrap();
+        };
+        write("Shell.qml", b"Item { property url data: \"site.json\" }");
+        write("site.json", b"{\"feed\": \"data/feed.json\"}");
+        write("data/feed.json", b"{\"hero\": \"../images/hero.svg\"}");
+        write("images/hero.svg", b"");
+        write("other.json", b"{\"named\": \"images/unused.svg\"}");
+        write("images/unused.svg", b"");
+        // Not text: read for nothing, and still not refused.
+        write("data/blob.json", &[0xff, 0xfe, 0x00]);
+        let (files, _, left_out) = walk(&root).unwrap();
+        let (kept, left_out) = reached(&root, files, left_out, None, None).unwrap();
+        let kept: Vec<&str> = kept.iter().map(|f| f.path.as_str()).collect();
+        assert_eq!(
+            kept,
+            [
+                "Shell.qml",
+                "data/feed.json",
+                "images/hero.svg",
+                "site.json"
+            ]
+        );
+        let left: Vec<&str> = left_out.iter().map(|l| l.path.as_str()).collect();
+        assert_eq!(left, ["data/blob.json", "images/unused.svg", "other.json"]);
+    }
 }

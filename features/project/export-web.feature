@@ -544,6 +544,27 @@ Feature: A project is exported for ljos-web to build a site from
       Then the answer's "/manifest/page/title" is "Media"
       And the file "ljos-page.json" does not exist
 
+    # The page is the project's once the bundle that shows it is written: an
+    # export that fails leaves the project's page as it was.
+    Scenario: An export that fails leaves the project's ljos-page.json as it was
+      Given the file "ljos-page.json":
+        """json
+        {"title": "Before"}
+        """
+      And the file "build/.web.partial":
+        """
+        not a directory
+        """
+      When the agent calls the tool "export" with:
+        """json
+        {"entry": "Shell.qml", "target": "web", "page": {"title": "After"}}
+        """
+      Then the agent is refused with "internal"
+      And the file "ljos-page.json" is:
+        """json
+        {"title": "Before"}
+        """
+
     # The project's own file of that name is config its code reads, not
     # the page: Studio's page has a name of Ljós's own.
     Scenario: A site.json of the project's own is a file of its site, not its page
@@ -865,6 +886,32 @@ Feature: A project is exported for ljos-web to build a site from
         | web    | build/web-site/inner      | , "dry_run": true |
         | web    | build/web-site/inner/deep |                  |
         | native | build/web-site/inner      |                  |
+
+    # A bundle's directory is replaced whole, and a site built below it
+    # would go with it.
+    Scenario Outline: A bundle with a built site below it is not replaced
+      Given the file "build/group/ljos-site.json":
+        """json
+        {"format": "ljos-site"}
+        """
+      And the file "build/group/web-site/.ljos-site-build":
+        """
+        {"files": {}}
+        """
+      When the agent calls the tool "export" with:
+        """json
+        {"entry": "Shell.qml", "target": "<target>", "out": "build/group"<given>}
+        """
+      Then the agent is refused with "invalid_argument"
+      And the refusal's "/details/kind" is "holds_site"
+      And the refusal's "/details/site" is "build/group/web-site"
+      And the file "build/group/web-site/.ljos-site-build" exists
+
+      Examples:
+        | target | given             |
+        | web    |                   |
+        | web    | , "dry_run": true |
+        | native |                   |
 
     # The runner's NODE is a stand-in: the toolchain is only looked at, and the
     # refusal comes before it runs.

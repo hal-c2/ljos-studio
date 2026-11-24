@@ -4,7 +4,9 @@
 //! `cargo run -p studio_mcp --example export -- DIR ENTRY [native | web [--build]]`
 //!
 //! `--build` builds the site as Studio's window does, with the ljos-web and
-//! `qmlc` that `LJOS_WEB` and `QMLC` name, or that Studio finds.
+//! `qmlc` that `LJOS_WEB` and `QMLC` name, or that Studio finds. It prints
+//! where the site is and no address: the server Studio starts for it ends
+//! with this program.
 
 use ljos_mcp_core::{CallCtx, Cap, CapSet, McpSurface};
 use serde_json::json;
@@ -31,6 +33,11 @@ fn parse(rest: &[String]) -> Result<(String, bool), String> {
     Ok((target, build))
 }
 
+/// The answer as printed.
+fn shown(out: serde_json::Value) -> serde_json::Value {
+    out
+}
+
 fn main() {
     let mut args = std::env::args().skip(1);
     let dir = args.next().expect(USAGE);
@@ -50,7 +57,10 @@ fn main() {
     let ctx = CallCtx::new(caps);
     let (out, _) = server.tools().call("export", &ctx, call);
     match out {
-        Ok(out) => println!("{}", serde_json::to_string_pretty(&out).expect("JSON")),
+        Ok(out) => println!(
+            "{}",
+            serde_json::to_string_pretty(&shown(out)).expect("JSON")
+        ),
         Err(e) => {
             eprintln!("{}", e.to_value());
             std::process::exit(1);
@@ -60,7 +70,8 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
-    use super::parse;
+    use super::{parse, shown};
+    use serde_json::json;
 
     fn args(list: &[&str]) -> Vec<String> {
         list.iter().map(|&a| a.to_owned()).collect()
@@ -95,5 +106,20 @@ mod tests {
         ] {
             assert!(parse(&args(given)).is_err(), "{given:?} was read");
         }
+    }
+
+    // Nothing serves that address once the program has printed it.
+    #[test]
+    fn a_built_site_is_shown_by_its_directory_and_no_address() {
+        let out = json!({
+            "files": 3,
+            "build": { "ready": true, "path": "/p/build/web-site", "url": "http://127.0.0.1:4000/" }
+        });
+        assert_eq!(
+            shown(out),
+            json!({ "files": 3, "build": { "ready": true, "path": "/p/build/web-site" } })
+        );
+        let plain = json!({ "files": 3 });
+        assert_eq!(shown(plain.clone()), plain);
     }
 }

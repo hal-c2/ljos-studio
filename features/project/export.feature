@@ -227,6 +227,30 @@ Feature: A project is exported as a bundle that runs without Studio
       And the answer's "/written" is false
       And the file "build/native/ljos-bundle.json" does not exist
 
+    # Where the system makes no link, the export copies what the link leads
+    # to under its name: a dry run cannot know which it will be, so it says
+    # both counts.
+    Scenario: A dry run with links says what an export writes where no link can be made
+      Given the file "zone/Part.qml":
+        """qml
+        import QtQuick
+        Item {}
+        """
+      And "alias" links to "zone" in the project
+      When the agent calls the tool "export" with:
+        """json
+        {"entry": "Shell.qml", "dry_run": true}
+        """
+      Then the answer's "/writes" is 7
+      And the answer's "/writes_unlinked" is 8
+
+    Scenario: A dry run without links has one count of what it writes
+      When the agent calls the tool "export" with:
+        """json
+        {"entry": "Shell.qml", "dry_run": true}
+        """
+      Then the answer's "/writes_unlinked" is absent
+
     Scenario: An answer says whether the bundle it writes replaces one already there
       When the agent calls the tool "export" with:
         """json
