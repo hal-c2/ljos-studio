@@ -2731,6 +2731,78 @@ fn says_under(w: &mut UiWorld, want: String, name: String) -> StepResult {
         .ok_or_else(|| format!("{want:?} is at {said:?}, {name:?} at {field:?}"))
 }
 
+/// A refusal's words and the buttons it offers end above the next row's
+/// top, so they hide none of it and take none of its clicks.
+#[then(
+    regex = r#"^the inspector's refusal "(.*)" and its offers end above the row under its "([^"]+)"$"#
+)]
+fn refusal_clear(w: &mut UiWorld, said: String, name: String) -> StepResult {
+    use ljos::item::kurbo::Rect;
+    let window = w.window()?;
+    let field = field_bounds(window, "inspector", &name)?;
+    // "Bind width to cube", "Write cube as text": not a row's own "Bind width".
+    let offer = |n: &str| {
+        (n.starts_with("Bind ") && n.split_once(" to ").is_some_and(|(_, v)| !v.is_empty()))
+            || (n.starts_with("Write ") && n.ends_with(" as text"))
+    };
+    let mut parts: Vec<(String, Rect)> = Vec::new();
+    let mut controls: Vec<(String, Rect)> = Vec::new();
+    window.stage.scene.accessibility_tree().walk(|_, _, d| {
+        let b = Rect::new(d.bounds.x0, d.bounds.y0, d.bounds.x1, d.bounds.y1);
+        let role = ljos_a11y::role_word(d.role);
+        if d.name == said || offer(&d.name) {
+            parts.push((d.name.clone(), b));
+        } else if b.y0 >= field.y1 - 0.5
+            && [
+                "textinput",
+                "button",
+                "combobox",
+                "checkbox",
+                "slider",
+                "spinbutton",
+            ]
+            .iter()
+            .any(|r| role.contains(r))
+        {
+            controls.push((format!("{role} {:?}", d.name), b));
+        }
+    });
+    if !parts.iter().any(|(n, _)| n == &said) {
+        return Err(format!("the inspector does not say {said:?}"));
+    }
+    if !parts.iter().any(|(n, _)| offer(n)) {
+        return Err(format!("the refusal {said:?} offers nothing"));
+    }
+    // The next row: the highest control below the field that a part's
+    // column or the field's crosses.
+    let crosses = |b: &Rect| {
+        parts
+            .iter()
+            .map(|(_, p)| p)
+            .chain(std::iter::once(&field))
+            .any(|p| b.x0 < p.x1 && b.x1 > p.x0)
+    };
+    let Some((next, top)) = controls
+        .iter()
+        .filter(|(_, b)| crosses(b))
+        .min_by(|a, b| a.1.y0.total_cmp(&b.1.y0))
+        .map(|(n, b)| (n.clone(), b.y0))
+    else {
+        return Err(format!("no row under {name:?} at {field:?}"));
+    };
+    let over: Vec<String> = parts
+        .iter()
+        .filter(|(_, p)| p.y1 > top + 0.5)
+        .map(|(n, p)| format!("{n:?} ends at {}", p.y1))
+        .collect();
+    over.is_empty().then_some(()).ok_or_else(|| {
+        format!(
+            "{} below the next row's top, {next} at {top}",
+            over.join(", ")
+        )
+    })
+}
+
 /// Where the field `name` of the inspector or the tokens panel is now. A
 /// token is looked for as the tokens panel's steps look for it, filtered.
 fn field_bounds(
