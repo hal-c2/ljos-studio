@@ -159,13 +159,13 @@ Feature: A person exports a native app or a web site from Studio's window
 
   Rule: A site has a page of its own, kept in the project
 
-    Scenario: The page's title and description are written into site.json
+    Scenario: The page's title and description are written into ljos-page.json
       Given the person has clicked the button "Export"
       And the person has chosen "Web site" in the export panel
       And the person has set "Page title" to "Media" in the export panel
       And the person has set "Page description" to "Plays one source" in the export panel
       When the person clicks the button "Write bundle"
-      Then the file "site.json" exists
+      Then the file "ljos-page.json" exists
       And the export panel says "^Page Media: Plays one source$"
       When the person clicks the button "Close"
       And the person clicks the button "Export"
@@ -187,7 +187,7 @@ Feature: A person exports a native app or a web site from Studio's window
       And the person has chosen "Web site" in the export panel
       When the person sets "Page icon" to "nowhere.svg" in the export panel
       Then the export panel says "nowhere.svg"
-      And the file "site.json" does not exist
+      And the file "ljos-page.json" does not exist
 
     Scenario: The page has no fields for a native app
       When the person clicks the button "Export"

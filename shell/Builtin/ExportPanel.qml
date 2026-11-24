@@ -5,7 +5,7 @@
 // a bundle already there are on screen before the person writes anything.
 // What the panel shows is the last answer or refusal of `export`; it keeps
 // no other state about the project. A site's page (title, description,
-// pictures) is the project's `site.json`, which an export with a `page`
+// pictures) is the project's `ljos-page.json`, which an export with a `page`
 // writes; "Build and open" is the same call with `build` and `open`, run
 // aside from the window's queue since a build takes as long as ljos-web.
 import QtQuick
@@ -33,7 +33,7 @@ Popup {
     readonly property bool wrote: answer !== null && answer.written
 
     // Whether the person changed the page's fields since the panel opened:
-    // until then the export reads the project's site.json, and the fields
+    // until then the export reads the project's ljos-page.json, and the fields
     // show what it says.
     property bool pageEdited: false
     // A build: running, and what the last one answered, or why it failed.
@@ -143,7 +143,7 @@ Popup {
             ""].join("\n")})
     }
 
-    // The fields say what the project's site.json says until the person
+    // The fields say what the project's ljos-page.json says until the person
     // changes one.
     function showPage(a) {
         if (pageEdited || a === null || !a.manifest || a.manifest.target !== "web")
