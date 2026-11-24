@@ -1764,25 +1764,25 @@ fn in_workspace(
     argument: &str,
     given: &str,
 ) -> Result<(), SurfaceError> {
-    let mut at = PathBuf::new();
+    // Where the system goes: each link is followed as it comes, so a `..`
+    // after one goes up from where it leads, not back to where it is. A
+    // part that is not there is taken as written.
+    let mut real = PathBuf::new();
     for part in root.join(given).components() {
         match part {
             Component::ParentDir => {
-                at.pop();
+                real.pop();
             }
             Component::CurDir => {}
-            part => at.push(part),
+            part => {
+                real.push(part);
+                if let Ok(there) = real.canonicalize() {
+                    real = there;
+                }
+            }
         }
     }
-    // Through links, as far as the path is there.
-    let real = at
-        .ancestors()
-        .find_map(|there| {
-            let rest = at.strip_prefix(there).ok()?;
-            Some(there.canonicalize().ok()?.join(rest))
-        })
-        .unwrap_or_else(|| at.clone());
-    if at.starts_with(workspace) && real.starts_with(workspace) {
+    if real.starts_with(workspace) {
         return Ok(());
     }
     let variable = if argument == "qmlc" {
