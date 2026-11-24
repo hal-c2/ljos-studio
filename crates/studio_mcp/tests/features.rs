@@ -1628,8 +1628,26 @@ fn manifest_dir() -> String {
     std::env::var("CARGO_MANIFEST_DIR").unwrap_or_else(|_| env!("CARGO_MANIFEST_DIR").to_owned())
 }
 
+fn main() {
+    // What the scenarios see of a build's toolchain is the same on every
+    // machine: NODE is a stand-in that is there and does not start, so no
+    // build here runs and none turns on the host's node. The environment
+    // is the process's own, so the runner starts itself again with it.
+    let node = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join("standin-node");
+    if std::env::var_os("NODE").as_deref() != Some(node.as_os_str()) {
+        std::fs::write(&node, "not run\n").expect("the stand-in node");
+        let status = std::process::Command::new(std::env::current_exe().expect("this runner"))
+            .args(std::env::args_os().skip(1))
+            .env("NODE", &node)
+            .status()
+            .expect("this runner, again");
+        std::process::exit(status.code().unwrap_or(1));
+    }
+    scenarios();
+}
+
 #[tokio::main]
-async fn main() {
+async fn scenarios() {
     let features = format!("{}/../../features", manifest_dir());
     let input = std::env::var("STUDIO_FEATURES").unwrap_or(features);
     StudioWorld::cucumber()
