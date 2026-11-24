@@ -102,6 +102,13 @@ Feature: An object's own API is written in the inspector
     And the person selects "Item root" in the layers panel
     Then the inspector lists the members "count, hasBrace, done"
 
+  # `of` is a keyword only in a `for (… of …)`: a name `of` is a value, and
+  # a `/` after it divides.
+  Scenario: A `/` after a name `of` divides, and one after a `for … of` starts a regular expression
+    When the person replaces "signal done(int code)" with "function half(of) { return of / 2 }\n    function parts(s) { for (const p of /[}]/[Symbol.split](s)) count++ }\n    signal done(int code)" in the code view
+    And the person selects "Item root" in the layers panel
+    Then the inspector lists the members "count, half, parts, done"
+
   # Inside a string the lines are the string's: the inspector trims none of
   # them. (Setting the value indents each later line by the handler's own
   # indent, inside the string too: that is qml_edit's, and not asserted.)
@@ -139,6 +146,24 @@ Feature: An object's own API is written in the inspector
     And the person clicks the button "Write the done handler"
     Then the file "Main.qml" says "b  \n"
 
+  # A name `of` is a value: the string after its division is still read as one.
+  Scenario: A division after a name `of` in a handler is no regular expression
+    Given the person has selected "Item root" in the layers panel
+    And the person has clicked the button "Edit the done handler"
+    When the person types "const of = 4\nconst k = of / 2 + `a\n  b  \nc`\nconsole.log(k)" in the inspector's "Handler for done" and leaves it
+    And the person clicks the button "Write the done handler"
+    Then the file "Main.qml" says "b  \n"
+
+  # What is typed while the handler is written is the next draft: the
+  # editor stays open with it.
+  Scenario: A handler typed while the one before it is written stays open with it
+    Given the person has selected "Item root" in the layers panel
+    And the person has clicked the button "Edit the done handler"
+    And the person has typed "count = 1" in the inspector's "Handler for done" and left it
+    When the person clicks the button "Write the done handler" and types "count = 2" in the inspector's "Handler for done" before its answer
+    Then the file "Main.qml" says "onDone: count = 1"
+    And the inspector's "Handler for done" holds "count = 2"
+
   # A word ends at a space or a line's end: `else` and `return` after a word
   # on the line before are still words that a regular expression follows.
   Scenario: A regular expression after `else return` starts no string
@@ -148,3 +173,12 @@ Feature: An object's own API is written in the inspector
     And the person has clicked the button "Write the done handler"
     When the person clicks the button "Edit the done handler"
     Then the inspector's "Handler for done" holds "const t = String(code)\nif (t) count = 1\nelse return /`/.test(t)\nconsole.log(t)"
+
+  # A field taller than the window is scrolled until its top shows, and is
+  # typed in there. (Last: a scenario that never ends stops the run.)
+  Scenario: A handler taller than the window is typed in again
+    Given the person has selected "Item root" in the layers panel
+    And the person has clicked the button "Edit the done handler"
+    And the person has typed 80 lines of "count = code" in the inspector's "Handler for done" and left it
+    When the person types "count = 1" in the inspector's "Handler for done" and leaves it
+    Then the inspector's "Handler for done" holds "count = 1"

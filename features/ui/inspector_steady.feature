@@ -70,6 +70,27 @@ Feature: The inspector holds still while a person types into it
     And the inspector's "Change value" holds ""
     And the inspector's "Change value" is where it was
 
+  # What is typed while a change is recorded is the next one, and the
+  # answer about the one before does not empty it.
+  Scenario: A change typed while the one before it is recorded is kept
+    Given the person has added the state "compact" in the inspector
+    And the person has picked the state "compact" in the inspector
+    And the person has typed "root" in the inspector's "Change target" and left it
+    And the person has typed "height" in the inspector's "Change property" and left it
+    And the person has typed "80" in the inspector's "Change value" and left it
+    When the person clicks the button "Set change" and types "90" in the inspector's "Change value" before its answer
+    Then the file "Main.qml" says "height: 80"
+    And the inspector's "Change property" holds "height"
+    And the inspector's "Change value" holds "90"
+
+  Scenario: A property typed while the one before it is set is kept
+    Given the person has typed "width" in the inspector's "New property" and left it
+    And the person has typed "120" in the inspector's "New value" and left it
+    When the person clicks the button "Set new property" and types "90" in the inspector's "New value" before its answer
+    Then the file "Main.qml" says "width: 120"
+    And the inspector's "New property" holds "width"
+    And the inspector's "New value" holds "90"
+
   Scenario: A token refused leaves the list of tokens where it was
     Given the person has noted where the tokens panel's "Colors.text light" is
     When the person sets "Colors.text light" to "#f0f0f0" in the tokens panel
