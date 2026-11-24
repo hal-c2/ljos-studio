@@ -79,3 +79,20 @@ Feature: An object's own API is written in the inspector
     And the person has clicked the button "Write the done handler"
     When the person clicks the button "Edit the done handler"
     Then the inspector's "Handler for done" holds "console.log(code)\ncount = code"
+
+  # A member on the line the object closes on is the object's too.
+  Scenario: A member written just before the closing brace is listed
+    When the person replaces "height: 10 }" with "height: 10; signal tapped }" in the code view
+    And the person selects "Rectangle inner" in the layers panel
+    Then the inspector lists the members "label, tapped"
+
+  # Inside a string the lines are the string's: the inspector trims none of
+  # them. (Setting the value indents each later line by the handler's own
+  # indent, inside the string too: that is qml_edit's, and not asserted.)
+  Scenario: A handler's multi-line string keeps the spaces typed at a line's end
+    Given the person has selected "Item root" in the layers panel
+    And the person has clicked the button "Edit the done handler"
+    When the person types "const s = `a\n  b  \nc`\nconsole.log(s)" in the inspector's "Handler for done" and leaves it
+    And the person clicks the button "Write the done handler"
+    Then the file "Main.qml" says "b  \n"
+    And the file "Main.qml" says "console.log(s)"

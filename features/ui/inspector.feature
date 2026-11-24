@@ -268,6 +268,17 @@ Feature: The inspector shows colours and every declared property
     Then the file "Main.qml" says "width: cube"
     And the window shows no refusal
 
+  # Taken from the new property row's refusal, the offer is that row's
+  # write: the row is emptied for the next, as a write from it is.
+  Scenario: A new property's refused value is bound from the row, which is emptied
+    When the person enters "rotation" as the new property in the inspector
+    And the person sets "New value" to "cube" in the inspector
+    Then the inspector's new property row holds "rotation"
+    When the person clicks the button "Bind rotation to cube"
+    Then the file "Main.qml" says "rotation: cube"
+    And the inspector's new property row holds ""
+    And the inspector's "New value" holds ""
+
   Scenario: A colour is written the way a person writes one
     When the person sets "color" to "#123456" in the inspector
     Then the file "Main.qml" says "color: \"#123456\""

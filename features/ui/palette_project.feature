@@ -49,6 +49,14 @@ Feature: The palette offers the project's own components
     Then the palette does not offer "Badge"
     And the palette offers "Rectangle"
 
+  # Placed lately or not, a file is not offered to itself.
+  Scenario: A component placed lately is not offered in its own file
+    Given the person has opened "Main.qml" in the documents list
+    And the person has placed "Badge" from the palette
+    When the person opens "Badge.qml" in the documents list
+    Then the palette does not offer "Badge"
+    And the palette offers "Rectangle"
+
   Scenario: A search that finds nothing says so
     Given the person has opened "Main.qml" in the documents list
     When the person searches the palette for "zzz"

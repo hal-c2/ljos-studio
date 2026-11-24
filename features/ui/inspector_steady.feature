@@ -53,7 +53,8 @@ Feature: The inspector holds still while a person types into it
   Scenario: The id refused stays under the id, and the next row stays put
     Given the person has noted where the inspector's "color" is
     When the person sets "id" to "2root" in the inspector
-    Then the inspector's "color" is where it was
+    Then the inspector says "`2root` is not an id: an id is one word and starts lowercase" under its "id"
+    And the inspector's "color" is where it was
     And the file "Main.qml" says "id: root"
 
   Scenario: A change recorded into a state empties the row that adds it, which stays put

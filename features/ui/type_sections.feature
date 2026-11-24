@@ -93,10 +93,32 @@ Feature: The inspector shows what a kind of object is about
   Scenario: A scrolling area holds as much as its content, with one press
     When the person selects "Flickable scroller" in the layers panel
     And the person clicks the button "Fit the height to the content"
-    Then the file "Main.qml" says "contentHeight: content.implicitHeight"
+    Then the file "Main.qml" says "contentHeight: content.height"
+
+  # What it holds may be sized only by what it is given: a box's implicit
+  # height is nothing.
+  Scenario: A scrolling area holds as much as a sized box it holds
+    When the person replaces "Column { id: content; Rectangle { width: 10; height: 400 } }" with "Rectangle { id: card; width: 320; height: 640 }" in the code view
+    And the person selects "Flickable scroller" in the layers panel
+    And the person clicks the button "Fit the height to the content"
+    Then the file "Main.qml" says "contentHeight: card.height"
 
   Scenario: A plain box is given a fill
     When the person selects "Item root" in the layers panel
     And the person clicks the button "Give it a fill"
-    Then the file "Main.qml" says "Rectangle {"
+    Then the file "Main.qml" says "Rectangle {\n    id: root"
     And the file "Main.qml" says "color: Colors.canvas"
+
+  # The theme's names are written the way the file imports them.
+  Scenario: A style is written with the name the theme is imported as
+    When the person replaces "import Ljos.Design" with "import Ljos.Design as Design" in the code view
+    And the person selects "Text title" in the layers panel
+    And the person chooses "Title" in the inspector's "Text style"
+    Then the file "Main.qml" says "font.pixelSize: Design.Typography.titleSize"
+    And the file "Main.qml" says "font.weight: Design.Typography.titleWeight"
+
+  Scenario: A fill is written with the name the theme is imported as
+    When the person replaces "import Ljos.Design" with "import Ljos.Design as Design" in the code view
+    And the person selects "Item root" in the layers panel
+    And the person clicks the button "Give it a fill"
+    Then the file "Main.qml" says "color: Design.Colors.canvas"
