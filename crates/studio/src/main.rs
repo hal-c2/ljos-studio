@@ -320,10 +320,19 @@ fn seed(dir: &Path) -> anyhow::Result<()> {
 /// so without the copy it would lose Studio's look, and a person who
 /// changes one role keeps the rest.
 fn seed_theme(file: &Path) -> anyhow::Result<()> {
-    if file.exists() {
-        return Ok(());
-    }
-    std::fs::write(file, THEME).with_context(|| format!("writing {}", file.display()))?;
+    // Created only if it is not there, in one step: a theme another Studio
+    // writes between a check and a write is never overwritten.
+    let mut out = match std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(file)
+    {
+        Ok(out) => out,
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => return Ok(()),
+        Err(e) => return Err(e).with_context(|| format!("creating {}", file.display())),
+    };
+    std::io::Write::write_all(&mut out, THEME.as_bytes())
+        .with_context(|| format!("writing {}", file.display()))?;
     eprintln!(
         "studio: {} had no theme; it now has a copy of Studio's",
         file.display()

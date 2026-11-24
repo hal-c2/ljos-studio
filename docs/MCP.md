@@ -971,9 +971,10 @@ horizontalCenter, verticalCenter}, target?} writes `anchors.*` and takes away
 the x, y, width and height that now disagree. A side's value is its margin
 (one equal to a number `anchors.margins` says writes none of its own), a
 centre line's its offset, and null takes either off; a centre line replaces the
-sides of its axis, and one asked of a `centerIn` keeps the other axis centred.
-`fill` and `centerIn` take true or false. An axis let go of keeps its place from the preview when one is
-running. `target` is `parent` (the default) or a sibling's id. Refused:
+sides of its axis, and one asked of a `centerIn` keeps the other axis centred;
+a centre line taken off with a side of its axis asked leaves that side pinned.
+`fill` and `centerIn` take true or false. An axis let go of keeps its place
+from the preview when one is running; with none, nothing is written for it. `target` is `parent` (the default) or a sibling's id. Refused:
 `arranged` in a Row, Column, Grid, Flow or `*Layout`, saying what to use
 instead; `not_a_sibling`, `root`, `locked`.
 

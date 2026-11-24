@@ -97,7 +97,10 @@ Panel {
         const rank = t => first.indexOf(t.name) < 0 ? first.length : first.indexOf(t.name)
         for (const g of out)
             g.types.sort((a, b) => rank(a) - rank(b))
-        const lately = {name: "Recently used", types: panel.recent.filter(t => t.name.toLowerCase().includes(needle))}
+        // A project's type placed lately is offered while it is beside the
+        // document, as in its own group: not to itself.
+        const lately = {name: "Recently used", types: panel.recent.filter(t => t.name.toLowerCase().includes(needle)
+            && (t.module !== "" || panel.besideDocument.includes(t.name)))}
         return [lately].concat(out).filter(g => g.types.length > 0)
     }
     function category(type, module) {

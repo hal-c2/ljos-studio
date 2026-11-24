@@ -141,6 +141,9 @@ TextField {
             }
             onPositionChanged: mouse => field.scrubTo(mapToItem(null, mouse.x, 0).x - startX)
             onReleased: field.scrubEnd()
+            // The window took the press (a popup, the pointer gone): what the
+            // scrub showed is kept, as letting go keeps it.
+            onCanceled: field.scrubEnd()
         }
     }
     Text {

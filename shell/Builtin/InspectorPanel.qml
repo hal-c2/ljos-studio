@@ -60,13 +60,23 @@ Panel {
         return offering(slot) && offered.asText ? "Write " + offered.value + " as text" : ""
     }
     function takeOffer(asText) {
-        if (asText)
-            set(offered.name, JSON.stringify(offered.value))
+        const take = () => {
+            if (asText)
+                set(offered.name, JSON.stringify(offered.value))
+            else
+                bind(offered.name, offered.value)
+        }
+        // From the new property row, it is that row's write, and empties it.
+        if (refusal.at === "new")
+            fromRow(take)
         else
-            bind(offered.name, offered.value)
+            take()
     }
     function asked(tool, args) {
+        const on = args.node !== undefined ? args.node : args.nodes !== undefined ? args.nodes
+            : args.target !== undefined ? args.target : args.parent
         return tool + ":" + (args.name !== undefined ? args.name : args.action !== undefined ? args.action : "")
+            + ":" + JSON.stringify(on === undefined ? null : on)
     }
     // Every write this panel makes goes through here, from the slot `at`.
     // A write that `follows` is the rest of a gesture already sent: its
@@ -138,6 +148,12 @@ Panel {
     }
     // The document reads the theme, so a value may name one of its roles.
     readonly property bool themed: /^\s*import\s+Ljos\.Design\b/m.test(workspace.text)
+    // What the theme's names are written after: `Design.` for an import
+    // `as Design`, nothing for a plain one.
+    readonly property string theme: {
+        const m = /^\s*import\s+Ljos\.Design\b(?:\s+[\d.]+)?(?:\s+as\s+([A-Za-z_]\w*))?/m.exec(workspace.text)
+        return m !== null && m[1] !== undefined ? m[1] + "." : ""
+    }
     // What the selected object's kind is about, in a section of its own:
     // its rows whether the file writes them yet or not, so nobody has to
     // know their names to find them.
@@ -195,12 +211,12 @@ Panel {
     ]
     function textStyle() {
         const size = inState("font.pixelSize", written("font.pixelSize")).trim()
-        return textStyles.findIndex(t => size === "Typography." + t.key + "Size")
+        return textStyles.findIndex(t => size === theme + "Typography." + t.key + "Size")
     }
     function giveStyle(key) {
         refusal.at = "kind"
-        set("font.pixelSize", "Typography." + key + "Size")
-        set("font.weight", "Typography." + key + "Weight", undefined, true)
+        set("font.pixelSize", theme + "Typography." + key + "Size")
+        set("font.weight", theme + "Typography." + key + "Weight", undefined, true)
     }
     // Writes what a row of the kind's section says, as a row of the list does.
     function put(name, text) {
@@ -221,7 +237,7 @@ Panel {
         const child = at + 1 < all.length && all[at + 1].depth === selectedLayer.layer.depth + 1 ? all[at + 1] : null
         refusal.at = name
         set(name, child !== null && child.id !== ""
-            ? child.id + (across ? ".implicitWidth" : ".implicitHeight")
+            ? child.id + (across ? ".width" : ".height")
             : "contentItem.childrenRect." + (across ? "width" : "height"))
     }
     // A plain box turned into one that can be filled, then filled: the page
@@ -241,7 +257,7 @@ Panel {
     function filled(node) {
         filling = false
         refusal.at = "kind"
-        set("color", themed ? (isRoot ? "Colors.canvas" : "Colors.surface") : '"white"', node)
+        set("color", themed ? theme + (isRoot ? "Colors.canvas" : "Colors.surface") : '"white"', node)
     }
 
     // What the selected object declares of its own: each property, signal
@@ -291,6 +307,9 @@ Panel {
                     end()
                 depth++
             } else if (c === "}") {
+                // The last member may end at the brace, with no `;` after it.
+                if (depth === 1)
+                    end()
                 depth--
                 words = ""
             } else if (depth === 1) {
@@ -343,22 +362,94 @@ Panel {
     }
     // A handler's statements as a person writes them: its braces taken off
     // and its lines brought back to the left edge together.
+    // For each line of `text`, whether it starts and whether it ends inside a
+    // string or a template literal, where its spaces are the string's own.
+    function literalLines(text) {
+        const lines = []
+        // What the scan is in: code (with how many `{` it has opened, for a
+        // `${` of a template), a quote, a template, or a comment.
+        const stack = [{mode: "code", open: 0}]
+        const top = () => stack[stack.length - 1]
+        const inside = () => ["'", '"', "`"].includes(top().mode)
+        let starts = false
+        const lineEnds = () => {
+            lines.push({starts: starts, ends: inside()})
+            starts = inside()
+        }
+        for (let i = 0; i < text.length; i++) {
+            const c = text[i]
+            const at = top()
+            if (c === "\n") {
+                // A line comment ends here, and so does a quote left open.
+                if (at.mode === "line" || at.mode === "'" || at.mode === '"')
+                    stack.pop()
+                lineEnds()
+            } else if (at.mode === "line") {
+                continue
+            } else if (at.mode === "block") {
+                if (c === "*" && text[i + 1] === "/") {
+                    stack.pop()
+                    i++
+                }
+            } else if (at.mode !== "code") {
+                if (c === "\\") {
+                    // An escaped line end goes on with the string.
+                    i++
+                    if (text[i] === "\n")
+                        lineEnds()
+                } else if (c === at.mode) {
+                    stack.pop()
+                } else if (at.mode === "`" && c === "$" && text[i + 1] === "{") {
+                    stack.push({mode: "code", open: 0})
+                    i++
+                }
+            } else if (c === "/" && text[i + 1] === "/") {
+                stack.push({mode: "line"})
+                i++
+            } else if (c === "/" && text[i + 1] === "*") {
+                stack.push({mode: "block"})
+                i++
+            } else if (c === "'" || c === '"' || c === "`") {
+                stack.push({mode: c})
+            } else if (c === "{") {
+                at.open++
+            } else if (c === "}") {
+                if (at.open > 0)
+                    at.open--
+                else if (stack.length > 1)
+                    stack.pop()
+            }
+        }
+        lines.push({starts: starts, ends: inside()})
+        return lines
+    }
+    // Each line of `text` with where it starts and ends: a line's spaces are
+    // trimmed only where they are not a string's.
+    function codeLines(text) {
+        const at = literalLines(text)
+        return text.split("\n").map((l, i) => ({
+            text: at[i].ends ? l : l.replace(/\s+$/, ""),
+            starts: at[i].starts
+        }))
+    }
     function handlerBody(signal) {
         let said = written(handlerName(signal)).trim()
         if (!/^\{[\s\S]*\}$/.test(said))
             return said
-        let lines = said.slice(1, -1).split("\n")
-        while (lines.length > 0 && lines[0].trim() === "")
+        let lines = codeLines(said.slice(1, -1))
+        while (lines.length > 0 && lines[0].text.trim() === "")
             lines.shift()
-        while (lines.length > 0 && lines[lines.length - 1].trim() === "")
+        while (lines.length > 0 && lines[lines.length - 1].text.trim() === "" && !lines[lines.length - 1].starts)
             lines.pop()
-        const indents = lines.filter(l => l.trim() !== "").map(l => l.match(/^\s*/)[0].length)
+        const indents = lines.filter(l => !l.starts && l.text.trim() !== "").map(l => l.text.match(/^\s*/)[0].length)
         const cut = indents.length > 0 ? Math.min(...indents) : 0
-        return lines.map(l => l.slice(cut).replace(/\s+$/, "")).join("\n").trim()
+        return lines.map(l => l.starts ? l.text : l.text.slice(cut)).join("\n")
     }
     function writeHandler(signal, text) {
-        const lines = text.replace(/\s+$/, "").split("\n").map(l => l.replace(/\s+$/, ""))
-        while (lines.length > 0 && lines[0].trim() === "")
+        const lines = codeLines(text)
+        while (lines.length > 0 && lines[lines.length - 1].text.trim() === "" && !lines[lines.length - 1].starts)
+            lines.pop()
+        while (lines.length > 0 && lines[0].text.trim() === "")
             lines.shift()
         const name = handlerName(signal)
         refusal.at = "handle " + signal
@@ -372,8 +463,9 @@ Panel {
             }
             value = null
         } else {
-            value = lines.length === 1 ? lines[0].trim()
-                : "{\n" + lines.map(l => l === "" ? "" : "    " + l).join("\n") + "\n}"
+            // A line that starts inside a string is the string's: no indent.
+            value = lines.length === 1 ? lines[0].text.trim()
+                : "{\n" + lines.map(l => l.text === "" || l.starts ? l.text : "    " + l.text).join("\n") + "\n}"
         }
         ask("binding_set", {doc: workspace.doc, node: {node: workspace.selected}, name: name, value: value})
     }
@@ -413,12 +505,20 @@ Panel {
             return []
         if (!/^Qt\.Align[A-Za-z]+(\s*\|\s*Qt\.Align[A-Za-z]+)*$/.test(text))
             return null
-        return text.split("|").map(f => f.trim())
+        // `AlignCenter` is both centres, each on its own axis.
+        return [].concat(...text.split("|").map(f => f.trim())
+            .map(f => f === "Qt.AlignCenter" ? ["Qt.AlignHCenter", "Qt.AlignVCenter"] : [f]))
     }
+    // Each axis's flags, as Qt reads them, not only those the buttons offer:
+    // a flag of the other axis is never replaced by one of this one.
+    readonly property var alignAxes: ({
+        across: ["Qt.AlignLeft", "Qt.AlignHCenter", "Qt.AlignRight", "Qt.AlignJustify"],
+        down: ["Qt.AlignTop", "Qt.AlignVCenter", "Qt.AlignBottom", "Qt.AlignBaseline"]
+    })
     // One axis's flag in place of whatever that axis had, or none when it was
     // the one written; the other axis keeps its own.
     function align(flag, axis) {
-        const sameAxis = alignments.filter(a => a.axis === axis).map(a => a.flag)
+        const sameAxis = alignAxes[axis]
         const had = alignmentFlags() || []
         const kept = had.filter(f => sameAxis.indexOf(f) < 0)
         if (had.indexOf(flag) < 0)
@@ -686,7 +786,8 @@ Panel {
     // On the selected object unless a picker says which it was opened on.
     function set(name, text, node, follows) {
         if (picked !== "") {
-            record(name, text, node)
+            // `null` takes a value off; in a state, that is the change.
+            record(name, text === "null" ? "" : text, node)
             return
         }
         // The parser's word on what QML reads as a literal, and written as typed:
@@ -976,7 +1077,7 @@ Panel {
     function review(args) {
         refusal.at = "comment"
         refusal.text = ""
-        workspace.dispatch("review", args)
+        ask("review", args)
     }
 
     function bind(name, text) {
@@ -1582,32 +1683,43 @@ Panel {
                     }
                 }
 
-                RowLayout {
+                // Two a row: three leads in one leave no room to type in.
+                GridLayout {
                     visible: panel.isLayout
-                    spacing: Spacing.xxs
+                    columns: 2
+                    columnSpacing: Spacing.xxs
+                    rowSpacing: Spacing.xxs
                     Layout.fillWidth: true
                     Repeater {
-                        model: panel.isLayout ? ["spacing", "columns"].filter(n => n === "spacing" || panel.selectedType.startsWith("Grid")) : []
+                        id: layoutFields
+                        // A GridLayout spaces its rows and its columns apart and
+                        // has no `spacing`; a Grid has one for both.
+                        model: !panel.isLayout ? []
+                            : panel.selectedType === "GridLayout" ? ["rowSpacing", "columnSpacing", "columns"]
+                            : panel.selectedType.startsWith("Grid") ? ["spacing", "columns"]
+                            : ["spacing"]
                         delegate: Field {
                             required property string modelData
-                            lead: modelData === "spacing" ? "Gap" : "Cols"
+                            required property int index
+                            lead: ({spacing: "Gap", rowSpacing: "Row gap", columnSpacing: "Col gap", columns: "Cols"})[modelData]
+                            // The last of an odd count has the row to itself.
+                            Layout.columnSpan: index === layoutFields.count - 1 && layoutFields.count % 2 === 1 ? 2 : 1
                             unit: panel.unitOf(modelData, text)
                             scrub: true
                             bound: panel.valueKind(modelData, text) === "binding"
                             token: panel.valueKind(modelData, text) === "token"
-                            text: panel.written(modelData)
+                            // The picked state's, while one is picked.
+                            text: panel.inState(modelData, panel.written(modelData))
                             Accessible.name: "Layout " + modelData
                             Layout.fillWidth: true
                             Layout.preferredWidth: 1
                             onAccepted: {
                                 refusal.at = "layout"
                                 refusal.text = ""
-                                panel.ask("binding_set", {
-                                    doc: panel.workspace.doc,
-                                    node: {node: panel.workspace.selected},
-                                    name: modelData,
-                                    value: text === "" ? null : text
-                                })
+                                if (text.trim() !== "")
+                                    panel.set(modelData, text)
+                                else if (panel.inState(modelData, panel.written(modelData)) !== "")
+                                    panel.set(modelData, "null")
                             }
                         }
                     }
