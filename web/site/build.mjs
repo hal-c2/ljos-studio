@@ -185,26 +185,58 @@ const there = lstatSync(out, { throwIfNoEntry: false });
 const stamp = { ljos_web: manifest.ljos_web, files: Object.fromEntries(contents(dist)) };
 writeFileSync(join(dist, STAMP), `${JSON.stringify(stamp, null, 2)}\n`);
 mkdirSync(dirname(out), { recursive: true });
-// The site before is set aside in a directory made for it: any name chosen
-// here could be a directory of the person's.
-const aside = there ? mkdtempSync(`${out}.old-`) : null;
-if (aside) {
-  const before = join(aside, "site");
-  renameSync(out, before);
-  // Looked at where nobody is writing to it any more, as it is removed there.
-  const added = notOurs(before);
-  if (added) {
-    renameSync(before, out);
-    rmdirSync(aside);
-    keeps(added);
-  }
-}
+// The new site is made whole beside the old one before the old one moves:
+// a disk that fills or a directory that refuses a write stops the build
+// here, with the old site where it was. Its directory, like the one the
+// old site is set aside in, is made for it: any name chosen here could be
+// a directory of the person's.
+let next;
+let ready;
 try {
-  renameSync(dist, out);
-} catch {
-  // Another file system: copied, then the work directory's is left.
-  cpSync(dist, out, { recursive: true });
+  next = mkdtempSync(`${out}.new-`);
+  ready = join(next, "site");
+  try {
+    renameSync(dist, ready);
+  } catch {
+    // Another file system: copied, then the work directory's is left.
+    cpSync(dist, ready, { recursive: true });
+  }
+} catch (e) {
+  if (next) rmSync(next, { recursive: true, force: true });
+  fail(`the site could not be written beside ${out} (${e.message}); the site there is as it was`, e.stack);
 }
+let aside = null;
+let before = null;
+try {
+  if (there) {
+    aside = mkdtempSync(`${out}.old-`);
+    before = join(aside, "site");
+    renameSync(out, before);
+    // Looked at where nobody is writing to it any more, as it is removed there.
+    const added = notOurs(before);
+    if (added) {
+      renameSync(before, out);
+      rmdirSync(aside);
+      rmSync(next, { recursive: true, force: true });
+      keeps(added);
+    }
+  }
+  renameSync(ready, out);
+} catch (e) {
+  // Whatever stopped the swap, the site before goes back where it was.
+  let back = "";
+  if (aside) {
+    try {
+      if (existsSync(before) && !existsSync(out)) renameSync(before, out);
+      rmdirSync(aside);
+    } catch (again) {
+      back = `; the site before is in ${before} (${again.message})`;
+    }
+  }
+  rmSync(next, { recursive: true, force: true });
+  fail(`the site could not be moved to ${out} (${e.message})${back || (aside ? "; the site there is as it was" : "")}`, e.stack);
+}
+rmdirSync(next);
 if (aside) rmSync(aside, { recursive: true, force: true });
 const weigh = (dir) =>
   readdirSync(dir, { withFileTypes: true }).reduce(
