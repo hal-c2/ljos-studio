@@ -860,7 +860,8 @@ Feature: A project is exported for ljos-web to build a site from
         | web    | build/web-site/inner/deep |                  |
         | native | build/web-site/inner      |                  |
 
-    # The toolchain is only looked at: the refusal comes before it runs.
+    # The runner's NODE is a stand-in: the toolchain is only looked at, and the
+    # refusal comes before it runs.
     Scenario: A build waits for the bundle that lies where its site would go
       Given the studio tools are connected with the capabilities "inspect, mutate, fs, run"
       And the file "standin/packages/runtime/package.json":
