@@ -130,6 +130,7 @@ TextField {
         }
         MouseArea {
             id: scrubber
+            objectName: "scrubber"
             anchors.fill: parent
             enabled: field.scrub && !field.bound && !field.token && field.enabled
             cursorShape: enabled ? Qt.SizeHorCursor : Qt.IBeamCursor

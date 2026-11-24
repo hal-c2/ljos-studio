@@ -2276,6 +2276,43 @@ fn press_taken(w: &mut UiWorld) -> StepResult {
     window.rest()
 }
 
+/// A scrub the window ends before the hand lets go, as a popup opening or
+/// the window losing the pointer does: no release arrives.
+#[when(
+    regex = r#"^the person scrubs the inspector's "([^"]+)" by (\d+) and the window takes the press away$"#
+)]
+fn scrub_taken(w: &mut UiWorld, name: String, by: f64) -> StepResult {
+    let window = w.window()?;
+    let field = window.node("Inspector", Some("textinput"), &name)?;
+    let bounds = field_bounds(window, "inspector", &name)?;
+    let item = window
+        .stage
+        .scene
+        .accessible_item(field.key.ok_or("the field has no key")?)
+        .ok_or("the field is not an item")?;
+    let scrubber = ljos_drive::find_below(window.engine(), item, "scrubber")
+        .ok_or_else(|| format!("{name:?} has no scrubber"))?;
+    // On its lead, the handle it is scrubbed by.
+    let from = Point::new(bounds.x0 + 8.0, (bounds.y0 + bounds.y1) / 2.0);
+    window
+        .stage
+        .drive()
+        .press(from, MouseButtons::LEFT)
+        .map_err(drive_error)?;
+    window.rest()?;
+    window
+        .stage
+        .drive()
+        .move_to(Point::new(from.x + by, from.y))
+        .map_err(drive_error)?;
+    window.rest()?;
+    window
+        .engine()
+        .emit_by_name(scrubber, "canceled", &[])
+        .map_err(|e| e.to_string())?;
+    window.rest()
+}
+
 #[when(
     regex = r#"^the person lets a drag go in the frame "([^"]+)" from (\d+), (\d+) to (\d+), (\d+), not waiting$"#
 )]
@@ -2822,7 +2859,9 @@ fn refusal_clear(w: &mut UiWorld, said: String, name: String) -> StepResult {
         let role = ljos_a11y::role_word(d.role);
         if d.name == said || offer(&d.name) {
             parts.push((d.name.clone(), b));
-        } else if b.y0 >= field.y1 - 0.5
+        // Below the field's row by its middle, so a row pulled up under the
+        // refusal, its top above the field's bottom, is still the next one.
+        } else if (b.y0 + b.y1) / 2.0 > field.y1
             && [
                 "textinput",
                 "button",

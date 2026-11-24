@@ -88,6 +88,29 @@ Feature: A person pins an object from the inspector's Layout section
     And the file "Main.qml" says "anchors.margins: 10"
     And the file "Main.qml" does not say "leftMargin"
 
+  # A scrub the window ends before the hand lets go (a popup opening, the
+  # pointer leaving the window) keeps what it showed, as letting go does.
+  Scenario: A margin scrubbed when the window takes the press away is written
+    When the person selects "Rectangle box" in the layers panel
+    And the person sets "Margins" to "10" in the inspector
+    And the person scrubs the inspector's "Margins" by 5 and the window takes the press away
+    Then the file "Main.qml" says "anchors.margins: 15"
+
+  # Emptied while a state is picked, the state's own margin is taken out:
+  # the object's own one shows again, and no `null` is written for it.
+  Scenario: A margin emptied in a state takes the state's margin out
+    Given the person has selected "Rectangle box" in the layers panel
+    And the person has clicked the button "Pin left"
+    And the person has set "Left margin" to "6" in the inspector
+    And the person has added the state "compact" in the inspector
+    And the person has picked the state "compact" in the inspector
+    When the person sets "Left margin" to "12" in the inspector
+    Then the file "Main.qml" says "anchors.leftMargin: 12"
+    When the person sets "Left margin" to "" in the inspector
+    Then the file "Main.qml" says "anchors.leftMargin: 6"
+    And the file "Main.qml" does not say "anchors.leftMargin: 12"
+    And the file "Main.qml" does not say "null"
+
   Scenario: What a row layout places is told where it sits in the row
     When the person selects "Rectangle chip" in the layers panel
     Then the inspector has no button "Pin left"
@@ -95,6 +118,22 @@ Feature: A person pins an object from the inspector's Layout section
     Then the file "Main.qml" says "Layout.alignment: Qt.AlignBottom"
     When the person clicks the button "Bottom of the row"
     Then the file "Main.qml" does not say "Layout.alignment"
+
+  # A grid's cell has both axes: a flag of one is changed with the other's
+  # kept, and a flag that is not one of the buttons' is read for its axis.
+  Scenario: A cell's flag on one axis is changed and the other's is kept
+    When the person replaces "RowLayout {" with "GridLayout {" in the code view
+    And the person replaces "id: chip;" with "id: chip; Layout.alignment: Qt.AlignRight | Qt.AlignBaseline;" in the code view
+    And the person selects "Rectangle chip" in the layers panel
+    And the person clicks the button "Top of its cell"
+    Then the file "Main.qml" says "Layout.alignment: Qt.AlignRight | Qt.AlignTop"
+
+  Scenario: A cell centred both ways keeps its centre across when put at the top
+    When the person replaces "RowLayout {" with "GridLayout {" in the code view
+    And the person replaces "id: chip;" with "id: chip; Layout.alignment: Qt.AlignCenter;" in the code view
+    And the person selects "Rectangle chip" in the layers panel
+    And the person clicks the button "Top of its cell"
+    Then the file "Main.qml" says "Layout.alignment: Qt.AlignHCenter | Qt.AlignTop"
 
   Scenario: An object is wrapped from the section
     When the person selects "Rectangle box" in the layers panel
@@ -117,6 +156,25 @@ Feature: A person pins an object from the inspector's Layout section
     When the person selects "Grid table" in the layers panel
     Then the inspector's "Layout spacing" holds "3"
     And the inspector's "Layout columns" holds "2"
+
+  # A GridLayout has no `spacing`: its rows and columns are spaced apart.
+  Scenario: A grid layout's spacing is written by rows and columns
+    When the person replaces "RowLayout {" with "GridLayout {" in the code view
+    And the person selects "GridLayout bar" in the layers panel
+    And the person sets "Layout rowSpacing" to "6" in the inspector
+    Then the file "Main.qml" says "rowSpacing: 6"
+    And the inspector does not offer the field "Layout spacing"
+
+  Scenario: A layout's spacing set while a state is picked goes into the state
+    Given the person has selected "Item root" in the layers panel
+    And the person has added the state "compact" in the inspector
+    And the person has picked the state "compact" in the inspector
+    When the person selects "Grid table" in the layers panel
+    And the person sets "Layout spacing" to "12" in the inspector
+    Then the file "Main.qml" says "spacing: 3"
+    And the file "Main.qml" says "spacing: 12"
+    And the file "Main.qml" says "target: table"
+    And the inspector's "Layout spacing" holds "12"
 
   Scenario: What a layout places cannot be pinned, and the section says so
     When the person selects "Text cell" in the layers panel

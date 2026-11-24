@@ -185,6 +185,43 @@ Feature: An object is pinned to its parent or a sibling
     And the file "Loosed.qml" does not contain "centerIn"
     And the file "Loosed.qml" does not contain "verticalCenter"
 
+  Scenario: Letting a centre line go while pinning a side of its axis pins the side
+    Given the file "Sided.qml":
+      """qml
+      import QtQuick
+
+      Rectangle {
+          Rectangle { id: c; width: 10; height: 10; anchors.centerIn: parent }
+      }
+      """
+    When the agent calls the tool "node_arrange" with:
+      """json
+      {"action": "anchor", "doc": "Sided.qml", "nodes": [{"id": "c"}], "sides": {"horizontalCenter": null, "left": 12}}
+      """
+    Then the file "Sided.qml" contains "anchors.left: parent.left"
+    And the file "Sided.qml" contains "anchors.leftMargin: 12"
+    And the file "Sided.qml" contains "anchors.verticalCenter: parent.verticalCenter"
+    And the file "Sided.qml" does not contain "centerIn"
+    And the file "Sided.qml" does not contain "horizontalCenter"
+
+  Scenario: The axis a split keeps centred is centred on the whole of what the centring named
+    Given the file "Either.qml":
+      """qml
+      import QtQuick
+
+      Rectangle {
+          property bool useOther
+          Rectangle { id: other; width: 50; height: 50 }
+          Rectangle { id: c; width: 10; height: 10; anchors.centerIn: useOther ? other : parent }
+      }
+      """
+    When the agent calls the tool "node_arrange" with:
+      """json
+      {"action": "anchor", "doc": "Either.qml", "nodes": [{"id": "c"}], "sides": {"horizontalCenter": null}}
+      """
+    Then the file "Either.qml" contains "anchors.verticalCenter: (useOther ? other : parent).verticalCenter"
+    And the file "Either.qml" does not contain "centerIn"
+
   Scenario: A centre and a side of one axis are not asked for together
     When the agent calls the tool "node_arrange" with:
       """json

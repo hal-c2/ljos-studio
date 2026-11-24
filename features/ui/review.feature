@@ -58,6 +58,7 @@ Feature: A person reviews a design in Studio's window
     And the person has selected "Text title" in the layers panel
     When the person adds the comment "Too small" in the inspector
     Then the window shows a refusal that says "does not read"
+    And the inspector says something with "does not read"
     And the inspector's comment box holds "Too small"
 
   Scenario: An agent's comment is resolved and reopened by a person
