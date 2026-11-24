@@ -197,6 +197,9 @@ Feature: A component or a store opened alone shows something
     Then the agent is refused with "not_actionable"
     And the file "Blocks/.HabitCard.preview.qml" does not exist
 
+  # A lock file is the file system's: a browser holds the project in its
+  # storage, one Studio to a page, and makes no hold to refuse.
+  @native
   Scenario: A stand-in Studio cannot hold is not written
     Given the file ".studio":
       """
@@ -208,6 +211,20 @@ Feature: A component or a store opened alone shows something
       """
     Then the agent is refused with "not_actionable"
     And the file "Blocks/.HabitCard.preview.qml" does not exist
+
+  # A browser's storage holds no links.
+  @native @disk
+  Scenario: A link in the stand-in's place is not written through
+    Given the file "Notes/kept.qml":
+      """qml
+      // Studio's preview of a copy the person keeps
+      """
+    And the link "Blocks/.HabitCard.preview.qml" leads to "Notes/kept.qml"
+    When the agent calls the tool "preview_open" with:
+      """json
+      {"doc": "Blocks/HabitCard.qml"}
+      """
+    Then the file "Notes/kept.qml" contains "a copy the person keeps"
 
   Scenario: A file of the person's in the stand-in's place is left alone
     Given the file "Blocks/.HabitCard.preview.qml":
