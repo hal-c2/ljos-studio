@@ -632,7 +632,8 @@ project below its `build/` (`build/native` by default) and answers `out`,
 short in the answer), `writes` (what a real export writes: the files and
 the manifest, so a panel's "Would write" is what "Wrote" says; a dry run
 of a project with links also gives `writes_unlinked`, what it writes where
-the system makes no link and copies what each leads to), the
+the system makes no link and copies what each leads to, unless that copy
+would be refused with `links_multiply`), the
 `manifest`, `written` (false for `dry_run`),
 `replaces` (whether `out` held a bundle before the call, which a real export
 swaps out), `ms` (the export's own time; a build's steps say theirs) and,

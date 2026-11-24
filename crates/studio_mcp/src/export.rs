@@ -288,7 +288,8 @@ struct ExportOut {
     /// What a real export writes: the files and the manifest.
     writes: usize,
     /// For a dry run with links: what it writes where the system makes no
-    /// link and each is copied.
+    /// link and each is copied; absent where that copy is refused
+    /// (`links_multiply`).
     #[serde(skip_serializing_if = "Option::is_none")]
     writes_unlinked: Option<usize>,
     manifest: Manifest,
@@ -1778,11 +1779,15 @@ fn export(studio: &Mutex<Studio>, ctx: &CallCtx, a: ExportArgs) -> Result<Export
         copied
     };
     // Where the system makes no link, a real export copies what each leads
-    // to: a dry run cannot know which, so it says that count too.
+    // to: a dry run cannot know which, so it says that count too. Only that
+    // copy is refused for too many ways down (a site's was in `plan`), so
+    // where it would be, the dry run answers as the export that makes its
+    // links does, with no count for the one that cannot.
     let writes_unlinked = if a.dry_run && !manifest.links.is_empty() {
         let all: Vec<&LinkEntry> = manifest.links.iter().collect();
-        let through = through_links(&manifest.files, &manifest.links, &all)?;
-        Some(manifest.files.len() + through.len() + 1)
+        through_links(&manifest.files, &manifest.links, &all)
+            .ok()
+            .map(|through| manifest.files.len() + through.len() + 1)
     } else {
         None
     };
