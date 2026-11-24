@@ -596,6 +596,12 @@ pub trait PreviewHost: Send {
         })
     }
 
+    /// Whether `appearance` can switch it: asked before a preview ends for
+    /// another, so one the next cannot show ends nothing.
+    fn switches_appearance(&self) -> bool {
+        false
+    }
+
     /// Shows the app in the system's dark or light appearance, as a person
     /// who switched it would see it. A host that cannot refuses.
     fn appearance(&mut self, dark: bool) -> Result<(), PreviewError> {

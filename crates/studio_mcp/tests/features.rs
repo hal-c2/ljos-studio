@@ -175,6 +175,10 @@ impl PreviewHost for Watched {
         self.0.extent()
     }
 
+    fn switches_appearance(&self) -> bool {
+        self.0.switches_appearance()
+    }
+
     fn appearance(&mut self, dark: bool) -> Result<(), PreviewError> {
         self.0.appearance(dark)
     }

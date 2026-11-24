@@ -230,6 +230,15 @@ pub(crate) fn preview_error(e: PreviewError) -> SurfaceError {
     }
 }
 
+/// What a host that cannot switch its appearance answers, given before
+/// anything ends or starts for the call.
+fn no_appearance() -> SurfaceError {
+    preview_error(PreviewError::Refused {
+        code: "unsupported".to_owned(),
+        message: "this preview cannot switch its appearance".to_owned(),
+    })
+}
+
 /// Changes the open preview, keeping the record true after each step: the
 /// host has done what came before a failure, and a retry does only the rest.
 fn change(
@@ -367,6 +376,9 @@ fn open(studio: &Mutex<Studio>, a: OpenArgs) -> Result<OpenOut, SurfaceError> {
     };
     if reuse {
         let open = previews.open.as_mut().expect("checked");
+        if a.appearance.is_some() && !open.host.switches_appearance() {
+            return Err(no_appearance());
+        }
         // What the document requires may have changed since: the running
         // harness follows it, as the preview follows the document.
         if let Some(h) = harness
@@ -409,6 +421,12 @@ fn open(studio: &Mutex<Studio>, a: OpenArgs) -> Result<OpenOut, SurfaceError> {
             previews.write_hidden();
         }
     } else {
+        let mut host = hosts.make(dir.as_deref()).expect("checked: it runs here");
+        // A look the next preview cannot show is refused while the last one
+        // still runs, not after it has ended for nothing.
+        if a.appearance.is_some() && !host.switches_appearance() {
+            return Err(no_appearance());
+        }
         // One preview at a time: the last one ends before the next starts,
         // and what was wrong in it with it.
         if let Some(mut last) = previews.end() {
@@ -437,7 +455,6 @@ fn open(studio: &Mutex<Studio>, a: OpenArgs) -> Result<OpenOut, SurfaceError> {
             None => None,
         };
         let entry = harness.as_ref().map_or(a.doc.as_str(), |h| h.path.as_str());
-        let mut host = hosts.make(dir.as_deref()).expect("checked: it runs here");
         if let Err(e) = host.open(&preview::spec(store, entry, size, &aliases)) {
             if let Some(standing) = &mut standing {
                 standing.leave(store);
@@ -490,7 +507,16 @@ fn open(studio: &Mutex<Studio>, a: OpenArgs) -> Result<OpenOut, SurfaceError> {
             .as_mut()
             .ok_or_else(|| preview_error(PreviewError::NotOpen))?;
         if let Err(e) = open.host.appearance(matches!(appearance, Appearance::Dark)) {
-            return Err(preview_error(previews.failed(e)));
+            let e = previews.failed(e);
+            // One started for this call ends with it: the call failed whole,
+            // and no preview is left running that nobody asked for.
+            if !reuse && let Some(mut started) = previews.end() {
+                started.host.close();
+                if let Some(standing) = &mut started.harness {
+                    standing.leave(store);
+                }
+            }
+            return Err(preview_error(e));
         }
         open.clicks += 1;
     }
