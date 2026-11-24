@@ -27,13 +27,13 @@ const TREE_PAGE: usize = 200;
 #[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct ProjectOpenArgs {
-    /// Relative or absolute (`.` is the workspace). Left out, describes the open project.
+    /// Relative or absolute (`.` is the workspace). Left out: the open project.
     path: Option<String>,
     /// On the project's `assets/`: `list` it, `import` a picture or font (`fs`), `remove` one no document uses (`fs`).
     asset: Option<AssetAction>,
     /// `import`: a file below the workspace.
     file: Option<String>,
-    /// `import`: the file's bytes in base64, for a client with no file here; needs `name`.
+    /// `import`: the file's bytes in base64 (a client with no file here); needs `name`.
     data: Option<String>,
     /// `import`: the name to give it. `remove`: the asset's name.
     name: Option<String>,
@@ -178,7 +178,7 @@ struct EditTextArgs {
     start: Option<usize>,
     end: Option<usize>,
     text: String,
-    /// A person's typing: joins the last in one undo step until a pause of a second or a new word.
+    /// A person's typing: joins the last in one undo step until a 1 s pause or a new word.
     #[serde(default)]
     typing: bool,
     #[serde(default)]
@@ -294,7 +294,7 @@ struct SelectArgs {
     /// Toggle these in the selection instead of replacing it.
     #[serde(default)]
     add: bool,
-    /// Also hold the selection and what it holds (`mutate`): others' edits of them are `busy` until the caller is idle five seconds (five minutes at most). Selecting nothing lets go.
+    /// Also hold the selection and what it holds (`mutate`): others' edits of them are `busy` until the caller is idle 5 s (5 min at most). Selecting nothing lets go.
     #[serde(default)]
     hold: bool,
 }
@@ -377,7 +377,7 @@ struct Inspected {
 #[serde(deny_unknown_fields)]
 struct InsertArgs {
     doc: String,
-    /// Generation read; a `path` needs it (handles and ids move past others' edits).
+    /// Generation read; `path` needs it (handles, ids move past others' edits).
     generation: Option<u64>,
     parent: Address,
     /// Child position; default the end.
@@ -419,11 +419,11 @@ impl Modules {
 #[serde(deny_unknown_fields)]
 struct MoveArgs {
     doc: String,
-    /// Generation read; a `path` needs it (handles and ids move past others' edits).
+    /// Generation read; `path` needs it (handles, ids move past others' edits).
     generation: Option<u64>,
     node: Address,
     parent: Address,
-    /// Index in the new parent, without the moved object; the end if left out.
+    /// Index in the new parent, without the moved object; default the end.
     index: Option<usize>,
     #[serde(default)]
     dry_run: bool,
@@ -433,7 +433,7 @@ struct MoveArgs {
 #[serde(deny_unknown_fields)]
 struct RemoveArgs {
     doc: String,
-    /// Generation read; a `path` needs it (handles and ids move past others' edits).
+    /// Generation read; `path` needs it (handles, ids move past others' edits).
     generation: Option<u64>,
     node: Address,
     /// Member name.
@@ -486,7 +486,7 @@ impl<T: JsonSchema> JsonSchema for Present<T> {
 #[serde(deny_unknown_fields)]
 struct PropertyArgs {
     doc: String,
-    /// Generation read; a `path` needs it (handles and ids move past others' edits).
+    /// Generation read; `path` needs it (handles, ids move past others' edits).
     generation: Option<u64>,
     node: Address,
     /// `width`, `font.bold`; written grouped or dotted as the file already does.
@@ -501,7 +501,7 @@ struct PropertyArgs {
 #[serde(deny_unknown_fields)]
 struct BindingArgs {
     doc: String,
-    /// Generation read; a `path` needs it (handles and ids move past others' edits).
+    /// Generation read; `path` needs it (handles, ids move past others' edits).
     generation: Option<u64>,
     node: Address,
     /// A property (`width`) or a handler (`onClicked`).
@@ -534,7 +534,7 @@ enum StateAction {
 struct StateEditArgs {
     doc: String,
     generation: Option<u64>,
-    /// The object whose states these are; the root when left out.
+    /// The object whose states these are; default the root.
     node: Option<Address>,
     action: StateAction,
     /// The state's name; all but the transition actions need it.
@@ -549,18 +549,18 @@ struct StateEditArgs {
     target: Option<Address>,
     /// `change`: its property (`text`, `anchors.left`).
     name: Option<String>,
-    /// `change`: a literal; with neither this nor `binding`, the value is removed.
+    /// `change`: a literal; neither this nor `binding` removes the value.
     value: Option<LiteralArg>,
     /// `change`: an expression (`root.width / 2`).
     binding: Option<String>,
-    /// Transitions: the states between; `*` (any) if left out.
+    /// Transitions: the states between; default `*` (any).
     from: Option<String>,
     to: Option<String>,
     /// `add_transition`: the animations it runs, in QML.
     animations: Option<String>,
     /// Interactions: the object tapped.
     trigger: Option<Address>,
-    /// Interactions: its signal (`clicked`); a `TapHandler`'s tap if left out.
+    /// Interactions: its signal (`clicked`); default a `TapHandler`'s tap.
     signal: Option<String>,
     /// `interaction`: a document beside this one to open, not with `state`.
     open: Option<String>,
@@ -2457,8 +2457,8 @@ fn edits(studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
         .with(
             ToolDef::new::<BindingArgs>(
                 "binding_set",
-                "Set a binding expression or a signal handler, or remove it with null. Refused \
-                 with `would_break` if the file would not parse.",
+                "Set a binding expression or a signal handler, or remove it with null. \
+                 `would_break` if the file would not parse.",
             )
             .answers::<EditOut>()
             .requires(Cap::Mutate)
@@ -2565,7 +2565,7 @@ fn edits(studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
         .with(
             ToolDef::new::<ThemeArgs>(
                 "theme_set",
-                "Read Ljos.Design's tokens, the module's value beside the theme file's; or set one in that file (made if none), the rest kept byte for byte. A theme Ljós would refuse is refused.",
+                "Read Ljos.Design's tokens, the module's value beside the theme file's; or set one in that file (made if none), the rest kept byte for byte. A theme Ljós refuses is refused.",
             )
             .answers::<ThemeOut>()
             .requires(Cap::Mutate)

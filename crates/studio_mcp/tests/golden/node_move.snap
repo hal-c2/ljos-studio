@@ -16,7 +16,7 @@ expression: value
         "additionalProperties": {
           "type": "string"
         },
-        "description": "`node` (session handle), `id`, or `document_tree` `path` (this text only).",
+        "description": "Session handle `node`, `id`, or `document_tree` `path` (this text only).",
         "type": "object"
       }
     },
@@ -28,11 +28,11 @@ expression: value
         "type": "boolean"
       },
       "generation": {
-        "description": "Generation read; a `path` needs it (handles and ids move past others' edits).",
+        "description": "Generation read; `path` needs it (handles, ids move past others' edits).",
         "type": "integer"
       },
       "index": {
-        "description": "Index in the new parent, without the moved object; the end if left out.",
+        "description": "Index in the new parent, without the moved object; default the end.",
         "type": "integer"
       },
       "node": {

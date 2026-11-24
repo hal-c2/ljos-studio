@@ -9,7 +9,7 @@ expression: value
     "open_world": false,
     "read_only": false
   },
-  "description": "Run a document in a preview for a target, live or mocked (`state`). On the open preview it changes size, fit or state in place; `state_kept` says whether the app's state survived.",
+  "description": "Run a document in a preview for a target, live or mocked (`state`). On the open preview it changes size, fit or state in place; `state_kept`: whether the app's state survived.",
   "inputSchema": {
     "properties": {
       "appearance": {

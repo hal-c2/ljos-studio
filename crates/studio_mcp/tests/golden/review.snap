@@ -9,7 +9,7 @@ expression: value
     "open_world": false,
     "read_only": false
   },
-  "description": "Design review comments on objects, kept in `.studio/`, never in the QML: add, reply, resolve, reopen, or list by doc and node. A comment follows its object through edits, and stays, orphaned, if it is removed.",
+  "description": "Design review comments on objects, in `.studio/`, never the QML: add, reply, resolve, reopen, or list by doc and node. A comment follows its object through edits and stays, orphaned, if it is removed.",
   "inputSchema": {
     "properties": {
       "action": {
@@ -38,7 +38,7 @@ expression: value
         "additionalProperties": {
           "type": "string"
         },
-        "description": "The object (`add`; `list` filters by it, with `doc`). `node` (session handle), `id`, or `document_tree` `path` (this text only).",
+        "description": "The object (`add`; `list` filters by it, with `doc`). Session handle `node`, `id`, or `document_tree` `path` (this text only).",
         "type": "object"
       },
       "text": {

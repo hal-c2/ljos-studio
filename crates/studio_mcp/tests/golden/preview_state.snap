@@ -16,7 +16,7 @@ expression: value
         "additionalProperties": {
           "type": "string"
         },
-        "description": "`node` (session handle), `id`, or `document_tree` `path` (this text only).",
+        "description": "Session handle `node`, `id`, or `document_tree` `path` (this text only).",
         "type": "object"
       },
       "Wheel": {
@@ -68,7 +68,7 @@ expression: value
       },
       "node": {
         "$ref": "#/$defs/Address",
-        "description": "The object to read, by `id`; in the previewed document unless `doc` names another. Left out, it only acts."
+        "description": "The object to read, by `id`, in `doc`, else the previewed one. Left out, it only acts."
       },
       "press": {
         "description": "Keys: `Ctrl+A Enter`.",
