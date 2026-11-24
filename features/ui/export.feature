@@ -182,6 +182,18 @@ Feature: A person exports a native app or a web site from Studio's window
       Then the export panel says "^Would write \d+ files to build/web"
       And the export panel's "Page title" reads "^$"
 
+    # Typed before the first check answered: the fields not typed in still
+    # take what the project's page says, so writing sends the page whole.
+    Scenario: A page field typed in before the check answers keeps the others the page has
+      Given the person has clicked the button "Export"
+      And the person has chosen "Web site" in the export panel
+      And the person has set "Page title" to "New" in the export panel
+      When the check that was on its way answers that the page is titled "Media" and described "Plays one source"
+      Then the export panel's "Page title" reads "^New$"
+      And the export panel's "Page description" reads "^Plays one source$"
+      When the person clicks the button "Write bundle"
+      Then the export panel says "^Page New: Plays one source$"
+
     Scenario: A page picture that is no file of the site is refused with the tool's message
       Given the person has clicked the button "Export"
       And the person has chosen "Web site" in the export panel
@@ -210,6 +222,22 @@ Feature: A person exports a native app or a web site from Studio's window
       When the person clicks the button "Write bundle"
       Then the file "build/web/ljos-site.json" exists
       And the export panel says "^Wrote 4 files to build/web"
+
+    Scenario: A build's answer does not stand for the target chosen since it began
+      Given the person has clicked the button "Export"
+      And the person has chosen "Web site" in the export panel
+      And the person has chosen "Native app" in the export panel
+      When the answer to a web build that was on its way arrives in the export panel
+      Then the export panel says "^Would write \d+ files to build/native"
+      And the export panel does not say "^Wrote"
+
+    Scenario: A build that fails after writing the bundle says it was written
+      Given the person has clicked the button "Export"
+      And the person has chosen "Web site" in the export panel
+      When a web build that was on its way is refused after writing the bundle
+      Then the export panel says "^Wrote 4 files to build/web"
+      And the export panel says "^the site was not built: node did not start"
+      And the export panel does not say "^Would write"
 
     Scenario: A native app is not built
       When the person clicks the button "Export"

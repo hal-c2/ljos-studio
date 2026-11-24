@@ -16,6 +16,7 @@ import Studio
 
 Popup {
     id: panel
+    objectName: "exportPanel"
     required property Workspace workspace
 
     // The last answer of `export`, or null, and why the last call was

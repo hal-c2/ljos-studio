@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-#MISE description="What qmlc is shown of a project, and a preview page whose mount throws, and what the site builder writes: no browser or build needed"
+#MISE description="What qmlc is shown of a project, and a preview page whose mount throws, what the site builder writes, and how a site's page sizes its root: no browser or build needed"
 set -euo pipefail
 # shellcheck source-path=SCRIPTDIR source=../../_lib/env.sh
 . "$(dirname "$0")/../../_lib/env.sh"
-node --test "$studio_root/web/serve.test.mjs" "$studio_root/web/page.test.mjs" "$studio_root/web/site.test.mjs"
+node --test "$studio_root/web/serve.test.mjs" "$studio_root/web/page.test.mjs" "$studio_root/web/site.test.mjs" "$studio_root/web/site-page.test.mjs"

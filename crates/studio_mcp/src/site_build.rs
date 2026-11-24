@@ -739,6 +739,45 @@ mod tests {
         assert!(post.starts_with("HTTP/1.1 405"), "{post}");
     }
 
+    // A picture imported from anywhere is served as it came: opened by
+    // its address it is a document, and its script must not run as the
+    // site's.
+    #[test]
+    fn a_served_svg_runs_no_script() {
+        let (_dir, site) = site();
+        fs::write(
+            site.join("assets/logo.svg"),
+            r#"<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>"#,
+        )
+        .unwrap();
+        let url = serve(&site).unwrap();
+        let port: u16 = url
+            .trim_start_matches("http://127.0.0.1:")
+            .trim_end_matches('/')
+            .parse()
+            .unwrap();
+        let ask = |path: &str| {
+            let mut stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
+            let request = format!("GET {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n\r\n");
+            stream.write_all(request.as_bytes()).unwrap();
+            let mut said = String::new();
+            stream.read_to_string(&mut said).unwrap();
+            said
+        };
+        let svg = ask("/assets/logo.svg");
+        assert!(svg.starts_with("HTTP/1.1 200 OK"), "{svg}");
+        assert!(svg.contains("Content-Type: image/svg+xml"), "{svg}");
+        let policy = svg
+            .lines()
+            .find_map(|l| l.strip_prefix("Content-Security-Policy: "))
+            .unwrap_or_else(|| panic!("no policy: {svg}"));
+        assert!(policy.split(';').any(|p| p.trim() == "sandbox"), "{policy}");
+        assert!(policy.contains("script-src 'none'"), "{policy}");
+        // The site's own page runs its code.
+        let page = ask("/");
+        assert!(!page.contains("Content-Security-Policy"), "{page}");
+    }
+
     #[test]
     fn an_ljos_web_without_its_packages_says_to_install_them() {
         let dir = tempfile::tempdir().unwrap();

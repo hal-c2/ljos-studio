@@ -191,6 +191,33 @@ test("a stamp that does not list the site's files vouches for nothing", (t) => {
   assert.ok(existsSync(join(site, "assets/app.js")));
 });
 
+// A manifest's paths are logical, `/` between names, on every system: one
+// with a `\\` would be a path out of the export where that separates names.
+const listing = (t, path) => {
+  const made = project(t);
+  const bundle = join(made.root, "build", "web");
+  const manifest = JSON.parse(readFileSync(join(bundle, "ljos-site.json"), "utf8"));
+  if (!path.startsWith("/") && !path.includes("..")) put(join(bundle, path), "1");
+  manifest.files.push({ path, bytes: 1 });
+  writeFileSync(join(bundle, "ljos-site.json"), JSON.stringify(manifest));
+  return made.build();
+};
+
+for (const path of ["assets/a.png", "assets/deep/b.png"]) {
+  test(`a file below the export listed as ${path} is copied`, (t) => {
+    const ran = listing(t, path);
+    assert.equal(ran.status, 0, ran.stdout + ran.stderr);
+  });
+}
+
+for (const path of ["a\\b.png", "assets\\..\\..\\x.png", "../x.png", "/etc/x.png", "a/../b.png", "./a.png", "a//b.png"]) {
+  test(`a file listed as ${JSON.stringify(path)} is not a path below the export`, (t) => {
+    const ran = listing(t, path);
+    assert.equal(ran.status, 1, ran.stdout + ran.stderr);
+    assert.match(ran.stdout, /^fail .* is not a path below the export$/m);
+  });
+}
+
 test("a build that fails says the bundler's first error, uncoloured", (t) => {
   const { build } = project(t);
   const ran = build({ STANDIN_FAIL: "\x1b[31m[plugin ljos-web]\x1b[39m\n\nShell.qml:3: no module Nowhere" });

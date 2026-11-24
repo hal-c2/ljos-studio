@@ -1924,6 +1924,42 @@ mod tests {
     }
 
     #[test]
+    fn a_quote_in_a_regular_expression_starts_no_string() {
+        let text = r#"
+            const quote = /["]/; const icon = "images/logo.svg";
+            var tick = s.split(/'/g)[0] + 'a.png'
+            var cls = /[/"]/.test(x) ? "b.png" : `c.png`
+            var half = n / 2; var other = "d.png" / 1
+            if (ok) /"/.exec(s); var e = "e.png"
+        "#;
+        assert_eq!(
+            literals(text),
+            ["images/logo.svg", "a.png", "b.png", "c.png", "d.png", "e.png"]
+        );
+    }
+
+    #[test]
+    fn a_string_is_read_as_its_escapes_say() {
+        let text = r#"
+            var a = "images/\u006cogo.svg"; var b = 'images/\u{6c}ogo.png'
+            var c = "images/\x6cogo.jpg"; var d = `icons/\u0070lay.svg`
+            var e = "line\none\ttab\\back\0"; var f = "a\
+b.png"
+        "#;
+        assert_eq!(
+            literals(text),
+            [
+                "images/logo.svg",
+                "images/logo.png",
+                "images/logo.jpg",
+                "icons/play.svg",
+                "line\none\ttab\\back\0",
+                "ab.png"
+            ]
+        );
+    }
+
+    #[test]
     fn a_string_names_a_file_a_directory_or_the_start_of_a_path() {
         let paths = [
             "Pages/Home.qml",

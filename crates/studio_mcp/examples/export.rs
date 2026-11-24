@@ -10,18 +10,28 @@ use ljos_mcp_core::{CallCtx, Cap, CapSet, McpSurface};
 use serde_json::json;
 use studio_mcp::{Studio, StudioServer};
 
-fn main() {
-    let mut args = std::env::args().skip(1);
-    let usage = "usage: export DIR ENTRY [native|web] [--build]";
-    let dir = args.next().expect(usage);
-    let entry = args.next().expect(usage);
-    let rest: Vec<String> = args.collect();
+const USAGE: &str = "usage: export DIR ENTRY [native|web] [--build]";
+
+/// The target and whether to build it, from what follows DIR and ENTRY.
+fn parse(rest: &[String]) -> Result<(String, bool), String> {
     let build = rest.iter().any(|a| a == "--build");
     let target = rest
         .iter()
         .find(|a| !a.starts_with("--"))
         .cloned()
         .unwrap_or_else(|| "native".to_owned());
+    Ok((target, build))
+}
+
+fn main() {
+    let mut args = std::env::args().skip(1);
+    let dir = args.next().expect(USAGE);
+    let entry = args.next().expect(USAGE);
+    let rest: Vec<String> = args.collect();
+    let (target, build) = parse(&rest).unwrap_or_else(|e| {
+        eprintln!("{e}\n{USAGE}");
+        std::process::exit(2);
+    });
     let server = StudioServer::new(Studio::open(&dir).unwrap_or_else(|e| panic!("{dir}: {e}")));
     let mut caps = CapSet::default().with(Cap::Inspect).with(Cap::Fs);
     let mut call = json!({ "entry": entry, "target": target });
@@ -36,6 +46,40 @@ fn main() {
         Err(e) => {
             eprintln!("{}", e.to_value());
             std::process::exit(1);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse;
+
+    fn args(list: &[&str]) -> Vec<String> {
+        list.iter().map(|&a| a.to_owned()).collect()
+    }
+
+    #[test]
+    fn a_target_and_build_read_as_given() {
+        assert_eq!(parse(&args(&[])), Ok(("native".to_owned(), false)));
+        assert_eq!(parse(&args(&["native"])), Ok(("native".to_owned(), false)));
+        assert_eq!(parse(&args(&["web"])), Ok(("web".to_owned(), false)));
+        assert_eq!(parse(&args(&["web", "--build"])), Ok(("web".to_owned(), true)));
+        assert_eq!(parse(&args(&["--build", "web"])), Ok(("web".to_owned(), true)));
+    }
+
+    // A flag misspelt or a word too many is not silently a native export.
+    #[test]
+    fn what_it_does_not_know_is_refused() {
+        for given in [
+            &["--bulid"][..],
+            &["web", "--bulid"],
+            &["--build"],
+            &["native", "--build"],
+            &["web", "native"],
+            &["web", "--build", "--build"],
+            &["phone"],
+        ] {
+            assert!(parse(&args(given)).is_err(), "{given:?} was read");
         }
     }
 }
