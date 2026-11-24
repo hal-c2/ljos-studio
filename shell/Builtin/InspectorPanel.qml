@@ -33,12 +33,18 @@ Panel {
     // next, unless something else was typed in it meanwhile.
     property bool rowEditing: false
     property string rowSent: ""
+    // The calls the row's edit sent, by what each says: an answer to any
+    // other write, the panel's own included, leaves the row as it is.
+    property var rowAsks: []
     function rowDraft() {
         return JSON.stringify([newName.text, newValue.text])
     }
     // The same for the row that adds a change to the picked state.
     property bool changing: false
     property string changeSent: ""
+    property var changeAsks: []
+    // Which of those two is sending, while it sends.
+    property string sending: ""
     function changeDraft() {
         return JSON.stringify([changeTarget.text, changeName.text, changeValue.text])
     }
@@ -92,10 +98,38 @@ Panel {
     // answer does not take the gesture's refusal off the window's line.
     function ask(tool, args, follows) {
         refusal.asking = refusal.asking.concat([asked(tool, args)])
+        if (sending === "row")
+            rowAsks = rowAsks.concat([sameAsk(tool, args)])
+        else if (sending === "change")
+            changeAsks = changeAsks.concat([sameAsk(tool, args)])
         if (follows)
             workspace.follow(tool, args)
         else
             workspace.dispatch(tool, args)
+    }
+    // A call by all it says, its fields in one order: what an answer
+    // carries is what was asked, read back, maybe in another order.
+    function canonical(v) {
+        if (Array.isArray(v))
+            return "[" + v.map(canonical).join(",") + "]"
+        if (v !== null && typeof v === "object") {
+            return "{" + Object.keys(v).filter(k => v[k] !== undefined).sort()
+                .map(k => JSON.stringify(k) + ":" + canonical(v[k])).join(",") + "}"
+        }
+        return JSON.stringify(v === undefined ? null : v)
+    }
+    function sameAsk(tool, args) {
+        return tool + ":" + canonical(args)
+    }
+    // Whether the call is one of those in the list property `which`, and
+    // takes it off.
+    function claims(which, tool, args) {
+        const list = panel[which]
+        const at = list.indexOf(sameAsk(tool, args))
+        if (at < 0)
+            return false
+        panel[which] = list.slice(0, at).concat(list.slice(at + 1))
+        return true
     }
     // Whether the call was this panel's, and no longer waited for.
     function answeredHere(tool, args) {
@@ -110,9 +144,12 @@ Panel {
         refusal.at = "new"
         rowEditing = true
         rowSent = rowDraft()
+        rowAsks = []
+        sending = "row"
         edit()
+        sending = ""
         // Stopped before it was asked: there will be no answer.
-        if (refusal.text !== "")
+        if (refusal.text !== "" || rowAsks.length === 0)
             rowEditing = false
     }
 
@@ -265,6 +302,8 @@ Panel {
     // Whether what was asked to be filled is the page: the selection can
     // change before the answer comes.
     property bool fillingRoot: false
+    // The conversion asked, by what it says: only its answer is filled.
+    property string fillAsk: ""
     function giveFill() {
         if (filling)
             return
@@ -272,22 +311,25 @@ Panel {
         fillingRoot = isRoot
         refusal.at = "kind"
         refusal.text = ""
-        ask("node_arrange", {
+        const args = {
             action: "relayout",
             doc: workspace.doc,
             nodes: [{node: workspace.selected}],
             name: "Rectangle"
-        })
+        }
+        fillAsk = sameAsk("node_arrange", args)
+        ask("node_arrange", args)
     }
     // The fill is the object's own: a state picked meanwhile would keep it
     // to that state, and the box would be unfilled in every other.
-    function filled(node) {
+    function filled(node, doc) {
         filling = false
+        fillAsk = ""
         refusal.at = "kind"
         refusal.text = ""
         ask("binding_set", {
-            doc: workspace.doc,
-            node: {node: node || workspace.selected},
+            doc: doc,
+            node: {node: node},
             name: "color",
             value: themed ? theme + (fillingRoot ? "Colors.canvas" : "Colors.surface") : '"white"'
         })
@@ -297,9 +339,11 @@ Panel {
     // expression where a value may start (after punctuation, an opening
     // bracket or a keyword), a division after a value. A name's text alone
     // makes it no keyword: `of` is one only in the head of a `for (… of …)`
-    // after what it binds, so `of / 2` divides. (`yield` and `await` are
-    // read as keywords: as names they are reserved in generators, async
-    // functions and modules.)
+    // after what it binds, so `of / 2` divides. The `)` that closes an
+    // `if`, `while`, `for` or `with` head ends no value: a statement starts
+    // after it. A `++` or `--` right after a value on its line is postfix,
+    // and ends one. (`yield` and `await` are read as keywords: as names they
+    // are reserved in generators, async functions and modules.)
     function slashReader() {
         const keywords = ["return", "typeof", "instanceof", "in", "new", "delete",
             "void", "throw", "case", "do", "else", "yield", "await"]
@@ -311,9 +355,16 @@ Panel {
         let after = ""
         let before = ""
         let inWord = false
-        // Each bracket open, and for a `for`'s `(`, whether its head may
-        // still take `of`: a `;` makes it a counting loop.
+        // A `+` or `-` just after a value with no line between, which the
+        // same character next to it makes postfix.
+        let postfix = ""
+        // Whether a line ended since the last token.
+        let line = false
+        // Each bracket open: for a `for`'s `(`, whether its head may still
+        // take `of` (a `;` makes it a counting loop), and for a statement's
+        // head, that its `)` ends no value.
         const open = []
+        const value = () => prev === ")" || (prev === "w" && !keywords.includes(word))
         return {
             // A character of code: not of a string, a comment or a regular
             // expression.
@@ -327,17 +378,37 @@ Panel {
                     word += c
                     inWord = true
                     prev = "w"
+                    postfix = ""
+                    line = false
                     return
                 }
                 inWord = false
-                if (c === " " || c === "\t" || c === "\r" || c === "\n")
+                if (c === " " || c === "\t" || c === "\r" || c === "\n") {
+                    if (c === "\n")
+                        line = true
+                    postfix = ""
                     return
+                }
+                if ((c === "+" || c === "-") && postfix === c) {
+                    postfix = ""
+                    line = false
+                    prev = ")"
+                    return
+                }
+                postfix = (c === "+" || c === "-") && value() && !line ? c : ""
+                line = false
                 if (c === "(" || c === "[" || c === "{") {
                     const head = c === "(" && prev === "w"
                         && (word === "for" || (word === "await" && before === "for"))
-                    open.push({of: head})
+                    const statement = c === "(" && prev === "w"
+                        && (["if", "while", "for", "with"].includes(word) || (word === "await" && before === "for"))
+                    open.push({of: head, statement: statement})
                 } else if (c === ")" || c === "]" || c === "}") {
-                    open.pop()
+                    const shut = open.pop()
+                    if (c === ")" && shut !== undefined && shut.statement) {
+                        prev = ""
+                        return
+                    }
                 } else if (c === ";" && open.length > 0) {
                     open[open.length - 1].of = false
                 }
@@ -346,17 +417,22 @@ Panel {
             // A gap between tokens that is no character of code: a comment.
             gap: () => {
                 inWord = false
+                postfix = ""
             },
             // A string, a template or a regular expression closed: a value.
             value: () => {
                 inWord = false
+                postfix = ""
+                line = false
                 prev = ")"
             },
             // A template's `${`, which its `}` closes: a value may start.
             opened: () => {
                 inWord = false
+                postfix = ""
+                line = false
                 prev = ""
-                open.push({of: false})
+                open.push({of: false, statement: false})
             },
             regex: () => {
                 if (prev === "" || "(,=:[!&|?{};+-*%<>~^".includes(prev))
@@ -653,12 +729,17 @@ Panel {
                 : "{\n" + lines.map(l => l.text === "" || l.starts ? l.text : "    " + l.text).join("\n") + "\n}"
         }
         handlerSent = text
-        ask("binding_set", {doc: workspace.doc, node: {node: workspace.selected}, name: name, value: value})
+        const args = {doc: workspace.doc, node: {node: workspace.selected}, name: name, value: value}
+        handlerAsk = sameAsk("binding_set", args)
+        ask("binding_set", args)
     }
     // The open handler's text as it was written, and as it is now: the
     // editor closes on the answer only if nothing was typed since.
     property var handlerSent: null
     property string handlerText: ""
+    // That write by what it says: a write of the same handler on another
+    // object, or of other text, is not its answer.
+    property string handlerAsk: ""
     // Neither the root nor what a layout places is pinned.
     readonly property bool pinnable: placedBy === "" && !isRoot
     readonly property var marginNames: ["anchors.margins", "anchors.topMargin", "anchors.leftMargin",
@@ -865,6 +946,8 @@ Panel {
         memberSent = ""
         memberAdded()
         handlerOf = ""
+        handlerSent = null
+        handlerAsk = ""
     }
     Connections {
         target: panel.workspace
@@ -887,8 +970,10 @@ Panel {
             panel.seenParent = null
         }
         function onRefused(tool, error, asked) {
-            if (tool === "node_arrange" && asked.action === "relayout")
+            if (panel.filling && panel.sameAsk(tool, asked) === panel.fillAsk) {
                 panel.filling = false
+                panel.fillAsk = ""
+            }
             if (tool === "node_insert") {
                 panel.addingMember = false
                 panel.memberSent = ""
@@ -912,13 +997,16 @@ Panel {
                 panel.renamedPicked = ""
             if (tool === "node_insert" && panel.addingMember)
                 panel.memberAdded()
-            if (tool === "binding_set" && panel.handlerOf !== "" && asked.name === panel.handlerName(panel.handlerOf)) {
-                if (panel.handlerSent !== null && panel.handlerText === panel.handlerSent)
+            if (panel.handlerAsk !== "" && panel.sameAsk(tool, asked) === panel.handlerAsk) {
+                if (panel.handlerOf !== "" && panel.handlerSent !== null && panel.handlerText === panel.handlerSent)
                     panel.handlerOf = ""
                 panel.handlerSent = null
+                panel.handlerAsk = ""
             }
-            if (tool === "node_arrange" && asked.action === "relayout" && panel.filling)
-                panel.filled(answer.nodes !== undefined && answer.nodes.length === 1 ? answer.nodes[0] : "")
+            if (panel.filling && panel.sameAsk(tool, asked) === panel.fillAsk) {
+                panel.filled(answer.nodes !== undefined && answer.nodes.length === 1 ? answer.nodes[0]
+                    : asked.nodes[0].node, asked.doc)
+            }
         }
     }
     // The picked state's old name while its rename is unanswered: the pick
@@ -1253,7 +1341,7 @@ Panel {
                         refusal.text = read + " is not a colour"
                 }
             }
-            if (panel.changing && tool === "state_edit" && asked.action === "change") {
+            if (panel.changing && panel.claims("changeAsks", tool, asked) && panel.changeAsks.length === 0) {
                 panel.changing = false
                 if (panel.changeDraft() === panel.changeSent) {
                     changeTarget.text = ""
@@ -1261,7 +1349,7 @@ Panel {
                     changeValue.text = ""
                 }
             }
-            if (panel.rowEditing && ["property_set", "binding_set", "state_edit"].includes(tool)) {
+            if (panel.rowEditing && panel.claims("rowAsks", tool, asked) && panel.rowAsks.length === 0) {
                 panel.rowEditing = false
                 if (panel.rowDraft() === panel.rowSent) {
                     newName.text = ""
@@ -1276,8 +1364,15 @@ Panel {
             // grey, since picking replaces what could not be read.
             if (tool === "preview_state" && picker.asks(asked))
                 picker.unread()
-            panel.rowEditing = false
-            panel.changing = false
+            // Only a refusal of the row's own write keeps its draft for good.
+            if (panel.rowEditing && panel.claims("rowAsks", tool, asked)) {
+                panel.rowEditing = false
+                panel.rowAsks = []
+            }
+            if (panel.changing && panel.claims("changeAsks", tool, asked)) {
+                panel.changing = false
+                panel.changeAsks = []
+            }
         }
     }
 
@@ -1335,13 +1430,15 @@ Panel {
                     Accessible.name: "Choose " + modelData + " for " + choiceList.name
                     onClicked: {
                         choiceList.close()
+                        // From the new property row, it is that row's write:
+                        // its answer empties the row, as a row's does.
                         if (choiceList.slot === "new") {
                             panel.fromRow(() => panel.set(choiceList.name, modelData))
                         } else {
                             refusal.at = choiceList.slot
                             panel.set(choiceList.name, modelData)
+                            newName.text = newName.text === choiceList.name ? "" : newName.text
                         }
-                        newName.text = newName.text === choiceList.name ? "" : newName.text
                     }
                 }
             }
@@ -2624,9 +2721,12 @@ Panel {
                                 refusal.at = "change"
                                 panel.changing = true
                                 panel.changeSent = panel.changeDraft()
+                                panel.changeAsks = []
+                                panel.sending = "change"
                                 panel.change(changeTarget.text, changeName.text, changeValue.text)
+                                panel.sending = ""
                                 // Stopped before it was asked: there will be no answer.
-                                if (refusal.text !== "")
+                                if (refusal.text !== "" || panel.changeAsks.length === 0)
                                     panel.changing = false
                             }
                         }
