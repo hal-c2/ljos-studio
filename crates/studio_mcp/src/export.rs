@@ -878,8 +878,8 @@ fn normal(base: &str, literal: &str) -> Option<String> {
 }
 
 /// The strings of a QML or JavaScript text: `'...'`, `"..."` and the text
-/// of a template between its `${...}`s, comments skipped. A regular
-/// expression is read as code, which at worst keeps a file more.
+/// of a template between its `${...}`s, as their escapes say, with
+/// comments and regular expressions skipped.
 fn literals(text: &str) -> Vec<String> {
     let chars: Vec<char> = text.chars().collect();
     let mut out = Vec::new();
@@ -888,33 +888,178 @@ fn literals(text: &str) -> Vec<String> {
     out
 }
 
+/// Words after which a `/` starts a regular expression, not a division.
+const BEFORE_AN_EXPRESSION: &[&str] = &[
+    "return",
+    "typeof",
+    "instanceof",
+    "in",
+    "of",
+    "new",
+    "delete",
+    "void",
+    "throw",
+    "case",
+    "do",
+    "else",
+    "yield",
+    "await",
+];
+
+/// Words whose `(...)` is followed by a statement, where a `/` starts a
+/// regular expression: `if (ok) /x/.test(s)`.
+const BEFORE_A_STATEMENT: &[&str] = &["if", "while", "for", "with"];
+
 /// Reads code from `at` until its end, or, `nested`, the `}` that closes a
-/// template's `${`.
+/// template's `${`. A `/` is a division after a value (a name, a number, a
+/// string, `)` or `]`) and a regular expression anywhere else, as
+/// JavaScript reads it.
 fn code(chars: &[char], at: &mut usize, out: &mut Vec<String>, nested: bool) {
     let mut depth = 0usize;
+    let mut after_value = false;
+    let mut word = String::new();
+    let mut parens: Vec<bool> = Vec::new();
     while let Some(&c) = chars.get(*at) {
         *at += 1;
+        if c.is_alphanumeric() || c == '_' || c == '$' {
+            word.clear();
+            word.push(c);
+            while let Some(&c) = chars
+                .get(*at)
+                .filter(|c| c.is_alphanumeric() || **c == '_' || **c == '$')
+            {
+                word.push(c);
+                *at += 1;
+            }
+            after_value = !BEFORE_AN_EXPRESSION.contains(&word.as_str());
+            continue;
+        }
+        if c.is_whitespace() {
+            continue;
+        }
+        let before = std::mem::take(&mut word);
         match c {
             '/' if chars.get(*at) == Some(&'/') => {
+                word = before;
                 while chars.get(*at).is_some_and(|&c| c != '\n') {
                     *at += 1;
                 }
+                continue;
             }
             '/' if chars.get(*at) == Some(&'*') => {
+                word = before;
                 *at += 1;
                 while *at < chars.len() && !(chars[*at] == '*' && chars.get(*at + 1) == Some(&'/'))
                 {
                     *at += 1;
                 }
                 *at = (*at + 2).min(chars.len());
+                continue;
             }
-            '\'' | '"' => out.push(quoted(chars, at, c)),
-            '`' => template(chars, at, out),
+            '/' if !after_value => {
+                regex(chars, at);
+                after_value = true;
+                continue;
+            }
+            '\'' | '"' => {
+                out.push(quoted(chars, at, c));
+                after_value = true;
+                continue;
+            }
+            '`' => {
+                template(chars, at, out);
+                after_value = true;
+                continue;
+            }
+            '(' => parens.push(BEFORE_A_STATEMENT.contains(&before.as_str())),
+            ')' => {
+                after_value = !parens.pop().unwrap_or(false);
+                continue;
+            }
+            ']' => {
+                after_value = true;
+                continue;
+            }
             '{' => depth += 1,
             '}' if nested && depth == 0 => return,
             '}' => depth = depth.saturating_sub(1),
             _ => {}
         }
+        after_value = false;
+    }
+}
+
+/// Skips a regular expression's body from after its opening `/`; its flags
+/// are read as a word.
+fn regex(chars: &[char], at: &mut usize) {
+    let mut class = false;
+    while let Some(&c) = chars.get(*at) {
+        *at += 1;
+        match c {
+            '\\' => *at = (*at + 1).min(chars.len()),
+            '\n' => return,
+            '[' => class = true,
+            ']' => class = false,
+            '/' if !class => return,
+            _ => {}
+        }
+    }
+}
+
+/// The text an escape from after its `\` stands for: nothing for a line
+/// continued, the character itself for one that names nothing else.
+fn escape(chars: &[char], at: &mut usize, text: &mut String) {
+    let Some(&c) = chars.get(*at) else {
+        return;
+    };
+    *at += 1;
+    let hex = |from: usize, to: usize| -> Option<char> {
+        let digits: String = chars.get(from..to)?.iter().collect();
+        // `from_str_radix` takes a sign too, which no escape has.
+        if digits.is_empty() || !digits.chars().all(|c| c.is_ascii_hexdigit()) {
+            return None;
+        }
+        char::from_u32(u32::from_str_radix(&digits, 16).ok()?)
+    };
+    match c {
+        'n' => text.push('\n'),
+        't' => text.push('\t'),
+        'r' => text.push('\r'),
+        'b' => text.push('\u{8}'),
+        'f' => text.push('\u{c}'),
+        'v' => text.push('\u{b}'),
+        '0' => text.push('\0'),
+        '\r' => {
+            if chars.get(*at) == Some(&'\n') {
+                *at += 1;
+            }
+        }
+        '\n' | '\u{2028}' | '\u{2029}' => {}
+        'x' => match hex(*at, *at + 2) {
+            Some(c) => {
+                text.push(c);
+                *at += 2;
+            }
+            None => text.push('x'),
+        },
+        'u' if chars.get(*at) == Some(&'{') => {
+            let close = chars[*at..].iter().position(|&c| c == '}').map(|n| *at + n);
+            match close.and_then(|close| hex(*at + 1, close).map(|c| (c, close))) {
+                Some((c, close)) => {
+                    text.push(c);
+                    *at = close + 1;
+                }
+                None => text.push('u'),
+            }
+        }
+        'u' => match hex(*at, *at + 4) {
+            Some(c) => {
+                text.push(c);
+                *at += 4;
+            }
+            None => text.push('u'),
+        },
+        c => text.push(c),
     }
 }
 
@@ -923,12 +1068,7 @@ fn quoted(chars: &[char], at: &mut usize, quote: char) -> String {
     while let Some(&c) = chars.get(*at) {
         *at += 1;
         match c {
-            '\\' => {
-                if let Some(&next) = chars.get(*at) {
-                    *at += 1;
-                    text.push(next);
-                }
-            }
+            '\\' => escape(chars, at, &mut text),
             c if c == quote || c == '\n' => break,
             c => text.push(c),
         }
@@ -941,12 +1081,7 @@ fn template(chars: &[char], at: &mut usize, out: &mut Vec<String>) {
     while let Some(&c) = chars.get(*at) {
         *at += 1;
         match c {
-            '\\' => {
-                if let Some(&next) = chars.get(*at) {
-                    *at += 1;
-                    text.push(next);
-                }
-            }
+            '\\' => escape(chars, at, &mut text),
             '`' => break,
             '$' if chars.get(*at) == Some(&'{') => {
                 *at += 1;
@@ -1934,7 +2069,14 @@ mod tests {
         "#;
         assert_eq!(
             literals(text),
-            ["images/logo.svg", "a.png", "b.png", "c.png", "d.png", "e.png"]
+            [
+                "images/logo.svg",
+                "a.png",
+                "b.png",
+                "c.png",
+                "d.png",
+                "e.png"
+            ]
         );
     }
 
@@ -1945,6 +2087,7 @@ mod tests {
             var c = "images/\x6cogo.jpg"; var d = `icons/\u0070lay.svg`
             var e = "line\none\ttab\\back\0"; var f = "a\
 b.png"
+            var g = "\x+1\u+06c"
         "#;
         assert_eq!(
             literals(text),
@@ -1954,7 +2097,8 @@ b.png"
                 "images/logo.jpg",
                 "icons/play.svg",
                 "line\none\ttab\\back\0",
-                "ab.png"
+                "ab.png",
+                "x+1u+06c"
             ]
         );
     }
