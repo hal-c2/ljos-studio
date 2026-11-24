@@ -1764,15 +1764,27 @@ fn inspector_field_enabled(w: &mut UiWorld, name: String, want: String) -> StepR
 #[given(regex = r#"^the person has typed "(.*)" in the inspector's "([^"]+)" and left it$"#)]
 #[when(regex = r#"^the person types "(.*)" in the inspector's "([^"]+)" and leaves it$"#)]
 fn types_in_row(w: &mut UiWorld, text: String, name: String) -> StepResult {
-    let text = unescape(&text);
+    type_in_row(w, &unescape(&text), &name)
+}
+
+/// As many lines as make a text area taller than the window.
+#[given(
+    regex = r#"^the person has typed (\d+) lines of "(.*)" in the inspector's "([^"]+)" and left it$"#
+)]
+fn types_lines_in_row(w: &mut UiWorld, count: usize, line: String, name: String) -> StepResult {
+    let line = unescape(&line);
+    type_in_row(w, &vec![line.as_str(); count].join("\n"), &name)
+}
+
+fn type_in_row(w: &mut UiWorld, text: &str, name: &str) -> StepResult {
     let window = w.window()?;
-    let field = window.typed_in("Inspector", &name)?;
+    let field = window.typed_in("Inspector", name)?;
     window.click_node(&field)?;
     let mut driver = window.stage.drive();
     driver
         .chord(&Chord::parse("Ctrl+A")?, 0)
         .map_err(drive_error)?;
-    driver.commit(&text).map_err(drive_error)?;
+    driver.commit(text).map_err(drive_error)?;
     window.rest()
 }
 
