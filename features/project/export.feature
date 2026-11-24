@@ -244,6 +244,20 @@ Feature: A project is exported as a bundle that runs without Studio
       Then the answer's "/writes" is 7
       And the answer's "/writes_unlinked" is 8
 
+    # A native export makes its links and copies only those the system
+    # will not make, so only there can too many ways down be refused. A dry
+    # run answers as the export does where links are made, and gives no
+    # count for where they are not, since that export would be refused.
+    Scenario: A dry run of links too many ways down to copy answers, as the export does
+      Given a diamond of directory links 24 levels deep in "levels"
+      When the agent calls the tool "export" with:
+        """json
+        {"entry": "Shell.qml", "dry_run": true}
+        """
+      Then it answered within 5 seconds
+      And the answer's "/written" is false
+      And the answer's "/writes_unlinked" is absent
+
     Scenario: A dry run without links has one count of what it writes
       When the agent calls the tool "export" with:
         """json
