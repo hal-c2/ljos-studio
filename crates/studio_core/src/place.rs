@@ -804,9 +804,13 @@ pub fn anchoring(node: &Node, pin: &Pin, now: Known) -> Vec<Change> {
             drop(&mut out, axis.size);
             continue;
         }
+        // A centre this call lets go of held the axis too: what is left
+        // to hold it is the place it was at.
+        let centre_stays =
+            binding(node, axis.centre).is_some() && !matches!(axis.asked_centre, Some(None));
         if after == 0
             && held_before
-            && binding(node, axis.centre).is_none()
+            && !centre_stays
             && binding(node, axis.place).is_none()
             && let Some(place) = axis.known_place
         {
