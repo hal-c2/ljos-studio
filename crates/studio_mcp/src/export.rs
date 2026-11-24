@@ -1846,7 +1846,24 @@ fn export(studio: &Mutex<Studio>, ctx: &CallCtx, a: ExportArgs) -> Result<Export
                     ms,
                     build: None,
                 };
-                with_export(e, &export)
+                let mut e = with_export(e, &export);
+                // Only the build failed: the export, and the page with it,
+                // stay written, and the words say so before anyone reads
+                // the details.
+                let why = e.details.as_ref().and_then(|d| {
+                    (d["kind"] == "build_failed").then(|| d["why"].as_str().map(str::to_owned))?
+                });
+                if let Some(why) = why {
+                    let page = if a.page.is_some() {
+                        ", with its page saved"
+                    } else {
+                        ""
+                    };
+                    e.message = format!(
+                        "the export to `{out}` was written{page}; only the site was not built: {why}"
+                    );
+                }
+                e
             })?,
         ),
         Some(Err(_)) => unreachable!("refused above"),
