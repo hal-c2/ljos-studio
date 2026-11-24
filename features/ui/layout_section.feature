@@ -135,6 +135,14 @@ Feature: A person pins an object from the inspector's Layout section
     And the person clicks the button "Top of its cell"
     Then the file "Main.qml" says "Layout.alignment: Qt.AlignHCenter | Qt.AlignTop"
 
+  # An alignment written as an expression says more than an axis's flag:
+  # a press of one axis would put the flag in its place.
+  Scenario: An alignment written as an expression is not replaced from the section
+    When the person replaces "id: chip;" with "id: chip; Layout.alignment: root.width > 300 ? Qt.AlignTop : Qt.AlignBottom;" in the code view
+    And the person selects "Rectangle chip" in the layers panel
+    Then the inspector's button "Top of the row" is disabled
+    And the file "Main.qml" says "Layout.alignment: root.width > 300 ? Qt.AlignTop : Qt.AlignBottom"
+
   Scenario: An object is wrapped from the section
     When the person selects "Rectangle box" in the layers panel
     And the person clicks the button "Wrap in Column"
@@ -151,6 +159,22 @@ Feature: A person pins an object from the inspector's Layout section
     And the file "Main.qml" does not say "Grid {"
     When the person clicks the button "Turn into Column"
     Then the file "Main.qml" says "Column {"
+
+  # The page can be turned into another layout too, and a refusal of that
+  # is said where it was asked.
+  Scenario: A page's turn into another layout that is refused is said in the section
+    When the person replaces "Item {\n    id: root\n" with "Grid {\n    id: root\n    columns: 2\n" in the code view
+    And the person selects "Grid root" in the layers panel
+    And the person clicks the button "Turn into Row"
+    Then the inspector's "Layout" section says something with "has no `columns`"
+    And the file "Main.qml" says "Grid {\n    id: root"
+
+  # An emptied field takes the binding off, as it takes a value off.
+  Scenario: Emptying a place written as a binding takes the binding off
+    When the person replaces "id: box; x: 10;" with "id: box; x: table.x;" in the code view
+    And the person selects "Rectangle box" in the layers panel
+    And the person sets "x" to "" in the inspector
+    Then the file "Main.qml" does not say "table.x"
 
   Scenario: A layout says its spacing here
     When the person selects "Grid table" in the layers panel

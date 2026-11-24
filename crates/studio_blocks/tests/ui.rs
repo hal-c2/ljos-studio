@@ -1382,6 +1382,109 @@ fn clicks_buttons_quickly(w: &mut UiWorld, first: String, second: String) -> Ste
     window.rest()
 }
 
+/// Presses the button `name` where the person sees it, with no wait for
+/// what it asks: the answer comes at the next rest.
+fn press_now(window: &mut Window, within: &str, name: &str) -> StepResult {
+    let button = window.node(within, Some("button"), name)?;
+    let key = button.key.ok_or("the button has no key")?;
+    window.scroll_to(key)?;
+    let mut driver = window.stage.drive();
+    let at = driver
+        .aim_at_node(key)
+        .map_err(|why| format!("button {name:?} is not clicked: {why}"))?;
+    driver
+        .click(at, MouseButtons::LEFT, 1)
+        .map_err(drive_error)?;
+    driver.settle().map_err(drive_error)
+}
+
+/// The button takes no second press while what the first asked is
+/// unanswered.
+#[when(regex = r#"^the person clicks the button "([^"]+)", which is disabled until its answer$"#)]
+fn clicks_disabled_until_answer(w: &mut UiWorld, name: String) -> StepResult {
+    let window = w.window()?;
+    press_now(window, "Inspector", &name)?;
+    let waiting = window.node("Inspector", Some("button"), &name)?;
+    let disabled = waiting.states.iter().any(|s| s == "disabled");
+    window.rest()?;
+    disabled
+        .then_some(())
+        .ok_or_else(|| format!("{name:?} is {:?} before its answer", waiting.states))
+}
+
+#[when(
+    regex = r#"^the person clicks the button "([^"]+)" and types "(.*)" in the inspector's "([^"]+)" before its answer$"#
+)]
+fn clicks_then_types(w: &mut UiWorld, button: String, text: String, name: String) -> StepResult {
+    let text = unescape(&text);
+    let window = w.window()?;
+    press_now(window, "Inspector", &button)?;
+    let field = window.typed_in("Inspector", &name)?;
+    let key = field.key.ok_or("the field has no key")?;
+    let mut driver = window.stage.drive();
+    let at = driver
+        .aim_at_node(key)
+        .map_err(|why| format!("{name:?} is not clicked: {why}"))?;
+    driver
+        .click(at, MouseButtons::LEFT, 1)
+        .map_err(drive_error)?;
+    driver
+        .chord(&Chord::parse("Ctrl+A")?, 0)
+        .map_err(drive_error)?;
+    driver.commit(&text).map_err(drive_error)?;
+    window.rest()
+}
+
+/// Tab after Tab, as a person moves through the window, until the target
+/// has the keys; a window that never gets there says where they went.
+#[when(
+    regex = r#"^the person presses "([^"]+)" until the export panel's "([^"]+)" has the keyboard's focus$"#
+)]
+fn presses_until_focused(w: &mut UiWorld, chord: String, name: String) -> StepResult {
+    let window = w.window()?;
+    let chord = Chord::parse(&chord)?;
+    let mut went = Vec::new();
+    for _ in 0..64 {
+        if window.node("Export panel", None, &name)?.focused {
+            return Ok(());
+        }
+        window.stage.drive().chord(&chord, 0).map_err(drive_error)?;
+        window.rest()?;
+        let tree = window.tree();
+        let mut at = String::new();
+        collect(&tree, &mut |n| {
+            if n.focused {
+                at = format!("{} {:?}", n.role, n.name);
+            }
+        });
+        went.push(at);
+    }
+    Err(format!(
+        "{name:?} never had the keys; they went to {}",
+        went.join(", ")
+    ))
+}
+
+#[then(regex = r#"^the export panel's "([^"]+)" shows (a|no) focus ring$"#)]
+fn shows_focus_ring(w: &mut UiWorld, name: String, want: String) -> StepResult {
+    let window = w.window()?;
+    let node = window.node("Export panel", None, &name)?;
+    let item = window
+        .stage
+        .scene
+        .accessible_item(node.key.ok_or("it has no key")?)
+        .ok_or("it is not an item")?;
+    let ring = ljos_drive::find_below(window.engine(), item, "focusRing")
+        .ok_or_else(|| format!("{name:?} has no focus ring to show"))?;
+    let shown = window.engine().read_by_name(ring, "visible") == Value::Bool(true);
+    (shown == (want == "a")).then_some(()).ok_or_else(|| {
+        format!(
+            "{name:?}'s focus ring is {}",
+            if shown { "shown" } else { "hidden" }
+        )
+    })
+}
+
 #[when(regex = r#"^the pointer rests on the button "([^"]+)" until its tip has shown$"#)]
 fn rests_on_button(w: &mut UiWorld, name: String) -> StepResult {
     rests_on(w, &name, Some("button"))
@@ -2909,11 +3012,11 @@ fn refusal_clear(w: &mut UiWorld, said: String, name: String) -> StepResult {
     };
     let mut parts: Vec<(String, Rect)> = Vec::new();
     let mut controls: Vec<(String, Rect)> = Vec::new();
-    window.stage.scene.accessibility_tree().walk(|_, _, d| {
-        let b = Rect::new(d.bounds.x0, d.bounds.y0, d.bounds.x1, d.bounds.y1);
-        let role = ljos_a11y::role_word(d.role);
-        if d.name == said || offer(&d.name) {
-            parts.push((d.name.clone(), b));
+    // The inspector's own, and an offer only under the field: another
+    // panel's offer, or one of another row, is not this refusal's.
+    for (name, role, b) in inspector_parts(window)? {
+        if name == said || (offer(&name) && b.y0 >= field.y1 - 1.0) {
+            parts.push((name, b));
         // Below the field's row by its middle, so a row pulled up under the
         // refusal, its top above the field's bottom, is still the next one.
         } else if (b.y0 + b.y1) / 2.0 > field.y1
@@ -2928,9 +3031,9 @@ fn refusal_clear(w: &mut UiWorld, said: String, name: String) -> StepResult {
             .iter()
             .any(|r| role.contains(r))
         {
-            controls.push((format!("{role} {:?}", d.name), b));
+            controls.push((format!("{role} {name:?}"), b));
         }
-    });
+    }
     if !parts.iter().any(|(n, _)| n == &said) {
         return Err(format!("the inspector does not say {said:?}"));
     }
@@ -2965,6 +3068,80 @@ fn refusal_clear(w: &mut UiWorld, said: String, name: String) -> StepResult {
             over.join(", ")
         )
     })
+}
+
+/// Every node the inspector holds, with its role and where it is.
+fn inspector_parts(
+    window: &mut Window,
+) -> Result<Vec<(String, String, ljos::item::kurbo::Rect)>, String> {
+    window.open_panel("Inspector")?;
+    let tree = window.tree();
+    let panel = find(&tree, &|n| {
+        n.name == "Inspector" && n.role != "label" && n.key.is_some()
+    })
+    .and_then(|n| n.key)
+    .ok_or("no \"Inspector\" in the window")?;
+    let mut parents = std::collections::HashMap::new();
+    let mut all = Vec::new();
+    window
+        .stage
+        .scene
+        .accessibility_tree()
+        .walk(|k, parent, d| {
+            parents.insert(k, parent);
+            let b = d.bounds;
+            all.push((
+                k,
+                d.name.clone(),
+                ljos_a11y::role_word(d.role).to_string(),
+                ljos::item::kurbo::Rect::new(b.x0, b.y0, b.x1, b.y1),
+            ));
+        });
+    let within = |mut k| {
+        // As deep as any tree a window holds, so a loop cannot hang it.
+        for _ in 0..256 {
+            if k == panel {
+                return true;
+            }
+            match parents.get(&k) {
+                Some(&p) if p != k => k = p,
+                _ => return false,
+            }
+        }
+        false
+    };
+    Ok(all
+        .into_iter()
+        .filter(|(k, ..)| *k != panel && within(*k))
+        .map(|(_, name, role, b)| (name, role, b))
+        .collect())
+}
+
+/// What one section of the inspector says, between its header and the
+/// next section's: not a refusal said under another section's rows.
+#[then(regex = r#"^the inspector's "([^"]+)" section says something with "(.+)"$"#)]
+fn section_says_with(w: &mut UiWorld, title: String, want: String) -> StepResult {
+    let parts = inspector_parts(w.window()?)?;
+    let header = format!("{title} section");
+    let top = parts
+        .iter()
+        .find(|(n, ..)| *n == header)
+        .map(|(.., b)| *b)
+        .ok_or_else(|| format!("the inspector has no {header:?}"))?;
+    let bottom = parts
+        .iter()
+        .filter(|(n, _, b)| n.ends_with(" section") && b.y0 > top.y0 + 0.5)
+        .map(|(.., b)| b.y0)
+        .fold(f64::INFINITY, f64::min);
+    let held: Vec<&String> = parts
+        .iter()
+        .filter(|(n, _, b)| !n.is_empty() && b.y0 >= top.y1 - 0.5 && b.y1 <= bottom + 0.5)
+        .map(|(n, ..)| n)
+        .collect();
+    held.iter()
+        .any(|n| n.contains(&want))
+        .then_some(())
+        .ok_or_else(|| format!("the {header:?} does not say {want:?}; it holds {held:?}"))
 }
 
 /// Where the field `name` of the inspector or the tokens panel is now. A
