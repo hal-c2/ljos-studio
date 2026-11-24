@@ -41,10 +41,11 @@ Panel {
         id: refusal
         property string text: ""
         property string at: ""
-        // The call this panel sent last, until it is answered: what the file
-        // refuses of it is said where it was asked, and what others asked is
-        // left to the window's error line.
-        property string asking: ""
+        // Every call this panel sent, until it is answered: what the file
+        // refuses of any of them is said where it was asked, and what others
+        // asked is left to the window's error line. One gesture can send
+        // more than one, as a text style does.
+        property var asking: []
     }
     function says(slot) {
         return refusal.at === slot ? refusal.text : ""
@@ -68,9 +69,22 @@ Panel {
         return tool + ":" + (args.name !== undefined ? args.name : args.action !== undefined ? args.action : "")
     }
     // Every write this panel makes goes through here, from the slot `at`.
-    function ask(tool, args) {
-        refusal.asking = asked(tool, args)
-        workspace.dispatch(tool, args)
+    // A write that `follows` is the rest of a gesture already sent: its
+    // answer does not take the gesture's refusal off the window's line.
+    function ask(tool, args, follows) {
+        refusal.asking = refusal.asking.concat([asked(tool, args)])
+        if (follows)
+            workspace.follow(tool, args)
+        else
+            workspace.dispatch(tool, args)
+    }
+    // Whether the call was this panel's, and no longer waited for.
+    function answeredHere(tool, args) {
+        const at = refusal.asking.indexOf(asked(tool, args))
+        if (at < 0)
+            return false
+        refusal.asking = refusal.asking.slice(0, at).concat(refusal.asking.slice(at + 1))
+        return true
     }
 
     function fromRow(edit) {
@@ -186,7 +200,7 @@ Panel {
     function giveStyle(key) {
         refusal.at = "kind"
         set("font.pixelSize", "Typography." + key + "Size")
-        set("font.weight", "Typography." + key + "Weight")
+        set("font.weight", "Typography." + key + "Weight", undefined, true)
     }
     // Writes what a row of the kind's section says, as a row of the list does.
     function put(name, text) {
@@ -585,18 +599,15 @@ Panel {
                 panel.addingMember = false
             if (["property_set", "binding_set", "state_edit", "node_arrange"].includes(tool))
                 panel.reseed()
-            if (refusal.asking !== "" && refusal.asking === panel.asked(tool, asked)) {
-                refusal.asking = ""
+            if (panel.answeredHere(tool, asked))
                 refusal.text = error.message
-            }
             if (tool === "state_edit" && panel.renamedPicked !== "") {
                 panel.pick(panel.renamedPicked, panel.pickedOn, true)
                 panel.renamedPicked = ""
             }
         }
         function onAnswered(tool, answer, asked) {
-            if (refusal.asking !== "" && refusal.asking === panel.asked(tool, asked))
-                refusal.asking = ""
+            panel.answeredHere(tool, asked)
             if (tool === "node_arrange" && answer.boxes !== undefined) {
                 panel.seenBox = answer.boxes.length === 1 ? answer.boxes[0] : null
                 panel.seenParent = answer.parent !== undefined ? answer.parent : null
@@ -673,7 +684,7 @@ Panel {
     property string offeredSays: ""
 
     // On the selected object unless a picker says which it was opened on.
-    function set(name, text, node) {
+    function set(name, text, node, follows) {
         if (picked !== "") {
             record(name, text, node)
             return
@@ -710,7 +721,7 @@ Panel {
             node: {node: node || workspace.selected},
             name: name,
             value: typed === "null" ? null : typed
-        })
+        }, follows)
     }
     // Whether a bare word names something an expression here could read: an
     // object's id, the parent, a property of the selected object, or one of

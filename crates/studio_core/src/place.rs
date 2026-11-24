@@ -638,6 +638,10 @@ pub fn anchoring(node: &Node, pin: &Pin, now: Known) -> Vec<Change> {
     // One centre line asked for, or let go of, splits a centring in two.
     let centres_asked = pin.horizontal_center.is_some() || pin.vertical_center.is_some();
     let centre_goes = lets_go(pin.center_in, had_centre) || (had_centre && centres_asked);
+    // A centre line asked of a centring splits it, keeping the other axis
+    // centred, unless the caller lets the centring go: then the other axis is
+    // let go as well, and keeps its place.
+    let split = had_centre && centres_asked && pin.center_in != Some(false);
     let centred_on = binding(node, "anchors.centerIn")
         .unwrap_or("parent")
         .to_owned();
@@ -725,7 +729,7 @@ pub fn anchoring(node: &Node, pin: &Pin, now: Known) -> Vec<Change> {
                 continue;
             }
             // The axis a split centring does not touch stays centred.
-            None if centre_goes && centres_asked && !sides_asked => {
+            None if split && !sides_asked => {
                 if binding(node, axis.centre).is_none() {
                     out.push(Change::Set(
                         axis.centre.to_owned(),
