@@ -330,24 +330,47 @@ fn seed_theme(file: &Path) -> anyhow::Result<()> {
 }
 
 /// Writes `file` with what `write` puts in it, only if there is no such
-/// file; whether it was written.
+/// file; whether it was written. It is written beside the file first and
+/// linked into place whole, so a write that fails or is cut off leaves no
+/// file behind, and a file another writer made meanwhile is never replaced.
 fn publish_new(
     file: &Path,
     write: impl FnOnce(&mut std::fs::File) -> std::io::Result<()>,
 ) -> anyhow::Result<bool> {
-    // Created only if it is not there, in one step: a theme another Studio
-    // writes between a check and a write is never overwritten.
-    let mut out = match std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(file)
-    {
-        Ok(out) => out,
-        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => return Ok(false),
-        Err(e) => return Err(e).with_context(|| format!("creating {}", file.display())),
-    };
-    write(&mut out).with_context(|| format!("writing {}", file.display()))?;
-    Ok(true)
+    if file.exists() {
+        return Ok(false);
+    }
+    let dir = file.parent().unwrap_or(Path::new("."));
+    let name = file.file_name().unwrap_or_default().to_string_lossy();
+    let (draft, mut out) = (0..100)
+        .find_map(|n| {
+            let draft = dir.join(format!(".{name}.{}.{n}.new", std::process::id()));
+            match std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&draft)
+            {
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => None,
+                opened => Some(opened.map(|out| (draft, out))),
+            }
+        })
+        .unwrap_or_else(|| Err(std::io::ErrorKind::AlreadyExists.into()))
+        .with_context(|| format!("making a draft of {} in {}", name, dir.display()))?;
+    let written = write(&mut out)
+        .and_then(|()| out.sync_all())
+        .with_context(|| format!("writing {}", draft.display()));
+    drop(out);
+    // A link fails when the name is taken, where a rename would replace it.
+    let published = written.and_then(|()| match std::fs::hard_link(&draft, file) {
+        Ok(()) => Ok(true),
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => Ok(false),
+        Err(e) => Err(e).with_context(|| format!("publishing {}", file.display())),
+    });
+    // A draft left over is only clutter: the file is whole or not there.
+    if let Err(e) = std::fs::remove_file(&draft) {
+        eprintln!("studio: could not remove {}: {e}", draft.display());
+    }
+    published
 }
 
 /// The theme Studio ships ([`THEME`]).
