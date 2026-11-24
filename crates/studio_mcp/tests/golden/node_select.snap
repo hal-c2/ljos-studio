@@ -9,7 +9,7 @@ expression: value
     "open_world": false,
     "read_only": true
   },
-  "description": "Set Studio's selection (canvas and inspector) by addresses, or by a point `at` in the document's preview. Empty clears it.",
+  "description": "Set Studio's selection (canvas and inspector) by addresses or a point `at`. Empty clears it.",
   "inputSchema": {
     "properties": {
       "add": {
@@ -36,7 +36,7 @@ expression: value
         "type": "string"
       },
       "hold": {
-        "description": "Also hold the selected objects and what they hold (`mutate`): others' edits of them are `busy` until the caller is idle five seconds (five minutes at most). Selecting nothing lets go.",
+        "description": "Also hold the selection and what it holds (`mutate`): others' edits of them are `busy` until the caller is idle five seconds (five minutes at most). Selecting nothing lets go.",
         "type": "boolean"
       },
       "nodes": {

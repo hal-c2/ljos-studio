@@ -9,7 +9,7 @@ expression: value
     "open_world": false,
     "read_only": true
   },
-  "description": "The project's functional blocks, with contracts and `slots`; `node_insert` places one by `Module.Name`. Unreadable ones are in `errors`. With `doc`, `types`: toolkit types it can place, imports first.",
+  "description": "The project's functional blocks, with contracts and `slots`; `node_insert` places one by `Module.Name`. Unreadable ones are in `errors`. `doc` adds `types`, imports first.",
   "inputSchema": {
     "properties": {
       "cursor": {

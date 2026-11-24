@@ -9,7 +9,7 @@ expression: value
     "open_world": false,
     "read_only": false
   },
-  "description": "States: add, rename, remove; change a value or the `when` (`breakpoint`: the root's width bound); add or remove a Transition; write or remove a flow (a tap on `trigger` goes to `state` or opens a document). `would_break` if the file would not parse.",
+  "description": "States: add, rename, remove; change a value or `when`; add or remove a Transition; write or remove a flow (a tap on `trigger` goes to `state` or opens a document). `would_break` if it would not parse.",
   "inputSchema": {
     "$defs": {
       "Address": {

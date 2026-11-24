@@ -27,7 +27,7 @@ const TREE_PAGE: usize = 200;
 #[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct ProjectOpenArgs {
-    /// A directory below the workspace, relative or absolute (`.` is the workspace). Left out, describes the open project.
+    /// Relative or absolute (`.` is the workspace). Left out, describes the open project.
     path: Option<String>,
     /// On the project's `assets/`: `list` it, `import` a picture or font (`fs`), `remove` one no document uses (`fs`).
     asset: Option<AssetAction>,
@@ -294,7 +294,7 @@ struct SelectArgs {
     /// Toggle these in the selection instead of replacing it.
     #[serde(default)]
     add: bool,
-    /// Also hold the selected objects and what they hold (`mutate`): others' edits of them are `busy` until the caller is idle five seconds (five minutes at most). Selecting nothing lets go.
+    /// Also hold the selection and what it holds (`mutate`): others' edits of them are `busy` until the caller is idle five seconds (five minutes at most). Selecting nothing lets go.
     #[serde(default)]
     hold: bool,
 }
@@ -1898,7 +1898,7 @@ fn edits(studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
         .with(
             ToolDef::new::<ProjectOpenArgs>(
                 "project_open",
-                "Open a project directory below the workspace, or describe the open one. Opening starts a new session: handles and history end. `asset` lists, imports or removes the project's pictures and fonts.",
+                "Open a project directory below the workspace, or describe the open one. Opening starts a new session: handles and history end. `asset` manages its pictures and fonts.",
             )
             .answers::<ProjectInfo>()
             .requires(Cap::Inspect)
@@ -2141,7 +2141,7 @@ fn edits(studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
         .with(
             ToolDef::new::<SelectArgs>(
                 "node_select",
-                "Set Studio's selection (canvas and inspector) by addresses, or by a point `at` in the document's preview. Empty clears it.",
+                "Set Studio's selection (canvas and inspector) by addresses or a point `at`. Empty clears it.",
             )
             .answers::<Selection>()
             .requires(Cap::Inspect),
@@ -2290,7 +2290,7 @@ fn edits(studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
         .with(
             ToolDef::new::<BlocksArgs>(
                 "blocks_list",
-                "The project's functional blocks, with contracts and `slots`; `node_insert` places one by `Module.Name`. Unreadable ones are in `errors`. With `doc`, `types`: toolkit types it can place, imports first.",
+                "The project's functional blocks, with contracts and `slots`; `node_insert` places one by `Module.Name`. Unreadable ones are in `errors`. `doc` adds `types`, imports first.",
             )
             .answers::<BlocksOut>()
             .requires(Cap::Inspect),
@@ -2332,7 +2332,7 @@ fn edits(studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
         .with(
             ToolDef::new::<InsertArgs>(
                 "node_insert",
-                "Insert in `parent` a QML object or a `blocks_list` `block`, as a child at an index, or a member (function, signal, property, handler). It gets an id if it has none. Returns the handle.",
+                "Insert in `parent` a QML object or a `blocks_list` `block`, as a child at an index, or a member. It gets an id if it has none. Returns the handle.",
             )
             .answers::<EditOut>()
             .requires(Cap::Mutate)
@@ -2485,7 +2485,7 @@ fn edits(studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
         .with(
             ToolDef::new::<StateEditArgs>(
                 "state_edit",
-                "States: add, rename, remove; change a value or the `when` (`breakpoint`: the root's width bound); add or remove a Transition; write or remove a flow (a tap on `trigger` goes to `state` or opens a document). `would_break` if the file would not parse.",
+                "States: add, rename, remove; change a value or `when`; add or remove a Transition; write or remove a flow (a tap on `trigger` goes to `state` or opens a document). `would_break` if it would not parse.",
             )
             .answers::<EditOut>()
             .requires(Cap::Mutate)
