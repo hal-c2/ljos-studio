@@ -677,10 +677,13 @@ names", so a picture outside `assets/` that nobody uses is not shipped.
 
 `page` is kept in the project's `ljos-page.json` (written by a real export
 that is given one, once its bundle is written, so one whose bundle is not
-written leaves the file as it was; DECISION: a build that fails after that
+written leaves the file as it was; read by one that is not; it is in
+`left_out` itself, since the manifest holds it). A build is not part of
+that promise. DECISION: a build that fails after the bundle is written
 leaves the page saved, as it leaves the bundle that holds it written, and
-building again reads both; read by one that is not; it is in `left_out` itself, since
-the manifest holds it). The name is Ljós's: a `site.json` of the project's
+building again reads both; its refusal says so first: "the export to
+`build/web` was written, with its page saved; only the site was not built:
+…". The name is Ljós's: a `site.json` of the project's
 is one of its files like any other, and the page is not in `.studio/`, which
 holds nothing a site is built from. Its `icon` and `image` are paths of the project's
 files: one that is not a file of the site is refused (`invalid_argument`,
@@ -749,7 +752,11 @@ while `build/web` is being built, `build/WEB` is refused on every system.
 
 A build replaces only what it wrote: the site's `.ljos-site-build` lists
 each file with its hash, and a build that finds anything else there, or a
-file changed since, fails naming it and leaves the site as it was.
+file changed since, fails naming it and leaves the site as it was. A site
+an earlier Studio built (its stamp holds only ljos-web's commit) lists
+nothing, so it is refused too, saying
+it was built by an earlier Studio: delete it or move it out once, and
+builds after that replace their own.
 DECISION: refused rather than merged, so no site is half somebody's. No
 export is written into a built site (`invalid_argument`, `inside_site`) or
 into `build/.site-work`, where builds work, in any letter case

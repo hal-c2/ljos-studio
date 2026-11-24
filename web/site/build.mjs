@@ -61,13 +61,22 @@ function notOurs(dir) {
   if (!there.isDirectory()) return other;
   const found = contents(dir);
   if (!lstatSync(join(dir, STAMP), { throwIfNoEntry: false })?.isFile()) return found.size ? other : null;
+  const stamp = readFileSync(join(dir, STAMP), "utf8");
   let wrote;
   try {
-    wrote = new Map(Object.entries(JSON.parse(readFileSync(join(dir, STAMP), "utf8")).files));
+    wrote = new Map(Object.entries(JSON.parse(stamp).files));
   } catch {
-    // DECISION: a stamp that is not this JSON is refused, not taken over.
-    // No released Studio wrote another kind, and one that lists no files
-    // vouches for none of what the directory holds.
+    // DECISION: a stamp that is not this JSON is refused, not taken over:
+    // one that lists no files vouches for none of what the directory holds.
+    // An earlier Studio's builder stamped a site with ljos-web's commit
+    // alone and replaced it whole; what a person changed there since cannot
+    // be told from that, so it is said plainly.
+    if (/^[0-9a-f]{40}\n?$/.test(stamp)) {
+      return [
+        `was built by an earlier Studio, whose ${STAMP} does not list the files it wrote, so what was changed there since cannot be told`,
+        "delete it or move it out, or choose another place",
+      ];
+    }
     return `does not say which files the builder wrote (${STAMP})`;
   }
   const theirs = [...found].filter(([path, what]) => wrote.get(path) !== what).map(([path]) => path);
@@ -77,7 +86,10 @@ function notOurs(dir) {
 }
 
 step("Reading the export");
-const keeps = (why) => fail(`${out} ${why}: move that out or choose another place`);
+const keeps = (why) => {
+  const [what, todo] = Array.isArray(why) ? why : [why, "move that out or choose another place"];
+  fail(`${out} ${what}: ${todo}`);
+};
 // Asked before the build, which takes a while, and again before the swap.
 const kept = notOurs(out);
 if (kept) keeps(kept);
