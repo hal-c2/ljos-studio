@@ -287,6 +287,10 @@ struct ExportOut {
     bytes: u64,
     /// What a real export writes: the files and the manifest.
     writes: usize,
+    /// For a dry run with links: what it writes where the system makes no
+    /// link and each is copied.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    writes_unlinked: Option<usize>,
     manifest: Manifest,
     /// False for a dry run.
     written: bool,
@@ -789,9 +793,24 @@ fn reached(
         .chain(page.into_iter().flat_map(Page::pictures))
         .map(str::to_owned)
         .collect();
-    for doc in paths.iter().copied().filter(|p| is_code(p)) {
+    // The code, then each JSON file kept, as data the code reads names
+    // files as the code does (a feed's pictures). One that is not text
+    // names none.
+    let mut read: BTreeSet<&str> = BTreeSet::new();
+    let mut next: Vec<&str> = paths.iter().copied().filter(|p| is_code(p)).collect();
+    while let Some(doc) = next.pop() {
+        if !read.insert(doc) {
+            continue;
+        }
         let full = root.join(doc);
-        let text = fs::read_to_string(&full).map_err(|e| io(&full, &e))?;
+        let text = if is_code(doc) {
+            fs::read_to_string(&full).map_err(|e| io(&full, &e))?
+        } else {
+            match String::from_utf8(fs::read(&full).map_err(|e| io(&full, &e))?) {
+                Ok(text) => text,
+                Err(_) => continue,
+            }
+        };
         let dir = doc.rsplit_once('/').map_or("", |(dir, _)| dir);
         let named = if file_name(doc) == "qmldir" {
             text.split_whitespace().map(str::to_owned).collect()
@@ -799,11 +818,12 @@ fn reached(
             literals(&text)
         };
         for literal in &named {
-            keep.extend(
-                named_by(&paths, dir, literal)
-                    .into_iter()
-                    .map(str::to_owned),
-            );
+            for path in named_by(&paths, dir, literal) {
+                if path.ends_with(".json") && path != SITE_PAGE && !read.contains(path) {
+                    next.push(path);
+                }
+                keep.insert(path.to_owned());
+            }
         }
     }
     let (kept, unnamed): (Vec<FileEntry>, Vec<FileEntry>) = files
@@ -983,6 +1003,11 @@ fn code(chars: &[char], at: &mut usize, out: &mut Vec<String>, nested: bool) {
             '{' => depth += 1,
             '}' if nested && depth == 0 => return,
             '}' => depth = depth.saturating_sub(1),
+            // `n++` is still a value: a `/` after it divides.
+            '+' | '-' if after_value && chars.get(*at) == Some(&c) => {
+                *at += 1;
+                continue;
+            }
             _ => {}
         }
         after_value = false;
@@ -1285,7 +1310,49 @@ fn may_replace(root: &Path, out: &Path) -> Result<(), SurfaceError> {
             ),
         ));
     }
+    // Replacing a bundle removes what is below it, a site built there too.
+    if let Some(site) = site_below(out) {
+        let relative = site.strip_prefix(root).unwrap_or(&site);
+        let relative = relative
+            .components()
+            .map(|c| c.as_os_str().to_string_lossy())
+            .collect::<Vec<_>>()
+            .join("/");
+        return Err(SurfaceError::new(
+            ErrorCode::InvalidArgument,
+            format!(
+                "`{}` holds the site built at `{relative}`, which replacing it would remove; \
+                 choose another `out`",
+                out.display()
+            ),
+        )
+        .with_details(json!({ "kind": "holds_site", "site": relative })));
+    }
     Ok(())
+}
+
+/// The first directory below `dir` a build stamped as its site. Links are
+/// not followed: what they lead to is not removed with `dir`.
+fn site_below(dir: &Path) -> Option<PathBuf> {
+    let mut next = vec![dir.to_owned()];
+    while let Some(at) = next.pop() {
+        let Ok(entries) = fs::read_dir(&at) else {
+            continue;
+        };
+        let mut dirs: Vec<PathBuf> = entries
+            .filter_map(Result::ok)
+            .filter(|e| e.file_type().is_ok_and(|t| t.is_dir()))
+            .map(|e| e.path())
+            .collect();
+        dirs.sort();
+        for sub in dirs.into_iter().rev() {
+            if fs::symlink_metadata(sub.join(SITE_STAMP)).is_ok_and(|m| m.file_type().is_file()) {
+                return Some(sub);
+            }
+            next.push(sub);
+        }
+    }
+    None
 }
 
 /// The files and bytes a bundle holds besides its manifest's files: what
@@ -1673,23 +1740,51 @@ fn export(studio: &Mutex<Studio>, ctx: &CallCtx, a: ExportArgs) -> Result<Export
         // A page goes into the project only for an export that may be
         // written; `write` asks again just before it replaces anything.
         may_replace(&root, &bundle)?;
+        if a.page.is_some() && !manifest.left_out.iter().any(|l| l.path == SITE_PAGE) {
+            manifest.left_out.push(LeftOut {
+                path: SITE_PAGE.to_owned(),
+                why: PAGE_WHY.to_owned(),
+            });
+            manifest.left_out.sort_by(|a, b| a.path.cmp(&b.path));
+        }
+        let copied = write(&root, &bundle, &manifest)?;
+        // Saved once the bundle is, so an export that fails leaves the
+        // project's page as it was.
         if let Some(page) = &a.page {
             let mut text = serde_json::to_string_pretty(page).expect("a page is JSON");
             text.push('\n');
-            studio
+            let saved = studio
                 .session
                 .store()
                 .write_bytes(SITE_PAGE, text.as_bytes())
-                .map_err(crate::store_error)?;
-            if !manifest.left_out.iter().any(|l| l.path == SITE_PAGE) {
-                manifest.left_out.push(LeftOut {
-                    path: SITE_PAGE.to_owned(),
-                    why: PAGE_WHY.to_owned(),
-                });
-                manifest.left_out.sort_by(|a, b| a.path.cmp(&b.path));
+                .map_err(crate::store_error);
+            if let Err(e) = saved {
+                let export = ExportOut {
+                    out: out.clone(),
+                    path: path.clone(),
+                    files: manifest.files.len() + copied.files,
+                    bytes: manifest.files.iter().map(|f| f.bytes).sum::<u64>() + copied.bytes,
+                    writes: manifest.files.len() + copied.files + 1,
+                    writes_unlinked: None,
+                    manifest: manifest.clone(),
+                    written: true,
+                    replaces,
+                    ms: studio_core::preview::ms(studio.timer.now().saturating_sub(started)),
+                    build: None,
+                };
+                return Err(with_export(e, &export));
             }
         }
-        write(&root, &root.join(&out), &manifest)?
+        copied
+    };
+    // Where the system makes no link, a real export copies what each leads
+    // to: a dry run cannot know which, so it says that count too.
+    let writes_unlinked = if a.dry_run && !manifest.links.is_empty() {
+        let all: Vec<&LinkEntry> = manifest.links.iter().collect();
+        let through = through_links(&manifest.files, &manifest.links, &all)?;
+        Some(manifest.files.len() + through.len() + 1)
+    } else {
+        None
     };
     let ms = studio_core::preview::ms(studio.timer.now().saturating_sub(started));
     // A build takes as long as ljos-web does; the project is not held for
@@ -1715,6 +1810,7 @@ fn export(studio: &Mutex<Studio>, ctx: &CallCtx, a: ExportArgs) -> Result<Export
                     files: manifest.files.len() + copied.files,
                     bytes: manifest.files.iter().map(|f| f.bytes).sum::<u64>() + copied.bytes,
                     writes: manifest.files.len() + copied.files + 1,
+                    writes_unlinked: None,
                     manifest: manifest.clone(),
                     written: true,
                     replaces,
@@ -1732,6 +1828,7 @@ fn export(studio: &Mutex<Studio>, ctx: &CallCtx, a: ExportArgs) -> Result<Export
         files: manifest.files.len() + copied.files,
         bytes: manifest.files.iter().map(|f| f.bytes).sum::<u64>() + copied.bytes,
         writes: manifest.files.len() + copied.files + 1,
+        writes_unlinked,
         manifest,
         written: !a.dry_run,
         replaces,
