@@ -172,6 +172,16 @@ Feature: A person exports a native app or a web site from Studio's window
       And the person chooses "Web site" in the export panel
       Then the export panel's "Page title" reads "^Media$"
 
+    Scenario: A site.json of the project's own does not stop the panel's dry run
+      Given the file "site.json":
+        """json
+        {"feed": "https://example.org/feed.json"}
+        """
+      And the person has clicked the button "Export"
+      When the person chooses "Web site" in the export panel
+      Then the export panel says "^Would write \d+ files to build/web"
+      And the export panel's "Page title" reads "^$"
+
     Scenario: A page picture that is no file of the site is refused with the tool's message
       Given the person has clicked the button "Export"
       And the person has chosen "Web site" in the export panel
