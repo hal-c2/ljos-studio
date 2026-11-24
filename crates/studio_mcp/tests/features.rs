@@ -497,6 +497,45 @@ fn the_file(w: &mut StudioWorld, name: String, step: &Step) -> StepResult {
     std::fs::write(path, file_text(step)?).map_err(|e| e.to_string())
 }
 
+/// Served as a build serves the site it made, at the project's real path.
+#[given(regex = r#"^the site at "([^"]+)" is served$"#)]
+fn site_served(w: &mut StudioWorld, site: String) -> StepResult {
+    let at = w
+        .dir
+        .path()
+        .canonicalize()
+        .map_err(|e| e.to_string())?
+        .join(&site);
+    let url = studio_mcp::site_build::serve(&at).map_err(|e| e.to_string())?;
+    w.kept.insert(format!("site {site}"), Value::String(url));
+    Ok(())
+}
+
+#[then(regex = r#"^the site served from "([^"]+)" answers "([^"]+)"$"#)]
+fn site_answers(w: &mut StudioWorld, site: String, status: String) -> StepResult {
+    use std::io::{Read, Write};
+    let url = w
+        .kept
+        .get(&format!("site {site}"))
+        .and_then(Value::as_str)
+        .ok_or_else(|| format!("`{site}` was not served"))?;
+    let host = url
+        .trim_start_matches("http://")
+        .trim_end_matches('/')
+        .to_owned();
+    let mut stream = std::net::TcpStream::connect(&host).map_err(|e| e.to_string())?;
+    stream
+        .write_all(format!("GET / HTTP/1.1\r\nHost: {host}\r\n\r\n").as_bytes())
+        .map_err(|e| e.to_string())?;
+    let mut said = String::new();
+    stream
+        .read_to_string(&mut said)
+        .map_err(|e| e.to_string())?;
+    said.starts_with(&format!("HTTP/1.1 {status}\r\n"))
+        .then_some(())
+        .ok_or_else(|| format!("{url} answered:\n{said}"))
+}
+
 #[given(regex = r#"^the file "([^"]+)" holds bytes that are not UTF-8$"#)]
 fn not_utf8(w: &mut StudioWorld, name: String) -> StepResult {
     std::fs::write(w.dir.path().join(&name), b"Item { \xff }\n").map_err(|e| e.to_string())

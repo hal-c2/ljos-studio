@@ -68,6 +68,9 @@ struct UiWorld {
     scrolls: Arc<Mutex<Vec<Scrolled>>>,
     /// Where a step left the hand holding the canvas.
     held: Option<Point>,
+    /// The export panel's check, answered as it was before a later step
+    /// wrote anything, and delivered when a step says it arrives.
+    check_on_its_way: Option<Json>,
 }
 
 /// A preview that answers everything but `placed`, whose default refuses.
@@ -365,6 +368,7 @@ impl UiWorld {
             scroll_ms: Arc::default(),
             scrolls: Arc::default(),
             held: None,
+            check_on_its_way: None,
         }
     }
 
@@ -3656,17 +3660,23 @@ fn late_page(w: &mut UiWorld, title: String, description: String) -> StepResult 
     late_check(w)
 }
 
+/// The panel's check of a web export, as the tool answers it now.
+fn web_check_asked() -> Json {
+    serde_json::json!({"entry": "Main.qml", "target": "web", "dry_run": true, "build": true})
+}
+
+// Answered as it was when it was sent, before any later step wrote: the
+// check is on its way from then.
 #[when("the check that was on its way answers")]
 fn late_check(w: &mut UiWorld) -> StepResult {
+    let sent = w.check_on_its_way.take();
     let window = w.window()?;
     export_waits_once_more(window)?;
-    let answer = export_as_the_person(
-        window,
-        serde_json::json!({"entry": "Main.qml", "target": "web", "dry_run": true}),
-    )?;
-    let asked =
-        serde_json::json!({"entry": "Main.qml", "target": "web", "dry_run": true, "build": true});
-    window.answer("export", answer, asked)?;
+    let answer = match sent {
+        Some(answer) => answer,
+        None => export_as_the_person(window, web_check_asked())?,
+    };
+    window.answer("export", answer, web_check_asked())?;
     window.rest()
 }
 
@@ -3679,6 +3689,8 @@ fn web_build_asked() -> Json {
 #[when("the answer to a web build that was on its way arrives in the export panel")]
 fn late_build(w: &mut UiWorld) -> StepResult {
     let window = w.window()?;
+    // A check sent before the build answers what was there then.
+    let check = export_as_the_person(window, web_check_asked())?;
     export_builds(window)?;
     let mut answer = export_as_the_person(
         window,
@@ -3689,7 +3701,9 @@ fn late_build(w: &mut UiWorld) -> StepResult {
         "url": "http://127.0.0.1:9/", "bytes": 2048, "steps": [], "opened": true
     });
     window.answer("export", answer, web_build_asked())?;
-    window.rest()
+    window.rest()?;
+    w.check_on_its_way = Some(check);
+    Ok(())
 }
 
 #[when("a web build that was on its way is refused after writing the bundle")]
@@ -3710,6 +3724,27 @@ fn late_build_refused(w: &mut UiWorld) -> StepResult {
         }
     });
     window.refuse("export", error, web_build_asked())?;
+    window.rest()
+}
+
+// The bundle is written; saving the page into the project is what failed.
+#[when("a written export that was on its way is refused saving its page")]
+fn late_page_refused(w: &mut UiWorld) -> StepResult {
+    let window = w.window()?;
+    export_waits_once_more(window)?;
+    let export = export_as_the_person(
+        window,
+        serde_json::json!({"entry": "Main.qml", "target": "web"}),
+    )?;
+    let error = serde_json::json!({
+        "code": "internal",
+        "message": "ljos-page.json could not be written: the disk is full",
+        "details": { "export": export }
+    });
+    let asked = serde_json::json!({
+        "entry": "Main.qml", "target": "web", "dry_run": false, "page": {"title": "Media"}
+    });
+    window.refuse("export", error, asked)?;
     window.rest()
 }
 

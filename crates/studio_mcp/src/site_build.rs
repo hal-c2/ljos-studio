@@ -349,7 +349,7 @@ fn build_within(
     let mut bytes = None;
     let mut why = None;
     loop {
-        let line = match lines.recv_timeout(deadline.saturating_sub(started.elapsed())) {
+        let line = match next_line(&lines, started, deadline) {
             Ok(line) => line,
             Err(RecvTimeoutError::Disconnected) => break,
             Err(RecvTimeoutError::Timeout) => {
@@ -420,6 +420,16 @@ fn build_within(
         opened,
         ..BuildOut::default()
     })
+}
+
+/// The builder's next line, or `Timeout` once `deadline` has passed since
+/// `started`.
+fn next_line(
+    lines: &mpsc::Receiver<String>,
+    started: Instant,
+    deadline: Duration,
+) -> Result<String, RecvTimeoutError> {
+    lines.recv_timeout(deadline.saturating_sub(started.elapsed()))
 }
 
 /// Stops a builder and all it started.
@@ -1022,6 +1032,18 @@ mod tests {
 
     // Green before the change too: what it proves is that a file is served
     // whole and its length said, not how much memory serving it takes.
+    // A line queued at the deadline is not read: a builder that never
+    // stops talking is stopped all the same.
+    #[test]
+    fn a_builder_that_keeps_talking_is_still_stopped_at_its_deadline() {
+        let (tx, lines) = mpsc::channel();
+        tx.send("step still going".to_owned()).unwrap();
+        assert_eq!(
+            next_line(&lines, Instant::now(), Duration::ZERO),
+            Err(RecvTimeoutError::Timeout)
+        );
+    }
+
     #[test]
     fn a_large_file_is_served_whole_and_a_head_request_gets_its_length() {
         let (_dir, site) = site();

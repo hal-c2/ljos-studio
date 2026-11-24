@@ -867,6 +867,25 @@ Feature: A project is exported for ljos-web to build a site from
         | native | build/.site-work/deep/down |                  |
         | native | build/.Site-Work           | , "dry_run": true |
 
+    # Studio stages each bundle beside its place under a hidden name
+    # (`build/.web.partial`), and empties what it finds there before the
+    # next export: nothing is exported below one, where it would go too.
+    Scenario Outline: A hidden name is no place for an export
+      When the agent calls the tool "export" with:
+        """json
+        {"entry": "Shell.qml", "target": "<target>", "out": "<out>"<given>}
+        """
+      Then the agent is refused with "path_denied"
+      And the refusal's "/details/kind" is "hidden_name"
+      And the file "<out>" does not exist
+
+      Examples:
+        | target | out                      | given             |
+        | web    | build/.web.partial/group |                   |
+        | web    | build/.web.partial/group | , "dry_run": true |
+        | web    | build/.web.partial       |                   |
+        | native | build/group/.inner       |                   |
+
     Scenario Outline: Nothing is exported into a built site
       Given the file "build/web-site/.ljos-site-build":
         """
@@ -1039,3 +1058,73 @@ Feature: A project is exported for ljos-web to build a site from
         """
       Then the agent is refused with "invalid_argument"
       And the refusal's "/details/kind" is "build_target"
+
+  Rule: A site is served only while it is the build of the bundle beside it
+
+    # Written again, the bundle is no longer what the site was built from:
+    # the site's address answers nothing until a build makes it anew.
+    Scenario: A site whose bundle is written again is no longer served
+      Given the file "build/web-site/index.html":
+        """
+        <!doctype html>
+        """
+      And the site at "build/web-site" is served
+      When the agent calls the tool "export" with:
+        """json
+        {"entry": "Shell.qml", "target": "web"}
+        """
+      Then the site served from "build/web-site" answers "404 Not Found"
+      And the file "build/web-site/index.html" exists
+
+    Scenario: A dry run leaves the site served
+      Given the file "build/web-site/index.html":
+        """
+        <!doctype html>
+        """
+      And the site at "build/web-site" is served
+      When the agent calls the tool "export" with:
+        """json
+        {"entry": "Shell.qml", "target": "web", "dry_run": true}
+        """
+      Then the site served from "build/web-site" answers "200 OK"
+
+    # The runner's NODE is a stand-in that does not start: the bundle is
+    # written and the build fails before it makes a site.
+    Scenario: A site whose build fails is no longer served
+      Given the studio tools are connected with the capabilities "inspect, mutate, fs, run"
+      And the file "standin/packages/runtime/package.json":
+        """
+        {}
+        """
+      And the file "standin/examples/web/node_modules/ljos-web/package.json":
+        """
+        {}
+        """
+      And the file "standin/examples/web/node_modules/solid-js/package.json":
+        """
+        {}
+        """
+      And the file "standin/examples/web/node_modules/vite/package.json":
+        """
+        {}
+        """
+      And the file "standin/examples/web/node_modules/@solidjs/web/package.json":
+        """
+        {}
+        """
+      And the file "standin/qmlc":
+        """
+        not run
+        """
+      And the file "build/web-site/index.html":
+        """
+        <!doctype html>
+        """
+      And the site at "build/web-site" is served
+      When the agent calls the tool "export" with:
+        """json
+        {"entry": "Shell.qml", "target": "web", "build": true, "ljos_web": "standin", "qmlc": "standin/qmlc"}
+        """
+      Then the agent is refused with "not_actionable"
+      And the refusal's "/details/kind" is "build_failed"
+      And the site served from "build/web-site" answers "404 Not Found"
