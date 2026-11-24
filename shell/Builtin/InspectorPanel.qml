@@ -2735,6 +2735,9 @@ Panel {
                                         }
                                         panel.handlerOf = signalRow.modelData.name
                                         handlerLines.text = panel.handlerBody(signalRow.modelData.name)
+                                        // The same lines again change nothing, so
+                                        // onTextChanged would leave another handler's.
+                                        panel.handlerText = handlerLines.text
                                         handlerLines.forceActiveFocus()
                                     }
                                 }
