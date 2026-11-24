@@ -28,20 +28,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "accesskit_atspi_common"
-version = "0.21.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "52c182f9c282ac9c5638d876d551d15e5f7d397ec263349a0c6a2b61595dd5e4"
-dependencies = [
- "accesskit",
- "accesskit_consumer",
- "atspi-common",
- "phf",
- "serde",
- "zvariant",
-]
-
-[[package]]
 name = "accesskit_consumer"
 version = "0.39.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -80,24 +66,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "accesskit_unix"
-version = "0.24.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "202f24df034a7476d07b7f74284de84f6d62aabd858dbe7ee9cad3b7ad6f8f9d"
-dependencies = [
- "accesskit",
- "accesskit_atspi_common",
- "async-channel",
- "async-executor",
- "async-task",
- "atspi",
- "futures-lite",
- "futures-util",
- "serde",
- "zbus",
-]
-
-[[package]]
 name = "accesskit_windows"
 version = "0.35.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -109,21 +77,6 @@ dependencies = [
  "static_assertions",
  "windows",
  "windows-core",
-]
-
-[[package]]
-name = "accesskit_winit"
-version = "0.34.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ee96dd150375c05912d8a473f98c2fb155fb3234fac88292d396548a2460fa77"
-dependencies = [
- "accesskit",
- "accesskit_ios",
- "accesskit_macos",
- "accesskit_unix",
- "accesskit_windows",
- "raw-window-handle",
- "winit",
 ]
 
 [[package]]
@@ -176,6 +129,7 @@ dependencies = [
  "ndk-context",
  "ndk-sys",
  "num_enum",
+ "simd_cesu8",
  "thiserror 2.0.21",
 ]
 
@@ -498,6 +452,16 @@ name = "base64"
 version = "0.23.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ac07cdecf99051d9a5238b80f35af32cdeba5b336e55d957b318b50137e18da5"
+
+[[package]]
+name = "base64-simd"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "339abbe78e73178762e23bea9dfd08e697eb3f3301cd4be981c0f78ba5859195"
+dependencies = [
+ "outref",
+ "vsimd",
+]
 
 [[package]]
 name = "bit-set"
@@ -1248,7 +1212,6 @@ version = "0.37.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e4e449f4c4a2a60c7ccb4ba7fa4078417bfe1f9ddc03b5e05ce75748e33a70de"
 dependencies = [
- "accesskit_winit",
  "arboard",
  "block2 0.6.2",
  "bytemuck",
@@ -1385,6 +1348,12 @@ name = "error-code"
 version = "3.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b5343afd4a8365a643ac588dab4cf234a190c7f6c88c9f6dd6ffe00837661b7"
+
+[[package]]
+name = "escape-simd"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f0440157235aa4badd45ea073af8de2ba44ffead74bf8a7833b215533c36f08e"
 
 [[package]]
 name = "euclid"
@@ -2635,6 +2604,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "json-escape-simd"
+version = "3.1.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d302fe9761f19c4123edfe82b66be55a08e54012403cd7e27f8a176538737954"
+dependencies = [
+ "escape-simd",
+]
+
+[[package]]
 name = "khronos-egl"
 version = "6.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2756,7 +2734,7 @@ checksum = "11d3d7f243d5c5a8b9bb5d6dd2b1602c0cb0b9db1621bafc7ed66e35ff9fe092"
 [[package]]
 name = "ljos"
 version = "0.0.0"
-source = "git+https://github.com/hal-c2/ljos-ui?rev=f5266a91b0b7f6b3d2f0991b264781f11b25c8b1#f5266a91b0b7f6b3d2f0991b264781f11b25c8b1"
+source = "git+https://github.com/hal-c2/ljos-ui?rev=ef64e611d30caaa089a411be41f9b6c96c0d0473#ef64e611d30caaa089a411be41f9b6c96c0d0473"
 dependencies = [
  "ljos_a11y",
  "ljos_aot",
@@ -2781,7 +2759,7 @@ dependencies = [
 [[package]]
 name = "ljos_3d"
 version = "0.0.0"
-source = "git+https://github.com/hal-c2/ljos-ui?rev=f5266a91b0b7f6b3d2f0991b264781f11b25c8b1#f5266a91b0b7f6b3d2f0991b264781f11b25c8b1"
+source = "git+https://github.com/hal-c2/ljos-ui?rev=ef64e611d30caaa089a411be41f9b6c96c0d0473#ef64e611d30caaa089a411be41f9b6c96c0d0473"
 dependencies = [
  "slotmap",
  "thiserror 2.0.21",
@@ -2790,15 +2768,60 @@ dependencies = [
 [[package]]
 name = "ljos_a11y"
 version = "0.0.0"
-source = "git+https://github.com/hal-c2/ljos-ui?rev=f5266a91b0b7f6b3d2f0991b264781f11b25c8b1#f5266a91b0b7f6b3d2f0991b264781f11b25c8b1"
+source = "git+https://github.com/hal-c2/ljos-ui?rev=ef64e611d30caaa089a411be41f9b6c96c0d0473#ef64e611d30caaa089a411be41f9b6c96c0d0473"
 dependencies = [
  "accesskit",
 ]
 
 [[package]]
+name = "ljos_accesskit_atspi_common"
+version = "0.21.0"
+source = "git+https://github.com/hal-c2/ljos-ui?rev=ef64e611d30caaa089a411be41f9b6c96c0d0473#ef64e611d30caaa089a411be41f9b6c96c0d0473"
+dependencies = [
+ "accesskit",
+ "accesskit_consumer",
+ "atspi-common",
+ "phf",
+ "serde",
+ "zvariant",
+]
+
+[[package]]
+name = "ljos_accesskit_unix"
+version = "0.24.0"
+source = "git+https://github.com/hal-c2/ljos-ui?rev=ef64e611d30caaa089a411be41f9b6c96c0d0473#ef64e611d30caaa089a411be41f9b6c96c0d0473"
+dependencies = [
+ "accesskit",
+ "async-channel",
+ "async-executor",
+ "async-io",
+ "async-task",
+ "atspi",
+ "futures-lite",
+ "futures-util",
+ "ljos_accesskit_atspi_common",
+ "serde",
+ "zbus",
+]
+
+[[package]]
+name = "ljos_accesskit_winit"
+version = "0.34.1"
+source = "git+https://github.com/hal-c2/ljos-ui?rev=ef64e611d30caaa089a411be41f9b6c96c0d0473#ef64e611d30caaa089a411be41f9b6c96c0d0473"
+dependencies = [
+ "accesskit",
+ "accesskit_ios",
+ "accesskit_macos",
+ "accesskit_windows",
+ "ljos_accesskit_unix",
+ "raw-window-handle",
+ "winit",
+]
+
+[[package]]
 name = "ljos_aot"
 version = "0.0.0"
-source = "git+https://github.com/hal-c2/ljos-ui?rev=f5266a91b0b7f6b3d2f0991b264781f11b25c8b1#f5266a91b0b7f6b3d2f0991b264781f11b25c8b1"
+source = "git+https://github.com/hal-c2/ljos-ui?rev=ef64e611d30caaa089a411be41f9b6c96c0d0473#ef64e611d30caaa089a411be41f9b6c96c0d0473"
 dependencies = [
  "ljos_ir",
 ]
@@ -2806,7 +2829,7 @@ dependencies = [
 [[package]]
 name = "ljos_blocks"
 version = "0.0.0"
-source = "git+https://github.com/hal-c2/ljos-ui?rev=f5266a91b0b7f6b3d2f0991b264781f11b25c8b1#f5266a91b0b7f6b3d2f0991b264781f11b25c8b1"
+source = "git+https://github.com/hal-c2/ljos-ui?rev=ef64e611d30caaa089a411be41f9b6c96c0d0473#ef64e611d30caaa089a411be41f9b6c96c0d0473"
 dependencies = [
  "qml_syntax",
  "serde",
@@ -2817,34 +2840,41 @@ dependencies = [
 [[package]]
 name = "ljos_child"
 version = "0.0.0"
-source = "git+https://github.com/hal-c2/ljos-ui?rev=f5266a91b0b7f6b3d2f0991b264781f11b25c8b1#f5266a91b0b7f6b3d2f0991b264781f11b25c8b1"
+source = "git+https://github.com/hal-c2/ljos-ui?rev=ef64e611d30caaa089a411be41f9b6c96c0d0473#ef64e611d30caaa089a411be41f9b6c96c0d0473"
 
 [[package]]
 name = "ljos_compiler"
 version = "0.0.0"
-source = "git+https://github.com/hal-c2/ljos-ui?rev=f5266a91b0b7f6b3d2f0991b264781f11b25c8b1#f5266a91b0b7f6b3d2f0991b264781f11b25c8b1"
+source = "git+https://github.com/hal-c2/ljos-ui?rev=ef64e611d30caaa089a411be41f9b6c96c0d0473#ef64e611d30caaa089a411be41f9b6c96c0d0473"
 dependencies = [
  "anyhow",
  "blake3",
+ "libc",
  "ljos_aot",
  "ljos_ir",
  "ljos_oxc_parser",
+ "miniz_oxide 0.8.9",
  "oxc_allocator",
  "oxc_ast",
  "oxc_ast_visit",
+ "oxc_codegen",
+ "oxc_isolated_declarations",
  "oxc_semantic",
  "oxc_span",
  "oxc_syntax",
+ "qml_compat",
  "qml_front",
  "qml_syntax",
  "qt_types",
+ "tempfile",
  "thiserror 2.0.21",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
 name = "ljos_controls"
 version = "0.0.0"
-source = "git+https://github.com/hal-c2/ljos-ui?rev=f5266a91b0b7f6b3d2f0991b264781f11b25c8b1#f5266a91b0b7f6b3d2f0991b264781f11b25c8b1"
+source = "git+https://github.com/hal-c2/ljos-ui?rev=ef64e611d30caaa089a411be41f9b6c96c0d0473#ef64e611d30caaa089a411be41f9b6c96c0d0473"
 dependencies = [
  "ljos_a11y",
  "ljos_compiler",
@@ -2852,17 +2882,21 @@ dependencies = [
  "ljos_engine",
  "ljos_i18n",
  "ljos_ir",
+ "ljos_platform",
  "ljos_quick",
  "ljos_render",
  "ljos_runtime",
+ "ljos_studio",
  "qt_types",
+ "slotmap",
+ "smallvec",
  "thiserror 2.0.21",
 ]
 
 [[package]]
 name = "ljos_design"
 version = "0.0.0"
-source = "git+https://github.com/hal-c2/ljos-ui?rev=f5266a91b0b7f6b3d2f0991b264781f11b25c8b1#f5266a91b0b7f6b3d2f0991b264781f11b25c8b1"
+source = "git+https://github.com/hal-c2/ljos-ui?rev=ef64e611d30caaa089a411be41f9b6c96c0d0473#ef64e611d30caaa089a411be41f9b6c96c0d0473"
 dependencies = [
  "serde",
  "thiserror 2.0.21",
@@ -2871,7 +2905,7 @@ dependencies = [
 [[package]]
 name = "ljos_design_qml"
 version = "0.0.0"
-source = "git+https://github.com/hal-c2/ljos-ui?rev=f5266a91b0b7f6b3d2f0991b264781f11b25c8b1#f5266a91b0b7f6b3d2f0991b264781f11b25c8b1"
+source = "git+https://github.com/hal-c2/ljos-ui?rev=ef64e611d30caaa089a411be41f9b6c96c0d0473#ef64e611d30caaa089a411be41f9b6c96c0d0473"
 dependencies = [
  "ljos_compiler",
  "ljos_design",
@@ -2883,7 +2917,7 @@ dependencies = [
 [[package]]
 name = "ljos_dev"
 version = "0.0.0"
-source = "git+https://github.com/hal-c2/ljos-ui?rev=f5266a91b0b7f6b3d2f0991b264781f11b25c8b1#f5266a91b0b7f6b3d2f0991b264781f11b25c8b1"
+source = "git+https://github.com/hal-c2/ljos-ui?rev=ef64e611d30caaa089a411be41f9b6c96c0d0473#ef64e611d30caaa089a411be41f9b6c96c0d0473"
 dependencies = [
  "blake3",
  "ljos_compiler",
@@ -2891,6 +2925,7 @@ dependencies = [
  "ljos_design_qml",
  "ljos_engine",
  "ljos_ir",
+ "ljos_js",
  "ljos_quick",
  "ljos_runtime",
  "notify",
@@ -2901,7 +2936,7 @@ dependencies = [
 [[package]]
 name = "ljos_drive"
 version = "0.0.0"
-source = "git+https://github.com/hal-c2/ljos-ui?rev=f5266a91b0b7f6b3d2f0991b264781f11b25c8b1#f5266a91b0b7f6b3d2f0991b264781f11b25c8b1"
+source = "git+https://github.com/hal-c2/ljos-ui?rev=ef64e611d30caaa089a411be41f9b6c96c0d0473#ef64e611d30caaa089a411be41f9b6c96c0d0473"
 dependencies = [
  "ljos_a11y",
  "ljos_engine",
@@ -2915,7 +2950,7 @@ dependencies = [
 [[package]]
 name = "ljos_egui"
 version = "0.0.0"
-source = "git+https://github.com/hal-c2/ljos-ui?rev=f5266a91b0b7f6b3d2f0991b264781f11b25c8b1#f5266a91b0b7f6b3d2f0991b264781f11b25c8b1"
+source = "git+https://github.com/hal-c2/ljos-ui?rev=ef64e611d30caaa089a411be41f9b6c96c0d0473#ef64e611d30caaa089a411be41f9b6c96c0d0473"
 dependencies = [
  "egui",
  "ljos_a11y",
@@ -2930,7 +2965,7 @@ dependencies = [
 [[package]]
 name = "ljos_engine"
 version = "0.0.0"
-source = "git+https://github.com/hal-c2/ljos-ui?rev=f5266a91b0b7f6b3d2f0991b264781f11b25c8b1#f5266a91b0b7f6b3d2f0991b264781f11b25c8b1"
+source = "git+https://github.com/hal-c2/ljos-ui?rev=ef64e611d30caaa089a411be41f9b6c96c0d0473#ef64e611d30caaa089a411be41f9b6c96c0d0473"
 dependencies = [
  "arcstr",
  "bitflags 2.13.2",
@@ -2955,7 +2990,7 @@ dependencies = [
 [[package]]
 name = "ljos_host"
 version = "0.0.0"
-source = "git+https://github.com/hal-c2/ljos-ui?rev=f5266a91b0b7f6b3d2f0991b264781f11b25c8b1#f5266a91b0b7f6b3d2f0991b264781f11b25c8b1"
+source = "git+https://github.com/hal-c2/ljos-ui?rev=ef64e611d30caaa089a411be41f9b6c96c0d0473#ef64e611d30caaa089a411be41f9b6c96c0d0473"
 dependencies = [
  "libc",
  "objc2 0.6.5",
@@ -2971,7 +3006,7 @@ dependencies = [
 [[package]]
 name = "ljos_i18n"
 version = "0.0.0"
-source = "git+https://github.com/hal-c2/ljos-ui?rev=f5266a91b0b7f6b3d2f0991b264781f11b25c8b1#f5266a91b0b7f6b3d2f0991b264781f11b25c8b1"
+source = "git+https://github.com/hal-c2/ljos-ui?rev=ef64e611d30caaa089a411be41f9b6c96c0d0473#ef64e611d30caaa089a411be41f9b6c96c0d0473"
 dependencies = [
  "icu_calendar",
  "icu_datetime",
@@ -2988,7 +3023,7 @@ dependencies = [
 [[package]]
 name = "ljos_ir"
 version = "0.0.0"
-source = "git+https://github.com/hal-c2/ljos-ui?rev=f5266a91b0b7f6b3d2f0991b264781f11b25c8b1#f5266a91b0b7f6b3d2f0991b264781f11b25c8b1"
+source = "git+https://github.com/hal-c2/ljos-ui?rev=ef64e611d30caaa089a411be41f9b6c96c0d0473#ef64e611d30caaa089a411be41f9b6c96c0d0473"
 dependencies = [
  "blake3",
  "postcard",
@@ -2997,9 +3032,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "ljos_jni"
+version = "0.0.0"
+source = "git+https://github.com/hal-c2/ljos-ui?rev=ef64e611d30caaa089a411be41f9b6c96c0d0473#ef64e611d30caaa089a411be41f9b6c96c0d0473"
+dependencies = [
+ "jni",
+ "log",
+ "ndk-context",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "ljos_js"
 version = "0.0.0"
-source = "git+https://github.com/hal-c2/ljos-ui?rev=f5266a91b0b7f6b3d2f0991b264781f11b25c8b1#f5266a91b0b7f6b3d2f0991b264781f11b25c8b1"
+source = "git+https://github.com/hal-c2/ljos-ui?rev=ef64e611d30caaa089a411be41f9b6c96c0d0473#ef64e611d30caaa089a411be41f9b6c96c0d0473"
 dependencies = [
  "libc",
  "ljos_rquickjs_core",
@@ -3015,7 +3061,7 @@ dependencies = [
 [[package]]
 name = "ljos_macros"
 version = "0.0.0"
-source = "git+https://github.com/hal-c2/ljos-ui?rev=f5266a91b0b7f6b3d2f0991b264781f11b25c8b1#f5266a91b0b7f6b3d2f0991b264781f11b25c8b1"
+source = "git+https://github.com/hal-c2/ljos-ui?rev=ef64e611d30caaa089a411be41f9b6c96c0d0473#ef64e611d30caaa089a411be41f9b6c96c0d0473"
 dependencies = [
  "proc-macro-crate",
  "proc-macro2",
@@ -3026,7 +3072,7 @@ dependencies = [
 [[package]]
 name = "ljos_mcp_core"
 version = "0.0.0"
-source = "git+https://github.com/hal-c2/ljos-ui?rev=f5266a91b0b7f6b3d2f0991b264781f11b25c8b1#f5266a91b0b7f6b3d2f0991b264781f11b25c8b1"
+source = "git+https://github.com/hal-c2/ljos-ui?rev=ef64e611d30caaa089a411be41f9b6c96c0d0473#ef64e611d30caaa089a411be41f9b6c96c0d0473"
 dependencies = [
  "bytes",
  "constant_time_eq",
@@ -3048,7 +3094,7 @@ dependencies = [
 [[package]]
 name = "ljos_oxc_parser"
 version = "0.144.0"
-source = "git+https://github.com/hal-c2/ljos-ui?rev=f5266a91b0b7f6b3d2f0991b264781f11b25c8b1#f5266a91b0b7f6b3d2f0991b264781f11b25c8b1"
+source = "git+https://github.com/hal-c2/ljos-ui?rev=ef64e611d30caaa089a411be41f9b6c96c0d0473#ef64e611d30caaa089a411be41f9b6c96c0d0473"
 dependencies = [
  "bitflags 2.13.2",
  "cow-utils",
@@ -3071,15 +3117,18 @@ dependencies = [
 [[package]]
 name = "ljos_platform"
 version = "0.0.0"
-source = "git+https://github.com/hal-c2/ljos-ui?rev=f5266a91b0b7f6b3d2f0991b264781f11b25c8b1#f5266a91b0b7f6b3d2f0991b264781f11b25c8b1"
+source = "git+https://github.com/hal-c2/ljos-ui?rev=ef64e611d30caaa089a411be41f9b6c96c0d0473#ef64e611d30caaa089a411be41f9b6c96c0d0473"
 dependencies = [
  "arboard",
  "futures",
+ "jni",
  "ljos_compiler",
  "ljos_engine",
  "ljos_ir",
+ "ljos_jni",
  "ljos_reactive",
  "ljos_runtime",
+ "log",
  "qt_types",
  "quick-xml 0.42.0",
  "raw-window-handle",
@@ -3093,7 +3142,7 @@ dependencies = [
 [[package]]
 name = "ljos_quick"
 version = "0.0.0"
-source = "git+https://github.com/hal-c2/ljos-ui?rev=f5266a91b0b7f6b3d2f0991b264781f11b25c8b1#f5266a91b0b7f6b3d2f0991b264781f11b25c8b1"
+source = "git+https://github.com/hal-c2/ljos-ui?rev=ef64e611d30caaa089a411be41f9b6c96c0d0473#ef64e611d30caaa089a411be41f9b6c96c0d0473"
 dependencies = [
  "bitflags 2.13.2",
  "fancy-regex",
@@ -3115,13 +3164,15 @@ dependencies = [
  "slotmap",
  "smallvec",
  "thiserror 2.0.21",
+ "tiff",
+ "unicode-general-category",
  "zune-jpeg",
 ]
 
 [[package]]
 name = "ljos_reactive"
 version = "0.0.0"
-source = "git+https://github.com/hal-c2/ljos-ui?rev=f5266a91b0b7f6b3d2f0991b264781f11b25c8b1#f5266a91b0b7f6b3d2f0991b264781f11b25c8b1"
+source = "git+https://github.com/hal-c2/ljos-ui?rev=ef64e611d30caaa089a411be41f9b6c96c0d0473#ef64e611d30caaa089a411be41f9b6c96c0d0473"
 dependencies = [
  "slotmap",
  "smallvec",
@@ -3131,7 +3182,7 @@ dependencies = [
 [[package]]
 name = "ljos_render"
 version = "0.0.0"
-source = "git+https://github.com/hal-c2/ljos-ui?rev=f5266a91b0b7f6b3d2f0991b264781f11b25c8b1#f5266a91b0b7f6b3d2f0991b264781f11b25c8b1"
+source = "git+https://github.com/hal-c2/ljos-ui?rev=ef64e611d30caaa089a411be41f9b6c96c0d0473#ef64e611d30caaa089a411be41f9b6c96c0d0473"
 dependencies = [
  "bitflags 2.13.2",
  "egui",
@@ -3152,7 +3203,7 @@ dependencies = [
 [[package]]
 name = "ljos_rquickjs_core"
 version = "0.14.0"
-source = "git+https://github.com/hal-c2/ljos-ui?rev=f5266a91b0b7f6b3d2f0991b264781f11b25c8b1#f5266a91b0b7f6b3d2f0991b264781f11b25c8b1"
+source = "git+https://github.com/hal-c2/ljos-ui?rev=ef64e611d30caaa089a411be41f9b6c96c0d0473#ef64e611d30caaa089a411be41f9b6c96c0d0473"
 dependencies = [
  "hashbrown 0.17.1",
  "ljos_rquickjs_sys",
@@ -3162,7 +3213,7 @@ dependencies = [
 [[package]]
 name = "ljos_rquickjs_sys"
 version = "0.14.0"
-source = "git+https://github.com/hal-c2/ljos-ui?rev=f5266a91b0b7f6b3d2f0991b264781f11b25c8b1#f5266a91b0b7f6b3d2f0991b264781f11b25c8b1"
+source = "git+https://github.com/hal-c2/ljos-ui?rev=ef64e611d30caaa089a411be41f9b6c96c0d0473#ef64e611d30caaa089a411be41f9b6c96c0d0473"
 dependencies = [
  "cc",
 ]
@@ -3170,7 +3221,7 @@ dependencies = [
 [[package]]
 name = "ljos_runtime"
 version = "0.0.0"
-source = "git+https://github.com/hal-c2/ljos-ui?rev=f5266a91b0b7f6b3d2f0991b264781f11b25c8b1#f5266a91b0b7f6b3d2f0991b264781f11b25c8b1"
+source = "git+https://github.com/hal-c2/ljos-ui?rev=ef64e611d30caaa089a411be41f9b6c96c0d0473#ef64e611d30caaa089a411be41f9b6c96c0d0473"
 dependencies = [
  "bitflags 2.13.2",
  "smallvec",
@@ -3180,7 +3231,7 @@ dependencies = [
 [[package]]
 name = "ljos_shader"
 version = "0.0.0"
-source = "git+https://github.com/hal-c2/ljos-ui?rev=f5266a91b0b7f6b3d2f0991b264781f11b25c8b1#f5266a91b0b7f6b3d2f0991b264781f11b25c8b1"
+source = "git+https://github.com/hal-c2/ljos-ui?rev=ef64e611d30caaa089a411be41f9b6c96c0d0473#ef64e611d30caaa089a411be41f9b6c96c0d0473"
 dependencies = [
  "naga",
  "serde",
@@ -3191,7 +3242,7 @@ dependencies = [
 [[package]]
 name = "ljos_shell"
 version = "0.0.0"
-source = "git+https://github.com/hal-c2/ljos-ui?rev=f5266a91b0b7f6b3d2f0991b264781f11b25c8b1#f5266a91b0b7f6b3d2f0991b264781f11b25c8b1"
+source = "git+https://github.com/hal-c2/ljos-ui?rev=ef64e611d30caaa089a411be41f9b6c96c0d0473#ef64e611d30caaa089a411be41f9b6c96c0d0473"
 dependencies = [
  "block2 0.6.2",
  "blocking",
@@ -3203,6 +3254,7 @@ dependencies = [
  "glutin",
  "libc",
  "ljos_a11y",
+ "ljos_accesskit_winit",
  "ljos_controls",
  "ljos_dev",
  "ljos_egui",
@@ -3214,7 +3266,9 @@ dependencies = [
  "ljos_runtime",
  "objc2 0.6.5",
  "objc2-app-kit 0.3.2",
+ "objc2-core-graphics",
  "objc2-foundation 0.3.2",
+ "objc2-quartz-core 0.3.2",
  "pollster 1.0.1",
  "softbuffer",
  "thiserror 2.0.21",
@@ -3227,11 +3281,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "ljos_studio"
+version = "0.0.0"
+source = "git+https://github.com/hal-c2/ljos-ui?rev=ef64e611d30caaa089a411be41f9b6c96c0d0473#ef64e611d30caaa089a411be41f9b6c96c0d0473"
+dependencies = [
+ "ljos_compiler",
+ "ljos_engine",
+ "ljos_ir",
+ "qt_types",
+]
+
+[[package]]
 name = "ljos_text"
 version = "0.0.0"
-source = "git+https://github.com/hal-c2/ljos-ui?rev=f5266a91b0b7f6b3d2f0991b264781f11b25c8b1#f5266a91b0b7f6b3d2f0991b264781f11b25c8b1"
+source = "git+https://github.com/hal-c2/ljos-ui?rev=ef64e611d30caaa089a411be41f9b6c96c0d0473#ef64e611d30caaa089a411be41f9b6c96c0d0473"
 dependencies = [
  "harfrust",
+ "icu_properties",
  "icu_segmenter",
  "ljos_render",
  "ljos_runtime",
@@ -3241,6 +3307,7 @@ dependencies = [
  "parley_engine",
  "pulldown-cmark",
  "rustc-hash 2.1.3",
+ "skrifa",
  "thiserror 2.0.21",
  "unicode-segmentation",
  "yeslogic-fontconfig-sys",
@@ -3592,6 +3659,7 @@ dependencies = [
  "objc2-core-foundation",
  "objc2-core-graphics",
  "objc2-foundation 0.3.2",
+ "objc2-quartz-core 0.3.2",
 ]
 
 [[package]]
@@ -3931,6 +3999,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "outref"
+version = "0.5.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1a80800c0488c3a21695ea981a54918fbb37abf04f4d0720c453632255e2ff0e"
+
+[[package]]
 name = "owned_ttf_parser"
 version = "0.25.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4014,6 +4088,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "oxc_codegen"
+version = "0.144.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5f8a30cbe510caef092aa75fe29e8d37576ca8eb2ab3e9ab34a453a92863e7f0"
+dependencies = [
+ "bitflags 2.13.2",
+ "cow-utils",
+ "oxc_allocator",
+ "oxc_ast",
+ "oxc_data_structures",
+ "oxc_ecmascript",
+ "oxc_index",
+ "oxc_semantic",
+ "oxc_sourcemap",
+ "oxc_span",
+ "oxc_str",
+ "oxc_syntax",
+ "rustc-hash 2.1.3",
+]
+
+[[package]]
 name = "oxc_data_structures"
 version = "0.144.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4065,6 +4160,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "oxc_isolated_declarations"
+version = "0.144.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "aba22c46bf2b6dc717be28b0cb5bfdd7c6dadb81b6ff47e3bee85ba0a9637733"
+dependencies = [
+ "bitflags 2.13.2",
+ "oxc_allocator",
+ "oxc_ast",
+ "oxc_ast_visit",
+ "oxc_diagnostics",
+ "oxc_ecmascript",
+ "oxc_span",
+ "oxc_str",
+ "oxc_syntax",
+ "rustc-hash 2.1.3",
+]
+
+[[package]]
 name = "oxc_regular_expression"
 version = "0.144.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4102,6 +4215,19 @@ dependencies = [
  "rustc-hash 2.1.3",
  "self_cell",
  "smallvec",
+]
+
+[[package]]
+name = "oxc_sourcemap"
+version = "8.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b415102a94b483bbd76d13e850fe87961197e5795c79a8523ebec5d82025f94f"
+dependencies = [
+ "base64-simd",
+ "json-escape-simd",
+ "rustc-hash 2.1.3",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -4540,9 +4666,25 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d55d956fa96f5ec02be2e13af0e20391a5aa83d6a074e3ad368959d0fab299ea"
 
 [[package]]
+name = "qml_compat"
+version = "0.0.0"
+source = "git+https://github.com/hal-c2/ljos-ui?rev=ef64e611d30caaa089a411be41f9b6c96c0d0473#ef64e611d30caaa089a411be41f9b6c96c0d0473"
+dependencies = [
+ "ljos_oxc_parser",
+ "oxc_allocator",
+ "oxc_ast",
+ "oxc_ast_visit",
+ "oxc_span",
+ "oxc_syntax",
+ "qml_edit",
+ "qml_syntax",
+ "qt_types",
+]
+
+[[package]]
 name = "qml_edit"
 version = "0.0.0"
-source = "git+https://github.com/hal-c2/ljos-ui?rev=f5266a91b0b7f6b3d2f0991b264781f11b25c8b1#f5266a91b0b7f6b3d2f0991b264781f11b25c8b1"
+source = "git+https://github.com/hal-c2/ljos-ui?rev=ef64e611d30caaa089a411be41f9b6c96c0d0473#ef64e611d30caaa089a411be41f9b6c96c0d0473"
 dependencies = [
  "ljos_ir",
  "qml_syntax",
@@ -4552,7 +4694,7 @@ dependencies = [
 [[package]]
 name = "qml_front"
 version = "0.0.0"
-source = "git+https://github.com/hal-c2/ljos-ui?rev=f5266a91b0b7f6b3d2f0991b264781f11b25c8b1#f5266a91b0b7f6b3d2f0991b264781f11b25c8b1"
+source = "git+https://github.com/hal-c2/ljos-ui?rev=ef64e611d30caaa089a411be41f9b6c96c0d0473#ef64e611d30caaa089a411be41f9b6c96c0d0473"
 dependencies = [
  "oxc_ast_visit",
  "oxc_syntax",
@@ -4564,19 +4706,21 @@ dependencies = [
 [[package]]
 name = "qml_syntax"
 version = "0.0.0"
-source = "git+https://github.com/hal-c2/ljos-ui?rev=f5266a91b0b7f6b3d2f0991b264781f11b25c8b1#f5266a91b0b7f6b3d2f0991b264781f11b25c8b1"
+source = "git+https://github.com/hal-c2/ljos-ui?rev=ef64e611d30caaa089a411be41f9b6c96c0d0473#ef64e611d30caaa089a411be41f9b6c96c0d0473"
 dependencies = [
  "ljos_oxc_parser",
  "oxc_allocator",
  "oxc_ast",
+ "oxc_ast_visit",
  "oxc_diagnostics",
  "oxc_span",
+ "oxc_syntax",
 ]
 
 [[package]]
 name = "qt_signals"
 version = "0.0.0"
-source = "git+https://github.com/hal-c2/ljos-ui?rev=f5266a91b0b7f6b3d2f0991b264781f11b25c8b1#f5266a91b0b7f6b3d2f0991b264781f11b25c8b1"
+source = "git+https://github.com/hal-c2/ljos-ui?rev=ef64e611d30caaa089a411be41f9b6c96c0d0473#ef64e611d30caaa089a411be41f9b6c96c0d0473"
 dependencies = [
  "qt_types",
 ]
@@ -4584,7 +4728,7 @@ dependencies = [
 [[package]]
 name = "qt_types"
 version = "0.0.0"
-source = "git+https://github.com/hal-c2/ljos-ui?rev=f5266a91b0b7f6b3d2f0991b264781f11b25c8b1#f5266a91b0b7f6b3d2f0991b264781f11b25c8b1"
+source = "git+https://github.com/hal-c2/ljos-ui?rev=ef64e611d30caaa089a411be41f9b6c96c0d0473#ef64e611d30caaa089a411be41f9b6c96c0d0473"
 
 [[package]]
 name = "quick-error"
@@ -6165,6 +6309,12 @@ name = "version_check"
 version = "0.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
+
+[[package]]
+name = "vsimd"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5c3082ca00d5a5ef149bb8b555a72ae84c9c59f7250f013ac822ac2e49b19c64"
 
 [[package]]
 name = "walkdir"
