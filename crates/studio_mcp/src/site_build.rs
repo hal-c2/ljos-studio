@@ -1064,6 +1064,88 @@ mod tests {
         }
     }
 
+    // A builder that closes its output and lives on is waited for no
+    // longer than one that keeps it open.
+    #[cfg(unix)]
+    #[test]
+    fn a_builder_that_closes_its_output_and_lives_on_is_still_stopped() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = tempfile::tempdir().unwrap();
+        let node = root.path().join("node");
+        fs::write(&node, "#!/bin/sh\nexec >&-\nsleep 60\n").unwrap();
+        fs::set_permissions(&node, fs::Permissions::from_mode(0o755)).unwrap();
+        let tools = ljos_web(root.path(), node);
+        fs::create_dir_all(root.path().join("build/web")).unwrap();
+        let (tx, rx) = std::sync::mpsc::channel();
+        let at = root.path().to_owned();
+        std::thread::spawn(move || {
+            let _ = tx.send(build_within(
+                &at,
+                "build/web",
+                &tools,
+                false,
+                Duration::from_secs(1),
+            ));
+        });
+        let refused = rx
+            .recv_timeout(Duration::from_secs(20))
+            .expect("the build was stopped")
+            .err()
+            .expect("the build was refused");
+        let details = refused.details.unwrap();
+        assert_eq!(details["kind"], "build_failed");
+        assert!(
+            details["why"].as_str().unwrap().contains("longer than"),
+            "{details}"
+        );
+    }
+
+    /// What `GET target` on the site served at `url` answers.
+    fn get(url: &str, target: &str) -> String {
+        let port: u16 = url
+            .trim_start_matches("http://127.0.0.1:")
+            .trim_end_matches('/')
+            .parse()
+            .unwrap();
+        let mut stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
+        stream
+            .write_all(
+                format!("GET {target} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n\r\n").as_bytes(),
+            )
+            .unwrap();
+        let mut said = String::new();
+        stream.read_to_string(&mut said).unwrap();
+        said
+    }
+
+    // A directory put where the site was, by anything but a build, is not
+    // the site the build served.
+    #[cfg(unix)]
+    #[test]
+    fn a_directory_put_where_the_site_was_is_not_read() {
+        let (dir, site) = site();
+        let url = serve(&site).unwrap();
+        fs::rename(&site, dir.path().join("site-before")).unwrap();
+        fs::create_dir_all(&site).unwrap();
+        fs::write(site.join("index.html"), "theirs").unwrap();
+        let said = get(&url, "/");
+        assert!(said.starts_with("HTTP/1.1 404"), "{said}");
+    }
+
+    // No link below the site is followed, not even one that leads back into
+    // it: a link swapped in while a request is read leads nowhere either.
+    #[cfg(unix)]
+    #[test]
+    fn no_link_below_the_site_is_followed() {
+        let (_dir, site) = site();
+        std::os::unix::fs::symlink(site.join("assets"), site.join("inner")).unwrap();
+        let url = serve(&site).unwrap();
+        let said = get(&url, "/inner/a%20b.js");
+        assert!(said.starts_with("HTTP/1.1 404"), "{said}");
+        let said = get(&url, "/assets/a%20b.js");
+        assert!(said.starts_with("HTTP/1.1 200 OK"), "{said}");
+    }
+
     // Green before the change too: what it proves is that a file is served
     // whole and its length said, not how much memory serving it takes.
     #[test]
