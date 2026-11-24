@@ -49,6 +49,23 @@ Feature: The inspector shows what a kind of object is about
     Then the file "Main.qml" says "font.pixelSize: Typography.titleSize"
     And the file "Main.qml" says "font.weight: Typography.titleWeight"
 
+  # A style is two writes, and the first may be refused while the second
+  # goes through: what is refused is still said in the text's section, and
+  # the second's answer does not take it off the window's line.
+  Scenario: A style the file refuses in part says so in the text's section
+    When the person replaces "wrapMode: Text.NoWrap" with "wrapMode: Text.NoWrap; font.weight: Font.Normal; font.pixelSize: Item { id: big }" in the code view
+    And the person selects "Text title" in the layers panel
+    And an agent named "Ada" calls the tool "node_select" with:
+      """json
+      {"doc": "Main.qml", "nodes": [{"id": "big"}], "hold": true}
+      """
+    And the person selects "Text title" in the layers panel
+    And the person chooses "Title" in the inspector's "Text style"
+    Then the file "Main.qml" says "font.weight: Typography.titleWeight"
+    And the file "Main.qml" does not say "Typography.titleSize"
+    And the inspector says something with "held by Ada"
+    And the window shows a refusal that says "held by Ada"
+
   Scenario: A text is aligned with a press, and a second press lets it go
     When the person selects "Text title" in the layers panel
     And the person clicks the button "Centre the text"

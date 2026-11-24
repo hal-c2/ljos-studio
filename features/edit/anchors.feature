@@ -168,6 +168,23 @@ Feature: An object is pinned to its parent or a sibling
     And the file "Centred.qml" does not contain "centerIn"
     And the file "Centred.qml" does not contain "horizontalCenter"
 
+  Scenario: Letting a centring go with a centre line asked is not a split
+    Given the file "Loosed.qml":
+      """qml
+      import QtQuick
+
+      Rectangle {
+          Rectangle { id: c; width: 10; height: 10; anchors.centerIn: parent }
+      }
+      """
+    When the agent calls the tool "node_arrange" with:
+      """json
+      {"action": "anchor", "doc": "Loosed.qml", "nodes": [{"id": "c"}], "centerIn": false, "sides": {"horizontalCenter": 0}}
+      """
+    Then the file "Loosed.qml" contains "anchors.horizontalCenter: parent.horizontalCenter"
+    And the file "Loosed.qml" does not contain "centerIn"
+    And the file "Loosed.qml" does not contain "verticalCenter"
+
   Scenario: A centre and a side of one axis are not asked for together
     When the agent calls the tool "node_arrange" with:
       """json
