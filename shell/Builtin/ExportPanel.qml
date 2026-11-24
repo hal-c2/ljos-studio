@@ -33,10 +33,15 @@ Popup {
     // Whether the answer in view was a real export, not a dry run.
     readonly property bool wrote: answer !== null && answer.written
 
-    // Whether the person changed the page's fields since the panel opened:
-    // until then the export reads the project's ljos-page.json, and the fields
-    // show what it says.
-    property bool pageEdited: false
+    // Which of the page's fields the person changed since the panel opened.
+    // Until one is, the export reads the project's ljos-page.json; the
+    // fields not changed show what it says, so a page written whole keeps
+    // what the person did not touch.
+    property bool titleEdited: false
+    property bool descriptionEdited: false
+    property bool iconEdited: false
+    property bool imageEdited: false
+    readonly property bool pageEdited: titleEdited || descriptionEdited || iconEdited || imageEdited
     // A build: running, and what the last one answered, or why it failed.
     property bool building: false
     property var built: null
@@ -144,16 +149,28 @@ Popup {
             ""].join("\n")})
     }
 
-    // The fields say what the project's ljos-page.json says until the person
-    // changes one.
-    function showPage(a) {
-        if (pageEdited || a === null || !a.manifest || a.manifest.target !== "web")
+    // Each field says what the project's ljos-page.json says until the
+    // person changes it. An answer to a call that sent a page says that
+    // page, not the project's.
+    function showPage(a, asked) {
+        if (a === null || asked.page !== undefined || !a.manifest || a.manifest.target !== "web")
             return
         const p = a.manifest.page || {}
-        title.text = p.title || ""
-        description.text = p.description || ""
-        icon.text = p.icon || ""
-        image.text = p.image || ""
+        if (!titleEdited)
+            title.text = p.title || ""
+        if (!descriptionEdited)
+            description.text = p.description || ""
+        if (!iconEdited)
+            icon.text = p.icon || ""
+        if (!imageEdited)
+            image.text = p.image || ""
+    }
+
+    // Whether an answer to `asked` is of the export the fields choose now:
+    // one that began before the person chose another is not.
+    function current(asked) {
+        return asked.entry === entry && asked.target === target
+            && (asked.out || "") === out.text.trim()
     }
 
     function check() {
@@ -163,7 +180,10 @@ Popup {
     function show() {
         answer = null
         refusal = ""
-        pageEdited = false
+        titleEdited = false
+        descriptionEdited = false
+        iconEdited = false
+        imageEdited = false
         built = null
         buildRefusal = ""
         buildReady = false
@@ -306,8 +326,10 @@ Popup {
             if (asked.build === true && asked.dry_run !== true) {
                 panel.building = false
                 panel.built = answer.build
-                panel.refusal = ""
-                panel.answer = answer
+                if (panel.current(asked)) {
+                    panel.refusal = ""
+                    panel.answer = answer
+                }
                 return
             }
             panel.waiting -= 1
@@ -315,7 +337,7 @@ Popup {
             panel.answer = answer
             if (asked.dry_run === true)
                 panel.buildReady = answer.build !== undefined && answer.build.ready === true
-            panel.showPage(answer)
+            panel.showPage(answer, asked)
         }
         function onRefused(tool, error, asked) {
             if (tool !== "export")
@@ -326,6 +348,11 @@ Popup {
                 panel.buildRefusal = error.message
                     + (d.step ? ". It stopped at: " + d.step : "")
                     + (d.log ? ". What ljos-web said is in " + d.log : "")
+                // The bundle was written before the build failed.
+                if (d.export && panel.current(asked)) {
+                    panel.refusal = ""
+                    panel.answer = d.export
+                }
                 return
             }
             panel.waiting -= 1
@@ -449,7 +476,7 @@ Popup {
                 placeholderText: "the entry's name"
                 Accessible.name: "Page title"
                 Layout.fillWidth: true
-                onTextEdited: panel.pageEdited = true
+                onTextEdited: panel.titleEdited = true
                 onAccepted: panel.check()
             }
             Label {
@@ -462,7 +489,7 @@ Popup {
                 placeholderText: "what a search result says of the page"
                 Accessible.name: "Page description"
                 Layout.fillWidth: true
-                onTextEdited: panel.pageEdited = true
+                onTextEdited: panel.descriptionEdited = true
                 onAccepted: panel.check()
             }
             Label {
@@ -475,7 +502,7 @@ Popup {
                 Accessible.name: "Page icon"
                 Layout.fillWidth: true
                 onTextEdited: {
-                    panel.pageEdited = true
+                    panel.iconEdited = true
                     settle.restart()
                 }
                 onAccepted: {
@@ -493,7 +520,7 @@ Popup {
                 Accessible.name: "Page picture for shared links"
                 Layout.fillWidth: true
                 onTextEdited: {
-                    panel.pageEdited = true
+                    panel.imageEdited = true
                     settle.restart()
                 }
                 onAccepted: {
