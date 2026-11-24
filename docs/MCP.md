@@ -696,12 +696,13 @@ which it finds, never downloads (DESIGN.md S6, as built):
 | node | `NODE`; `PATH` |
 
 `ljos_web` and `qmlc` are relative to the project and must lie in the
-workspace, through links too: one outside is refused before anything there
-is looked at, in a dry run too (`path_denied`, `outside_workspace`,
-`details.argument`). DECISION: the workspace, not the project, so an
-ljos-web kept beside the project is still in reach; an argument does not
-choose a program from anywhere on the machine, which `LJOS_WEB` and `QMLC`,
-the machine's own say, still may.
+workspace where the system finds them: each link is followed as it comes,
+so a `..` after one goes up from where it leads. One outside is refused
+before anything there is looked at, in a dry run too (`path_denied`,
+`outside_workspace`, `details.argument`). DECISION: the workspace, not the
+project, so an ljos-web kept beside the project is still in reach; an
+argument does not choose a program from anywhere on the machine, which
+`LJOS_WEB` and `QMLC`, the machine's own say, still may.
 
 The answer's `build` holds `ready`, what was found (`ljos_web`, `qmlc`,
 `node`), and after a build `site` (relative), `path` (absolute), `url`,
