@@ -243,8 +243,12 @@ Panel {
     // A plain box turned into one that can be filled, then filled: the page
     // with the theme's canvas, anything else with its surface.
     property bool filling: false
+    // Whether what was asked to be filled is the page: the selection can
+    // change before the answer comes.
+    property bool fillingRoot: false
     function giveFill() {
         filling = true
+        fillingRoot = isRoot
         refusal.at = "kind"
         refusal.text = ""
         ask("node_arrange", {
@@ -257,7 +261,7 @@ Panel {
     function filled(node) {
         filling = false
         refusal.at = "kind"
-        set("color", themed ? theme + (isRoot ? "Colors.canvas" : "Colors.surface") : '"white"', node)
+        set("color", themed ? theme + (fillingRoot ? "Colors.canvas" : "Colors.surface") : '"white"', node)
     }
 
     // What the selected object declares of its own: each property, signal
@@ -367,8 +371,18 @@ Panel {
     function literalLines(text) {
         const lines = []
         // What the scan is in: code (with how many `{` it has opened, for a
-        // `${` of a template), a quote, a template, or a comment.
+        // `${` of a template), a quote, a template, a regular expression, or
+        // a comment.
         const stack = [{mode: "code", open: 0}]
+        // The code's last token, which tells a `/` that starts a regular
+        // expression from one that divides: "w" after a name or a number
+        // (`word`), ")" after a value closed, else the punctuation itself.
+        let prev = ""
+        let word = ""
+        const keywords = ["return", "typeof", "instanceof", "in", "of", "new", "delete",
+            "void", "throw", "case", "do", "else", "yield", "await"]
+        const startsRegex = () => prev === "" || "(,=:[!&|?{};+-*%<>~^".includes(prev)
+            || (prev === "w" && keywords.includes(word))
         const top = () => stack[stack.length - 1]
         const inside = () => ["'", '"', "`"].includes(top().mode)
         let starts = false
@@ -380,8 +394,9 @@ Panel {
             const c = text[i]
             const at = top()
             if (c === "\n") {
-                // A line comment ends here, and so does a quote left open.
-                if (at.mode === "line" || at.mode === "'" || at.mode === '"')
+                // A line comment ends here, and so does a quote or a regular
+                // expression left open.
+                if (at.mode === "line" || at.mode === "'" || at.mode === '"' || at.mode === "/")
                     stack.pop()
                 lineEnds()
             } else if (at.mode === "line") {
@@ -391,6 +406,18 @@ Panel {
                     stack.pop()
                     i++
                 }
+            } else if (at.mode === "/") {
+                // A `/` in a class is the class's; an escaped one is its own.
+                if (c === "\\")
+                    i++
+                else if (at.cls && c === "]")
+                    at.cls = false
+                else if (c === "[")
+                    at.cls = true
+                else if (!at.cls && c === "/") {
+                    stack.pop()
+                    prev = ")"
+                }
             } else if (at.mode !== "code") {
                 if (c === "\\") {
                     // An escaped line end goes on with the string.
@@ -399,8 +426,10 @@ Panel {
                         lineEnds()
                 } else if (c === at.mode) {
                     stack.pop()
+                    prev = ")"
                 } else if (at.mode === "`" && c === "$" && text[i + 1] === "{") {
                     stack.push({mode: "code", open: 0})
+                    prev = ""
                     i++
                 }
             } else if (c === "/" && text[i + 1] === "/") {
@@ -409,15 +438,27 @@ Panel {
             } else if (c === "/" && text[i + 1] === "*") {
                 stack.push({mode: "block"})
                 i++
+            } else if (c === "/" && startsRegex()) {
+                stack.push({mode: "/", cls: false})
             } else if (c === "'" || c === '"' || c === "`") {
                 stack.push({mode: c})
-            } else if (c === "{") {
-                at.open++
-            } else if (c === "}") {
-                if (at.open > 0)
-                    at.open--
-                else if (stack.length > 1)
-                    stack.pop()
+            } else if (/[A-Za-z0-9_$]/.test(c)) {
+                word = prev === "w" ? word + c : c
+                prev = "w"
+            } else if (c === " " || c === "\t" || c === "\r") {
+                continue
+            } else {
+                prev = c === ")" || c === "]" ? ")" : c
+                if (c === "{") {
+                    at.open++
+                } else if (c === "}") {
+                    if (at.open > 0)
+                        at.open--
+                    else if (stack.length > 1) {
+                        stack.pop()
+                        continue
+                    }
+                }
             }
         }
         lines.push({starts: starts, ends: inside()})
@@ -878,6 +919,10 @@ Panel {
     // selected when it was picked, and stays picked as the selection moves.
     property string picked: ""
     property string pickedOn: ""
+    // What a field shows is the picked state's: one typed or scrubbed over
+    // shows the state's value again once another is picked, or none.
+    onPickedChanged: reseed()
+    onPickedOnChanged: reseed()
     // For what else sets values: the canvas records into the same state.
     readonly property var recording: picked === "" ? null : {state: picked, on: {node: pickedOn}}
     readonly property var current: {
@@ -1699,6 +1744,7 @@ Panel {
                             : panel.selectedType.startsWith("Grid") ? ["spacing", "columns"]
                             : ["spacing"]
                         delegate: Field {
+                            id: layoutField
                             required property string modelData
                             required property int index
                             lead: ({spacing: "Gap", rowSpacing: "Row gap", columnSpacing: "Col gap", columns: "Cols"})[modelData]
@@ -1720,6 +1766,13 @@ Panel {
                                     panel.set(modelData, text)
                                 else if (panel.inState(modelData, panel.written(modelData)) !== "")
                                     panel.set(modelData, "null")
+                            }
+                            // A scrub writes over the binding.
+                            Connections {
+                                target: panel
+                                function onReseed() {
+                                    layoutField.text = Qt.binding(() => panel.inState(layoutField.modelData, panel.written(layoutField.modelData)))
+                                }
                             }
                         }
                     }
