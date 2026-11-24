@@ -339,7 +339,8 @@ Panel {
     // expression where a value may start (after punctuation, an opening
     // bracket or a keyword), a division after a value. A name's text alone
     // makes it no keyword: `of` is one only in the head of a `for (… of …)`
-    // after what it binds, so `of / 2` divides. The `)` that closes an
+    // after what it binds, so `of / 2` divides, and none is one after a `.`
+    // or a `#`, which make it a property's name. The `)` that closes an
     // `if`, `while`, `for` or `with` head ends no value: a statement starts
     // after it. A `++` or `--` right after a value on its line is postfix,
     // and ends one. (`yield` and `await` are read as keywords: as names they
@@ -364,7 +365,9 @@ Panel {
         // take `of` (a `;` makes it a counting loop), and for a statement's
         // head, that its `)` ends no value.
         const open = []
-        const value = () => prev === ")" || (prev === "w" && !keywords.includes(word))
+        // Whether the word names a property: `o.if()` is a call.
+        const named = () => after === "." || after === "#"
+        const value = () => prev === ")" || (prev === "w" && (named() || !keywords.includes(word)))
         return {
             // A character of code: not of a string, a comment or a regular
             // expression.
@@ -398,9 +401,10 @@ Panel {
                 postfix = (c === "+" || c === "-") && value() && !line ? c : ""
                 line = false
                 if (c === "(" || c === "[" || c === "{") {
-                    const head = c === "(" && prev === "w"
+                    const keyword = c === "(" && prev === "w" && !named()
+                    const head = keyword
                         && (word === "for" || (word === "await" && before === "for"))
-                    const statement = c === "(" && prev === "w"
+                    const statement = keyword
                         && (["if", "while", "for", "with"].includes(word) || (word === "await" && before === "for"))
                     open.push({of: head, statement: statement})
                 } else if (c === ")" || c === "]" || c === "}") {
@@ -437,7 +441,7 @@ Panel {
             regex: () => {
                 if (prev === "" || "(,=:[!&|?{};+-*%<>~^".includes(prev))
                     return true
-                if (prev !== "w")
+                if (prev !== "w" || named())
                     return false
                 if (word === "of") {
                     const head = open[open.length - 1]
