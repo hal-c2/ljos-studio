@@ -1008,6 +1008,7 @@ at d28e9440 it fails to resolve `ljos-web/theme` from its stage.
 | `files` | every file of the bundle with its size, and nothing else is in it; plain paths below the bundle, never `mocks/`, `.studio/` or `ljostypes.json`; no links, so a directory the project links to is listed again under the link's name |
 | `modules` | each of the project's modules (`module`) and its `qmldir`, both listed, each module once, and every listed qmldir that declares a module among them; every component a qmldir names is listed |
 | `imports` | every module a document imports that is not the project's, sorted: each one ljos-web at `ljos_web` provides |
+| `page` | optional: the head of the site's page, from the project's `ljos-page.json`; `title`, `description`, `icon` (the tab's) and `image` (a shared link's), each optional and nothing else; a picture names a listed file, and a builder refuses one that does not |
 | `blocks`, `left_out` | as in the native manifest, for a person reading it |
 | `ljos_web` | the ljos-web commit the imports were checked against (`web/ljos-web.rev`) |
 
