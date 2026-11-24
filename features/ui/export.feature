@@ -231,6 +231,17 @@ Feature: A person exports a native app or a web site from Studio's window
       Then the export panel says "^Would write \d+ files to build/native"
       And the export panel does not say "^Wrote"
 
+    # The check is a dry run, which writes nothing; the site is still there.
+    Scenario: A check that answers after a build keeps the site's path to copy
+      Given the person has clicked the button "Export"
+      And the person has chosen "Web site" in the export panel
+      When the answer to a web build that was on its way arrives in the export panel
+      And the check that was on its way answers
+      Then the export panel's button "Copy path" is enabled
+      When the person clicks the button "Copy path"
+      And the person pastes into the output directory in the export panel
+      Then the export panel's output directory reads "^build/web-site$"
+
     Scenario: A build that fails after writing the bundle says it was written
       Given the person has clicked the button "Export"
       And the person has chosen "Web site" in the export panel

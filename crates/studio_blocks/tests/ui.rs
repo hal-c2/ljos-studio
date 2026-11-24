@@ -3653,6 +3653,11 @@ fn late_page(w: &mut UiWorld, title: String, description: String) -> StepResult 
     let page = serde_json::json!({"title": title, "description": description});
     std::fs::write(w.dir.path().join("ljos-page.json"), page.to_string())
         .map_err(|e| e.to_string())?;
+    late_check(w)
+}
+
+#[when("the check that was on its way answers")]
+fn late_check(w: &mut UiWorld) -> StepResult {
     let window = w.window()?;
     export_waits_once_more(window)?;
     let answer = export_as_the_person(

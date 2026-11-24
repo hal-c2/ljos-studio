@@ -102,8 +102,13 @@ fn find_ljos_web(project: &Path, given: Option<&str>) -> Result<PathBuf, String>
     if let Some(env) = std::env::var_os("LJOS_WEB") {
         return ready(Path::new(&env));
     }
+    ljos_web_in(ljos_web_places(project))
+}
+
+/// The first of `places` that is an ljos-web.
+fn ljos_web_in(places: Vec<PathBuf>) -> Result<PathBuf, String> {
     let mut looked = Vec::new();
-    for dir in ljos_web_places(project) {
+    for dir in places {
         if dir.is_dir() {
             return ready(&dir);
         }
@@ -240,6 +245,9 @@ fn failed(step: &str, why: impl Into<String>, log: &Path, steps: &[BuildStep]) -
     }))
 }
 
+/// How long a build may take before it is stopped.
+const BUILD_DEADLINE: Duration = Duration::from_secs(15 * 60);
+
 /// Builds the export at `out` (below the project's `build/`) into
 /// `<out>-site`, serves it, and opens it when asked.
 pub fn build(
@@ -248,6 +256,18 @@ pub fn build(
     tools: &Toolchain,
     open: bool,
 ) -> Result<BuildOut, SurfaceError> {
+    build_within(root, out, tools, open, BUILD_DEADLINE)
+}
+
+/// [`build`], stopped when it takes longer than `deadline`.
+fn build_within(
+    root: &Path,
+    out: &str,
+    tools: &Toolchain,
+    open: bool,
+    deadline: Duration,
+) -> Result<BuildOut, SurfaceError> {
+    let _ = deadline;
     let _one = BUILDING.lock().unwrap_or_else(|e| e.into_inner());
     let site = format!("{out}{}", crate::export::SITE_SUFFIX);
     let work = root.join(SITE_WORK);
@@ -805,5 +825,160 @@ mod tests {
             find_ljos_web(dir.path(), Some("ljos-web")).unwrap(),
             web.canonicalize().unwrap()
         );
+    }
+
+    /// An ljos-web in `dir` with its packages installed, its node `node`.
+    fn ljos_web(dir: &Path, node: PathBuf) -> Toolchain {
+        let web = dir.join("ljos-web");
+        fs::create_dir_all(web.join("packages/runtime")).unwrap();
+        fs::write(web.join("packages/runtime/package.json"), "{}").unwrap();
+        for package in PACKAGES {
+            let at = web.join(MODULES).join(package);
+            fs::create_dir_all(&at).unwrap();
+            fs::write(at.join("package.json"), "{}").unwrap();
+        }
+        Toolchain {
+            ljos_web: web,
+            qmlc: dir.join("qmlc"),
+            node,
+        }
+    }
+
+    // A folder of that name that is not one, or one not installed, is
+    // passed over for the next place, as a place with nothing there is.
+    #[test]
+    fn a_place_that_holds_no_ready_ljos_web_is_passed_over() {
+        let dir = tempfile::tempdir().unwrap();
+        let unready = dir.path().join("first/ljos-web");
+        fs::create_dir_all(&unready).unwrap();
+        let tools = ljos_web(&dir.path().join("second"), dir.path().join("node"));
+        let found = ljos_web_in(vec![
+            dir.path().join("nothing"),
+            unready.clone(),
+            tools.ljos_web.clone(),
+        ])
+        .unwrap();
+        assert_eq!(found, tools.ljos_web.canonicalize().unwrap());
+        // With none ready, what the first one lacks is said.
+        let why = ljos_web_in(vec![unready.clone()]).unwrap_err();
+        assert!(why.contains("packages/runtime"), "{why}");
+    }
+
+    // The log of the build before is no account of this one.
+    #[test]
+    fn a_build_that_fails_before_it_logs_names_no_log() {
+        let root = tempfile::tempdir().unwrap();
+        let work = root.path().join(SITE_WORK);
+        fs::create_dir_all(&work).unwrap();
+        fs::write(work.join("build.log"), "the last build's").unwrap();
+        let tools = Toolchain {
+            ljos_web: root.path().join("none"),
+            qmlc: root.path().join("none"),
+            node: root.path().join("none"),
+        };
+        let refused = build(root.path(), "build/web", &tools, false)
+            .err()
+            .expect("the build was refused");
+        let details = refused.details.unwrap();
+        assert_eq!(details["kind"], "build_failed");
+        assert_eq!(details["log"], serde_json::Value::Null, "{details}");
+    }
+
+    // A builder that never ends is stopped, and the next build is not kept
+    // waiting on it.
+    #[cfg(unix)]
+    #[test]
+    fn a_build_that_takes_too_long_is_stopped() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = tempfile::tempdir().unwrap();
+        let node = root.path().join("node");
+        // A child of its own too, which holds the output open.
+        fs::write(&node, "#!/bin/sh\nsleep 30 &\nsleep 30\n").unwrap();
+        fs::set_permissions(&node, fs::Permissions::from_mode(0o755)).unwrap();
+        let tools = ljos_web(root.path(), node);
+        fs::create_dir_all(root.path().join("build/web")).unwrap();
+        for _ in 0..2 {
+            let (tx, rx) = std::sync::mpsc::channel();
+            let (at, tools) = (root.path().to_owned(), tools.clone());
+            std::thread::spawn(move || {
+                let _ = tx.send(build_within(
+                    &at,
+                    "build/web",
+                    &tools,
+                    false,
+                    Duration::from_secs(1),
+                ));
+            });
+            let refused = rx
+                .recv_timeout(Duration::from_secs(20))
+                .expect("the build was stopped")
+                .err()
+                .expect("the build was refused");
+            let details = refused.details.unwrap();
+            assert_eq!(details["kind"], "build_failed");
+            assert!(
+                details["why"].as_str().unwrap().contains("longer than"),
+                "{details}"
+            );
+        }
+    }
+
+    // Green before the change too: what it proves is that a file is served
+    // whole and its length said, not how much memory serving it takes.
+    #[test]
+    fn a_large_file_is_served_whole_and_a_head_request_gets_its_length() {
+        let (_dir, site) = site();
+        let big: Vec<u8> = (0..3_000_000u32).map(|i| (i % 251) as u8).collect();
+        fs::write(site.join("assets/big.bin"), &big).unwrap();
+        let url = serve(&site).unwrap();
+        let port: u16 = url
+            .trim_start_matches("http://127.0.0.1:")
+            .trim_end_matches('/')
+            .parse()
+            .unwrap();
+        let ask = |method: &str| {
+            let mut stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
+            let request =
+                format!("{method} /assets/big.bin HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n\r\n");
+            stream.write_all(request.as_bytes()).unwrap();
+            let mut said = Vec::new();
+            stream.read_to_end(&mut said).unwrap();
+            let end = said.windows(4).position(|w| w == b"\r\n\r\n").unwrap() + 4;
+            (
+                String::from_utf8_lossy(&said[..end]).into_owned(),
+                said[end..].to_vec(),
+            )
+        };
+        let (head, body) = ask("HEAD");
+        assert!(head.contains("Content-Length: 3000000\r\n"), "{head}");
+        assert!(body.is_empty());
+        let (head, body) = ask("GET");
+        assert!(head.starts_with("HTTP/1.1 200 OK"), "{head}");
+        assert!(body == big, "{} bytes served", body.len());
+    }
+
+    // The site is the directory it was when served: one put in its place
+    // later through a link is not read.
+    #[cfg(unix)]
+    #[test]
+    fn a_site_swapped_for_a_link_is_not_read() {
+        let (dir, site) = site();
+        let url = serve(&site).unwrap();
+        let port: u16 = url
+            .trim_start_matches("http://127.0.0.1:")
+            .trim_end_matches('/')
+            .parse()
+            .unwrap();
+        let other = dir.path().join("other");
+        fs::create_dir_all(&other).unwrap();
+        fs::write(other.join("index.html"), "theirs").unwrap();
+        fs::rename(&site, dir.path().join("site-before")).unwrap();
+        std::os::unix::fs::symlink(&other, &site).unwrap();
+        let mut stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
+        let request = format!("GET / HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n\r\n");
+        stream.write_all(request.as_bytes()).unwrap();
+        let mut said = String::new();
+        stream.read_to_string(&mut said).unwrap();
+        assert!(said.starts_with("HTTP/1.1 404"), "{said}");
     }
 }
