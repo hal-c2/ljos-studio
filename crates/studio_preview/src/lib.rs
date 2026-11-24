@@ -582,6 +582,10 @@ impl PreviewHost for NativeHost {
         Ok(())
     }
 
+    fn switches_appearance(&self) -> bool {
+        true
+    }
+
     fn appearance(&mut self, dark: bool) -> Result<(), PreviewError> {
         let scheme = if dark { "dark" } else { "light" };
         self.call("app_set_appearance", json!({ "color_scheme": scheme }))?;

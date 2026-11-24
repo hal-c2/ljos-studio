@@ -50,6 +50,8 @@ struct Seen {
     /// On the `n`th measure the `tall` item folds to this height first, as a
     /// page changes while it runs.
     folds: Option<(usize, f64)>,
+    /// The host can show the app dark or light; most cannot.
+    looks: bool,
     /// The host can be waited on: it rested once, and rests again as soon as
     /// a wait parks.
     watches: bool,
@@ -314,6 +316,17 @@ impl PreviewHost for Recorder {
             Input::Press(keys) => format!("press {keys}"),
             Input::Type(text) => format!("type {text}"),
         })
+    }
+
+    fn switches_appearance(&self) -> bool {
+        self.0.lock().unwrap().looks
+    }
+
+    fn appearance(&mut self, dark: bool) -> Result<(), PreviewError> {
+        self.note(format!(
+            "appearance {}",
+            if dark { "dark" } else { "light" }
+        ))
     }
 
     fn close(&mut self) {
@@ -922,6 +935,51 @@ fn another_document_starts_another_preview() {
 }
 
 #[test]
+fn a_look_the_preview_cannot_show_is_refused_before_the_open_preview_ends() {
+    let f = Fixture::new();
+    f.call("preview_open", json!({ "doc": "Shell.qml" }))
+        .unwrap();
+    for doc in ["Other.qml", "Shell.qml"] {
+        let refused = f
+            .call("preview_open", json!({ "doc": doc, "appearance": "dark" }))
+            .unwrap_err();
+        assert!(
+            refused["message"].as_str().unwrap().contains("appearance"),
+            "{refused}"
+        );
+    }
+    assert_eq!(f.calls(), ["open Shell.qml 1280x800 []"]);
+    let events = f.call("preview_events", json!({})).unwrap();
+    assert_eq!(events["open"], true, "{events}");
+}
+
+#[test]
+fn a_new_preview_that_refuses_its_look_is_closed_and_none_is_left_open() {
+    let f = Fixture::new();
+    f.seen.lock().unwrap().looks = true;
+    f.call("preview_open", json!({ "doc": "Shell.qml" }))
+        .unwrap();
+    f.fail("appearance", refused());
+    f.call(
+        "preview_open",
+        json!({ "doc": "Other.qml", "appearance": "dark" }),
+    )
+    .unwrap_err();
+    assert_eq!(
+        f.calls(),
+        [
+            "open Shell.qml 1280x800 []",
+            "close",
+            "open Other.qml 1280x800 []",
+            "appearance dark",
+            "close"
+        ]
+    );
+    let events = f.call("preview_events", json!({})).unwrap();
+    assert_eq!(events["open"], false, "{events}");
+}
+
+#[test]
 fn every_write_reloads_the_preview_before_the_tool_answers() {
     let f = Fixture::new();
     f.call("preview_open", json!({ "doc": "Shell.qml" }))
@@ -1151,6 +1209,8 @@ fn a_preview_that_ends_as_it_opens_answers_ended() {
     for (reused, appearance) in [(false, false), (false, true), (true, false), (true, true)] {
         let case = format!("reused {reused}, appearance {appearance}");
         let f = Fixture::new();
+        // One that can switch its look: the end is met before the look.
+        f.seen.lock().unwrap().looks = true;
         let mut args = json!({ "doc": "Shell.qml" });
         if reused {
             f.call("preview_open", args.clone()).unwrap();
@@ -2048,7 +2108,10 @@ fn a_refused_open_that_changed_the_preview_tells_the_windows() {
             f.fail("alias", refused());
             json!({ "doc": "Shell.qml", "target": "phone", "state": "mocked" })
         } else {
-            // The host can't switch its look, and says so once it has started.
+            // The host says it switches its look, and refuses it once it has
+            // started.
+            f.seen.lock().unwrap().looks = true;
+            f.fail("appearance", refused());
             json!({ "doc": "Shell.qml", "appearance": "dark" })
         };
         while f.told.try_recv().is_ok() {}
