@@ -17,10 +17,9 @@ use std::{
     io::{BufRead, BufReader, Read, Write},
     net::{TcpListener, TcpStream},
     path::{Component, Path, PathBuf},
-    process::{Child, Command, Stdio},
+    process::{Command, ExitStatus, Stdio},
     sync::{
         Arc, LazyLock, Mutex,
-        atomic::{AtomicBool, Ordering},
         mpsc::{self, RecvTimeoutError},
     },
     time::{Duration, Instant},
@@ -328,6 +327,19 @@ fn build_within(
         .spawn()
         .map_err(|e| failed(setup, format!("node did not start: {e}"), Some(&log), &[]))?;
     let said = BufReader::new(child.stdout.take().expect("piped"));
+    let pid = child.id();
+    // Waited for on a thread of its own, so a builder that closes its
+    // output and lives on is still stopped at the deadline.
+    let (exited, waited) = mpsc::channel();
+    let waiter = std::thread::Builder::new()
+        .name("site build wait".to_owned())
+        .spawn(move || {
+            let _ = exited.send(child.wait());
+        });
+    if let Err(e) = waiter {
+        stop(pid, None);
+        return Err(failed(setup, e.to_string(), Some(&log), &[]));
+    }
     // Read on a thread of its own, so a builder that hangs without a word
     // is still stopped at the deadline.
     let (tx, lines) = mpsc::channel();
@@ -341,7 +353,7 @@ fn build_within(
             }
         });
     if let Err(e) = reader {
-        stop(&mut child);
+        stop(pid, Some(&waited));
         return Err(failed(setup, e.to_string(), Some(&log), &[]));
     }
     let started = Instant::now();
@@ -349,22 +361,23 @@ fn build_within(
     let mut since = Instant::now();
     let mut bytes = None;
     let mut why = None;
+    let too_long = |steps: &mut Vec<BuildStep>, since: Instant| {
+        stop(pid, Some(&waited));
+        if let Some(last) = steps.last_mut() {
+            last.ms = since.elapsed().as_secs_f64() * 1000.0;
+        }
+        let step = steps.last().map_or(setup, |s| s.what.as_str()).to_owned();
+        let why = format!(
+            "it took longer than {} and was stopped; its log says how far it got",
+            span(deadline)
+        );
+        failed(&step, why, Some(&log), steps)
+    };
     loop {
-        let line = match next_line(&lines, started, deadline) {
+        let line = match in_time(&lines, started, deadline) {
             Ok(line) => line,
             Err(RecvTimeoutError::Disconnected) => break,
-            Err(RecvTimeoutError::Timeout) => {
-                stop(&mut child);
-                if let Some(last) = steps.last_mut() {
-                    last.ms = since.elapsed().as_secs_f64() * 1000.0;
-                }
-                let step = steps.last().map_or(setup, |s| s.what.as_str()).to_owned();
-                let why = format!(
-                    "it took longer than {} and was stopped; its log says how far it got",
-                    span(deadline)
-                );
-                return Err(failed(&step, why, Some(&log), &steps));
-            }
+            Err(RecvTimeoutError::Timeout) => return Err(too_long(&mut steps, since)),
         };
         let close = |steps: &mut Vec<BuildStep>, since: Instant| {
             if let Some(last) = steps.last_mut() {
@@ -386,7 +399,13 @@ fn build_within(
             why = Some(what.to_owned());
         }
     }
-    let status = child.wait();
+    let status = match in_time(&waited, started, deadline) {
+        Ok(status) => status,
+        Err(RecvTimeoutError::Timeout) => return Err(too_long(&mut steps, since)),
+        Err(RecvTimeoutError::Disconnected) => {
+            Err(std::io::Error::other("the builder's end was not seen"))
+        }
+    };
     let step = steps.last().map_or(setup, |s| s.what.as_str()).to_owned();
     match (status, why, bytes) {
         (_, Some(why), _) => return Err(failed(&step, why, Some(&log), &steps)),
@@ -423,37 +442,43 @@ fn build_within(
     })
 }
 
-/// The builder's next line, or `Timeout` once `deadline` has passed since
-/// `started`.
-fn next_line(
-    lines: &mpsc::Receiver<String>,
+/// What the builder says or does next (a line, its end), or `Timeout` once
+/// `deadline` has passed since `started`.
+fn in_time<T>(
+    next: &mpsc::Receiver<T>,
     started: Instant,
     deadline: Duration,
-) -> Result<String, RecvTimeoutError> {
+) -> Result<T, RecvTimeoutError> {
     let left = deadline.saturating_sub(started.elapsed());
-    // With no time left a line already queued would still be handed over.
+    // With no time left what is already queued would still be handed over.
     if left.is_zero() {
         return Err(RecvTimeoutError::Timeout);
     }
-    lines.recv_timeout(left)
+    next.recv_timeout(left)
 }
 
-/// Stops a builder and all it started.
-fn stop(child: &mut Child) {
+/// Stops the builder `pid` and all it started (its own process group),
+/// then sees it end on the thread that `waited` hears from.
+fn stop(pid: u32, waited: Option<&mpsc::Receiver<std::io::Result<ExitStatus>>>) {
     #[cfg(unix)]
-    let _ = Command::new("kill")
-        .args(["-KILL", "--", &format!("-{}", child.id())])
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status();
+    if let Some(group) = i32::try_from(pid)
+        .ok()
+        .and_then(rustix::process::Pid::from_raw)
+    {
+        let _ = rustix::process::kill_process_group(group, rustix::process::Signal::KILL);
+    }
     #[cfg(windows)]
     let _ = Command::new("taskkill")
-        .args(["/T", "/F", "/PID", &child.id().to_string()])
+        .args(["/T", "/F", "/PID", &pid.to_string()])
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .status();
-    let _ = child.kill();
-    let _ = child.wait();
+    #[cfg(not(any(unix, windows)))]
+    let _ = pid;
+    // One the system would not stop is left, not waited on for ever.
+    if let Some(waited) = waited {
+        let _ = waited.recv_timeout(Duration::from_secs(10));
+    }
 }
 
 /// A length of time in plain words.
@@ -542,40 +567,67 @@ fn link_dir(to: &Path, at: &Path) -> std::io::Result<()> {
 /// Studio runs, so a site built again keeps its address.
 static SERVED: LazyLock<Mutex<HashMap<PathBuf, Served>>> = LazyLock::new(Mutex::default);
 
-/// A site's server: its port, and whether it answers with the site, which
-/// it does only while the site is the build of the bundle beside it.
+/// A site's server: its port, and the site it answers with, which it has
+/// only while that is the build of the bundle beside it.
 struct Served {
     port: u16,
-    open: Arc<AtomicBool>,
+    site: Answers,
+}
+
+/// The site a server answers with now, if any; each build puts its own.
+type Answers = Arc<Mutex<Option<Arc<Site>>>>;
+
+/// A site as a build left it: its directory's real path and, where the
+/// system opens files relative to a directory, that directory held open,
+/// so what is put at its path later, or into it as a link, is not read.
+struct Site {
+    root: PathBuf,
+    #[cfg(unix)]
+    dir: fs::File,
+}
+
+impl Site {
+    fn pin(site: &Path) -> std::io::Result<Self> {
+        let root = site.canonicalize()?;
+        #[cfg(unix)]
+        let dir = {
+            use rustix::fs::{Mode, OFlags};
+            let flags = OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC;
+            fs::File::from(rustix::fs::open(&root, flags, Mode::empty())?)
+        };
+        Ok(Self {
+            root,
+            #[cfg(unix)]
+            dir,
+        })
+    }
 }
 
 /// The address this machine serves `site` on, which nobody else can reach.
+/// Called once a build has made it: what it answers with is the directory
+/// there now.
 pub fn serve(site: &Path) -> std::io::Result<String> {
+    let pinned = Arc::new(Site::pin(site)?);
     let mut served = SERVED.lock().unwrap_or_else(|e| e.into_inner());
     if let Some(server) = served.get(site) {
-        server.open.store(true, Ordering::SeqCst);
+        *server.site.lock().unwrap_or_else(|e| e.into_inner()) = Some(pinned);
         return Ok(format!("http://127.0.0.1:{}/", server.port));
     }
-    // The directory it is now: a link put in its place later leads nowhere
-    // the server reads.
-    let root = site.canonicalize()?;
     let listener = TcpListener::bind(("127.0.0.1", 0))?;
     let port = listener.local_addr()?.port();
-    let dir = root;
-    let open = Arc::new(AtomicBool::new(true));
-    let answers = Arc::clone(&open);
+    let now: Answers = Arc::new(Mutex::new(Some(pinned)));
+    let answers = Arc::clone(&now);
     std::thread::Builder::new()
         .name("site server".to_owned())
         .spawn(move || {
             for stream in listener.incoming().map_while(Result::ok) {
-                let dir = dir.clone();
-                let open = Arc::clone(&answers);
+                let site = Arc::clone(&answers);
                 let _ = std::thread::Builder::new()
                     .name("site request".to_owned())
-                    .spawn(move || answer(stream, &dir, port, &open));
+                    .spawn(move || answer(stream, &site, port));
             }
         })?;
-    served.insert(site.to_owned(), Served { port, open });
+    served.insert(site.to_owned(), Served { port, site: now });
     Ok(format!("http://127.0.0.1:{port}/"))
 }
 
@@ -589,11 +641,11 @@ pub fn withdraw(site: &Path) {
         .iter()
         .filter(|(at, _)| crate::export::folded(at) == site)
     {
-        server.open.store(false, Ordering::SeqCst);
+        *server.site.lock().unwrap_or_else(|e| e.into_inner()) = None;
     }
 }
 
-fn answer(mut stream: TcpStream, site: &Path, port: u16, open: &AtomicBool) {
+fn answer(mut stream: TcpStream, site: &Mutex<Option<Arc<Site>>>, port: u16) {
     let _ = stream.set_read_timeout(Some(Duration::from_secs(10)));
     let _ = stream.set_write_timeout(Some(Duration::from_secs(30)));
     let mut head = Vec::new();
@@ -629,15 +681,11 @@ fn answer(mut stream: TcpStream, site: &Path, port: u16, open: &AtomicBool) {
     if !body && method != "HEAD" {
         return reply(&mut stream, "405 Method Not Allowed", None, false);
     }
-    if !open.load(Ordering::SeqCst) {
+    let site = site.lock().unwrap_or_else(|e| e.into_inner()).clone();
+    let Some(site) = site else {
         return reply(&mut stream, "404 Not Found", None, false);
-    }
-    let file = resolve(site, target).and_then(|at| {
-        let file = fs::File::open(&at).ok()?;
-        let len = file.metadata().ok()?.len();
-        Some((at, file, len))
-    });
-    match file {
+    };
+    match open_in(&site, target) {
         Some((at, file, len)) => reply(&mut stream, "200 OK", Some((&at, file, len)), body),
         None => reply(&mut stream, "404 Not Found", None, false),
     }
@@ -676,14 +724,13 @@ fn reply(stream: &mut TcpStream, status: &str, file: Option<(&Path, fs::File, u6
     }
 }
 
-/// The file of `site`, a directory's real path, that a request's target
-/// names, or `None`: a path out of it, a hidden name (the build's stamp) or
-/// nothing there.
-fn resolve(site: &Path, target: &str) -> Option<PathBuf> {
+/// The names below the site a request's target goes through, or `None`
+/// for a path out of it or a hidden name (the build's stamp).
+fn names(target: &str) -> Option<Vec<String>> {
     let path = target.split(['?', '#']).next()?;
     let path = path.strip_prefix('/')?;
     let decoded = percent_decode(path)?;
-    let mut at = site.to_owned();
+    let mut names = Vec::new();
     for part in decoded.split('/') {
         if part.is_empty() {
             continue;
@@ -691,19 +738,78 @@ fn resolve(site: &Path, target: &str) -> Option<PathBuf> {
         if part.starts_with('.') || part.contains('\\') {
             return None;
         }
-        at.push(part);
+        names.push(part.to_owned());
     }
-    if !Path::new(&decoded)
+    Path::new(&decoded)
         .components()
         .all(|c| matches!(c, Component::Normal(_) | Component::CurDir))
-    {
+        .then_some(names)
+}
+
+/// The file of `site` a request's target names, opened: its path below
+/// the site (a directory's is its `index.html`), the file and its length.
+/// `None` for a path out of it, a hidden name, nothing there, or a site no
+/// longer at its place.
+#[cfg(unix)]
+fn open_in(site: &Site, target: &str) -> Option<(PathBuf, fs::File, u64)> {
+    use std::os::unix::fs::MetadataExt;
+
+    use rustix::fs::{Mode, OFlags};
+    let mut names = names(target)?;
+    // A directory put where the site was is not what the build made.
+    let (now, held) = (
+        fs::symlink_metadata(&site.root).ok()?,
+        site.dir.metadata().ok()?,
+    );
+    if !now.is_dir() || (now.dev(), now.ino()) != (held.dev(), held.ino()) {
         return None;
     }
+    // Each name opened below the one before and none followed as a link,
+    // so a link swapped in while this reads leads nowhere. Not blocking:
+    // a pipe put there is not waited on.
+    let flags = OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::CLOEXEC | OFlags::NONBLOCK;
+    let open = |dir: &fs::File, name: &str| {
+        rustix::fs::openat(dir, name, flags, Mode::empty())
+            .ok()
+            .map(fs::File::from)
+    };
+    let mut file: Option<fs::File> = None;
+    for name in &names {
+        file = Some(open(file.as_ref().unwrap_or(&site.dir), name)?);
+    }
+    let mut file = match file {
+        Some(file) => file,
+        None => site.dir.try_clone().ok()?,
+    };
+    let mut meta = file.metadata().ok()?;
+    if meta.is_dir() {
+        file = open(&file, "index.html")?;
+        meta = file.metadata().ok()?;
+        names.push("index.html".to_owned());
+    }
+    meta.is_file()
+        .then(|| (names.iter().collect(), file, meta.len()))
+}
+
+/// The file of `site` a request's target names, opened: its path below
+/// the site (a directory's is its `index.html`), the file and its length,
+/// or `None` for a path out of it, a hidden name or nothing there.
+#[cfg(not(unix))]
+fn open_in(site: &Site, target: &str) -> Option<(PathBuf, fs::File, u64)> {
+    let mut names = names(target)?;
+    let mut at = site.root.clone();
+    at.extend(&names);
     if at.is_dir() {
         at.push("index.html");
+        names.push("index.html".to_owned());
     }
     let real = at.canonicalize().ok()?;
-    (real.starts_with(site) && real.is_file()).then_some(real)
+    if !(real.starts_with(&site.root) && real.is_file()) {
+        return None;
+    }
+    let file = fs::File::open(&real).ok()?;
+    let len = file.metadata().ok()?.len();
+    Some((names.iter().collect(), file, len))
 }
 
 fn percent_decode(text: &str) -> Option<String> {
@@ -822,21 +928,21 @@ mod tests {
     #[test]
     fn a_request_reads_only_files_of_the_site() {
         let (_dir, site) = site();
-        let real = site.canonicalize().unwrap();
-        let site = real.clone();
-        assert_eq!(resolve(&site, "/"), Some(real.join("index.html")));
-        assert_eq!(resolve(&site, "/?x=1"), Some(real.join("index.html")));
+        let site = Site::pin(&site).unwrap();
+        let found = |target: &str| open_in(&site, target).map(|(at, ..)| at);
+        assert_eq!(found("/"), Some(PathBuf::from("index.html")));
+        assert_eq!(found("/?x=1"), Some(PathBuf::from("index.html")));
         assert_eq!(
-            resolve(&site, "/assets/a%20b.js"),
-            Some(real.join("assets/a b.js"))
+            found("/assets/a%20b.js"),
+            Some(PathBuf::from("assets/a b.js"))
         );
-        assert_eq!(resolve(&site, "/../secret.txt"), None);
-        assert_eq!(resolve(&site, "/%2e%2e/secret.txt"), None);
-        assert_eq!(resolve(&site, "/assets/..%2f..%2fsecret.txt"), None);
-        assert_eq!(resolve(&site, "/.ljos-site-build"), None);
-        assert_eq!(resolve(&site, "/nothing.js"), None);
-        assert_eq!(resolve(&site, "secret.txt"), None);
-        assert_eq!(resolve(&site, "/%zz"), None);
+        assert_eq!(found("/../secret.txt"), None);
+        assert_eq!(found("/%2e%2e/secret.txt"), None);
+        assert_eq!(found("/assets/..%2f..%2fsecret.txt"), None);
+        assert_eq!(found("/.ljos-site-build"), None);
+        assert_eq!(found("/nothing.js"), None);
+        assert_eq!(found("secret.txt"), None);
+        assert_eq!(found("/%zz"), None);
     }
 
     #[cfg(unix)]
@@ -844,7 +950,7 @@ mod tests {
     fn a_link_out_of_the_site_is_not_followed() {
         let (dir, site) = site();
         std::os::unix::fs::symlink(dir.path().join("secret.txt"), site.join("out.txt")).unwrap();
-        assert_eq!(resolve(&site, "/out.txt"), None);
+        assert!(open_in(&Site::pin(&site).unwrap(), "/out.txt").is_none());
     }
 
     #[cfg(unix)]
@@ -1101,6 +1207,7 @@ mod tests {
     }
 
     /// What `GET target` on the site served at `url` answers.
+    #[cfg(unix)]
     fn get(url: &str, target: &str) -> String {
         let port: u16 = url
             .trim_start_matches("http://127.0.0.1:")
@@ -1181,7 +1288,7 @@ mod tests {
         let (tx, lines) = mpsc::channel();
         tx.send("step still going".to_owned()).unwrap();
         assert_eq!(
-            next_line(&lines, Instant::now(), Duration::ZERO),
+            in_time(&lines, Instant::now(), Duration::ZERO),
             Err(RecvTimeoutError::Timeout)
         );
     }

@@ -34,6 +34,11 @@ serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 
+# A served site's files opened below its directory held open, no link
+# followed; a builder's process group stopped without starting `kill`.
+[target.'cfg(unix)'.dependencies]
+rustix = { workspace = true, features = ["fs", "process"] }
+
 # What the palette offers is read here, on the machine that builds: see build.rs.
 [build-dependencies]
 qt_types.workspace = true
