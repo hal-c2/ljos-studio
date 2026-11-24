@@ -871,15 +871,17 @@ struct Sources {
 }
 
 impl Sources {
+    /// The root is taken where it really is, as the files are below.
     fn new(root: Option<&Path>) -> Self {
         Sources {
-            root: root.map(Path::to_owned),
+            root: root.and_then(|root| root.canonicalize().ok()),
             read: HashMap::new(),
         }
     }
 
     /// `file`'s text, if it is a file of the project. A name the app gave
     /// is not trusted to stay in it: an absolute one would leave the root,
+    /// a link in the project can lead out of it, as the store judges links,
     /// and a pipe or a device would never end its read.
     fn file(&mut self, file: &str) -> Option<&str> {
         let root = self.root.as_deref()?;
@@ -890,8 +892,8 @@ impl Sources {
                 let inside = name
                     .components()
                     .all(|c| matches!(c, Component::Normal(_) | Component::CurDir));
-                let path = root.join(name);
-                if inside && path.is_file() {
+                let path = root.join(name).canonicalize().ok()?;
+                if inside && path.starts_with(root) && path.is_file() {
                     std::fs::read_to_string(path).ok()
                 } else {
                     None
@@ -1300,6 +1302,25 @@ mod tests {
         assert_eq!(sources.text_at(Some(&format!("../{name}")), Some(1)), None);
         std::fs::create_dir_all(root.join("Dir.qml")).unwrap();
         assert_eq!(sources.text_at(Some("Dir.qml"), None), None);
+        std::fs::remove_file(&outside).unwrap();
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_link_in_the_project_is_read_only_where_it_leads_inside_it() {
+        let (mut p, _) = previews(VecDeque::new(), false);
+        let root = rooted(&mut p, "Item {}\n");
+        let outside = root.with_extension("secret.qml");
+        std::fs::write(&outside, "Item { id: secret }\n").unwrap();
+        std::os::unix::fs::symlink(&outside, root.join("Out.qml")).unwrap();
+        std::os::unix::fs::symlink("Main.qml", root.join("In.qml")).unwrap();
+        let mut sources = Sources::new(Some(root.as_path()));
+        assert_eq!(sources.text_at(Some("Out.qml"), Some(1)), None);
+        assert_eq!(
+            sources.text_at(Some("In.qml"), Some(1)).as_deref(),
+            Some("Item {}")
+        );
         std::fs::remove_file(&outside).unwrap();
         std::fs::remove_dir_all(&root).unwrap();
     }
