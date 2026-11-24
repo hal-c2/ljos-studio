@@ -85,7 +85,7 @@ struct OpenOut {
 #[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct StateArgs {
-    /// The object to read, by `id`; in the previewed document unless `doc` names another. Left out, it only acts.
+    /// The object to read, by `id`, in `doc`, else the previewed one. Left out, it only acts.
     node: Option<Address>,
     doc: Option<String>,
     /// Show `node` in this QML state through reloads, until `""`.
@@ -1339,7 +1339,7 @@ pub(crate) fn add(registry: ToolRegistry, studio: &Arc<Mutex<Studio>>) -> ToolRe
         .with(
             ToolDef::new::<OpenArgs>(
                 "preview_open",
-                "Run a document in a preview for a target, live or mocked (`state`). On the open preview it changes size, fit or state in place; `state_kept` says whether the app's state survived.",
+                "Run a document in a preview for a target, live or mocked (`state`). On the open preview it changes size, fit or state in place; `state_kept`: whether the app's state survived.",
             )
             .answers::<OpenOut>()
             .requires(Cap::Run)

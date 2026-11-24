@@ -16,7 +16,7 @@ expression: value
         "additionalProperties": {
           "type": "string"
         },
-        "description": "`node` (session handle), `id`, or `document_tree` `path` (this text only).",
+        "description": "Session handle `node`, `id`, or `document_tree` `path` (this text only).",
         "type": "object"
       }
     },
@@ -59,7 +59,7 @@ expression: value
         "type": "boolean"
       },
       "from": {
-        "description": "Transitions: the states between; `*` (any) if left out.",
+        "description": "Transitions: the states between; default `*` (any).",
         "type": "string"
       },
       "generation": {
@@ -79,14 +79,14 @@ expression: value
       },
       "node": {
         "$ref": "#/$defs/Address",
-        "description": "The object whose states these are; the root when left out."
+        "description": "The object whose states these are; default the root."
       },
       "open": {
         "description": "`interaction`: a document beside this one to open, not with `state`.",
         "type": "string"
       },
       "signal": {
-        "description": "Interactions: its signal (`clicked`); a `TapHandler`'s tap if left out.",
+        "description": "Interactions: its signal (`clicked`); default a `TapHandler`'s tap.",
         "type": "string"
       },
       "state": {
@@ -105,7 +105,7 @@ expression: value
         "description": "Interactions: the object tapped."
       },
       "value": {
-        "description": "`change`: a literal; with neither this nor `binding`, the value is removed.",
+        "description": "`change`: a literal; neither this nor `binding` removes the value.",
         "type": [
           "boolean",
           "number",

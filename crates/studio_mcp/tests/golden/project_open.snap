@@ -22,7 +22,7 @@ expression: value
         "type": "string"
       },
       "data": {
-        "description": "`import`: the file's bytes in base64, for a client with no file here; needs `name`.",
+        "description": "`import`: the file's bytes in base64 (a client with no file here); needs `name`.",
         "type": "string"
       },
       "file": {
@@ -34,7 +34,7 @@ expression: value
         "type": "string"
       },
       "path": {
-        "description": "Relative or absolute (`.` is the workspace). Left out, describes the open project.",
+        "description": "Relative or absolute (`.` is the workspace). Left out: the open project.",
         "type": "string"
       }
     },

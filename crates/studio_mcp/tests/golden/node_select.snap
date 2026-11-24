@@ -36,7 +36,7 @@ expression: value
         "type": "string"
       },
       "hold": {
-        "description": "Also hold the selection and what it holds (`mutate`): others' edits of them are `busy` until the caller is idle five seconds (five minutes at most). Selecting nothing lets go.",
+        "description": "Also hold the selection and what it holds (`mutate`): others' edits of them are `busy` until the caller is idle 5 s (5 min at most). Selecting nothing lets go.",
         "type": "boolean"
       },
       "nodes": {
@@ -45,7 +45,7 @@ expression: value
           "additionalProperties": {
             "type": "string"
           },
-          "description": "`node` (session handle), `id`, or `document_tree` `path` (this text only).",
+          "description": "Session handle `node`, `id`, or `document_tree` `path` (this text only).",
           "type": "object"
         },
         "type": "array"

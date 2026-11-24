@@ -33,7 +33,7 @@ expression: value
         "type": "string"
       },
       "typing": {
-        "description": "A person's typing: joins the last in one undo step until a pause of a second or a new word.",
+        "description": "A person's typing: joins the last in one undo step until a 1 s pause or a new word.",
         "type": "boolean"
       }
     },
