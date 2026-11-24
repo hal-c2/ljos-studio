@@ -224,6 +224,34 @@ Feature: A person pins an object from the inspector's Layout section
     When the person sets "y" to "30" in the inspector
     Then the file "Main.qml" says "y: 30"
 
+  # A place the file does not write, set in a state, is the state's change:
+  # the field shows it whenever the state is picked, and emptying it takes
+  # the change out.
+  @preview
+  Scenario: A place set in a state that the file does not write shows the state's
+    Given the person has selected "Grid table" in the layers panel
+    And the person has added the state "compact" in the inspector
+    And the person has picked the state "compact" in the inspector
+    When the person sets "y" to "30" in the inspector
+    Then the file "Main.qml" says "target: table"
+    And the file "Main.qml" says "y: 30"
+    And the inspector's "y" holds "30"
+    When the person lets go of the state "compact" in the inspector
+    Then the inspector's "y" holds ""
+    When the person picks the state "compact" in the inspector
+    Then the inspector's "y" holds "30"
+    When the person sets "y" to "" in the inspector
+    Then the file "Main.qml" does not say "y: 30"
+    And the inspector's "y" holds ""
+
+  @preview
+  Scenario: A place a state gives shows when the object is selected in that state
+    Given the person has replaced "id: root\n" with "id: root\n    states: State { name: \"compact\"; PropertyChanges { target: table; y: 30 } }\n" in the code view
+    And the person has selected "Item root" in the layers panel
+    And the person has picked the state "compact" in the inspector
+    When the person selects "Grid table" in the layers panel
+    Then the inspector's "y" holds "30"
+
   @preview
   Scenario: What has no place on the canvas is offered none
     When the person selects "Timer tick" in the layers panel

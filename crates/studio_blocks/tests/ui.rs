@@ -1251,8 +1251,9 @@ fn selects_layer(w: &mut UiWorld, label: String) -> StepResult {
     });
     match shown {
         Some(row) if row["label"] == label.as_str() => Ok(()),
-        _ => Err(format!(
-            "{label:?} is not selected: {:?}",
+        shown => Err(format!(
+            "{label:?} is not selected: {selected:?} is, listed as {:?}; the error {:?}",
+            shown.map(|row| row["label"].clone()),
             window.read("error").to_js_string()
         )),
     }
