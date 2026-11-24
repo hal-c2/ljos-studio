@@ -67,7 +67,7 @@ impl Harness {
             let root = dir.canonicalize().unwrap_or_else(|_| dir.to_owned());
             (root, dir.join(&self.path))
         });
-        let held = file.as_ref().and_then(|(_, file)| hold(file));
+        let held = file.as_ref().and_then(|(root, file)| hold(root, file));
         Standing {
             path: self.path.clone(),
             file,
@@ -100,18 +100,44 @@ struct Held {
     path: PathBuf,
 }
 
-/// What a hold beside `file` is named: `<file>.<run>.<ext>`.
-fn hold_path(file: &Path, run: &str, ext: &str) -> Option<PathBuf> {
+/// The project's preview gate, beside its samples in Studio's sidecar.
+const GATE: &str = ".studio/preview.lock";
+
+/// Takes the gate of the project at `root`: held while a preview makes its
+/// hold, and while one that ends counts the holds and removes the file, so
+/// no hold is made between that count and that removal. Waits for another
+/// Studio's turn, which is a few file operations long. None when there is
+/// none to take: the sidecar cannot be made, or leads out of the project.
+fn gate(root: &Path) -> Option<File> {
+    let dir = root.join(".studio");
+    std::fs::create_dir_all(&dir).ok()?;
+    if !dir.canonicalize().ok()?.starts_with(root) {
+        return None;
+    }
+    let gate = File::options()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(root.join(GATE))
+        .ok()?;
+    gate.lock().ok()?;
+    Some(gate)
+}
+
+/// What a hold beside `file` is named: `<file>.<run>.lock`.
+fn hold_path(file: &Path, run: &str) -> Option<PathBuf> {
     let mut name = file.file_name()?.to_os_string();
-    name.push(format!(".{run}.{ext}"));
+    name.push(format!(".{run}.lock"));
     Some(file.with_file_name(name))
 }
 
-/// Holds `file` for this preview. Made and locked under another name, then
-/// renamed into place, so no other Studio sees it unlocked and takes it
-/// for a killed one's.
-fn hold(file: &Path) -> Option<Held> {
+/// Holds `file` for this preview, under the gate of the project at `root`.
+/// Nothing counts the holds meanwhile, so it is made in place: one a killed
+/// Studio made and did not lock is a file nobody holds, which the next
+/// count removes as a dead hold's.
+fn hold(root: &Path, file: &Path) -> Option<Held> {
     static NEXT: AtomicU64 = AtomicU64::new(0);
+    let _gate = gate(root)?;
     // Unique among the holds of live runs: a pid is not reused while its
     // run lives, and the count tells this run's apart.
     let run = format!(
@@ -119,12 +145,11 @@ fn hold(file: &Path) -> Option<Held> {
         std::process::id(),
         NEXT.fetch_add(1, Ordering::Relaxed)
     );
-    let making = hold_path(file, &run, "making")?;
-    let lock = File::create(&making).ok()?;
-    let path = hold_path(file, &run, "lock")?;
-    if lock.try_lock().is_err() || std::fs::rename(&making, &path).is_err() {
+    let path = hold_path(file, &run)?;
+    let lock = File::create(&path).ok()?;
+    if lock.try_lock().is_err() {
         // std opens files shareable for deletion, so it goes while open.
-        let _ = std::fs::remove_file(&making);
+        let _ = std::fs::remove_file(&path);
         return None;
     }
     Some(Held { lock, path })
@@ -155,8 +180,8 @@ fn held_by_another(file: &Path) -> bool {
             continue;
         };
         match lock.try_lock() {
-            // Taken: its preview has ended. Removed while held, so no
-            // starting run's hold of that name is taken for it.
+            // Taken: its preview has ended, or its Studio was killed before
+            // it locked it.
             Ok(()) => {
                 let _ = std::fs::remove_file(entry.path());
             }
@@ -168,21 +193,31 @@ fn held_by_another(file: &Path) -> bool {
     held
 }
 
+/// Leave to remove a harness: the project's gate, held until it has gone.
+struct Leave {
+    _gate: Option<File>,
+}
+
 impl Standing {
-    /// Lets go of this preview's hold, and says whether another preview
-    /// still runs from the file, which then stays.
-    fn release(&mut self) -> bool {
+    /// Lets go of this preview's hold. Some when the file is this
+    /// preview's to remove: no other preview holds it, or it is outside the
+    /// project, where another's holds are not this Studio's to judge.
+    fn release(&mut self) -> Option<Leave> {
+        let gate = match &self.file {
+            Some((root, _)) if self.inside() => gate(root),
+            _ => None,
+        };
         if let Some(held) = self.held.take() {
             // Let go before it goes, so whoever looks next may take it.
             let _ = held.lock.unlock();
             let _ = std::fs::remove_file(&held.path);
         }
-        // Outside the project, another's holds are not this Studio's to judge.
-        self.inside()
+        let another = self.inside()
             && self
                 .file
                 .as_ref()
-                .is_some_and(|(_, file)| held_by_another(file))
+                .is_some_and(|(_, file)| held_by_another(file));
+        (!another).then_some(Leave { _gate: gate })
     }
 
     /// Whether the file's directory is still inside the project. The
@@ -200,21 +235,22 @@ impl Standing {
     /// it in a project without a directory. A person's file there stays,
     /// and so does one another Studio's preview runs from.
     pub fn leave(&mut self, store: &dyn Store) {
-        if self.release() {
-            return;
-        }
-        if store.read(&self.path).is_ok_and(|text| is_studios(&text)) {
+        if let Some(_leave) = self.release()
+            && store.read(&self.path).is_ok_and(|text| is_studios(&text))
+        {
             // Already gone is as good.
             let _ = store.remove(&self.path);
         }
+        // Left: dropping it then has nothing more to do.
+        self.file = None;
     }
 }
 
 impl Drop for Standing {
     fn drop(&mut self) {
-        if self.release() {
+        let Some(_leave) = self.release() else {
             return;
-        }
+        };
         if let Some((_, file)) = self.file.as_ref().filter(|_| self.inside()) {
             // A person may have written their own file there since.
             if std::fs::read_to_string(file).is_ok_and(|text| is_studios(&text)) {
@@ -971,8 +1007,8 @@ mod tests {
         second.leave(&studio_core::FsStore::new(dir.path()).unwrap());
         assert!(!file.exists());
         drop(second);
-        // Nothing of either preview is left in the project.
-        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 0);
+        // Nothing of either preview is left in the project but the gate.
+        assert_eq!(left(dir.path()), [".studio"]);
     }
 
     #[test]
@@ -987,7 +1023,91 @@ mod tests {
             text: MARK.to_owned(),
         };
         drop(h.standing(Some(dir.path())));
-        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 0);
+        assert_eq!(left(dir.path()), [".studio"]);
+    }
+
+    /// What is in `dir`, by name.
+    fn left(dir: &Path) -> Vec<String> {
+        std::fs::read_dir(dir)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+            .collect()
+    }
+
+    /// Takes the project's preview gate, as another Studio would.
+    fn take_gate(dir: &Path) -> File {
+        std::fs::create_dir_all(dir.join(".studio")).unwrap();
+        let gate = File::options()
+            .create(true)
+            .truncate(false)
+            .write(true)
+            .open(dir.join(".studio/preview.lock"))
+            .unwrap();
+        gate.lock().unwrap();
+        gate
+    }
+
+    #[test]
+    fn a_harness_is_counted_and_removed_while_no_other_studio_makes_its_hold() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join(".Card.preview.qml");
+        std::fs::write(&file, MARK).unwrap();
+        let h = Harness {
+            path: ".Card.preview.qml".to_owned(),
+            text: MARK.to_owned(),
+        };
+        let first = h.standing(Some(dir.path()));
+        // Another Studio starts a preview of the component: it makes its
+        // hold under the gate, and writes the file after.
+        let gate = take_gate(dir.path());
+        let (ended, end) = std::sync::mpsc::channel();
+        let ending = std::thread::spawn(move || {
+            drop(first);
+            ended.send(()).unwrap();
+        });
+        assert!(
+            end.recv_timeout(std::time::Duration::from_millis(200))
+                .is_err(),
+            "the holds were counted while another Studio was making its own"
+        );
+        let theirs = File::create(dir.path().join(".Card.preview.qml.other-0.lock")).unwrap();
+        theirs.try_lock().unwrap();
+        gate.unlock().unwrap();
+        ending.join().unwrap();
+        assert!(file.exists(), "removed under the other Studio's preview");
+    }
+
+    #[test]
+    fn a_hold_is_made_while_no_other_studio_counts_them() {
+        let dir = tempfile::tempdir().unwrap();
+        let gate = take_gate(dir.path());
+        let (made, make) = std::sync::mpsc::channel();
+        let project = dir.path().to_owned();
+        let making = std::thread::spawn(move || {
+            let h = Harness {
+                path: ".Card.preview.qml".to_owned(),
+                text: MARK.to_owned(),
+            };
+            let standing = h.standing(Some(&project));
+            made.send(()).unwrap();
+            standing
+        });
+        assert!(
+            make.recv_timeout(std::time::Duration::from_millis(200))
+                .is_err(),
+            "a hold was made while another Studio counted them"
+        );
+        gate.unlock().unwrap();
+        let _standing = making.join().unwrap();
+        // Made in place, under no other name: one a killed Studio half made
+        // is a lock file nobody holds, which the next count removes.
+        let holds: Vec<String> = std::fs::read_dir(dir.path())
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+            .filter(|name| name.starts_with(".Card.preview.qml."))
+            .collect();
+        assert_eq!(holds.len(), 1, "{holds:?}");
+        assert!(holds[0].ends_with(".lock"), "{holds:?}");
     }
 
     #[test]
