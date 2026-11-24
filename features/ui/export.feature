@@ -242,6 +242,23 @@ Feature: A person exports a native app or a web site from Studio's window
       And the person pastes into the output directory in the export panel
       Then the export panel's output directory reads "^build/web-site$"
 
+    Scenario: Checking again after a build keeps the site's path to copy
+      Given the person has clicked the button "Export"
+      And the person has chosen "Web site" in the export panel
+      When the answer to a web build that was on its way arrives in the export panel
+      And the person clicks the button "Check"
+      Then the export panel's button "Copy path" is enabled
+      When the person clicks the button "Copy path"
+      And the person pastes into the output directory in the export panel
+      Then the export panel's output directory reads "^build/web-site$"
+
+    Scenario: A check of another export lets go of the site built before
+      Given the person has clicked the button "Export"
+      And the person has chosen "Web site" in the export panel
+      When the answer to a web build that was on its way arrives in the export panel
+      And the person chooses "Native app" in the export panel
+      Then the export panel's button "Copy path" is disabled
+
     Scenario: A build that fails after writing the bundle says it was written
       Given the person has clicked the button "Export"
       And the person has chosen "Web site" in the export panel
@@ -249,6 +266,15 @@ Feature: A person exports a native app or a web site from Studio's window
       Then the export panel says "^Wrote 4 files to build/web"
       And the export panel says "^the site was not built: node did not start"
       And the export panel does not say "^Would write"
+
+    # The bundle was written; only saving the page into the project failed.
+    Scenario: A page not saved after the bundle is written says the bundle was
+      Given the person has clicked the button "Export"
+      And the person has chosen "Web site" in the export panel
+      When a written export that was on its way is refused saving its page
+      Then the export panel says "^Wrote 4 files to build/web"
+      And the export panel says "^ljos-page.json could not be written"
+      And the export panel's button "Copy path" is enabled
 
     Scenario: A native app is not built
       When the person clicks the button "Export"

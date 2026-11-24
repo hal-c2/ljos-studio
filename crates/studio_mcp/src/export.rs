@@ -2415,12 +2415,15 @@ b.png"
             fs::write(at, text).unwrap();
         };
         write("Shell.qml", b"Item { property url data: \"site.json\" }");
-        write("site.json", b"{\"feed\": \"data/feed.json\"}");
+        write(
+            "site.json",
+            b"{\"feed\": \"data/feed.json\", \"raw\": \"data/blob.json\"}",
+        );
         write("data/feed.json", b"{\"hero\": \"../images/hero.svg\"}");
         write("images/hero.svg", b"");
         write("other.json", b"{\"named\": \"images/unused.svg\"}");
         write("images/unused.svg", b"");
-        // Not text: read for nothing, and still not refused.
+        // Not text: named, so kept, and read for nothing, not refused.
         write("data/blob.json", &[0xff, 0xfe, 0x00]);
         let (files, _, left_out) = walk(&root).unwrap();
         let (kept, left_out) = reached(&root, files, left_out, None, None).unwrap();
@@ -2429,12 +2432,47 @@ b.png"
             kept,
             [
                 "Shell.qml",
+                "data/blob.json",
                 "data/feed.json",
                 "images/hero.svg",
                 "site.json"
             ]
         );
         let left: Vec<&str> = left_out.iter().map(|l| l.path.as_str()).collect();
-        assert_eq!(left, ["data/blob.json", "images/unused.svg", "other.json"]);
+        assert_eq!(left, ["images/unused.svg", "other.json"]);
+    }
+
+    // The theme and what was brought in below `assets/` are kept without
+    // the code naming them, and are data the site reads like any other.
+    #[test]
+    fn a_kept_theme_or_asset_json_file_names_files_too() {
+        let project = tempfile::tempdir().unwrap();
+        let root = project.path().canonicalize().unwrap();
+        let write = |path: &str, text: &str| {
+            let at = root.join(path);
+            fs::create_dir_all(at.parent().unwrap()).unwrap();
+            fs::write(at, text).unwrap();
+        };
+        write("Shell.qml", "Item {}");
+        write("theme.json", "{\"paper\": \"images/paper.png\"}");
+        write("assets/data.json", "{\"hero\": \"../images/asset.png\"}");
+        write("images/paper.png", "");
+        write("images/asset.png", "");
+        write("images/unused.png", "");
+        let (files, _, left_out) = walk(&root).unwrap();
+        let (kept, left_out) = reached(&root, files, left_out, Some("theme.json"), None).unwrap();
+        let kept: Vec<&str> = kept.iter().map(|f| f.path.as_str()).collect();
+        assert_eq!(
+            kept,
+            [
+                "Shell.qml",
+                "assets/data.json",
+                "images/asset.png",
+                "images/paper.png",
+                "theme.json"
+            ]
+        );
+        let left: Vec<&str> = left_out.iter().map(|l| l.path.as_str()).collect();
+        assert_eq!(left, ["images/unused.png"]);
     }
 }
