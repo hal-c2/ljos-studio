@@ -170,6 +170,22 @@ Feature: An object's own API is written in the inspector
     And the person clicks the button "Write the done handler"
     Then the file "Main.qml" says "b  \n"
 
+  # A keyword after a `.` names a property: `o.if()` is a call, whose `)`
+  # ends a value, and `o.return` is a value. A `/` after either divides.
+  Scenario: A division after a method named `if` in a handler is no regular expression
+    Given the person has selected "Item root" in the layers panel
+    And the person has clicked the button "Edit the done handler"
+    When the person types "const o = { if: () => 4 }\nconst k = o.if() / 2 + `a\n  b  \nc`\nconsole.log(k)" in the inspector's "Handler for done" and leaves it
+    And the person clicks the button "Write the done handler"
+    Then the file "Main.qml" says "b  \n"
+
+  Scenario: A division after a property named `return` in a handler is no regular expression
+    Given the person has selected "Item root" in the layers panel
+    And the person has clicked the button "Edit the done handler"
+    When the person types "const o = { return: 8 }\nconst k = o.return / 2 + `a\n  b  \nc`\nconsole.log(k)" in the inspector's "Handler for done" and leaves it
+    And the person clicks the button "Write the done handler"
+    Then the file "Main.qml" says "b  \n"
+
   # What is typed while the handler is written is the next draft: the
   # editor stays open with it.
   Scenario: A handler typed while the one before it is written stays open with it
