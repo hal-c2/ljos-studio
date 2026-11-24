@@ -966,10 +966,16 @@ impl Window {
     fn enter(&mut self, node: &AccessibleNode, text: &str) -> StepResult {
         self.click_node(node)?;
         let mut driver = self.stage.drive();
-        driver
-            .chord(&Chord::parse("Ctrl+A")?, 0)
-            .map_err(drive_error)?;
-        driver.commit(text).map_err(drive_error)?;
+        // Deleted first: committing nothing over a selection keeps it, so ""
+        // would leave the field as it was.
+        for chord in ["Ctrl+A", "Delete"] {
+            driver
+                .chord(&Chord::parse(chord)?, 0)
+                .map_err(drive_error)?;
+        }
+        if !text.is_empty() {
+            driver.commit(text).map_err(drive_error)?;
+        }
         driver
             .chord(&Chord::parse("Return")?, 0)
             .map_err(drive_error)?;

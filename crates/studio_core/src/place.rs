@@ -596,14 +596,28 @@ struct PinAxis<'a> {
     known_size: Option<f64>,
 }
 
+/// Whether `text` is an id or a dotted path, which a property can follow
+/// without parentheses.
+fn is_path(text: &str) -> bool {
+    text.split('.').all(|part| {
+        let mut chars = part.chars();
+        chars
+            .next()
+            .is_some_and(|c| c.is_ascii_alphabetic() || c == '_' || c == '$')
+            && chars.all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '$')
+    })
+}
+
 /// The changes that make `node` pinned as `pin` says, with nothing left over
 /// that disagrees. An axis let go of keeps what `now` knows, so the object
 /// stays where it was seen.
 pub fn anchoring(node: &Node, pin: &Pin, now: Known) -> Vec<Change> {
     let mut out = Vec::new();
+    // Once per name, however many reasons there are to take it off.
     let drop = |out: &mut Vec<Change>, name: &str| {
-        if binding(node, name).is_some() {
-            out.push(Change::Remove(name.to_owned()));
+        let gone = Change::Remove(name.to_owned());
+        if binding(node, name).is_some() && !out.contains(&gone) {
+            out.push(gone);
         }
     };
     if pin.fill == Some(true) {
@@ -642,9 +656,13 @@ pub fn anchoring(node: &Node, pin: &Pin, now: Known) -> Vec<Change> {
     // centred, unless the caller lets the centring go: then the other axis is
     // let go as well, and keeps its place.
     let split = had_centre && centres_asked && pin.center_in != Some(false);
-    let centred_on = binding(node, "anchors.centerIn")
-        .unwrap_or("parent")
-        .to_owned();
+    // Whole, so that `.horizontalCenter` reads off all of an expression.
+    let centred_on = binding(node, "anchors.centerIn").unwrap_or("parent");
+    let centred_on = if is_path(centred_on) {
+        centred_on.to_owned()
+    } else {
+        format!("({centred_on})")
+    };
     if fill_goes {
         drop(&mut out, "anchors.fill");
     }
@@ -713,6 +731,12 @@ pub fn anchoring(node: &Node, pin: &Pin, now: Known) -> Vec<Change> {
                     out.push(Change::Set(axis.size.to_owned(), number(size)));
                 }
                 continue;
+            }
+            // With a side of the axis asked for, that side holds the axis:
+            // the sides below pin it.
+            Some(None) if sides_asked => {
+                drop(&mut out, axis.centre);
+                drop(&mut out, axis.offset);
             }
             Some(None) => {
                 let was_centred = binding(node, axis.centre).is_some() || centre_goes;

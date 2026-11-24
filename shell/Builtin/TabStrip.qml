@@ -89,8 +89,6 @@ Item {
                         radius: 8
                         color: Colors.surfaceHover
                         opacity: tab.hovered && !tab.shown ? 0.6 : 0
-                        border.width: tab.visualFocus ? 2 : 0
-                        border.color: Colors.focusRing
                         Behavior on opacity {
                             // Not into what it opens as: nothing has moved then.
                             enabled: !opening.running
@@ -100,6 +98,19 @@ Item {
                                 easing.bezierCurve: Motion.easeOut
                             }
                         }
+                    }
+                    // Apart from the hover fill, whose opacity would hide it
+                    // on the current tab and on one not hovered.
+                    Rectangle {
+                        objectName: "focusRing"
+                        anchors.verticalCenter: parent.verticalCenter
+                        width: parent.width
+                        height: 26
+                        radius: 8
+                        color: "transparent"
+                        border.width: 2
+                        border.color: Colors.focusRing
+                        visible: tab.visualFocus
                     }
                 }
                 contentItem: Text {
