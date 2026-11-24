@@ -566,6 +566,8 @@ const NATIVE_ONLY = new Map([
   ['given ^the empty directory "([^"]+)"$', "storage holds no empty directory (@disk)"],
   ['given ^a site is being built from "([^"]+)"$', "a site is built on disk (@disk)"],
   ["when ^the build ends$", "a site is built on disk (@disk)"],
+  ['given ^the site at "([^"]+)" is served$', "a site is served from disk (@disk)"],
+  ['then ^the site served from "([^"]+)" answers "([^"]+)"$', "a site is served from disk (@disk)"],
 ]);
 const WEB_ONLY = new Set(['given ^storage refuses to keep "([^"]+)"$', "when ^storage keeps files again$"]);
 
