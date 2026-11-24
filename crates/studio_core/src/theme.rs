@@ -14,6 +14,7 @@ use std::sync::OnceLock;
 
 use ljos_design::module::{self, DEFAULT_HUE, Seeds, qml_role};
 use ljos_design::palette::{self, Contrast, ROLES, Scheme, Seed};
+use ljos_design::scale;
 use ljos_design::theme::{self as ljos_theme, Kind, Setting, Theme};
 use serde_json::{Map, Value as Json, json};
 
@@ -147,6 +148,18 @@ fn module_values() -> &'static HashMap<String, Json> {
                     .unwrap_or_else(|_| Json::String(binding.value.clone()));
                 out.insert(format!("{singleton}.{}", binding.name), value);
             }
+        }
+        // A spacing step is a binding on the unit, clamped, so its text is
+        // no number; its value is the one Ljós's scale gives it at the
+        // module's own unit.
+        for step in scale::spacing() {
+            let px = f64::from(step.px);
+            let value = if px.fract() == 0.0 {
+                Json::from(px as i64)
+            } else {
+                Json::from(px)
+            };
+            out.insert(format!("Spacing.{}", step.name), value);
         }
         out
     })
