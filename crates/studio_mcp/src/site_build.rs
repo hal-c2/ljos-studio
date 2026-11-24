@@ -17,8 +17,11 @@ use std::{
     io::{BufRead, BufReader, Read, Write},
     net::{TcpListener, TcpStream},
     path::{Component, Path, PathBuf},
-    process::{Command, Stdio},
-    sync::{LazyLock, Mutex},
+    process::{Child, Command, Stdio},
+    sync::{
+        LazyLock, Mutex,
+        mpsc::{self, RecvTimeoutError},
+    },
     time::{Duration, Instant},
 };
 
@@ -105,14 +108,25 @@ fn find_ljos_web(project: &Path, given: Option<&str>) -> Result<PathBuf, String>
     ljos_web_in(ljos_web_places(project))
 }
 
-/// The first of `places` that is an ljos-web.
+/// The first of `places` that is an ljos-web ready to build with. A folder
+/// of that name that is not one, or not installed, does not hide one
+/// further on; when none is ready, what the first lacks is said.
 fn ljos_web_in(places: Vec<PathBuf>) -> Result<PathBuf, String> {
     let mut looked = Vec::new();
+    let mut first = None;
     for dir in places {
         if dir.is_dir() {
-            return ready(&dir);
+            match ready(&dir) {
+                Ok(dir) => return Ok(dir),
+                Err(why) => {
+                    first.get_or_insert(why);
+                }
+            }
         }
         looked.push(dir.to_string_lossy().into_owned());
+    }
+    if let Some(why) = first {
+        return Err(why);
     }
     Err(format!(
         "no ljos-web found: choose its folder or set LJOS_WEB (looked in {})",
@@ -230,7 +244,14 @@ fn on_path(name: &str) -> Option<PathBuf> {
 /// One build at a time: they share the work directory.
 static BUILDING: Mutex<()> = Mutex::new(());
 
-fn failed(step: &str, why: impl Into<String>, log: &Path, steps: &[BuildStep]) -> SurfaceError {
+/// A build refused. `log` is `None` when it stopped before the builder
+/// wrote one: the log there is the last build's.
+fn failed(
+    step: &str,
+    why: impl Into<String>,
+    log: Option<&Path>,
+    steps: &[BuildStep],
+) -> SurfaceError {
     let why = why.into();
     SurfaceError::new(
         ErrorCode::NotActionable,
@@ -240,7 +261,7 @@ fn failed(step: &str, why: impl Into<String>, log: &Path, steps: &[BuildStep]) -
         "kind": "build_failed",
         "step": step,
         "why": why,
-        "log": log.to_string_lossy(),
+        "log": log.map(|l| l.to_string_lossy()),
         "steps": steps,
     }))
 }
@@ -267,7 +288,6 @@ fn build_within(
     open: bool,
     deadline: Duration,
 ) -> Result<BuildOut, SurfaceError> {
-    let _ = deadline;
     let _one = BUILDING.lock().unwrap_or_else(|e| e.into_inner());
     let site = format!("{out}{}", crate::export::SITE_SUFFIX);
     let work = root.join(SITE_WORK);
@@ -284,8 +304,8 @@ fn build_within(
         }
     }
     let setup = "Getting the builder ready";
-    prepare(&work, tools).map_err(|why| failed(setup, why, &log, &[]))?;
-    let log_file = fs::File::create(&log).map_err(|e| failed(setup, e.to_string(), &log, &[]))?;
+    prepare(&work, tools).map_err(|why| failed(setup, why, None, &[]))?;
+    let log_file = fs::File::create(&log).map_err(|e| failed(setup, e.to_string(), None, &[]))?;
     let mut command = Command::new(&tools.node);
     command
         .arg(work.join("build.mjs"))
@@ -300,15 +320,51 @@ fn build_within(
     if std::env::var_os("LJOS_QT_TYPES").is_none() && types.is_file() {
         command.env("LJOS_QT_TYPES", types);
     }
+    // A group of its own, so what it starts is stopped with it.
+    #[cfg(unix)]
+    std::os::unix::process::CommandExt::process_group(&mut command, 0);
     let mut child = command
         .spawn()
-        .map_err(|e| failed(setup, format!("node did not start: {e}"), &log, &[]))?;
+        .map_err(|e| failed(setup, format!("node did not start: {e}"), Some(&log), &[]))?;
     let said = BufReader::new(child.stdout.take().expect("piped"));
+    // Read on a thread of its own, so a builder that hangs without a word
+    // is still stopped at the deadline.
+    let (tx, lines) = mpsc::channel();
+    let reader = std::thread::Builder::new()
+        .name("site build output".to_owned())
+        .spawn(move || {
+            for line in said.lines().map_while(Result::ok) {
+                if tx.send(line).is_err() {
+                    break;
+                }
+            }
+        });
+    if let Err(e) = reader {
+        stop(&mut child);
+        return Err(failed(setup, e.to_string(), Some(&log), &[]));
+    }
+    let started = Instant::now();
     let mut steps: Vec<BuildStep> = Vec::new();
     let mut since = Instant::now();
     let mut bytes = None;
     let mut why = None;
-    for line in said.lines().map_while(Result::ok) {
+    loop {
+        let line = match lines.recv_timeout(deadline.saturating_sub(started.elapsed())) {
+            Ok(line) => line,
+            Err(RecvTimeoutError::Disconnected) => break,
+            Err(RecvTimeoutError::Timeout) => {
+                stop(&mut child);
+                if let Some(last) = steps.last_mut() {
+                    last.ms = since.elapsed().as_secs_f64() * 1000.0;
+                }
+                let step = steps.last().map_or(setup, |s| s.what.as_str()).to_owned();
+                let why = format!(
+                    "it took longer than {} and was stopped; its log says how far it got",
+                    span(deadline)
+                );
+                return Err(failed(&step, why, Some(&log), &steps));
+            }
+        };
         let close = |steps: &mut Vec<BuildStep>, since: Instant| {
             if let Some(last) = steps.last_mut() {
                 last.ms = since.elapsed().as_secs_f64() * 1000.0;
@@ -332,21 +388,21 @@ fn build_within(
     let status = child.wait();
     let step = steps.last().map_or(setup, |s| s.what.as_str()).to_owned();
     match (status, why, bytes) {
-        (_, Some(why), _) => return Err(failed(&step, why, &log, &steps)),
+        (_, Some(why), _) => return Err(failed(&step, why, Some(&log), &steps)),
         (Ok(status), None, Some(_)) if status.success() => {}
         (Ok(status), None, _) => {
             let why =
                 format!("the builder stopped ({status}) without saying why; its log says more");
-            return Err(failed(&step, why, &log, &steps));
+            return Err(failed(&step, why, Some(&log), &steps));
         }
-        (Err(e), None, _) => return Err(failed(&step, e.to_string(), &log, &steps)),
+        (Err(e), None, _) => return Err(failed(&step, e.to_string(), Some(&log), &steps)),
     }
     let path = root.join(&site);
     let url = serve(&path).map_err(|e| {
         failed(
             "Serving the site",
             format!("it was built, but not served: {e}"),
-            &log,
+            Some(&log),
             &steps,
         )
     })?;
@@ -364,6 +420,33 @@ fn build_within(
         opened,
         ..BuildOut::default()
     })
+}
+
+/// Stops a builder and all it started.
+fn stop(child: &mut Child) {
+    #[cfg(unix)]
+    let _ = Command::new("kill")
+        .args(["-KILL", "--", &format!("-{}", child.id())])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
+    #[cfg(windows)]
+    let _ = Command::new("taskkill")
+        .args(["/T", "/F", "/PID", &child.id().to_string()])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
+    let _ = child.kill();
+    let _ = child.wait();
+}
+
+/// A length of time in plain words.
+fn span(time: Duration) -> String {
+    let secs = time.as_secs();
+    match secs {
+        0..60 => format!("{secs} s"),
+        _ => format!("{} minutes", secs / 60),
+    }
 }
 
 /// What a build writes or empties in `work`. A project may come with any of
@@ -449,9 +532,12 @@ pub fn serve(site: &Path) -> std::io::Result<String> {
     if let Some(port) = served.get(site) {
         return Ok(format!("http://127.0.0.1:{port}/"));
     }
+    // The directory it is now: a link put in its place later leads nowhere
+    // the server reads.
+    let root = site.canonicalize()?;
     let listener = TcpListener::bind(("127.0.0.1", 0))?;
     let port = listener.local_addr()?.port();
-    let dir = site.to_owned();
+    let dir = root;
     std::thread::Builder::new()
         .name("site server".to_owned())
         .spawn(move || {
@@ -502,8 +588,13 @@ fn answer(mut stream: TcpStream, site: &Path, port: u16) {
     if !body && method != "HEAD" {
         return reply(&mut stream, "405 Method Not Allowed", None, false);
     }
-    match resolve(site, target).and_then(|at| fs::read(&at).ok().map(|b| (at, b))) {
-        Some((at, bytes)) => reply(&mut stream, "200 OK", Some((&at, &bytes)), body),
+    let file = resolve(site, target).and_then(|at| {
+        let file = fs::File::open(&at).ok()?;
+        let len = file.metadata().ok()?.len();
+        Some((at, file, len))
+    });
+    match file {
+        Some((at, file, len)) => reply(&mut stream, "200 OK", Some((&at, file, len)), body),
         None => reply(&mut stream, "404 Not Found", None, false),
     }
 }
@@ -513,10 +604,13 @@ fn local_host(host: &str, port: u16) -> bool {
     host == format!("127.0.0.1:{port}") || host == format!("localhost:{port}")
 }
 
-fn reply(stream: &mut TcpStream, status: &str, file: Option<(&Path, &[u8])>, body: bool) {
-    let (kind, bytes) = file.map_or(("text/plain; charset=utf-8", &b""[..]), |(at, b)| {
-        (kind(at), b)
-    });
+/// Answers with `file`, its length said and its bytes copied as they are
+/// read, so a large one is not held whole.
+fn reply(stream: &mut TcpStream, status: &str, file: Option<(&Path, fs::File, u64)>, body: bool) {
+    let (kind, len, file) = match file {
+        Some((at, file, len)) => (kind(at), len, Some(file)),
+        None => ("text/plain; charset=utf-8", 0, None),
+    };
     // A picture is a document of its own when opened by its address; one
     // brought in from anywhere runs no script with the site's origin.
     let policy = if kind == "image/svg+xml" {
@@ -528,16 +622,19 @@ fn reply(stream: &mut TcpStream, status: &str, file: Option<(&Path, &[u8])>, bod
     let head = format!(
         "HTTP/1.1 {status}\r\nContent-Type: {kind}\r\nContent-Length: {}\r\n{policy}\
          Cache-Control: no-cache\r\nX-Content-Type-Options: nosniff\r\nConnection: close\r\n\r\n",
-        bytes.len()
+        len
     );
-    let _ = stream.write_all(head.as_bytes());
-    if body {
-        let _ = stream.write_all(bytes);
+    if stream.write_all(head.as_bytes()).is_err() {
+        return;
+    }
+    if let (true, Some(file)) = (body, file) {
+        let _ = std::io::copy(&mut file.take(len), stream);
     }
 }
 
-/// The file of `site` a request's target names, or `None`: a path out of
-/// it, a hidden name (the build's stamp) or nothing there.
+/// The file of `site`, a directory's real path, that a request's target
+/// names, or `None`: a path out of it, a hidden name (the build's stamp) or
+/// nothing there.
 fn resolve(site: &Path, target: &str) -> Option<PathBuf> {
     let path = target.split(['?', '#']).next()?;
     let path = path.strip_prefix('/')?;
@@ -562,8 +659,7 @@ fn resolve(site: &Path, target: &str) -> Option<PathBuf> {
         at.push("index.html");
     }
     let real = at.canonicalize().ok()?;
-    let site = site.canonicalize().ok()?;
-    (real.starts_with(&site) && real.is_file()).then_some(real)
+    (real.starts_with(site) && real.is_file()).then_some(real)
 }
 
 fn percent_decode(text: &str) -> Option<String> {
@@ -683,6 +779,7 @@ mod tests {
     fn a_request_reads_only_files_of_the_site() {
         let (_dir, site) = site();
         let real = site.canonicalize().unwrap();
+        let site = real.clone();
         assert_eq!(resolve(&site, "/"), Some(real.join("index.html")));
         assert_eq!(resolve(&site, "/?x=1"), Some(real.join("index.html")));
         assert_eq!(

@@ -33,8 +33,12 @@ fn parse(rest: &[String]) -> Result<(String, bool), String> {
     Ok((target, build))
 }
 
-/// The answer as printed.
-fn shown(out: serde_json::Value) -> serde_json::Value {
+/// The answer as printed: a built site by its directory, without the
+/// address Studio served it on, which ends with this program.
+fn shown(mut out: serde_json::Value) -> serde_json::Value {
+    if let Some(build) = out.get_mut("build").and_then(|b| b.as_object_mut()) {
+        build.remove("url");
+    }
     out
 }
 

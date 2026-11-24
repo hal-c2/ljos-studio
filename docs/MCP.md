@@ -630,7 +630,9 @@ project below its `build/` (`build/native` by default) and answers `out`,
 `path` (the same, absolute),
 `files` and `bytes` (totals that stay true when a long manifest is cut
 short in the answer), `writes` (what a real export writes: the files and
-the manifest, so a panel's "Would write" is what "Wrote" says), the
+the manifest, so a panel's "Would write" is what "Wrote" says; a dry run
+of a project with links also gives `writes_unlinked`, what it writes where
+the system makes no link and copies what each leads to), the
 `manifest`, `written` (false for `dry_run`),
 `replaces` (whether `out` held a bundle before the call, which a real export
 swaps out), `ms` (the export's own time; a build's steps say theirs) and,
@@ -649,8 +651,9 @@ of the project except `.studio/`, the top-level `mocks/`, hidden files,
 | `files` | Every file, `path` and `bytes`, sorted |
 | `left_out` | What of the project is not in it, `path` and `why` |
 
-`target: "web"` writes the same files to `build/web` with `ljos-site.json`
-instead (DESIGN.md S6, the site contract), which a site builder reads:
+`target: "web"` writes to `build/web` the files the web's rules below
+choose, with `ljos-site.json` instead (DESIGN.md S6, the site contract),
+which a site builder reads:
 
 | Field | Holds |
 |---|---|
@@ -667,11 +670,13 @@ brought in as an asset: every document, script and `qmldir`, the theme, the
 page's pictures, everything below `assets/`, and each other file a
 string in the code names (`"images/logo.svg"`), or a directory or the
 start of a path a name is made from (`"icons/" + name + ".svg"` keeps
-`icons/`). Every other file is in `left_out` with "nothing the site's code
+`icons/`). A JSON file kept is read the same way, so a feed the code names
+keeps the pictures the feed names. Every other file is in `left_out` with "nothing the site's code
 names", so a picture outside `assets/` that nobody uses is not shipped.
 
 `page` is kept in the project's `ljos-page.json` (written by a real export
-that is given one, read by one that is not; it is in `left_out` itself, since
+that is given one, once its bundle is written, so one that fails leaves the
+file as it was; read by one that is not; it is in `left_out` itself, since
 the manifest holds it). The name is Ljós's: a `site.json` of the project's
 is one of its files like any other, and the page is not in `.studio/`, which
 holds nothing a site is built from. Its `icon` and `image` are paths of the project's
@@ -695,6 +700,10 @@ which it finds, never downloads (DESIGN.md S6, as built):
 | its compiler | `qmlc`; `QMLC`; the checkout's `target/release` and `target/debug`; beside the studio binary; `PATH` |
 | node | `NODE`; `PATH` |
 
+Of the places Studio looks in itself, the first that holds a ready ljos-web
+is used: a folder of that name that is not one, or not installed, is passed
+over.
+
 `ljos_web` and `qmlc` are relative to the project and must lie in the
 workspace where the system finds them: each link is followed as it comes,
 so a `..` after one goes up from where it leads. One outside is refused
@@ -713,9 +722,11 @@ was looked for. A real export with `build` that lacks something is refused
 before anything is written (`unavailable`, `no_site_builder`,
 `details.missing`); a build that fails is refused with `not_actionable`
 (`build_failed`, with `details.step`, where it stopped, `why`, in plain
-words, `log`, the path of the builder's error log, the `steps` before it,
+words, `log`, the path of the builder's error log, or null when it stopped
+before the builder began one, the `steps` before it,
 and `export`, the answer the export gives without `build`, since its bundle
-was written before the build began). A
+was written before the build began). A build that runs longer than 15
+minutes is stopped, with all it started, and refused the same way. A
 build runs on its own thread, one at a time, and does not hold the project.
 It does hold its bundle and its `<out>-site`, whether that is there yet or
 not: a real export to either, or to a directory over or below either, is
@@ -748,7 +759,9 @@ plugin's); `syntax` for a document that does not parse (`broken`,
 `build/` or one a link leads elsewhere; a link out of the project is left
 out (`left_out`, "a link out of the project");
 `invalid_argument` (`exists`) for an `out` that holds something other
-than a bundle of either kind (a site built from one, say).
+than a bundle of either kind (a site built from one, say), and
+(`holds_site`, `details.site`) for a bundle with a built site below it,
+which replacing the bundle would remove, in a dry run too.
 
 - DECISION: the native bundle is the project directory as `ljos run`
   starts it. Ljós's production bundles (ARCHITECTURE.md 12.2: hashed,

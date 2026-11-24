@@ -705,7 +705,8 @@ Popup {
             TextButton {
                 text: "Copy path"
                 Accessible.name: text
-                enabled: panel.wrote
+                // A built site stays when a check answers after it.
+                enabled: panel.built !== null || panel.wrote
                 onClicked: {
                     clip.text = panel.built !== null ? panel.built.path : panel.answer.path
                     clip.selectAll()
