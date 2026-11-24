@@ -1050,6 +1050,43 @@ Feature: A project is exported for ljos-web to build a site from
       And the refusal's "/details/export/out" is "build/web"
       And the file "build/web/ljos-site.json" exists
 
+    # The page is saved with the bundle that holds it, and a failed build
+    # undoes neither: the refusal says plainly that only the build failed.
+    Scenario: A build that fails says the export and its page were saved
+      Given the studio tools are connected with the capabilities "inspect, mutate, fs, run"
+      And the file "standin/packages/runtime/package.json":
+        """
+        {}
+        """
+      And the file "standin/examples/web/node_modules/ljos-web/package.json":
+        """
+        {}
+        """
+      And the file "standin/examples/web/node_modules/solid-js/package.json":
+        """
+        {}
+        """
+      And the file "standin/examples/web/node_modules/vite/package.json":
+        """
+        {}
+        """
+      And the file "standin/examples/web/node_modules/@solidjs/web/package.json":
+        """
+        {}
+        """
+      And the file "standin/qmlc":
+        """
+        not run
+        """
+      When the agent calls the tool "export" with:
+        """json
+        {"entry": "Shell.qml", "target": "web", "page": {"title": "Kept"}, "build": true, "ljos_web": "standin", "qmlc": "standin/qmlc"}
+        """
+      Then the agent is refused with "not_actionable"
+      And the refusal's "/details/kind" is "build_failed"
+      And the refusal's message matches "^the export to `build/web` was written, with its page saved; only the site was not built: "
+      And the file "ljos-page.json" contains "Kept"
+
     Scenario: Only a web export is built
       Given the studio tools are connected with the capabilities "inspect, mutate, fs, run"
       When the agent calls the tool "export" with:

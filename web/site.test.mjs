@@ -191,6 +191,18 @@ test("a stamp that does not list the site's files vouches for nothing", (t) => {
   assert.ok(existsSync(join(site, "assets/app.js")));
 });
 
+// The builder before this one stamped a site with ljos-web's commit alone:
+// nothing says what was changed in it since, so it is not replaced, and the
+// refusal says why in words a person can act on.
+test("a site an earlier builder stamped is refused in plain words", (t) => {
+  const { site, build } = built(t);
+  put(join(site, ".ljos-site-build"), `${"0".repeat(40)}\n`);
+  const again = build();
+  assert.equal(again.status, 1, again.stdout + again.stderr);
+  assert.match(again.stdout, /^fail .* was built by an earlier Studio, whose \.ljos-site-build does not list the files it wrote, so what was changed there since cannot be told: delete it or move it out, or choose another place$/m);
+  assert.ok(existsSync(join(site, "assets/app.js")));
+});
+
 // A manifest's paths are logical, `/` between names, on every system: one
 // with a `\\` would be a path out of the export where that separates names.
 const listing = (t, path) => {

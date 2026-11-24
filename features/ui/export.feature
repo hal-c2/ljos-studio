@@ -264,7 +264,7 @@ Feature: A person exports a native app or a web site from Studio's window
       And the person has chosen "Web site" in the export panel
       When a web build that was on its way is refused after writing the bundle
       Then the export panel says "^Wrote 4 files to build/web"
-      And the export panel says "^the site was not built: node did not start"
+      And the export panel says "only the site was not built: node did not start"
       And the export panel does not say "^Would write"
 
     # The bundle was written; only saving the page into the project failed.
