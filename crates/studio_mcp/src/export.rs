@@ -154,9 +154,9 @@ struct ExportArgs {
     // whether a build would find what it needs.
     #[serde(default)]
     build: bool,
-    // Open the built site in the browser.
-    #[serde(default)]
-    open: bool,
+    // Open the built site in the browser. Given at all, false too, it
+    // needs `build`.
+    open: Option<bool>,
     // The ljos-web folder to build with, when Studio does not find one.
     ljos_web: Option<String>,
     // The `qmlc` to build with, when Studio does not find one.
@@ -166,7 +166,7 @@ struct ExportArgs {
 impl ExportArgs {
     fn only_a_build_uses(&self) -> Option<&'static str> {
         [
-            ("open", self.open),
+            ("open", self.open.is_some()),
             ("ljos_web", self.ljos_web.is_some()),
             ("qmlc", self.qmlc.is_some()),
         ]
@@ -1627,6 +1627,17 @@ fn export(studio: &Mutex<Studio>, ctx: &CallCtx, a: ExportArgs) -> Result<Export
         ));
     };
     let root = root.canonicalize().map_err(|e| io(&root, &e))?;
+    if a.build {
+        let workspace = studio
+            .workspace()
+            .canonicalize()
+            .map_err(|e| io(studio.workspace(), &e))?;
+        for (argument, given) in [("ljos_web", &a.ljos_web), ("qmlc", &a.qmlc)] {
+            if let Some(given) = given {
+                in_workspace(&root, &workspace, argument, given)?;
+            }
+        }
+    }
     let mut manifest = plan(&root, &studio, &a.entry, a.target, a.page.as_ref())?;
     let out = out_dir(&root, a.out.as_deref(), a.target)?;
     let path = root.join(&out);
@@ -1659,6 +1670,9 @@ fn export(studio: &Mutex<Studio>, ctx: &CallCtx, a: ExportArgs) -> Result<Export
             )
             .with_details(json!({ "kind": "build_running" })));
         }
+        // A page goes into the project only for an export that may be
+        // written; `write` asks again just before it replaces anything.
+        may_replace(&root, &bundle)?;
         if let Some(page) = &a.page {
             let mut text = serde_json::to_string_pretty(page).expect("a page is JSON");
             text.push('\n');
@@ -1691,7 +1705,25 @@ fn export(studio: &Mutex<Studio>, ctx: &CallCtx, a: ExportArgs) -> Result<Export
                 ..BuildOut::default()
             },
         }),
-        Some(Ok(tools)) => Some(build_site(&root, &out, &tools, a.open)?),
+        Some(Ok(tools)) => Some(
+            build_site(&root, &out, &tools, a.open.unwrap_or(false)).map_err(|e| {
+                // The bundle was written all the same: say so, as an
+                // export that was not built would.
+                let export = ExportOut {
+                    out: out.clone(),
+                    path: path.clone(),
+                    files: manifest.files.len() + copied.files,
+                    bytes: manifest.files.iter().map(|f| f.bytes).sum::<u64>() + copied.bytes,
+                    writes: manifest.files.len() + copied.files + 1,
+                    manifest: manifest.clone(),
+                    written: true,
+                    replaces,
+                    ms,
+                    build: None,
+                };
+                with_export(e, &export)
+            })?,
+        ),
         Some(Err(_)) => unreachable!("refused above"),
     };
     Ok(ExportOut {
@@ -1706,6 +1738,65 @@ fn export(studio: &Mutex<Studio>, ctx: &CallCtx, a: ExportArgs) -> Result<Export
         ms,
         build,
     })
+}
+
+/// `e` with what the export wrote in its details, as `export`.
+fn with_export(e: SurfaceError, export: &ExportOut) -> SurfaceError {
+    let mut details = e.details.clone().unwrap_or_else(|| json!({}));
+    if let Some(details) = details.as_object_mut() {
+        // As long as an answer may be, and the rest of the refusal beside it.
+        let export = serde_json::to_value(export).expect("an export is JSON");
+        details.insert(
+            "export".to_owned(),
+            ljos_mcp_core::cap_result(export, ljos_mcp_core::DEFAULT_RESULT_BYTES / 2),
+        );
+    }
+    e.with_details(details)
+}
+
+/// Refuses a toolchain named by `given` (relative to `root`) that lies
+/// outside `workspace`, before anything there is looked at: an argument
+/// does not get Studio to run a program from anywhere on the machine.
+/// `LJOS_WEB` and `QMLC` are the machine's own say and are not asked.
+fn in_workspace(
+    root: &Path,
+    workspace: &Path,
+    argument: &str,
+    given: &str,
+) -> Result<(), SurfaceError> {
+    let mut at = PathBuf::new();
+    for part in root.join(given).components() {
+        match part {
+            Component::ParentDir => {
+                at.pop();
+            }
+            Component::CurDir => {}
+            part => at.push(part),
+        }
+    }
+    // Through links, as far as the path is there.
+    let real = at
+        .ancestors()
+        .find_map(|there| {
+            let rest = at.strip_prefix(there).ok()?;
+            Some(there.canonicalize().ok()?.join(rest))
+        })
+        .unwrap_or_else(|| at.clone());
+    if at.starts_with(workspace) && real.starts_with(workspace) {
+        return Ok(());
+    }
+    let variable = if argument == "qmlc" {
+        "QMLC"
+    } else {
+        "LJOS_WEB"
+    };
+    Err(SurfaceError::new(
+        ErrorCode::PathDenied,
+        format!(
+            "`{argument}` names `{given}`, which is outside the workspace: choose one in it, or set {variable}"
+        ),
+    )
+    .with_details(json!({ "kind": "outside_workspace", "argument": argument })))
 }
 
 #[cfg(feature = "native")]
