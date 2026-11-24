@@ -337,6 +337,18 @@ fn publish_new(
     file: &Path,
     write: impl FnOnce(&mut std::fs::File) -> std::io::Result<()>,
 ) -> anyhow::Result<bool> {
+    publish_new_by(file, write, |draft, file| std::fs::hard_link(draft, file))
+}
+
+/// [`publish_new`], linking with `link`. Where files cannot be linked (FAT,
+/// some network and FUSE file systems) the draft is copied into a file
+/// made only if there is none: not whole at once there, but never over
+/// another's, and a copy that fails takes its file away again.
+fn publish_new_by(
+    file: &Path,
+    write: impl FnOnce(&mut std::fs::File) -> std::io::Result<()>,
+    link: impl FnOnce(&Path, &Path) -> std::io::Result<()>,
+) -> anyhow::Result<bool> {
     if file.exists() {
         return Ok(false);
     }
@@ -361,16 +373,43 @@ fn publish_new(
         .with_context(|| format!("writing {}", draft.display()));
     drop(out);
     // A link fails when the name is taken, where a rename would replace it.
-    let published = written.and_then(|()| match std::fs::hard_link(&draft, file) {
+    let published = written.and_then(|()| match link(&draft, file) {
         Ok(()) => Ok(true),
         Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => Ok(false),
-        Err(e) => Err(e).with_context(|| format!("publishing {}", file.display())),
+        Err(_) => copy_new(&draft, file).with_context(|| format!("publishing {}", file.display())),
     });
     // A draft left over is only clutter: the file is whole or not there.
     if let Err(e) = std::fs::remove_file(&draft) {
         eprintln!("studio: could not remove {}: {e}", draft.display());
     }
     published
+}
+
+/// Copies `draft` to `file` only if there is no `file`; whether it did. A
+/// copy that fails takes the file it made away, so none is left part-way.
+fn copy_new(draft: &Path, file: &Path) -> std::io::Result<bool> {
+    let mut out = match std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(file)
+    {
+        Ok(out) => out,
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => return Ok(false),
+        Err(e) => return Err(e),
+    };
+    let copied = std::fs::File::open(draft)
+        .and_then(|mut from| std::io::copy(&mut from, &mut out))
+        .and_then(|_| out.sync_all());
+    drop(out);
+    match copied {
+        Ok(()) => Ok(true),
+        Err(e) => {
+            if let Err(gone) = std::fs::remove_file(file) {
+                eprintln!("studio: could not remove {}: {gone}", file.display());
+            }
+            Err(e)
+        }
+    }
 }
 
 /// The theme Studio ships ([`THEME`]).
