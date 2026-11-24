@@ -2782,6 +2782,25 @@ fn says_under(w: &mut UiWorld, want: String, name: String) -> StepResult {
         .ok_or_else(|| format!("{want:?} is at {said:?}, {name:?} at {field:?}"))
 }
 
+/// The inspector's own words, not the window's line, which says every
+/// refusal whoever asked.
+#[then(regex = r#"^the inspector says something with "(.+)"$"#)]
+fn inspector_says_with(w: &mut UiWorld, want: String) -> StepResult {
+    let window = w.window()?;
+    window.open_panel("Inspector")?;
+    let tree = window.tree();
+    let panel = find(&tree, &|n| n.name == "Inspector" && n.role != "label")
+        .ok_or("no \"Inspector\" in the window")?;
+    find(panel, &|n| n.name.contains(&want))
+        .map(drop)
+        .ok_or_else(|| {
+            format!(
+                "the inspector does not say {want:?}; it holds {}",
+                names(panel)
+            )
+        })
+}
+
 /// A refusal's words and the buttons it offers end above the next row's
 /// top, so they hide none of it and take none of its clicks.
 #[then(
