@@ -146,12 +146,15 @@ Panel {
     function has(name) {
         return offer(name) !== null || written(name) !== ""
     }
+    // The file with its comments taken out: an import a comment shows is
+    // not one the file makes.
+    readonly property string importsText: workspace.text.replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/g, "")
     // The document reads the theme, so a value may name one of its roles.
-    readonly property bool themed: /^\s*import\s+Ljos\.Design\b/m.test(workspace.text)
+    readonly property bool themed: /^\s*import\s+Ljos\.Design\b/m.test(importsText)
     // What the theme's names are written after: `Design.` for an import
     // `as Design`, nothing for a plain one.
     readonly property string theme: {
-        const m = /^\s*import\s+Ljos\.Design\b(?:\s+[\d.]+)?(?:\s+as\s+([A-Za-z_]\w*))?/m.exec(workspace.text)
+        const m = /^\s*import\s+Ljos\.Design\b(?:\s+[\d.]+)?(?:\s+as\s+([A-Za-z_]\w*))?/m.exec(importsText)
         return m !== null && m[1] !== undefined ? m[1] + "." : ""
     }
     // What the selected object's kind is about, in a section of its own:
@@ -228,13 +231,19 @@ Panel {
             set(name, "null")
         }
     }
-    // A scrolling area's content is as big as its first child, or as what
-    // all its children cover when that one has no name to read.
+    // A scrolling area's content is as big as its child when it holds one
+    // with a name, else as what all its children cover.
     function fitContent(name) {
         const across = name === "contentWidth"
         const all = workspace.layers
         const at = selectedLayer.at
-        const child = at + 1 < all.length && all[at + 1].depth === selectedLayer.layer.depth + 1 ? all[at + 1] : null
+        const depth = selectedLayer.layer.depth
+        const children = []
+        for (let i = at + 1; i < all.length && all[i].depth > depth; i++) {
+            if (all[i].depth === depth + 1)
+                children.push(all[i])
+        }
+        const child = children.length === 1 ? children[0] : null
         refusal.at = name
         set(name, child !== null && child.id !== ""
             ? child.id + (across ? ".width" : ".height")
@@ -247,6 +256,8 @@ Panel {
     // change before the answer comes.
     property bool fillingRoot: false
     function giveFill() {
+        if (filling)
+            return
         filling = true
         fillingRoot = isRoot
         refusal.at = "kind"
@@ -258,10 +269,18 @@ Panel {
             name: "Rectangle"
         })
     }
+    // The fill is the object's own: a state picked meanwhile would keep it
+    // to that state, and the box would be unfilled in every other.
     function filled(node) {
         filling = false
         refusal.at = "kind"
-        set("color", themed ? theme + (fillingRoot ? "Colors.canvas" : "Colors.surface") : '"white"', node)
+        refusal.text = ""
+        ask("binding_set", {
+            doc: workspace.doc,
+            node: {node: node || workspace.selected},
+            name: "color",
+            value: themed ? theme + (fillingRoot ? "Colors.canvas" : "Colors.surface") : '"white"'
+        })
     }
 
     // What the selected object declares of its own: each property, signal
@@ -276,6 +295,15 @@ Panel {
         const out = []
         let depth = 0
         let words = ""
+        // The last token, as literalLines reads it, so a `/` that starts a
+        // regular expression is told from one that divides.
+        let prev = ""
+        let word = ""
+        let inWord = false
+        const keywords = ["return", "typeof", "instanceof", "in", "of", "new", "delete",
+            "void", "throw", "case", "do", "else", "yield", "await"]
+        const startsRegex = () => prev === "" || "(,=:[!&|?{};+-*%<>~^".includes(prev)
+            || (prev === "w" && keywords.includes(word))
         const end = () => {
             const said = words.trim()
             const m = member.exec(said)
@@ -285,6 +313,9 @@ Panel {
         }
         for (let i = 0; i < text.length; i++) {
             const c = text[i]
+            const wordChar = /[A-Za-z0-9_$]/.test(c)
+            if (!wordChar)
+                inWord = false
             if (c === "/" && text[i + 1] === "/") {
                 while (i < text.length && text[i] !== "\n")
                     i++
@@ -297,6 +328,30 @@ Panel {
                 i = close < 0 ? text.length : close + 1
                 continue
             }
+            if (c === "/" && startsRegex()) {
+                // To the `/` that closes it: not an escaped one, nor one in
+                // a class. One left open ends with its line.
+                let j = i + 1
+                let cls = false
+                while (j < text.length && text[j] !== "\n") {
+                    const d = text[j]
+                    if (d === "\\")
+                        j++
+                    else if (d === "[")
+                        cls = true
+                    else if (d === "]")
+                        cls = false
+                    else if (d === "/" && !cls)
+                        break
+                    j++
+                }
+                const closed = j < text.length && text[j] === "/"
+                if (depth === 1)
+                    words += text.slice(i, closed ? j + 1 : j)
+                i = closed ? j : j - 1
+                prev = ")"
+                continue
+            }
             if (c === '"' || c === "'" || c === "`") {
                 let j = i + 1
                 while (j < text.length && text[j] !== c)
@@ -304,7 +359,15 @@ Panel {
                 if (depth === 1)
                     words += text.slice(i, j + 1)
                 i = j
+                prev = ")"
                 continue
+            }
+            if (wordChar) {
+                word = inWord ? word + c : c
+                inWord = true
+                prev = "w"
+            } else if (c !== " " && c !== "\t" && c !== "\r" && c !== "\n") {
+                prev = c === ")" || c === "]" ? ")" : c
             }
             if (c === "{") {
                 if (depth === 1)
@@ -348,10 +411,22 @@ Panel {
         refusal.at = "api"
         refusal.text = ""
         addingMember = true
+        memberSent = memberDraft()
         ask("node_insert", {doc: workspace.doc, parent: {node: workspace.selected}, text: text})
     }
+    // What the row held when it was sent: one typed meanwhile is the next
+    // member, not the one the file now has.
+    property string memberSent: ""
+    function memberDraft() {
+        return JSON.stringify([memberKind.currentIndex, memberName.text, memberType.text,
+            memberValue.text, memberArgs.text, memberBody.text])
+    }
     function memberAdded() {
+        const sent = memberSent
         addingMember = false
+        memberSent = ""
+        if (sent !== "" && memberDraft() !== sent)
+            return
         memberName.text = ""
         memberType.text = ""
         memberArgs.text = ""
@@ -379,6 +454,9 @@ Panel {
         // (`word`), ")" after a value closed, else the punctuation itself.
         let prev = ""
         let word = ""
+        // Whether the last character was the word's: a space or a line end
+        // ends it, so `else return` is two words, not `elsereturn`.
+        let inWord = false
         const keywords = ["return", "typeof", "instanceof", "in", "of", "new", "delete",
             "void", "throw", "case", "do", "else", "yield", "await"]
         const startsRegex = () => prev === "" || "(,=:[!&|?{};+-*%<>~^".includes(prev)
@@ -393,6 +471,8 @@ Panel {
         for (let i = 0; i < text.length; i++) {
             const c = text[i]
             const at = top()
+            if (!/[A-Za-z0-9_$]/.test(c))
+                inWord = false
             if (c === "\n") {
                 // A line comment ends here, and so does a quote or a regular
                 // expression left open.
@@ -443,7 +523,8 @@ Panel {
             } else if (c === "'" || c === '"' || c === "`") {
                 stack.push({mode: c})
             } else if (/[A-Za-z0-9_$]/.test(c)) {
-                word = prev === "w" ? word + c : c
+                word = inWord ? word + c : c
+                inWord = true
                 prev = "w"
             } else if (c === " " || c === "\t" || c === "\r") {
                 continue
@@ -560,7 +641,10 @@ Panel {
     // the one written; the other axis keeps its own.
     function align(flag, axis) {
         const sameAxis = alignAxes[axis]
-        const had = alignmentFlags() || []
+        const had = alignmentFlags()
+        // An expression is the file's to change: one flag would replace all of it.
+        if (had === null)
+            return
         const kept = had.filter(f => sameAxis.indexOf(f) < 0)
         if (had.indexOf(flag) < 0)
             kept.push(flag)
@@ -710,6 +794,7 @@ Panel {
         newValue.text = ""
         componentName.text = ""
         newComment.text = ""
+        memberSent = ""
         memberAdded()
         handlerOf = ""
     }
@@ -736,8 +821,10 @@ Panel {
         function onRefused(tool, error, asked) {
             if (tool === "node_arrange" && asked.action === "relayout")
                 panel.filling = false
-            if (tool === "node_insert")
+            if (tool === "node_insert") {
                 panel.addingMember = false
+                panel.memberSent = ""
+            }
             if (["property_set", "binding_set", "state_edit", "node_arrange"].includes(tool))
                 panel.reseed()
             if (panel.answeredHere(tool, asked))
@@ -812,7 +899,7 @@ Panel {
             }
             return
         }
-        heldText = (row.value === "" && row.notText !== true) || String(row.value).startsWith('"')
+        heldText = (row.value === "" && row.notText !== true) || /^["'`]/.test(String(row.value))
         set(row.name, text)
         heldText = false
     }
@@ -1437,6 +1524,8 @@ Panel {
                             text: modelData.label
                             iconSize: 14
                             checked: (panel.alignmentFlags() || []).indexOf(modelData.flag) >= 0
+                            // An expression is more than one axis's flag.
+                            enabled: panel.alignmentFlags() !== null
                             // A gap between a grid's two axes.
                             Layout.leftMargin: index === 3 ? Spacing.sm : 0
                             onClicked: panel.align(modelData.flag, modelData.axis)
@@ -1689,10 +1778,15 @@ Panel {
                                         Layout.minimumWidth: 48
                                         onAccepted: {
                                             refusal.at = cell.modelData.name
-                                            if (cell.modelData.row !== null)
+                                            // Emptied, what was written goes.
+                                            if (text.trim() === "") {
+                                                if (cell.written !== "")
+                                                    panel.set(cell.modelData.name, "null")
+                                            } else if (cell.modelData.row !== null) {
                                                 panel.enter(cell.modelData.row, text)
-                                            else if (text.trim() !== "")
+                                            } else {
                                                 panel.set(cell.modelData.name, text)
+                                            }
                                         }
                                         Connections {
                                             target: panel
@@ -1881,7 +1975,8 @@ Panel {
                     }
                 }
                 Note {
-                    visible: !panel.isRoot
+                    // The page has no wrap, but a layout page can be turned.
+                    visible: !panel.isRoot || panel.isLayout
                     text: panel.says("arrange")
                     Layout.fillWidth: true
                 }
@@ -1985,6 +2080,8 @@ Panel {
                     visible: panel.kindSection !== null && panel.kindSection.fill === true
                     text: "Give it a fill"
                     Accessible.name: text
+                    // One fill at a time: the answer says which box to fill.
+                    enabled: !panel.filling
                     onClicked: panel.giveFill()
                 }
                 Note {

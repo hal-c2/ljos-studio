@@ -507,6 +507,16 @@ Popup {
                                 : kindButton.hovered ? Colors.surfacePressed : "transparent"
                             border.width: kindButton.checked ? 1 : 0
                             border.color: Colors.surfacePressed
+                            // Where the keys are, over the picked one's own edge.
+                            Rectangle {
+                                objectName: "focusRing"
+                                anchors.fill: parent
+                                radius: parent.radius
+                                color: "transparent"
+                                border.width: 2
+                                border.color: Colors.focusRing
+                                visible: kindButton.visualFocus
+                            }
                             Behavior on color {
                                 // Not into what it opens as: nothing has moved then.
                                 enabled: !opening.running
