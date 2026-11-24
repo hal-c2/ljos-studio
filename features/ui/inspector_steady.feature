@@ -34,6 +34,10 @@ Feature: The inspector holds still while a person types into it
     And the inspector's "color" is where it was
     And the file "Main.qml" says "width: 100"
 
+  Scenario: A refusal and what it offers end above the row below
+    When the person sets "color" to "cube" in the inspector
+    Then the inspector's refusal "cube is not a literal: bind it as an expression" and its offers end above the row under its "color"
+
   Scenario: A property refused is said under its row, and the row below stays put
     Given the person has noted where the inspector's "opacity" is
     When the person sets "color" to "cube" in the inspector
