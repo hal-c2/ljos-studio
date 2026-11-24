@@ -33,6 +33,10 @@ Panel {
         const bare = picked.type.split(".").pop()
         return picked.parent !== "" && panel.drawsItsOwn.includes(bare) ? picked.parent : picked.node
     }
+    // Whether there is anywhere to place, which every Place button asks.
+    // `target` moves to each new document's root; this changes only when
+    // there comes to be a place or stops being one.
+    readonly property bool canPlace: target !== ""
     readonly property var drawsItsOwn: ["Text", "TextInput", "TextEdit", "Image", "AnimatedImage",
         "BorderImage", "Canvas", "Button", "CheckBox", "RadioButton", "Switch", "Slider",
         "ProgressBar", "SpinBox", "TextField", "TextArea", "ComboBox", "Label", "ToolButton"]
@@ -231,7 +235,7 @@ Panel {
                 IconButton {
                     icon_: "plus"
                     text: "Place " + row.modelData.name
-                    enabled: panel.target !== ""
+                    enabled: panel.canPlace
                     onClicked: panel.workspace.dispatch("node_insert", {
                         doc: panel.workspace.doc,
                         parent: {node: panel.target},
@@ -337,7 +341,7 @@ Panel {
                             text: modelData.name
                             Accessible.name: "Place " + modelData.name
                             Accessible.role: Accessible.Button
-                            enabled: panel.target !== ""
+                            enabled: panel.canPlace
                             width: (assetsSection.width - 2 * Spacing.xxs) / 3
                             height: 68
                             ToolTip.visible: hovered
@@ -461,7 +465,7 @@ Panel {
                                 Accessible.name: "Place " + modelData.name
                                 Accessible.description: modelData.module
                                 Accessible.role: Accessible.Button
-                                enabled: panel.target !== ""
+                                enabled: panel.canPlace
                                 width: (group.width - 2 * Spacing.xxs) / 3
                                 height: 76
                                 hoverEnabled: true
