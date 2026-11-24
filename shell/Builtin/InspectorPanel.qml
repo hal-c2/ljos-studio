@@ -1934,8 +1934,10 @@ Panel {
                                 delegate: RowLayout {
                                     id: cell
                                     required property var modelData
-                                    readonly property string written: modelData.row !== null
-                                        ? panel.inState(modelData.name, modelData.row.value) : ""
+                                    // A picked state's change shows here even where the
+                                    // file writes no value of the object's own.
+                                    readonly property string written: panel.inState(modelData.name,
+                                        modelData.row !== null ? modelData.row.value : "")
                                     spacing: 2
                                     Layout.fillWidth: true
                                     // Equal columns, whatever each holds.
