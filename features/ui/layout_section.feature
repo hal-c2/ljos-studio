@@ -176,6 +176,17 @@ Feature: A person pins an object from the inspector's Layout section
     And the file "Main.qml" says "target: table"
     And the inspector's "Layout spacing" holds "12"
 
+  # A scrub writes over what the field showed; once the state is let go of,
+  # the field shows the object's own value again, not the scrubbed one.
+  Scenario: A layout's spacing scrubbed in a state shows its own once the state is let go of
+    Given the person has selected "Grid table" in the layers panel
+    And the person has added the state "compact" in the inspector
+    And the person has picked the state "compact" in the inspector
+    When the person scrubs the inspector's "Layout spacing" by 5 and the window takes the press away
+    Then the file "Main.qml" says "spacing: 8"
+    When the person lets go of the state "compact" in the inspector
+    Then the inspector's "Layout spacing" holds "3"
+
   Scenario: What a layout places cannot be pinned, and the section says so
     When the person selects "Text cell" in the layers panel
     Then the inspector has no button "Pin left"

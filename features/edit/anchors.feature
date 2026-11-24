@@ -306,3 +306,29 @@ Feature: An object is pinned to its parent or a sibling
     Then the file "Shown.qml" contains "x: 0"
     And the file "Shown.qml" contains "width: 400"
     And the file "Shown.qml" contains "height: 300"
+
+  # The centre line was all that held the axis: let go of with a side that
+  # was never pinned, it keeps the place the preview shows.
+  @preview
+  Scenario: Letting the last centre line go with a side keeps it where the preview shows it
+    Given the file "Lined.qml":
+      """qml
+      import QtQuick
+
+      Rectangle {
+          id: root
+          width: 400; height: 300
+          Rectangle { id: c; width: 50; height: 10; anchors.horizontalCenter: parent.horizontalCenter }
+      }
+      """
+    And the studio tools are connected with the capabilities "inspect, mutate, run"
+    And the agent has called the tool "preview_open" with:
+      """json
+      {"doc": "Lined.qml", "size": {"width": 400, "height": 300}}
+      """
+    When the agent calls the tool "node_arrange" with:
+      """json
+      {"action": "anchor", "doc": "Lined.qml", "nodes": [{"id": "c"}], "sides": {"horizontalCenter": null, "left": null}}
+      """
+    Then the file "Lined.qml" contains "x: 175"
+    And the file "Lined.qml" does not contain "horizontalCenter"

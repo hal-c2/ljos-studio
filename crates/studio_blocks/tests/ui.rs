@@ -1461,6 +1461,48 @@ fn picks_state(w: &mut UiWorld, name: String) -> StepResult {
         .map(drop)
 }
 
+#[when(regex = r#"^the person lets go of the state "([^"]+)" in the inspector$"#)]
+fn lets_go_of_state(w: &mut UiWorld, name: String) -> StepResult {
+    let window = w.window()?;
+    let button = window.node("Inspector", Some("button"), &format!("State {name}"))?;
+    window.click_node(&button)?;
+    // Only a picked state shows its condition.
+    match window.node("Inspector", Some("textinput"), "When") {
+        Ok(_) => Err(format!("the state {name:?} is still picked")),
+        Err(_) => Ok(()),
+    }
+}
+
+/// The click is queued before the agent's pick, and both are answered
+/// together: the window sees the new selection with the click's answer.
+#[when(
+    regex = r#"^the person clicks the button "([^"]+)" as an agent selects "([^"]+)" in "([^"]+)"$"#
+)]
+fn clicks_as_agent_selects(w: &mut UiWorld, name: String, id: String, doc: String) -> StepResult {
+    let window = w.window()?;
+    let button = window.node("Inspector", Some("button"), &name)?;
+    let key = button.key.ok_or("the button has no key")?;
+    {
+        let mut driver = window.stage.drive();
+        let at = driver
+            .aim_at_node(key)
+            .map_err(|why| format!("button {name:?} is not clicked: {why:?}"))?;
+        driver
+            .click(at, MouseButtons::LEFT, 1)
+            .map_err(drive_error)?;
+    }
+    let ctx = CallCtx::new(CapSet::of([Cap::Inspect, Cap::Mutate]));
+    window
+        .server
+        .call(
+            "node_select",
+            &ctx,
+            serde_json::json!({"doc": doc, "nodes": [{"id": id}]}),
+        )
+        .map_err(|e| format!("the agent was refused: {}", e.to_value()))?;
+    window.rest()
+}
+
 #[when(regex = r#"^the person renames the state "([^"]+)" to "([^"]+)" in the inspector$"#)]
 fn renames_state(w: &mut UiWorld, name: String, to: String) -> StepResult {
     let window = w.window()?;
@@ -2316,6 +2358,13 @@ fn scrub_taken(w: &mut UiWorld, name: String, by: f64) -> StepResult {
         .engine()
         .emit_by_name(scrubber, "canceled", &[])
         .map_err(|e| e.to_string())?;
+    window.rest()?;
+    // The hand comes up later, to a window that no longer gave it the press.
+    window
+        .stage
+        .drive()
+        .release(Point::new(from.x + by, from.y), MouseButtons::LEFT)
+        .map_err(drive_error)?;
     window.rest()
 }
 
