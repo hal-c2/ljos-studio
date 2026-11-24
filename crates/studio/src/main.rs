@@ -635,6 +635,30 @@ mod tests {
         assert_eq!(names_in(dir.path()), ["theme.json"]);
     }
 
+    // Where files cannot be linked, the draft itself is put in place, whole
+    // at once: no reader sees, and no interruption leaves, a theme part-way.
+    #[cfg(unix)]
+    #[test]
+    fn a_theme_seeded_where_files_cannot_be_linked_is_its_whole_draft() {
+        use std::os::unix::fs::MetadataExt;
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("theme.json");
+        let mut drafted = None;
+        let written = publish_new_by(
+            &file,
+            |out| std::io::Write::write_all(out, THEME.as_bytes()),
+            |draft, _| {
+                drafted = Some(std::fs::metadata(draft)?.ino());
+                Err(std::io::ErrorKind::Unsupported.into())
+            },
+        )
+        .unwrap();
+        assert!(written);
+        assert_eq!(std::fs::metadata(&file).unwrap().ino(), drafted.unwrap());
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), THEME);
+        assert_eq!(names_in(dir.path()), ["theme.json"]);
+    }
+
     #[test]
     fn the_state_is_never_in_the_shared_temporary_directory() {
         let os = |s: &str| Some(OsString::from(s));

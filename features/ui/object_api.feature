@@ -109,6 +109,14 @@ Feature: An object's own API is written in the inspector
     And the person selects "Item root" in the layers panel
     Then the inspector lists the members "count, half, parts, done"
 
+  # A `)` that ends the head of an `if`, a `while`, a `for` or a `with` ends
+  # no value: a `/` after it starts a regular expression. One that ends a
+  # call ends a value, and a `/` after it divides.
+  Scenario: A brace in a regular expression after an `if` ends nothing
+    When the person replaces "signal done(int code)" with "function hasBrace(s) { if (s) /[}]/.test(s) }\n    function half(s) { return Number(s) / 2 + \"}\" }\n    signal done(int code)" in the code view
+    And the person selects "Item root" in the layers panel
+    Then the inspector lists the members "count, hasBrace, half, done"
+
   # Inside a string the lines are the string's: the inspector trims none of
   # them. (Setting the value indents each later line by the handler's own
   # indent, inside the string too: that is qml_edit's, and not asserted.)
@@ -154,6 +162,14 @@ Feature: An object's own API is written in the inspector
     And the person clicks the button "Write the done handler"
     Then the file "Main.qml" says "b  \n"
 
+  # A `++` or a `--` after a value ends it: a `/` after it divides.
+  Scenario: A division after a postfix `++` in a handler is no regular expression
+    Given the person has selected "Item root" in the layers panel
+    And the person has clicked the button "Edit the done handler"
+    When the person types "let n = code\nconst k = n++ / 2 + `a\n  b  \nc`\nconsole.log(k)" in the inspector's "Handler for done" and leaves it
+    And the person clicks the button "Write the done handler"
+    Then the file "Main.qml" says "b  \n"
+
   # What is typed while the handler is written is the next draft: the
   # editor stays open with it.
   Scenario: A handler typed while the one before it is written stays open with it
@@ -195,5 +211,6 @@ Feature: An object's own API is written in the inspector
     Given the person has selected "Item root" in the layers panel
     And the person has clicked the button "Edit the done handler"
     And the person has typed 80 lines of "count = code" in the inspector's "Handler for done" and left it
+    And the inspector's "Handler for done" is taller than the window
     When the person types "count = 1" in the inspector's "Handler for done" and leaves it
     Then the inspector's "Handler for done" holds "count = 1"

@@ -91,6 +91,28 @@ Feature: The inspector holds still while a person types into it
     And the inspector's "New property" holds "width"
     And the inspector's "New value" holds "90"
 
+  # A row's write is answered on its own: the answer to a write sent
+  # before it empties nothing, and the row's own refused leaves it as typed.
+  Scenario: A property refused after another write's answer keeps its row
+    Given the person has typed "nosuch" in the inspector's "New property" and left it
+    And the person has typed "3" in the inspector's "New value" and left it
+    When the person sets "width" to "120" in the inspector and clicks the button "Set new property" before its answer
+    Then the file "Main.qml" says "width: 120"
+    And the inspector says "a `Rectangle` has no `nosuch`" under its "New value"
+    And the inspector's new property row holds "nosuch"
+    And the inspector's "New value" holds "3"
+
+  Scenario: A change refused after another write's answer keeps its row
+    Given the person has added the state "compact" in the inspector
+    And the person has picked the state "compact" in the inspector
+    And the person has typed "nobody" in the inspector's "Change target" and left it
+    And the person has typed "height" in the inspector's "Change property" and left it
+    And the person has typed "80" in the inspector's "Change value" and left it
+    When the person sets "width" to "120" in the inspector and clicks the button "Set change" before its answer
+    Then the file "Main.qml" says "width: 120"
+    And the inspector's "Change target" holds "nobody"
+    And the inspector's "Change value" holds "80"
+
   Scenario: A token refused leaves the list of tokens where it was
     Given the person has noted where the tokens panel's "Colors.text light" is
     When the person sets "Colors.text light" to "#f0f0f0" in the tokens panel

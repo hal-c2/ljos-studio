@@ -1490,6 +1490,40 @@ fn clicks_then_types(w: &mut UiWorld, button: String, text: String, name: String
     window.rest()
 }
 
+/// The field's value entered, then the button pressed before the field's
+/// write is answered: both answers come at the next rest, the field's first.
+#[when(
+    regex = r#"^the person sets "([^"]+)" to "(.*)" in the inspector and clicks the button "([^"]+)" before its answer$"#
+)]
+fn sets_then_clicks(w: &mut UiWorld, name: String, value: String, button: String) -> StepResult {
+    let value = unescape(&value);
+    let window = w.window()?;
+    let field = window.node("Inspector", Some("textinput"), &name)?;
+    let key = field.key.ok_or("the field has no key")?;
+    window.scroll_to(key)?;
+    {
+        let mut driver = window.stage.drive();
+        let at = driver
+            .aim_at_node(key)
+            .map_err(|why| format!("{name:?} is not clicked: {why}"))?;
+        driver
+            .click(at, MouseButtons::LEFT, 1)
+            .map_err(drive_error)?;
+        for chord in ["Ctrl+A", "Delete"] {
+            driver
+                .chord(&Chord::parse(chord)?, 0)
+                .map_err(drive_error)?;
+        }
+        driver.commit(&value).map_err(drive_error)?;
+        driver
+            .chord(&Chord::parse("Return")?, 0)
+            .map_err(drive_error)?;
+        driver.settle().map_err(drive_error)?;
+    }
+    press_now(window, "Inspector", &button)?;
+    window.rest()
+}
+
 /// Tab after Tab, as a person moves through the window, until the target
 /// has the keys; a window that never gets there says where they went.
 #[when(
@@ -1850,6 +1884,28 @@ fn row_holds(w: &mut UiWorld, name: String, want: String) -> StepResult {
     (field.value == want)
         .then_some(())
         .ok_or_else(|| format!("the row holds {:?}", field.value))
+}
+
+/// The field reaches past the window's top or bottom edge, so a person
+/// cannot see it whole.
+#[given(regex = r#"^the inspector's "([^"]+)" is taller than the window$"#)]
+#[then(regex = r#"^the inspector's "([^"]+)" is taller than the window$"#)]
+fn row_taller_than_window(w: &mut UiWorld, name: String) -> StepResult {
+    let window = w.window()?;
+    let key = window
+        .typed_in("Inspector", &name)?
+        .key
+        .ok_or("the field has no key")?;
+    let mut high = None;
+    window.stage.scene.accessibility_tree().walk(|k, _, d| {
+        if k == key {
+            high = Some(d.bounds.y1 - d.bounds.y0);
+        }
+    });
+    let high = high.ok_or_else(|| format!("{name:?} is not in the window"))?;
+    (high > window.window_rect().height())
+        .then_some(())
+        .ok_or_else(|| format!("{name:?} is {high} high, in a window {HEIGHT} high"))
 }
 
 #[when(regex = r#"^the person clicks in the inspector's "([^"]+)"$"#)]

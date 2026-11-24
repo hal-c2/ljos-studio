@@ -47,6 +47,18 @@ Feature: The inspector says what an object can be given
     And the person clicks the button "Choose Font.Bold for font.weight"
     Then the file "Main.qml" says "font.weight: Font.Bold"
 
+  # A choice for the new property row is that row's write: answered, the
+  # row is emptied, the value typed in it too.
+  Scenario: A choice for a new property empties its row when it is answered
+    Given the person has selected "Text title" in the layers panel
+    And the person has typed "font.weight" in the inspector's "New property" and left it
+    And the person has typed "Font.Light" in the inspector's "New value" and left it
+    When the person clicks the button "Choices for new property"
+    And the person clicks the button "Choose Font.Bold for font.weight"
+    Then the file "Main.qml" says "font.weight: Font.Bold"
+    And the inspector's new property row holds ""
+    And the inspector's "New value" holds ""
+
   Scenario: A value of the property's enum typed by hand needs no asking
     Given the person has selected "Text title" in the layers panel
     When the person sets "font.weight" to "Font.DemiBold" in the inspector
