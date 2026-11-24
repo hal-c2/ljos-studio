@@ -5619,6 +5619,7 @@ dependencies = [
  "qt_signals",
  "qt_types",
  "regex",
+ "rustix 1.1.5",
  "schemars",
  "serde",
  "serde_json",

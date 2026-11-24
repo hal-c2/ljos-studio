@@ -695,7 +695,11 @@ into `<out>-site` (`build/web-site`) and serves it on this machine over
 loopback; `open: true` asks the system's browser to open it. A site is
 served only while it is the build of the bundle beside it: once that bundle
 is written again (built or not), its address answers `404` until a build
-makes the site anew, at the same address. Studio carries
+makes the site anew, at the same address. What it reads is the directory
+the build made, through no link: a directory put at that place by anything
+else answers `404`, and on Linux and macOS each file is opened below the
+directory held open, so a link swapped in while a request is read leads
+nowhere. Studio carries
 its own builder (`web/site/`: a Vite build with ljos-web's plugin, whose
 page has the head `page` gives and scrolls as a document) but not ljos-web,
 which it finds, never downloads (DESIGN.md S6, as built):
