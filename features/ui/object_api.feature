@@ -96,3 +96,29 @@ Feature: An object's own API is written in the inspector
     And the person clicks the button "Write the done handler"
     Then the file "Main.qml" says "b  \n"
     And the file "Main.qml" says "console.log(s)"
+
+  # A `/` where a value starts begins a regular expression, and a quote or a
+  # backtick in one starts no string: the lines after it stay the handler's
+  # own, indented with it.
+  Scenario: A backtick in a handler's regular expression starts no string
+    Given the person has selected "Item root" in the layers panel
+    And the person has clicked the button "Edit the done handler"
+    And the person has typed "const t = String(code).replace(/`/g, \"'\")\nconsole.log(t)" in the inspector's "Handler for done" and left it
+    And the person has clicked the button "Write the done handler"
+    When the person clicks the button "Edit the done handler"
+    Then the inspector's "Handler for done" holds "const t = String(code).replace(/`/g, \"'\")\nconsole.log(t)"
+
+  Scenario: A quote in a handler's regular expression starts no string
+    Given the person has selected "Item root" in the layers panel
+    And the person has clicked the button "Edit the done handler"
+    When the person types "const s = /\"/.test(String(code)) ? `a\n  b  \nc` : \"\"\nconsole.log(s)" in the inspector's "Handler for done" and leaves it
+    And the person clicks the button "Write the done handler"
+    Then the file "Main.qml" says "b  \n"
+
+  # After a value a `/` divides: the string after it is still read as one.
+  Scenario: A division in a handler is no regular expression
+    Given the person has selected "Item root" in the layers panel
+    And the person has clicked the button "Edit the done handler"
+    When the person types "const k = String(code).length / 2 + \"/\" + `a\n  b  \nc`\nconsole.log(k)" in the inspector's "Handler for done" and leaves it
+    And the person clicks the button "Write the done handler"
+    Then the file "Main.qml" says "b  \n"

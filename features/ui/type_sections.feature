@@ -109,6 +109,15 @@ Feature: The inspector shows what a kind of object is about
     Then the file "Main.qml" says "Rectangle {\n    id: root"
     And the file "Main.qml" says "color: Colors.canvas"
 
+  # The selection is shared: an agent's pick can reach the window with the
+  # fill's answer. What was asked to be filled is filled as what it was.
+  Scenario: The page given a fill as an agent selects a child is filled as the page
+    When the person selects "Item root" in the layers panel
+    And the person clicks the button "Give it a fill" as an agent selects "title" in "Main.qml"
+    Then the file "Main.qml" says "Rectangle {\n    id: root"
+    And the file "Main.qml" says "color: Colors.canvas"
+    And the file "Main.qml" does not say "Colors.surface"
+
   # The theme's names are written the way the file imports them.
   Scenario: A style is written with the name the theme is imported as
     When the person replaces "import Ljos.Design" with "import Ljos.Design as Design" in the code view
