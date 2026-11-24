@@ -19,7 +19,8 @@ use std::{
     path::{Component, Path, PathBuf},
     process::{Child, Command, Stdio},
     sync::{
-        LazyLock, Mutex,
+        Arc, LazyLock, Mutex,
+        atomic::{AtomicBool, Ordering},
         mpsc::{self, RecvTimeoutError},
     },
     time::{Duration, Instant},
@@ -429,7 +430,12 @@ fn next_line(
     started: Instant,
     deadline: Duration,
 ) -> Result<String, RecvTimeoutError> {
-    lines.recv_timeout(deadline.saturating_sub(started.elapsed()))
+    let left = deadline.saturating_sub(started.elapsed());
+    // With no time left a line already queued would still be handed over.
+    if left.is_zero() {
+        return Err(RecvTimeoutError::Timeout);
+    }
+    lines.recv_timeout(left)
 }
 
 /// Stops a builder and all it started.
@@ -532,15 +538,23 @@ fn link_dir(to: &Path, at: &Path) -> std::io::Result<()> {
     }
 }
 
-/// The sites served, by directory, and their ports: one server for each,
-/// for as long as Studio runs, so a site built again keeps its address.
-static SERVED: LazyLock<Mutex<HashMap<PathBuf, u16>>> = LazyLock::new(Mutex::default);
+/// The sites served, by directory: one server for each, for as long as
+/// Studio runs, so a site built again keeps its address.
+static SERVED: LazyLock<Mutex<HashMap<PathBuf, Served>>> = LazyLock::new(Mutex::default);
+
+/// A site's server: its port, and whether it answers with the site, which
+/// it does only while the site is the build of the bundle beside it.
+struct Served {
+    port: u16,
+    open: Arc<AtomicBool>,
+}
 
 /// The address this machine serves `site` on, which nobody else can reach.
 pub fn serve(site: &Path) -> std::io::Result<String> {
     let mut served = SERVED.lock().unwrap_or_else(|e| e.into_inner());
-    if let Some(port) = served.get(site) {
-        return Ok(format!("http://127.0.0.1:{port}/"));
+    if let Some(server) = served.get(site) {
+        server.open.store(true, Ordering::SeqCst);
+        return Ok(format!("http://127.0.0.1:{}/", server.port));
     }
     // The directory it is now: a link put in its place later leads nowhere
     // the server reads.
@@ -548,21 +562,38 @@ pub fn serve(site: &Path) -> std::io::Result<String> {
     let listener = TcpListener::bind(("127.0.0.1", 0))?;
     let port = listener.local_addr()?.port();
     let dir = root;
+    let open = Arc::new(AtomicBool::new(true));
+    let answers = Arc::clone(&open);
     std::thread::Builder::new()
         .name("site server".to_owned())
         .spawn(move || {
             for stream in listener.incoming().map_while(Result::ok) {
                 let dir = dir.clone();
+                let open = Arc::clone(&answers);
                 let _ = std::thread::Builder::new()
                     .name("site request".to_owned())
-                    .spawn(move || answer(stream, &dir, port));
+                    .spawn(move || answer(stream, &dir, port, &open));
             }
         })?;
-    served.insert(site.to_owned(), port);
+    served.insert(site.to_owned(), Served { port, open });
     Ok(format!("http://127.0.0.1:{port}/"))
 }
 
-fn answer(mut stream: TcpStream, site: &Path, port: u16) {
+/// Stops serving `site`, whose bundle was written again, until a build
+/// serves it anew at the same address. By its letters' case too, as holds
+/// compare paths: on a disk that ignores it `build/WEB-site` is the site.
+pub fn withdraw(site: &Path) {
+    let site = crate::export::folded(site);
+    let served = SERVED.lock().unwrap_or_else(|e| e.into_inner());
+    for (_, server) in served
+        .iter()
+        .filter(|(at, _)| crate::export::folded(at) == site)
+    {
+        server.open.store(false, Ordering::SeqCst);
+    }
+}
+
+fn answer(mut stream: TcpStream, site: &Path, port: u16, open: &AtomicBool) {
     let _ = stream.set_read_timeout(Some(Duration::from_secs(10)));
     let _ = stream.set_write_timeout(Some(Duration::from_secs(30)));
     let mut head = Vec::new();
@@ -597,6 +628,9 @@ fn answer(mut stream: TcpStream, site: &Path, port: u16) {
     let body = method == "GET";
     if !body && method != "HEAD" {
         return reply(&mut stream, "405 Method Not Allowed", None, false);
+    }
+    if !open.load(Ordering::SeqCst) {
+        return reply(&mut stream, "404 Not Found", None, false);
     }
     let file = resolve(site, target).and_then(|at| {
         let file = fs::File::open(&at).ok()?;
@@ -1032,6 +1066,32 @@ mod tests {
 
     // Green before the change too: what it proves is that a file is served
     // whole and its length said, not how much memory serving it takes.
+    #[test]
+    fn a_withdrawn_site_answers_nothing_until_it_is_served_again_at_its_address() {
+        let (_dir, site) = site();
+        let url = serve(&site).unwrap();
+        let port: u16 = url
+            .trim_start_matches("http://127.0.0.1:")
+            .trim_end_matches('/')
+            .parse()
+            .unwrap();
+        let ask = || {
+            let mut stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
+            stream
+                .write_all(format!("GET / HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n\r\n").as_bytes())
+                .unwrap();
+            let mut said = String::new();
+            stream.read_to_string(&mut said).unwrap();
+            said
+        };
+        withdraw(&site);
+        let gone = ask();
+        assert!(gone.starts_with("HTTP/1.1 404"), "{gone}");
+        assert_eq!(serve(&site).unwrap(), url);
+        let back = ask();
+        assert!(back.starts_with("HTTP/1.1 200 OK"), "{back}");
+    }
+
     // A line queued at the deadline is not read: a builder that never
     // stops talking is stopped all the same.
     #[test]
