@@ -794,11 +794,16 @@ fn reached(
         .chain(page.into_iter().flat_map(Page::pictures))
         .map(str::to_owned)
         .collect();
-    // The code, then each JSON file kept, as data the code reads names
-    // files as the code does (a feed's pictures). One that is not text
-    // names none.
+    // The code, then each JSON file kept (the theme, what was brought in
+    // below `assets/`, each one a file read names), as data the code reads
+    // names files as the code does (a feed's pictures). One that is not
+    // text names none.
     let mut read: BTreeSet<&str> = BTreeSet::new();
-    let mut next: Vec<&str> = paths.iter().copied().filter(|p| is_code(p)).collect();
+    let mut next: Vec<&str> = paths
+        .iter()
+        .copied()
+        .filter(|p| is_code(p) || (p.ends_with(".json") && *p != SITE_PAGE && keep.contains(*p)))
+        .collect();
     while let Some(doc) = next.pop() {
         if !read.insert(doc) {
             continue;
@@ -1221,6 +1226,21 @@ fn out_dir(root: &Path, out: Option<&str>, target: Target) -> Result<String, Sur
             ),
         ));
     }
+    // Bundles are staged beside their place under a hidden name, and what
+    // is found there is emptied before the next export.
+    if path
+        .components()
+        .skip(1)
+        .any(|c| c.as_os_str().to_string_lossy().starts_with('.'))
+    {
+        return Err(refused(
+            ErrorCode::PathDenied,
+            "hidden_name",
+            format!(
+                "`{out}` has a hidden name, as the places Studio stages bundles in do; choose another `out`"
+            ),
+        ));
+    }
     let full = root.join(&path);
     if leads_elsewhere(root, &full) {
         return Err(SurfaceError::new(
@@ -1607,7 +1627,7 @@ static BEING_BUILT: LazyLock<Mutex<Vec<PathBuf>>> = LazyLock::new(Mutex::default
 /// A path as holds compare it, without its letters' case: on a disk that
 /// ignores it `build/WEB` is `build/web`. Where the two differ, an export
 /// to one only waits for a build of the other.
-fn folded(path: &Path) -> PathBuf {
+pub(crate) fn folded(path: &Path) -> PathBuf {
     PathBuf::from(path.to_string_lossy().to_lowercase())
 }
 
@@ -1749,8 +1769,12 @@ fn export(studio: &Mutex<Studio>, ctx: &CallCtx, a: ExportArgs) -> Result<Export
             manifest.left_out.sort_by(|a, b| a.path.cmp(&b.path));
         }
         let copied = write(&root, &bundle, &manifest)?;
-        // Saved once the bundle is, so an export that fails leaves the
-        // project's page as it was.
+        // The site beside it was built from the bundle just replaced.
+        #[cfg(feature = "native")]
+        crate::site_build::withdraw(&site_of(&bundle));
+        // Saved once the bundle is, so an export whose bundle is not written
+        // leaves the project's page as it was. A build that fails after
+        // leaves it saved, as it leaves the bundle that holds it written.
         if let Some(page) = &a.page {
             let mut text = serde_json::to_string_pretty(page).expect("a page is JSON");
             text.push('\n');

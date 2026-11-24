@@ -676,8 +676,10 @@ keeps the pictures the feed names. Every other file is in `left_out` with "nothi
 names", so a picture outside `assets/` that nobody uses is not shipped.
 
 `page` is kept in the project's `ljos-page.json` (written by a real export
-that is given one, once its bundle is written, so one that fails leaves the
-file as it was; read by one that is not; it is in `left_out` itself, since
+that is given one, once its bundle is written, so one whose bundle is not
+written leaves the file as it was; DECISION: a build that fails after that
+leaves the page saved, as it leaves the bundle that holds it written, and
+building again reads both; read by one that is not; it is in `left_out` itself, since
 the manifest holds it). The name is Ljós's: a `site.json` of the project's
 is one of its files like any other, and the page is not in `.studio/`, which
 holds nothing a site is built from. Its `icon` and `image` are paths of the project's
@@ -690,7 +692,10 @@ anything is written, never ignored; `"open": false` too.
 
 `build: true` (needs `run`) builds the site from the bundle it just wrote
 into `<out>-site` (`build/web-site`) and serves it on this machine over
-loopback; `open: true` asks the system's browser to open it. Studio carries
+loopback; `open: true` asks the system's browser to open it. A site is
+served only while it is the build of the bundle beside it: once that bundle
+is written again (built or not), its address answers `404` until a build
+makes the site anew, at the same address. Studio carries
 its own builder (`web/site/`: a Vite build with ljos-web's plugin, whose
 page has the head `page` gives and scrolls as a document) but not ljos-web,
 which it finds, never downloads (DESIGN.md S6, as built):
@@ -744,7 +749,9 @@ file changed since, fails naming it and leaves the site as it was.
 DECISION: refused rather than merged, so no site is half somebody's. No
 export is written into a built site (`invalid_argument`, `inside_site`) or
 into `build/.site-work`, where builds work, in any letter case
-(`path_denied`, `work_directory`); a dry run says both.
+(`path_denied`, `work_directory`), or below a hidden name, where bundles
+are staged and emptied (`path_denied`, `hidden_name`); a dry run says all
+three.
 
 A bundle is written beside its place and swapped in, so it is never half
 of two exports. Refusals: `capability_denied` without `fs`; `not_found`

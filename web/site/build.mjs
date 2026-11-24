@@ -65,6 +65,9 @@ function notOurs(dir) {
   try {
     wrote = new Map(Object.entries(JSON.parse(readFileSync(join(dir, STAMP), "utf8")).files));
   } catch {
+    // DECISION: a stamp that is not this JSON is refused, not taken over.
+    // No released Studio wrote another kind, and one that lists no files
+    // vouches for none of what the directory holds.
     return `does not say which files the builder wrote (${STAMP})`;
   }
   const theirs = [...found].filter(([path, what]) => wrote.get(path) !== what).map(([path]) => path);
