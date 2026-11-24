@@ -53,5 +53,10 @@ tokio.workspace = true
 name = "features"
 harness = false
 
+# Its reading of the command line is tested with the crate.
+[[example]]
+name = "export"
+test = true
+
 [lints]
 workspace = true

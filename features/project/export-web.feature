@@ -602,6 +602,29 @@ Feature: A project is exported for ljos-web to build a site from
       And the file "ljos-page.json" does not exist
       And the file "build/web/ljos-site.json" does not exist
 
+    # The page is saved only with the bundle: a refused export leaves the
+    # page the next one reads as it was.
+    Scenario: An export refused its place keeps the page it was given out of the project
+      Given the file "ljos-page.json":
+        """json
+        {"title": "Before"}
+        """
+      And the file "build/web/notes.txt":
+        """
+        mine
+        """
+      When the agent calls the tool "export" with:
+        """json
+        {"entry": "Shell.qml", "target": "web", "page": {"title": "After"}}
+        """
+      Then the agent is refused with "invalid_argument"
+      And the refusal's "/details/kind" is "exists"
+      And the file "ljos-page.json" is:
+        """json
+        {"title": "Before"}
+        """
+      And the file "build/web/notes.txt" exists
+
   # Building needs ljos-web's compiler, runtime and bundler, which Studio
   # finds (DESIGN.md S6, as built: Studio builds the site); these say what
   # happens without them, which needs none of them to run.
@@ -628,6 +651,34 @@ Feature: A project is exported for ljos-web to build a site from
       And the answer's "/build/missing/0" contains "no-ljos-web"
       And the file "build/web/ljos-site.json" does not exist
 
+    # A build runs the `qmlc` it is given and the code of the ljos-web it is
+    # given, so neither is taken from outside the workspace: `run` is for
+    # the project's own code and the build's own tools. LJOS_WEB and QMLC
+    # are the machine's owner's, and are not held to it.
+    Scenario Outline: A toolchain from outside the workspace is refused before it is looked at
+      Given the studio tools are connected with the capabilities "inspect, mutate, fs, run"
+      And "outside" links to a directory outside the project that holds the file "qmlc"
+      When the agent calls the tool "export" with:
+        """json
+        {"entry": "Shell.qml", "target": "web", "build": true, <given>}
+        """
+      Then the agent is refused with "path_denied"
+      And the refusal's "/details/kind" is "outside_workspace"
+      And the refusal's "/details/argument" is "<argument>"
+      And the file "build/web/ljos-site.json" does not exist
+
+      Examples:
+        | given                                  | argument |
+        | "ljos_web": ".."                       | ljos_web |
+        | "ljos_web": "/"                        | ljos_web |
+        | "ljos_web": "outside"                  | ljos_web |
+        | "ljos_web": "missing/../../ljos-web"   | ljos_web |
+        | "ljos_web": "..", "dry_run": true      | ljos_web |
+        | "qmlc": "outside/qmlc"                 | qmlc     |
+        | "qmlc": "/bin/sh"                      | qmlc     |
+        | "qmlc": "missing/../../qmlc"           | qmlc     |
+        | "qmlc": "/bin/sh", "dry_run": true     | qmlc     |
+
     Scenario: Building a site runs a program, which needs the run capability
       When the agent calls the tool "export" with:
         """json
@@ -650,6 +701,7 @@ Feature: A project is exported for ljos-web to build a site from
       Examples:
         | given                               | argument |
         | "open": true                        | open     |
+        | "open": false                       | open     |
         | "open": true, "dry_run": true       | open     |
         | "ljos_web": "../ljos-web"           | ljos_web |
         | "qmlc": "qmlc"                      | qmlc     |
@@ -843,6 +895,87 @@ Feature: A project is exported for ljos-web to build a site from
       Then the agent is refused with "busy"
       And the refusal's "/details/kind" is "build_running"
       And the file "build/web/ljos-site.json" does not exist
+
+    # The runner's NODE is a stand-in that does not start, so these builds
+    # fail as one on any machine can after its bundle is written: the
+    # refusal still says what the export wrote.
+    Scenario: A build that fails says the bundle it wrote
+      Given the studio tools are connected with the capabilities "inspect, mutate, fs, run"
+      And the file "standin/packages/runtime/package.json":
+        """
+        {}
+        """
+      And the file "standin/examples/web/node_modules/ljos-web/package.json":
+        """
+        {}
+        """
+      And the file "standin/examples/web/node_modules/solid-js/package.json":
+        """
+        {}
+        """
+      And the file "standin/examples/web/node_modules/vite/package.json":
+        """
+        {}
+        """
+      And the file "standin/examples/web/node_modules/@solidjs/web/package.json":
+        """
+        {}
+        """
+      And the file "standin/qmlc":
+        """
+        not run
+        """
+      When the agent calls the tool "export" with:
+        """json
+        {"entry": "Shell.qml", "target": "web", "build": true, "ljos_web": "standin", "qmlc": "standin/qmlc"}
+        """
+      Then the agent is refused with "not_actionable"
+      And the refusal's "/details/kind" is "build_failed"
+      And the refusal's "/details/export/written" is true
+      And the refusal's "/details/export/replaces" is false
+      And the refusal's "/details/export/out" is "build/web"
+      And the file "build/web/ljos-site.json" exists
+
+    Scenario: A build that fails says the bundle it wrote replaced the one before
+      Given the studio tools are connected with the capabilities "inspect, mutate, fs, run"
+      And the file "standin/packages/runtime/package.json":
+        """
+        {}
+        """
+      And the file "standin/examples/web/node_modules/ljos-web/package.json":
+        """
+        {}
+        """
+      And the file "standin/examples/web/node_modules/solid-js/package.json":
+        """
+        {}
+        """
+      And the file "standin/examples/web/node_modules/vite/package.json":
+        """
+        {}
+        """
+      And the file "standin/examples/web/node_modules/@solidjs/web/package.json":
+        """
+        {}
+        """
+      And the file "standin/qmlc":
+        """
+        not run
+        """
+      And the agent has called the tool "export" with:
+        """json
+        {"entry": "Shell.qml", "target": "web"}
+        """
+      When the agent calls the tool "export" with:
+        """json
+        {"entry": "Shell.qml", "target": "web", "build": true, "ljos_web": "standin", "qmlc": "standin/qmlc"}
+        """
+      Then the agent is refused with "not_actionable"
+      And the refusal's "/details/kind" is "build_failed"
+      And the refusal's "/details/export/written" is true
+      And the refusal's "/details/export/replaces" is true
+      And the refusal's "/details/export/out" is "build/web"
+      And the file "build/web/ljos-site.json" exists
 
     Scenario: Only a web export is built
       Given the studio tools are connected with the capabilities "inspect, mutate, fs, run"

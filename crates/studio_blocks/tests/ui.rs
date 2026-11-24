@@ -738,6 +738,19 @@ impl Window {
         .map_err(|e| format!("{e:?}"))
     }
 
+    /// The refusal of a gesture's call, as the worker's arrives.
+    fn refuse(&mut self, tool: &str, error: Json, asked: Json) -> StepResult {
+        let workspace = self.workspace;
+        let engine = &mut self.stage.engine;
+        studio_blocks::Workspace::emit_refused(
+            &Cx::new(engine, workspace),
+            tool.to_owned(),
+            error,
+            asked,
+        )
+        .map_err(|e| format!("{e:?}"))
+    }
+
     fn tree(&self) -> AccessibleNode {
         ljos_drive::a11y::tree(&self.stage.scene, String::new())
     }
@@ -3588,6 +3601,111 @@ fn export_button(w: &mut UiWorld, name: String, state: String) -> StepResult {
     (disabled == (state == "disabled"))
         .then_some(())
         .ok_or_else(|| format!("{name:?} is {:?}", button.states))
+}
+
+fn export_panel(window: &Window) -> Result<ObjectId, String> {
+    ljos_drive::find_below(window.engine(), window.root, "exportPanel")
+        .ok_or_else(|| "the window has no export panel".to_owned())
+}
+
+/// `export` answered as the person's calls are, for an answer a step hands
+/// the panel later than it really came.
+fn export_as_the_person(window: &Window, args: Json) -> Result<Json, String> {
+    let ctx = CallCtx {
+        client: Some(studio_mcp::PERSON.to_owned()),
+        ..CallCtx::new(CapSet::of([Cap::Inspect, Cap::Mutate, Cap::Run, Cap::Fs]))
+    };
+    window
+        .server
+        .call("export", &ctx, args)
+        .map(|reply| reply.structured)
+        .map_err(|e| format!("export was refused: {}", e.to_value()))
+}
+
+/// The panel waits for one call more, as it does for one on its way.
+fn export_waits_once_more(window: &mut Window) -> StepResult {
+    let panel = export_panel(window)?;
+    let waiting = match window.engine().read_by_name(panel, "waiting") {
+        Value::Int(n) => n,
+        Value::Real(n) => n as i32,
+        other => return Err(format!("the panel's waiting is {other:?}")),
+    };
+    window
+        .engine()
+        .write_by_name(panel, "waiting", Value::Int(waiting + 1))
+        .map_err(|e| format!("{e:?}"))
+}
+
+fn export_builds(window: &mut Window) -> StepResult {
+    let panel = export_panel(window)?;
+    window
+        .engine()
+        .write_by_name(panel, "building", Value::Bool(true))
+        .map_err(|e| format!("{e:?}"))
+}
+
+// The page is the project's from the start; the check that read it is
+// what answers after the person has typed.
+#[when(
+    regex = r#"^the check that was on its way answers that the page is titled "([^"]*)" and described "([^"]*)"$"#
+)]
+fn late_page(w: &mut UiWorld, title: String, description: String) -> StepResult {
+    let page = serde_json::json!({"title": title, "description": description});
+    std::fs::write(w.dir.path().join("ljos-page.json"), page.to_string())
+        .map_err(|e| e.to_string())?;
+    let window = w.window()?;
+    export_waits_once_more(window)?;
+    let answer = export_as_the_person(
+        window,
+        serde_json::json!({"entry": "Main.qml", "target": "web", "dry_run": true}),
+    )?;
+    let asked =
+        serde_json::json!({"entry": "Main.qml", "target": "web", "dry_run": true, "build": true});
+    window.answer("export", answer, asked)?;
+    window.rest()
+}
+
+fn web_build_asked() -> Json {
+    serde_json::json!({
+        "entry": "Main.qml", "target": "web", "dry_run": false, "build": true, "open": true
+    })
+}
+
+#[when("the answer to a web build that was on its way arrives in the export panel")]
+fn late_build(w: &mut UiWorld) -> StepResult {
+    let window = w.window()?;
+    export_builds(window)?;
+    let mut answer = export_as_the_person(
+        window,
+        serde_json::json!({"entry": "Main.qml", "target": "web"}),
+    )?;
+    answer["build"] = serde_json::json!({
+        "ready": true, "site": "build/web-site", "path": "build/web-site",
+        "url": "http://127.0.0.1:9/", "bytes": 2048, "steps": [], "opened": true
+    });
+    window.answer("export", answer, web_build_asked())?;
+    window.rest()
+}
+
+#[when("a web build that was on its way is refused after writing the bundle")]
+fn late_build_refused(w: &mut UiWorld) -> StepResult {
+    let window = w.window()?;
+    export_builds(window)?;
+    let export = export_as_the_person(
+        window,
+        serde_json::json!({"entry": "Main.qml", "target": "web"}),
+    )?;
+    let why = "node did not start: no such program";
+    let error = serde_json::json!({
+        "code": "not_actionable",
+        "message": format!("the site was not built: {why}"),
+        "details": {
+            "kind": "build_failed", "step": "Getting the builder ready", "why": why,
+            "log": "build/.site-work/build.log", "steps": [], "export": export
+        }
+    });
+    window.refuse("export", error, web_build_asked())?;
+    window.rest()
 }
 
 #[then(regex = r#"^the file "([^"]+)" exists$"#)]

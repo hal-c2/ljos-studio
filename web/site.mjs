@@ -194,7 +194,9 @@ const end = await page.getByText("The end", { exact: true }).evaluate((e) => {
   const box = e.getBoundingClientRect();
   return { top: box.top, bottom: box.bottom, window: innerHeight };
 }).catch((e) => e.message);
-check('the page shows "The end"', typeof end === "object", end);
+// (in the window, and some of it to be seen)
+const seen = typeof end === "object" ? Math.min(end.bottom, end.window) - Math.max(end.top, 0) : 0;
+check('the page shows "The end"', seen > 0, end);
 
 // When the page is made 390 by 844 pixels
 await page.evaluate(() => scrollTo(0, 0));
