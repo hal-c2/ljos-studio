@@ -197,6 +197,18 @@ Feature: A component or a store opened alone shows something
     Then the agent is refused with "not_actionable"
     And the file "Blocks/.HabitCard.preview.qml" does not exist
 
+  Scenario: A stand-in Studio cannot hold is not written
+    Given the file ".studio":
+      """
+      Not a directory, so no lock is made in it.
+      """
+    When the agent calls the tool "preview_open" with:
+      """json
+      {"doc": "Blocks/HabitCard.qml"}
+      """
+    Then the agent is refused with "not_actionable"
+    And the file "Blocks/.HabitCard.preview.qml" does not exist
+
   Scenario: A file of the person's in the stand-in's place is left alone
     Given the file "Blocks/.HabitCard.preview.qml":
       """qml

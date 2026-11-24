@@ -62,17 +62,23 @@ impl Harness {
     /// This harness as written into the project at `dir`. Made before the
     /// file is written: what holds it is seen by another Studio ending its
     /// own preview of the component before the file is there to remove.
-    pub fn standing(&self, dir: Option<&Path>) -> Standing {
+    /// None when the project has a directory and the file cannot be held
+    /// there: written unheld, another Studio's ending preview would take it
+    /// from under this one.
+    pub fn standing(&self, dir: Option<&Path>) -> Option<Standing> {
         let file = dir.map(|dir| {
             let root = dir.canonicalize().unwrap_or_else(|_| dir.to_owned());
             (root, dir.join(&self.path))
         });
-        let held = file.as_ref().and_then(|(root, file)| hold(root, file));
-        Standing {
+        let held = match &file {
+            Some((root, file)) => Some(hold(root, file)?),
+            None => None,
+        };
+        Some(Standing {
             path: self.path.clone(),
             file,
             held,
-        }
+        })
     }
 }
 
@@ -114,14 +120,40 @@ fn gate(root: &Path) -> Option<File> {
     if !dir.canonicalize().ok()?.starts_with(root) {
         return None;
     }
-    let gate = File::options()
-        .create(true)
-        .truncate(false)
-        .write(true)
-        .open(root.join(GATE))
-        .ok()?;
+    let path = root.join(GATE);
+    // Made only where nothing is: an exclusive create follows no link.
+    let _ = File::options().write(true).create_new(true).open(&path);
+    let gate = plain(&path)?;
     gate.lock().ok()?;
     Some(gate)
+}
+
+/// Opens the plain file at `path` to read, never what a link there leads
+/// to: whoever else writes to the project could plant one leading out of
+/// it. Looked at before the open, so no link is followed into a pipe that
+/// would never open, and after, so one swapped in meanwhile is caught by
+/// not being what was opened.
+fn plain(path: &Path) -> Option<File> {
+    if !path.symlink_metadata().ok()?.file_type().is_file() {
+        return None;
+    }
+    let file = File::open(path).ok()?;
+    let here = path.symlink_metadata().ok()?;
+    (here.file_type().is_file() && same(&here, &file.metadata().ok()?)).then_some(file)
+}
+
+/// Whether two looks at a file saw the same one.
+#[cfg(unix)]
+fn same(a: &std::fs::Metadata, b: &std::fs::Metadata) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    a.dev() == b.dev() && a.ino() == b.ino()
+}
+
+/// Whether two looks at a file saw the same one. Without a file's identity
+/// at hand, the look before the open stands alone.
+#[cfg(not(unix))]
+fn same(_: &std::fs::Metadata, _: &std::fs::Metadata) -> bool {
+    true
 }
 
 /// What a hold beside `file` is named: `<file>.<run>.lock`.
@@ -138,6 +170,11 @@ fn hold_path(file: &Path, run: &str) -> Option<PathBuf> {
 fn hold(root: &Path, file: &Path) -> Option<Held> {
     static NEXT: AtomicU64 = AtomicU64::new(0);
     let _gate = gate(root)?;
+    // Only in a directory still inside the project: one swapped for a link
+    // would lead out of it.
+    if !file.parent()?.canonicalize().ok()?.starts_with(root) {
+        return None;
+    }
     // Unique among the holds of live runs: a pid is not reused while its
     // run lives, and the count tells this run's apart.
     let run = format!(
@@ -146,7 +183,12 @@ fn hold(root: &Path, file: &Path) -> Option<Held> {
         NEXT.fetch_add(1, Ordering::Relaxed)
     );
     let path = hold_path(file, &run)?;
-    let lock = File::create(&path).ok()?;
+    // Exclusive: never truncates a file, nor follows a link, already there.
+    let lock = File::options()
+        .write(true)
+        .create_new(true)
+        .open(&path)
+        .ok()?;
     if lock.try_lock().is_err() {
         // std opens files shareable for deletion, so it goes while open.
         let _ = std::fs::remove_file(&path);
@@ -176,7 +218,7 @@ fn held_by_another(file: &Path) -> bool {
         {
             continue;
         }
-        let Ok(lock) = File::open(entry.path()) else {
+        let Some(lock) = plain(&entry.path()) else {
             continue;
         };
         match lock.try_lock() {
@@ -210,7 +252,9 @@ impl Standing {
         if let Some(held) = self.held.take() {
             // Let go before it goes, so whoever looks next may take it.
             let _ = held.lock.unlock();
-            let _ = std::fs::remove_file(&held.path);
+            if self.inside() {
+                let _ = std::fs::remove_file(&held.path);
+            }
         }
         let another = self.inside()
             && self
@@ -252,8 +296,12 @@ impl Drop for Standing {
             return;
         };
         if let Some((_, file)) = self.file.as_ref().filter(|_| self.inside()) {
-            // A person may have written their own file there since.
-            if std::fs::read_to_string(file).is_ok_and(|text| is_studios(&text)) {
+            // A person may have written their own file there since, or
+            // put a link there, which Studio never writes.
+            if plain(file)
+                .and_then(|opened| std::io::read_to_string(opened).ok())
+                .is_some_and(|text| is_studios(&text))
+            {
                 // Already gone is as good.
                 let _ = std::fs::remove_file(file);
             }
@@ -950,7 +998,7 @@ mod tests {
             path: ".Card.preview.qml".to_owned(),
             text: MARK.to_owned(),
         };
-        drop(h.standing(Some(dir.path())));
+        drop(h.standing(Some(dir.path())).expect("held"));
         assert!(!file.exists());
     }
 
@@ -966,7 +1014,7 @@ mod tests {
             path: "cards/.Card.preview.qml".to_owned(),
             text: MARK.to_owned(),
         };
-        let standing = h.standing(Some(&project));
+        let standing = h.standing(Some(&project)).expect("held");
         // Swapped for a link to a marked file of another project. The
         // directory holds this preview's hold, so it goes with it.
         std::fs::remove_dir_all(project.join("cards")).unwrap();
@@ -986,7 +1034,7 @@ mod tests {
             path: ".Card.preview.qml".to_owned(),
             text: MARK.to_owned(),
         };
-        drop(h.standing(Some(dir.path())));
+        drop(h.standing(Some(dir.path())).expect("held"));
         assert_eq!(std::fs::read_to_string(&file).unwrap(), "// Mine\n");
     }
 
@@ -1000,8 +1048,8 @@ mod tests {
             text: MARK.to_owned(),
         };
         // Two Studios on one project, each previewing the component.
-        let first = h.standing(Some(dir.path()));
-        let mut second = h.standing(Some(dir.path()));
+        let first = h.standing(Some(dir.path())).expect("held");
+        let mut second = h.standing(Some(dir.path())).expect("held");
         drop(first);
         assert!(file.exists(), "removed while another preview ran from it");
         second.leave(&studio_core::FsStore::new(dir.path()).unwrap());
@@ -1022,7 +1070,7 @@ mod tests {
             path: ".Card.preview.qml".to_owned(),
             text: MARK.to_owned(),
         };
-        drop(h.standing(Some(dir.path())));
+        drop(h.standing(Some(dir.path())).expect("held"));
         assert_eq!(left(dir.path()), [".studio"]);
     }
 
@@ -1056,7 +1104,7 @@ mod tests {
             path: ".Card.preview.qml".to_owned(),
             text: MARK.to_owned(),
         };
-        let first = h.standing(Some(dir.path()));
+        let first = h.standing(Some(dir.path())).expect("held");
         // Another Studio starts a preview of the component: it makes its
         // hold under the gate, and writes the file after.
         let gate = take_gate(dir.path());
@@ -1088,7 +1136,7 @@ mod tests {
                 path: ".Card.preview.qml".to_owned(),
                 text: MARK.to_owned(),
             };
-            let standing = h.standing(Some(&project));
+            let standing = h.standing(Some(&project)).expect("held");
             made.send(()).unwrap();
             standing
         });
@@ -1108,6 +1156,70 @@ mod tests {
             .collect();
         assert_eq!(holds.len(), 1, "{holds:?}");
         assert!(holds[0].ends_with(".lock"), "{holds:?}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_linked_gate_leads_nowhere_out_of_the_project() {
+        let dir = tempfile::tempdir().unwrap();
+        let project = dir.path().join("project");
+        let elsewhere = dir.path().join("elsewhere");
+        std::fs::create_dir_all(project.join(".studio")).unwrap();
+        std::fs::create_dir_all(&elsewhere).unwrap();
+        // Planted by whoever else writes to the project: a link to a file
+        // that is not there yet.
+        std::os::unix::fs::symlink(elsewhere.join("made"), project.join(".studio/preview.lock"))
+            .unwrap();
+        let h = Harness {
+            path: ".Card.preview.qml".to_owned(),
+            text: MARK.to_owned(),
+        };
+        // Without the gate nothing is held, so nothing is written either.
+        assert!(h.standing(Some(&project)).is_none());
+        assert!(
+            !elsewhere.join("made").exists(),
+            "a file was made through the link"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_hold_is_never_made_through_a_linked_directory() {
+        let dir = tempfile::tempdir().unwrap();
+        let project = dir.path().join("project");
+        let elsewhere = dir.path().join("elsewhere");
+        std::fs::create_dir_all(&project).unwrap();
+        std::fs::create_dir_all(&elsewhere).unwrap();
+        std::os::unix::fs::symlink(&elsewhere, project.join("cards")).unwrap();
+        let h = Harness {
+            path: "cards/.Card.preview.qml".to_owned(),
+            text: MARK.to_owned(),
+        };
+        let standing = h.standing(Some(&project));
+        assert!(standing.is_none());
+        assert_eq!(left(&elsewhere), Vec::<String>::new());
+        drop(standing);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_link_by_the_harness_name_is_not_studios_to_remove() {
+        let dir = tempfile::tempdir().unwrap();
+        let project = dir.path().join("project");
+        let elsewhere = dir.path().join("elsewhere");
+        std::fs::create_dir_all(&project).unwrap();
+        std::fs::create_dir_all(&elsewhere).unwrap();
+        let theirs = elsewhere.join("Theirs.qml");
+        std::fs::write(&theirs, MARK).unwrap();
+        let link = project.join(".Card.preview.qml");
+        std::os::unix::fs::symlink(&theirs, &link).unwrap();
+        let h = Harness {
+            path: ".Card.preview.qml".to_owned(),
+            text: MARK.to_owned(),
+        };
+        drop(h.standing(Some(&project)).expect("held"));
+        assert!(link.symlink_metadata().is_ok(), "the link was removed");
+        assert!(theirs.exists());
     }
 
     #[test]
@@ -1130,7 +1242,9 @@ mod tests {
                 path: path.to_owned(),
                 text: MARK.to_owned(),
             };
-            h.standing(None).leave(&store);
+            h.standing(None)
+                .expect("no directory to hold in")
+                .leave(&store);
         }
         assert!(!store.exists("Own.qml"));
         assert!(store.exists("Theirs.qml"));
