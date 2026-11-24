@@ -29,6 +29,11 @@ tokio = { workspace = true, features = ["signal"] }
 # Its safe `_exit`: the workspace forbids `unsafe`.
 signal-hook = { version = "0.3", default-features = false }
 
+# A rename that refuses a name taken, for the theme seeded where files
+# cannot be linked.
+[target.'cfg(any(target_os = "linux", target_os = "android", target_vendor = "apple"))'.dependencies]
+rustix = { workspace = true, features = ["fs"] }
+
 # The shell Studio ships, compiled ahead of time against
 # crates/studio_blocks/ljostypes.json: the build script runs none of
 # Studio's code.

@@ -337,17 +337,40 @@ fn publish_new(
     file: &Path,
     write: impl FnOnce(&mut std::fs::File) -> std::io::Result<()>,
 ) -> anyhow::Result<bool> {
-    publish_new_by(file, write, |draft, file| std::fs::hard_link(draft, file))
+    publish_new_by(
+        file,
+        write,
+        |draft, file| std::fs::hard_link(draft, file),
+        rename_new,
+    )
+}
+
+/// Renames `draft` to `file` in one step that fails with `AlreadyExists`
+/// when the name is taken, where the system has such a rename.
+fn rename_new(draft: &Path, file: &Path) -> std::io::Result<()> {
+    #[cfg(any(target_os = "linux", target_os = "android", target_vendor = "apple"))]
+    {
+        use rustix::fs::{CWD, RenameFlags, renameat_with};
+        renameat_with(CWD, draft, CWD, file, RenameFlags::NOREPLACE).map_err(Into::into)
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "android", target_vendor = "apple")))]
+    {
+        let _ = (draft, file);
+        Err(std::io::ErrorKind::Unsupported.into())
+    }
 }
 
 /// [`publish_new`], linking with `link`. Where files cannot be linked (FAT,
-/// some network and FUSE file systems) the draft is copied into a file
-/// made only if there is none: not whole at once there, but never over
-/// another's, and a copy that fails takes its file away again.
+/// some network and FUSE file systems) the draft itself is put in place
+/// with `place`, a rename that refuses a name taken, so the file is still
+/// whole at once. Where neither can be made, the draft is renamed into
+/// place if the name is free when looked at: whole still, but a file
+/// another writer makes in that moment is replaced.
 fn publish_new_by(
     file: &Path,
     write: impl FnOnce(&mut std::fs::File) -> std::io::Result<()>,
     link: impl FnOnce(&Path, &Path) -> std::io::Result<()>,
+    place: impl FnOnce(&Path, &Path) -> std::io::Result<()>,
 ) -> anyhow::Result<bool> {
     if file.exists() {
         return Ok(false);
@@ -372,44 +395,32 @@ fn publish_new_by(
         .and_then(|()| out.sync_all())
         .with_context(|| format!("writing {}", draft.display()));
     drop(out);
-    // A link fails when the name is taken, where a rename would replace it.
-    let published = written.and_then(|()| match link(&draft, file) {
-        Ok(()) => Ok(true),
-        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => Ok(false),
-        Err(_) => copy_new(&draft, file).with_context(|| format!("publishing {}", file.display())),
+    // A link fails when the name is taken, where a plain rename would
+    // replace it.
+    let published = written.and_then(|()| {
+        let taken = |e: &std::io::Error| e.kind() == std::io::ErrorKind::AlreadyExists;
+        match link(&draft, file) {
+            Ok(()) => return Ok(true),
+            Err(e) if taken(&e) => return Ok(false),
+            Err(_) => {}
+        }
+        match place(&draft, file) {
+            Ok(()) => Ok(true),
+            Err(e) if taken(&e) => Ok(false),
+            Err(_) if file.exists() => Ok(false),
+            Err(_) => std::fs::rename(&draft, file).map(|()| true),
+        }
+        .with_context(|| format!("publishing {}", file.display()))
     });
     // A draft left over is only clutter: the file is whole or not there.
-    if let Err(e) = std::fs::remove_file(&draft) {
-        eprintln!("studio: could not remove {}: {e}", draft.display());
+    // One put in place is gone already.
+    match std::fs::remove_file(&draft) {
+        Err(e) if e.kind() != std::io::ErrorKind::NotFound => {
+            eprintln!("studio: could not remove {}: {e}", draft.display());
+        }
+        _ => {}
     }
     published
-}
-
-/// Copies `draft` to `file` only if there is no `file`; whether it did. A
-/// copy that fails takes the file it made away, so none is left part-way.
-fn copy_new(draft: &Path, file: &Path) -> std::io::Result<bool> {
-    let mut out = match std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(file)
-    {
-        Ok(out) => out,
-        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => return Ok(false),
-        Err(e) => return Err(e),
-    };
-    let copied = std::fs::File::open(draft)
-        .and_then(|mut from| std::io::copy(&mut from, &mut out))
-        .and_then(|_| out.sync_all());
-    drop(out);
-    match copied {
-        Ok(()) => Ok(true),
-        Err(e) => {
-            if let Err(gone) = std::fs::remove_file(file) {
-                eprintln!("studio: could not remove {}: {gone}", file.display());
-            }
-            Err(e)
-        }
-    }
 }
 
 /// The theme Studio ships ([`THEME`]).
@@ -610,6 +621,7 @@ mod tests {
             &file,
             |out| std::io::Write::write_all(out, THEME.as_bytes()),
             no_links,
+            rename_new,
         )
         .unwrap();
         assert!(written);
@@ -628,6 +640,7 @@ mod tests {
                 std::fs::write(&file, "{}")
             },
             no_links,
+            rename_new,
         )
         .unwrap();
         assert!(!written);
@@ -651,12 +664,41 @@ mod tests {
                 drafted = Some(std::fs::metadata(draft)?.ino());
                 Err(std::io::ErrorKind::Unsupported.into())
             },
+            rename_new,
         )
         .unwrap();
         assert!(written);
         assert_eq!(std::fs::metadata(&file).unwrap().ino(), drafted.unwrap());
         assert_eq!(std::fs::read_to_string(&file).unwrap(), THEME);
         assert_eq!(names_in(dir.path()), ["theme.json"]);
+    }
+
+    // Where neither a link nor a rename that refuses a name taken can be
+    // made, the draft is still put in place whole, and a file that is
+    // there by then is kept.
+    #[test]
+    fn a_theme_is_seeded_where_no_rename_refuses_a_name_taken() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("theme.json");
+        let write = |out: &mut std::fs::File| std::io::Write::write_all(out, THEME.as_bytes());
+        assert!(publish_new_by(&file, write, no_links, no_links).unwrap());
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), THEME);
+        assert_eq!(names_in(dir.path()), ["theme.json"]);
+
+        let other = dir.path().join("other.json");
+        let written = publish_new_by(
+            &other,
+            |out| {
+                std::io::Write::write_all(out, THEME.as_bytes())?;
+                std::fs::write(&other, "{}")
+            },
+            no_links,
+            no_links,
+        )
+        .unwrap();
+        assert!(!written);
+        assert_eq!(std::fs::read_to_string(&other).unwrap(), "{}");
+        assert_eq!(names_in(dir.path()), ["other.json", "theme.json"]);
     }
 
     #[test]

@@ -5555,6 +5555,7 @@ dependencies = [
  "ljos_mcp_core",
  "ljos_quick",
  "ljos_runtime",
+ "rustix 1.1.5",
  "serde_json",
  "signal-hook",
  "studio_blocks",
