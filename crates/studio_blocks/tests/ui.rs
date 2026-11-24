@@ -3717,7 +3717,7 @@ fn late_build_refused(w: &mut UiWorld) -> StepResult {
     let why = "node did not start: no such program";
     let error = serde_json::json!({
         "code": "not_actionable",
-        "message": format!("the site was not built: {why}"),
+        "message": format!("the export to `build/web` was written; only the site was not built: {why}"),
         "details": {
             "kind": "build_failed", "step": "Getting the builder ready", "why": why,
             "log": "build/.site-work/build.log", "steps": [], "export": export
