@@ -654,7 +654,9 @@ Feature: A project is exported for ljos-web to build a site from
     # A build runs the `qmlc` it is given and the code of the ljos-web it is
     # given, so neither is taken from outside the workspace: `run` is for
     # the project's own code and the build's own tools. LJOS_WEB and QMLC
-    # are the machine's owner's, and are not held to it.
+    # are the machine's owner's, and are not held to it. A `..` after a link
+    # goes up from where the link leads, as the system goes, not back to
+    # where the link is.
     Scenario Outline: A toolchain from outside the workspace is refused before it is looked at
       Given the studio tools are connected with the capabilities "inspect, mutate, fs, run"
       And "outside" links to a directory outside the project that holds the file "qmlc"
@@ -678,6 +680,10 @@ Feature: A project is exported for ljos-web to build a site from
         | "qmlc": "/bin/sh"                      | qmlc     |
         | "qmlc": "missing/../../qmlc"           | qmlc     |
         | "qmlc": "/bin/sh", "dry_run": true     | qmlc     |
+        | "ljos_web": "outside/.."               | ljos_web |
+        | "ljos_web": "outside/../ljos-web"      | ljos_web |
+        | "qmlc": "outside/../qmlc"              | qmlc     |
+        | "qmlc": "outside/../qmlc", "dry_run": true | qmlc |
 
     Scenario: Building a site runs a program, which needs the run capability
       When the agent calls the tool "export" with:
