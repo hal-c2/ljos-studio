@@ -756,7 +756,8 @@ file changed since, fails naming it and leaves the site as it was. A site
 an earlier Studio built (its stamp holds only ljos-web's commit) lists
 nothing, so it is refused too, saying
 it was built by an earlier Studio: delete it or move it out once, and
-builds after that replace their own.
+builds after that replace their own. A stamp that cannot be read is
+refused the same way, with the reason the system gave.
 DECISION: refused rather than merged, so no site is half somebody's. No
 export is written into a built site (`invalid_argument`, `inside_site`) or
 into `build/.site-work`, where builds work, in any letter case
