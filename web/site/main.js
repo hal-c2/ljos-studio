@@ -50,10 +50,12 @@ const fit = () => {
   try {
     root.width = window.innerWidth;
     const flick = scroller();
-    const tall = windowed ? window.innerHeight : Math.max(window.innerHeight, Math.ceil(contentHeight(flick)));
+    let tall = windowed ? window.innerHeight : Math.max(window.innerHeight, Math.ceil(contentHeight(flick)));
     if (!windowed && tall > window.innerHeight && tall > root.height && root.height > window.innerHeight && ++fits > 3) {
+      // This pass goes on as the window's height: a fit started from here
+      // would stop at `fitting` and leave the root as it was.
       windowed = true;
-      return fit();
+      tall = window.innerHeight;
     }
     root.height = tall;
     app.style.height = `${tall}px`;
