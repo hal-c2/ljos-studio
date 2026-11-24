@@ -898,8 +898,59 @@ impl Window {
         self.rest()
     }
 
+    /// Scrolls what holds the node `key` until the node is in the window,
+    /// as a person does with a control past the window's edge: a wheel
+    /// notch at a time over the part of its nearest holder the window
+    /// shows. A node already in the window is left where it is.
+    fn scroll_to(&mut self, key: ljos_a11y::NodeKey) -> StepResult {
+        use ljos::item::kurbo::Rect;
+        let window = Rect::new(0.0, 0.0, WIDTH, HEIGHT);
+        let place = |w: &Self| {
+            let mut parents = std::collections::HashMap::new();
+            let mut bounds = std::collections::HashMap::new();
+            w.stage.scene.accessibility_tree().walk(|k, parent, d| {
+                parents.insert(k, parent);
+                let b = d.bounds;
+                bounds.insert(k, Rect::new(b.x0, b.y0, b.x1, b.y1));
+            });
+            let at = *bounds.get(&key)?;
+            let mut holder = parents.get(&key).copied();
+            while let Some(h) = holder {
+                if let Some(seen) = bounds.get(&h).map(|b| b.intersect(window))
+                    && seen.area() > 0.0
+                {
+                    return Some((at, seen));
+                }
+                holder = parents.get(&h).copied();
+            }
+            None
+        };
+        let Some((mut at, mut over)) = place(self) else {
+            return Ok(());
+        };
+        while at.y0 < window.y0 || at.y1 > window.y1 {
+            // A positive notch turns the wheel away, which shows what is
+            // above.
+            let notch = if at.y1 > window.y1 { -1.0 } else { 1.0 };
+            self.stage
+                .drive()
+                .wheel(over.center(), Wheel::Notches(0.0, notch))
+                .map_err(drive_error)?;
+            self.advance(1000)?;
+            let Some((then, seen)) = place(self) else {
+                break;
+            };
+            if then.y0 == at.y0 {
+                break;
+            }
+            (at, over) = (then, seen);
+        }
+        Ok(())
+    }
+
     fn click_node(&mut self, node: &AccessibleNode) -> StepResult {
         let key = node.key.ok_or("the node has no key")?;
+        self.scroll_to(key)?;
         let mut driver = self.stage.drive();
         let at = driver
             .aim_at_node(key)

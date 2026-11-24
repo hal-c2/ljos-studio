@@ -1251,9 +1251,7 @@ Panel {
                 Accessible.name: text
             }
 
-            // Each lies over the next: a refusal hangs from a section's last gap.
             Section {
-                z: 8
                 tail: Spacing.xxs
                 title: "Layout"
                 gap: 0
@@ -1503,7 +1501,6 @@ Panel {
                         id: pair
                         required property var modelData
                         readonly property string slot: pair.modelData.some(c => c.name === refusal.at) ? refusal.at : "-"
-                        z: panel.says(slot) !== "" ? 1 : 0
                         spacing: 0
                         Layout.fillWidth: true
                         GridLayout {
@@ -1718,7 +1715,6 @@ Panel {
             // scrolling area's content, a plain box's fill.
             Section {
                 id: kind
-                z: 7
                 tail: Spacing.xxs
                 visible: panel.kindSection !== null
                 title: panel.kindSection !== null ? panel.kindSection.title : ""
@@ -1826,7 +1822,6 @@ Panel {
             }
 
             Section {
-                z: 6
                 tail: Spacing.xxs
                 title: "Properties"
                 gap: 0
@@ -1842,7 +1837,6 @@ Panel {
                     delegate: ColumnLayout {
                         id: row
                         required property var modelData
-                        z: panel.says(row.modelData.name) !== "" ? 1 : 0
                         Layout.fillWidth: true
                         spacing: 0
                         RowLayout {
@@ -2086,7 +2080,6 @@ Panel {
             }
 
             Section {
-                z: 5
                 tail: Spacing.xxs
                 title: "States"
                 gap: 0
@@ -2098,7 +2091,6 @@ Panel {
                     delegate: ColumnLayout {
                         id: stateRow
                         required property var modelData
-                        z: panel.says("state " + stateRow.modelData.name) !== "" ? 1 : 0
                         Layout.fillWidth: true
                         spacing: 0
                         RowLayout {
@@ -2303,7 +2295,6 @@ Panel {
                             readonly property string name: modelData.target + "." + modelData.name
                             Layout.fillWidth: true
                             spacing: 0
-                            z: panel.says("change " + changeRow.name) !== "" ? 1 : 0
                             RowLayout {
                                 Layout.fillWidth: true
                                 spacing: Spacing.xxs
@@ -2342,7 +2333,6 @@ Panel {
             }
 
             Section {
-                z: 4
                 tail: Spacing.xxs
                 title: "Signals"
                 gap: 0
@@ -2359,7 +2349,6 @@ Panel {
                         id: signalRow
                         required property var modelData
                         readonly property string handler: "on" + modelData.name[0].toUpperCase() + modelData.name.slice(1)
-                        z: panel.says("handle " + signalRow.modelData.name) !== "" ? 1 : 0
                         Layout.fillWidth: true
                         spacing: Spacing.xxs
 
@@ -2484,7 +2473,6 @@ Panel {
             }
 
             Section {
-                z: 3
                 tail: Spacing.xxs
                 title: "Roles"
                 gap: 0
@@ -2496,7 +2484,6 @@ Panel {
                     delegate: ColumnLayout {
                         id: roleRow
                         required property string modelData
-                        z: panel.says("role " + roleRow.modelData) !== "" ? 1 : 0
                         Layout.fillWidth: true
                         spacing: 0
                         RowLayout {
@@ -2539,7 +2526,6 @@ Panel {
             }
 
             Section {
-                z: 2
                 tail: Spacing.xxs
                 title: "Comments"
                 gap: 0
@@ -2613,7 +2599,6 @@ Panel {
             // What the object declares of its own, and one more added by its
             // kind (`node_insert` of a member).
             Section {
-                z: 1
                 tail: Spacing.xxs
                 title: "API"
                 gap: 0
