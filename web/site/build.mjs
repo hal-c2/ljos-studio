@@ -17,7 +17,7 @@
 
 import { createHash } from "node:crypto";
 import { copyFileSync, cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmdirSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { dirname, join, normalize, resolve, sep } from "node:path";
+import { dirname, join, posix, resolve } from "node:path";
 import { stripVTControlCharacters } from "node:util";
 
 const here = import.meta.dirname;
@@ -118,8 +118,10 @@ step(`Copying the ${files.length} files the export lists`);
 const site = join(here, "site");
 rmSync(site, { recursive: true, force: true });
 for (const { path, bytes } of files) {
-  const at = normalize(path);
-  if (at.startsWith("..") || at.startsWith(sep) || at !== path) fail(`${path} is not a path below the export`);
+  // A manifest's paths are logical, `/` between names on every system; a
+  // `\` would separate names where Windows reads it.
+  const at = posix.normalize(path);
+  if (at.startsWith("..") || at.startsWith("/") || at !== path || path.includes("\\")) fail(`${path} is not a path below the export`);
   const from = join(bundle, path);
   const stat = lstatSync(from, { throwIfNoEntry: false });
   if (!stat?.isFile()) fail(`${path} is listed but is not a file of the export: export again`);
