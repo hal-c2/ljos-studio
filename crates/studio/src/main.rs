@@ -320,6 +320,21 @@ fn seed(dir: &Path) -> anyhow::Result<()> {
 /// so without the copy it would lose Studio's look, and a person who
 /// changes one role keeps the rest.
 fn seed_theme(file: &Path) -> anyhow::Result<()> {
+    if publish_new(file, |out| std::io::Write::write_all(out, THEME.as_bytes()))? {
+        eprintln!(
+            "studio: {} had no theme; it now has a copy of Studio's",
+            file.display()
+        );
+    }
+    Ok(())
+}
+
+/// Writes `file` with what `write` puts in it, only if there is no such
+/// file; whether it was written.
+fn publish_new(
+    file: &Path,
+    write: impl FnOnce(&mut std::fs::File) -> std::io::Result<()>,
+) -> anyhow::Result<bool> {
     // Created only if it is not there, in one step: a theme another Studio
     // writes between a check and a write is never overwritten.
     let mut out = match std::fs::OpenOptions::new()
@@ -328,16 +343,11 @@ fn seed_theme(file: &Path) -> anyhow::Result<()> {
         .open(file)
     {
         Ok(out) => out,
-        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => return Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => return Ok(false),
         Err(e) => return Err(e).with_context(|| format!("creating {}", file.display())),
     };
-    std::io::Write::write_all(&mut out, THEME.as_bytes())
-        .with_context(|| format!("writing {}", file.display()))?;
-    eprintln!(
-        "studio: {} had no theme; it now has a copy of Studio's",
-        file.display()
-    );
-    Ok(())
+    write(&mut out).with_context(|| format!("writing {}", file.display()))?;
+    Ok(true)
 }
 
 /// The theme Studio ships ([`THEME`]).
@@ -480,6 +490,48 @@ mod tests {
         std::fs::write(&file, "{}").unwrap();
         seed_theme(&file).unwrap();
         assert_eq!(std::fs::read_to_string(&file).unwrap(), "{}");
+    }
+
+    fn names_in(dir: &Path) -> Vec<String> {
+        let mut names: Vec<String> = std::fs::read_dir(dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        names.sort();
+        names
+    }
+
+    // A theme file that is there is taken as the person's, so one cut off
+    // part way would be kept for good: it is there whole or not at all.
+    #[test]
+    fn a_theme_whose_write_fails_leaves_nothing_and_the_next_start_seeds_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("theme.json");
+        let failed = publish_new(&file, |out| {
+            std::io::Write::write_all(out, &THEME.as_bytes()[..10])?;
+            Err(std::io::Error::other("the disk is full"))
+        });
+        assert!(failed.is_err());
+        assert_eq!(names_in(dir.path()), Vec::<String>::new());
+        seed_theme(&file).unwrap();
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), THEME);
+        assert_eq!(names_in(dir.path()), ["theme.json"]);
+    }
+
+    // Another Studio's theme, written while this one writes its own, is
+    // the one that stays.
+    #[test]
+    fn a_theme_written_by_another_studio_meanwhile_is_kept() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("theme.json");
+        let written = publish_new(&file, |out| {
+            std::io::Write::write_all(out, THEME.as_bytes())?;
+            std::fs::write(&file, "{}")
+        })
+        .unwrap();
+        assert!(!written);
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), "{}");
+        assert_eq!(names_in(dir.path()), ["theme.json"]);
     }
 
     #[test]
