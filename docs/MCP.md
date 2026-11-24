@@ -680,7 +680,7 @@ files: one that is not a file of the site is refused (`invalid_argument`,
 (`page`) and a `page` or `build` for `native` (`page_target`,
 `build_target`). `open`, `ljos_web` and `qmlc` are a build's: without
 `build: true` they are refused (`needs_build`, `details.argument`) before
-anything is written, never ignored.
+anything is written, never ignored; `"open": false` too.
 
 `build: true` (needs `run`) builds the site from the bundle it just wrote
 into `<out>-site` (`build/web-site`) and serves it on this machine over
@@ -693,7 +693,15 @@ which it finds, never downloads (DESIGN.md S6, as built):
 |---|---|
 | ljos-web, with its packages installed (`pnpm install`) | `ljos_web`; `LJOS_WEB`; `ljos-web` beside the studio binary or in its `../share`; `ljos-web` beside the project; `$XDG_DATA_HOME/ljos-web` |
 | its compiler | `qmlc`; `QMLC`; the checkout's `target/release` and `target/debug`; beside the studio binary; `PATH` |
-| node | `PATH` |
+| node | `NODE`; `PATH` |
+
+`ljos_web` and `qmlc` are relative to the project and must lie in the
+workspace, through links too: one outside is refused before anything there
+is looked at, in a dry run too (`path_denied`, `outside_workspace`,
+`details.argument`). DECISION: the workspace, not the project, so an
+ljos-web kept beside the project is still in reach; an argument does not
+choose a program from anywhere on the machine, which `LJOS_WEB` and `QMLC`,
+the machine's own say, still may.
 
 The answer's `build` holds `ready`, what was found (`ljos_web`, `qmlc`,
 `node`), and after a build `site` (relative), `path` (absolute), `url`,
@@ -704,7 +712,9 @@ was looked for. A real export with `build` that lacks something is refused
 before anything is written (`unavailable`, `no_site_builder`,
 `details.missing`); a build that fails is refused with `not_actionable`
 (`build_failed`, with `details.step`, where it stopped, `why`, in plain
-words, `log`, the builder's whole output, and the `steps` before it). A
+words, `log`, the path of the builder's error log, the `steps` before it,
+and `export`, the answer the export gives without `build`, since its bundle
+was written before the build began). A
 build runs on its own thread, one at a time, and does not hold the project.
 It does hold its bundle and its `<out>-site`, whether that is there yet or
 not: a real export to either, or to a directory over or below either, is
