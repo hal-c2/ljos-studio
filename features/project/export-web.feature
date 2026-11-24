@@ -544,6 +544,47 @@ Feature: A project is exported for ljos-web to build a site from
       Then the answer's "/manifest/page/title" is "Media"
       And the file "site.json" does not exist
 
+    # The project's own file of that name is config its code reads, not
+    # the page: Studio's page has a name of Ljós's own.
+    Scenario: A site.json of the project's own is a file of its site, not its page
+      Given the file "site.json":
+        """json
+        {"feed": "https://example.org/feed.json"}
+        """
+      And the file "Shell.qml":
+        """qml
+        import QtQuick
+
+        Item {
+            property url settings: "site.json"
+        }
+        """
+      When the agent calls the tool "export" with:
+        """json
+        {"entry": "Shell.qml", "target": "web"}
+        """
+      Then the answer's "/written" is true
+      And the answer's "/manifest/page" is absent
+      And the file "build/web/site.json" is:
+        """json
+        {"feed": "https://example.org/feed.json"}
+        """
+
+    Scenario: The page is written beside a site.json of the project's own, which stays as it was
+      Given the file "site.json":
+        """json
+        {"feed": "https://example.org/feed.json"}
+        """
+      When the agent calls the tool "export" with:
+        """json
+        {"entry": "Shell.qml", "target": "web", "page": {"title": "Media"}}
+        """
+      Then the answer's "/manifest/page" is {"title": "Media"}
+      And the file "site.json" is:
+        """json
+        {"feed": "https://example.org/feed.json"}
+        """
+
     Scenario: A picture of the page that is no file of the site is refused
       When the agent calls the tool "export" with:
         """json
