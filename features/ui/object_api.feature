@@ -164,6 +164,21 @@ Feature: An object's own API is written in the inspector
     Then the file "Main.qml" says "onDone: count = 1"
     And the inspector's "Handler for done" holds "count = 2"
 
+  # Opened again with the lines it had, a handler is as the person left it:
+  # what was typed in another handler before is not what it holds.
+  Scenario: A handler opened again unchanged after another is typed in closes when written
+    Given the person has replaced "signal done(int code)" with "signal done(int code)\n    signal tapped()\n    onDone: count = 1" in the code view
+    And the person has selected "Item root" in the layers panel
+    And the person has clicked the button "Edit the done handler"
+    And the person has clicked the button "Leave the done handler as it was"
+    And the person has clicked the button "Edit the tapped handler"
+    And the person has typed "count = 2" in the inspector's "Handler for tapped" and left it
+    And the person has clicked the button "Leave the tapped handler as it was"
+    And the person has clicked the button "Edit the done handler"
+    When the person clicks the button "Write the done handler"
+    Then the inspector has no button "Write the done handler"
+    And the file "Main.qml" says "onDone: count = 1"
+
   # A word ends at a space or a line's end: `else` and `return` after a word
   # on the line before are still words that a regular expression follows.
   Scenario: A regular expression after `else return` starts no string

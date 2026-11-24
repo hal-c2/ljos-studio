@@ -2106,6 +2106,7 @@ fn presses_quickly(w: &mut UiWorld, chords: String) -> StepResult {
     window.rest()
 }
 
+#[given(regex = r#"^the person has replaced "(.*)" with "(.*)" in the code view$"#)]
 #[when(regex = r#"^the person replaces "(.*)" with "(.*)" in the code view$"#)]
 fn replaces_in_code(w: &mut UiWorld, old: String, new: String) -> StepResult {
     let (old, new) = (unescape(&old), unescape(&new));
