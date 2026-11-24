@@ -1947,7 +1947,7 @@ pub(crate) fn add(registry: ToolRegistry, studio: &Arc<Mutex<Studio>>) -> ToolRe
     registry.with(
         ToolDef::new::<ExportArgs>(
             "export",
-            "Write a bundle that runs without Studio: QML, theme, assets, own modules; no mocks or `.studio/`. `native`: `ljos run` starts it from `ljos-bundle.json`. `web`: ljos-web builds from `ljos-site.json`, here with `build` (needs `run`). `dry_run`: what it would hold; writes nothing.",
+            "Write a bundle that runs without Studio: QML, theme, assets, own modules; no mocks or `.studio/`. `native`: `ljos run` reads `ljos-bundle.json`. `web`: ljos-web builds from `ljos-site.json`, here with `build` (needs `run`). `dry_run`: what it would hold; writes nothing.",
         )
         .answers::<ExportOut>()
         .requires(Cap::Fs)
