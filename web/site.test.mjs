@@ -4,11 +4,11 @@
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const VITE = `
 import { copyFileSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
@@ -45,7 +45,7 @@ function project(t, page = {}, imports = []) {
   const manifest = { format: "ljos-site", version: 1, target: "web", entry: "Main.qml", files, imports, modules: [], page, ljos_web: "0".repeat(40) };
   put(join(bundle, "ljos-site.json"), JSON.stringify(manifest));
   const site = join(root, "build", "web-site");
-  const build = (env = {}) => {
+  const build = (env = {}, node = []) => {
     // Studio unpacks the builder afresh for each build.
     const work = join(root, "work");
     for (const name of ["build.mjs", "index.html"]) {
@@ -55,7 +55,7 @@ function project(t, page = {}, imports = []) {
     put(join(work, "node_modules/ljos-web/package.json"), '{"exports":{}}');
     put(join(work, "node_modules/vite/package.json"), '{"type":"module","exports":"./index.js"}');
     put(join(work, "node_modules/vite/index.js"), VITE);
-    return spawnSync(process.execPath, [join(work, "build.mjs"), bundle, site], { encoding: "utf8", env: { ...process.env, ...env } });
+    return spawnSync(process.execPath, [...node, join(work, "build.mjs"), bundle, site], { encoding: "utf8", env: { ...process.env, ...env } });
   };
   return { root, site, build };
 }
@@ -133,6 +133,54 @@ test("a file put in the site while it builds is kept", (t) => {
   assert.equal(again.status, 1, again.stdout);
   assert.match(again.stdout, /^fail .*late\.txt/m);
   assert.equal(readFileSync(join(site, "late.txt"), "utf8"), "mine");
+  assert.deepEqual(readdirSync(join(root, "build")).sort(), ["web", "web-site"]);
+});
+
+// The file system refusing a move or a copy, as a full disk or a directory
+// the builder may not write does: loaded before the builder, so it sees
+// these in place of `node:fs`'s own. A move out of a site set aside is let
+// through, so that putting the old site back can be seen.
+const REFUSING = `
+import fs from "node:fs";
+import { syncBuiltinESMExports } from "node:module";
+const { REFUSE_FROM, REFUSE_TO, REFUSE_CODE } = process.env;
+const refuse = () => {
+  throw Object.assign(new Error(\`\${REFUSE_CODE}: refused by the test\`), { code: REFUSE_CODE });
+};
+const moves = fs.renameSync;
+const copies = fs.cpSync;
+fs.renameSync = (from, to) => (from === REFUSE_FROM || (to === REFUSE_TO && !String(from).includes(".old-")) ? refuse() : moves(from, to));
+fs.cpSync = (from, to, o) => (from === REFUSE_FROM || to === REFUSE_TO ? refuse() : copies(from, to, o));
+syncBuiltinESMExports();
+`;
+
+function refusing(root, env) {
+  const at = join(root, "refusing.mjs");
+  writeFileSync(at, REFUSING);
+  return [env, ["--import", pathToFileURL(at).href]];
+}
+
+test("a site that cannot be written leaves the one before as it was, and says why", (t) => {
+  const { root, site, build } = built(t);
+  const before = readdirSync(site, { recursive: true }).sort();
+  const stamp = readFileSync(join(site, ".ljos-site-build"), "utf8");
+  const dist = join(realpathSync(join(root, "work")), "dist");
+  const again = build(...refusing(root, { STANDIN_ASSET: "next", REFUSE_FROM: dist, REFUSE_CODE: "ENOSPC" }));
+  assert.equal(again.status, 1, again.stdout + again.stderr);
+  assert.match(again.stdout, /^fail .*ENOSPC/m);
+  assert.deepEqual(readdirSync(site, { recursive: true }).sort(), before);
+  assert.equal(readFileSync(join(site, ".ljos-site-build"), "utf8"), stamp);
+  assert.deepEqual(readdirSync(join(root, "build")).sort(), ["web", "web-site"]);
+});
+
+test("a site that cannot be moved into place puts the one before back, and says why", (t) => {
+  const { root, site, build } = built(t);
+  const before = readdirSync(site, { recursive: true }).sort();
+  const again = build(...refusing(root, { STANDIN_ASSET: "next", REFUSE_TO: site, REFUSE_CODE: "EACCES" }));
+  assert.equal(again.status, 1, again.stdout + again.stderr);
+  assert.match(again.stdout, /^fail .*EACCES/m);
+  assert.deepEqual(readdirSync(site, { recursive: true }).sort(), before);
+  assert.ok(!existsSync(join(site, "assets/next.js")));
   assert.deepEqual(readdirSync(join(root, "build")).sort(), ["web", "web-site"]);
 });
 
