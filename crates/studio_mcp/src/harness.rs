@@ -394,7 +394,24 @@ pub(crate) fn harness(store: &dyn Store, doc: &str) -> Option<Harness> {
     if store.exists(&path) && !store.read(&path).is_ok_and(|old| is_studios(&old)) {
         return None;
     }
+    // So is a link by that name, wherever it leads: written through, the
+    // stand-in would land on what it points at.
+    if !in_place(store, dir, &path) {
+        return None;
+    }
     Some(Harness { path, text })
+}
+
+/// Whether `path` is where its directory really is: its own name is not a
+/// link. A directory that is a link is the person's way of laying out the
+/// project, and the stand-in goes beside the document in it.
+fn in_place(store: &dyn Store, dir: Option<&str>, path: &str) -> bool {
+    let file = path.rsplit('/').next().unwrap_or(path);
+    let beside = match dir {
+        Some(dir) => store.resolved(dir).map(|dir| format!("{dir}/{file}")),
+        None => Ok(file.to_owned()),
+    };
+    store.resolved(path).ok() == beside.ok()
 }
 
 /// The type the root of the last of `doc`'s bases in the project is, when
