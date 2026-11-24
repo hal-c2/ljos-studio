@@ -29,10 +29,19 @@ Panel {
     required property Workspace workspace
     title: "Inspector"
 
-    // The new-property row's edit: answered, the row is emptied for the next.
+    // The new-property row's edit: answered, the row is emptied for the
+    // next, unless something else was typed in it meanwhile.
     property bool rowEditing: false
+    property string rowSent: ""
+    function rowDraft() {
+        return JSON.stringify([newName.text, newValue.text])
+    }
     // The same for the row that adds a change to the picked state.
     property bool changing: false
+    property string changeSent: ""
+    function changeDraft() {
+        return JSON.stringify([changeTarget.text, changeName.text, changeValue.text])
+    }
 
     // What was refused, and the slot whose note says it: the field the person
     // last entered, or the row of fields it is in. Every field keeps a line
@@ -100,6 +109,7 @@ Panel {
     function fromRow(edit) {
         refusal.at = "new"
         rowEditing = true
+        rowSent = rowDraft()
         edit()
         // Stopped before it was asked: there will be no answer.
         if (refusal.text !== "")
@@ -283,6 +293,85 @@ Panel {
         })
     }
 
+    // What a `/` in code starts, as the tokens before it say: a regular
+    // expression where a value may start (after punctuation, an opening
+    // bracket or a keyword), a division after a value. A name's text alone
+    // makes it no keyword: `of` is one only in the head of a `for (… of …)`
+    // after what it binds, so `of / 2` divides. (`yield` and `await` are
+    // read as keywords: as names they are reserved in generators, async
+    // functions and modules.)
+    function slashReader() {
+        const keywords = ["return", "typeof", "instanceof", "in", "new", "delete",
+            "void", "throw", "case", "do", "else", "yield", "await"]
+        // The last token: "w" after a name or a number (`word`), ")" after a
+        // value closed, else the punctuation itself.
+        let prev = ""
+        let word = ""
+        // The token before the word, and the word before it when it was one.
+        let after = ""
+        let before = ""
+        let inWord = false
+        // Each bracket open, and for a `for`'s `(`, whether its head may
+        // still take `of`: a `;` makes it a counting loop.
+        const open = []
+        return {
+            // A character of code: not of a string, a comment or a regular
+            // expression.
+            code: c => {
+                if (/[A-Za-z0-9_$]/.test(c)) {
+                    if (!inWord) {
+                        after = prev
+                        before = prev === "w" ? word : ""
+                        word = ""
+                    }
+                    word += c
+                    inWord = true
+                    prev = "w"
+                    return
+                }
+                inWord = false
+                if (c === " " || c === "\t" || c === "\r" || c === "\n")
+                    return
+                if (c === "(" || c === "[" || c === "{") {
+                    const head = c === "(" && prev === "w"
+                        && (word === "for" || (word === "await" && before === "for"))
+                    open.push({of: head})
+                } else if (c === ")" || c === "]" || c === "}") {
+                    open.pop()
+                } else if (c === ";" && open.length > 0) {
+                    open[open.length - 1].of = false
+                }
+                prev = c === ")" || c === "]" ? ")" : c
+            },
+            // A gap between tokens that is no character of code: a comment.
+            gap: () => {
+                inWord = false
+            },
+            // A string, a template or a regular expression closed: a value.
+            value: () => {
+                inWord = false
+                prev = ")"
+            },
+            // A template's `${`, which its `}` closes: a value may start.
+            opened: () => {
+                inWord = false
+                prev = ""
+                open.push({of: false})
+            },
+            regex: () => {
+                if (prev === "" || "(,=:[!&|?{};+-*%<>~^".includes(prev))
+                    return true
+                if (prev !== "w")
+                    return false
+                if (word === "of") {
+                    const head = open[open.length - 1]
+                    return head !== undefined && head.of && (after === "w" || after === ")")
+                }
+                return keywords.includes(word)
+            }
+        }
+    }
+
     // What the selected object declares of its own: each property, signal
     // and function at its own depth of the text, in the order written. A
     // child's are the child's, and strings and comments say nothing.
@@ -295,15 +384,9 @@ Panel {
         const out = []
         let depth = 0
         let words = ""
-        // The last token, as literalLines reads it, so a `/` that starts a
+        // The tokens, as literalLines reads them, so a `/` that starts a
         // regular expression is told from one that divides.
-        let prev = ""
-        let word = ""
-        let inWord = false
-        const keywords = ["return", "typeof", "instanceof", "in", "of", "new", "delete",
-            "void", "throw", "case", "do", "else", "yield", "await"]
-        const startsRegex = () => prev === "" || "(,=:[!&|?{};+-*%<>~^".includes(prev)
-            || (prev === "w" && keywords.includes(word))
+        const reader = slashReader()
         const end = () => {
             const said = words.trim()
             const m = member.exec(said)
@@ -313,10 +396,8 @@ Panel {
         }
         for (let i = 0; i < text.length; i++) {
             const c = text[i]
-            const wordChar = /[A-Za-z0-9_$]/.test(c)
-            if (!wordChar)
-                inWord = false
             if (c === "/" && text[i + 1] === "/") {
+                reader.gap()
                 while (i < text.length && text[i] !== "\n")
                     i++
                 if (depth === 1)
@@ -324,11 +405,12 @@ Panel {
                 continue
             }
             if (c === "/" && text[i + 1] === "*") {
+                reader.gap()
                 const close = text.indexOf("*/", i + 2)
                 i = close < 0 ? text.length : close + 1
                 continue
             }
-            if (c === "/" && startsRegex()) {
+            if (c === "/" && reader.regex()) {
                 // To the `/` that closes it: not an escaped one, nor one in
                 // a class. One left open ends with its line.
                 let j = i + 1
@@ -349,7 +431,7 @@ Panel {
                 if (depth === 1)
                     words += text.slice(i, closed ? j + 1 : j)
                 i = closed ? j : j - 1
-                prev = ")"
+                reader.value()
                 continue
             }
             if (c === '"' || c === "'" || c === "`") {
@@ -359,16 +441,10 @@ Panel {
                 if (depth === 1)
                     words += text.slice(i, j + 1)
                 i = j
-                prev = ")"
+                reader.value()
                 continue
             }
-            if (wordChar) {
-                word = inWord ? word + c : c
-                inWord = true
-                prev = "w"
-            } else if (c !== " " && c !== "\t" && c !== "\r" && c !== "\n") {
-                prev = c === ")" || c === "]" ? ")" : c
-            }
+            reader.code(c)
             if (c === "{") {
                 if (depth === 1)
                     end()
@@ -449,18 +525,10 @@ Panel {
         // `${` of a template), a quote, a template, a regular expression, or
         // a comment.
         const stack = [{mode: "code", open: 0}]
-        // The code's last token, which tells a `/` that starts a regular
-        // expression from one that divides: "w" after a name or a number
-        // (`word`), ")" after a value closed, else the punctuation itself.
-        let prev = ""
-        let word = ""
-        // Whether the last character was the word's: a space or a line end
-        // ends it, so `else return` is two words, not `elsereturn`.
-        let inWord = false
-        const keywords = ["return", "typeof", "instanceof", "in", "of", "new", "delete",
-            "void", "throw", "case", "do", "else", "yield", "await"]
-        const startsRegex = () => prev === "" || "(,=:[!&|?{};+-*%<>~^".includes(prev)
-            || (prev === "w" && keywords.includes(word))
+        // The code's tokens, which tell a `/` that starts a regular
+        // expression from one that divides. A space or a line end ends a
+        // word, so `else return` is two words, not `elsereturn`.
+        const reader = slashReader()
         const top = () => stack[stack.length - 1]
         const inside = () => ["'", '"', "`"].includes(top().mode)
         let starts = false
@@ -471,9 +539,8 @@ Panel {
         for (let i = 0; i < text.length; i++) {
             const c = text[i]
             const at = top()
-            if (!/[A-Za-z0-9_$]/.test(c))
-                inWord = false
             if (c === "\n") {
+                reader.code(c)
                 // A line comment ends here, and so does a quote or a regular
                 // expression left open.
                 if (at.mode === "line" || at.mode === "'" || at.mode === '"' || at.mode === "/")
@@ -496,7 +563,7 @@ Panel {
                     at.cls = true
                 else if (!at.cls && c === "/") {
                     stack.pop()
-                    prev = ")"
+                    reader.value()
                 }
             } else if (at.mode !== "code") {
                 if (c === "\\") {
@@ -506,30 +573,26 @@ Panel {
                         lineEnds()
                 } else if (c === at.mode) {
                     stack.pop()
-                    prev = ")"
+                    reader.value()
                 } else if (at.mode === "`" && c === "$" && text[i + 1] === "{") {
                     stack.push({mode: "code", open: 0})
-                    prev = ""
+                    reader.opened()
                     i++
                 }
             } else if (c === "/" && text[i + 1] === "/") {
+                reader.gap()
                 stack.push({mode: "line"})
                 i++
             } else if (c === "/" && text[i + 1] === "*") {
+                reader.gap()
                 stack.push({mode: "block"})
                 i++
-            } else if (c === "/" && startsRegex()) {
+            } else if (c === "/" && reader.regex()) {
                 stack.push({mode: "/", cls: false})
             } else if (c === "'" || c === '"' || c === "`") {
                 stack.push({mode: c})
-            } else if (/[A-Za-z0-9_$]/.test(c)) {
-                word = inWord ? word + c : c
-                inWord = true
-                prev = "w"
-            } else if (c === " " || c === "\t" || c === "\r") {
-                continue
             } else {
-                prev = c === ")" || c === "]" ? ")" : c
+                reader.code(c)
                 if (c === "{") {
                     at.open++
                 } else if (c === "}") {
@@ -589,8 +652,13 @@ Panel {
             value = lines.length === 1 ? lines[0].text.trim()
                 : "{\n" + lines.map(l => l.text === "" || l.starts ? l.text : "    " + l.text).join("\n") + "\n}"
         }
+        handlerSent = text
         ask("binding_set", {doc: workspace.doc, node: {node: workspace.selected}, name: name, value: value})
     }
+    // The open handler's text as it was written, and as it is now: the
+    // editor closes on the answer only if nothing was typed since.
+    property var handlerSent: null
+    property string handlerText: ""
     // Neither the root nor what a layout places is pinned.
     readonly property bool pinnable: placedBy === "" && !isRoot
     readonly property var marginNames: ["anchors.margins", "anchors.topMargin", "anchors.leftMargin",
@@ -844,8 +912,11 @@ Panel {
                 panel.renamedPicked = ""
             if (tool === "node_insert" && panel.addingMember)
                 panel.memberAdded()
-            if (tool === "binding_set" && panel.handlerOf !== "" && asked.name === panel.handlerName(panel.handlerOf))
-                panel.handlerOf = ""
+            if (tool === "binding_set" && panel.handlerOf !== "" && asked.name === panel.handlerName(panel.handlerOf)) {
+                if (panel.handlerSent !== null && panel.handlerText === panel.handlerSent)
+                    panel.handlerOf = ""
+                panel.handlerSent = null
+            }
             if (tool === "node_arrange" && asked.action === "relayout" && panel.filling)
                 panel.filled(answer.nodes !== undefined && answer.nodes.length === 1 ? answer.nodes[0] : "")
         }
@@ -1182,16 +1253,20 @@ Panel {
                         refusal.text = read + " is not a colour"
                 }
             }
-            if (panel.changing && tool === "state_edit") {
+            if (panel.changing && tool === "state_edit" && asked.action === "change") {
                 panel.changing = false
-                changeTarget.text = ""
-                changeName.text = ""
-                changeValue.text = ""
+                if (panel.changeDraft() === panel.changeSent) {
+                    changeTarget.text = ""
+                    changeName.text = ""
+                    changeValue.text = ""
+                }
             }
             if (panel.rowEditing && ["property_set", "binding_set", "state_edit"].includes(tool)) {
                 panel.rowEditing = false
-                newName.text = ""
-                newValue.text = ""
+                if (panel.rowDraft() === panel.rowSent) {
+                    newName.text = ""
+                    newValue.text = ""
+                }
             }
         }
         function onRefused(tool, error, asked) {
@@ -2548,6 +2623,7 @@ Panel {
                             onClicked: {
                                 refusal.at = "change"
                                 panel.changing = true
+                                panel.changeSent = panel.changeDraft()
                                 panel.change(changeTarget.text, changeName.text, changeValue.text)
                                 // Stopped before it was asked: there will be no answer.
                                 if (refusal.text !== "")
@@ -2682,6 +2758,10 @@ Panel {
                             Layout.fillWidth: true
                             Layout.minimumHeight: 72
                             Accessible.name: "Handler for " + signalRow.modelData.name
+                            onTextChanged: {
+                                if (signalRow.opened)
+                                    panel.handlerText = text
+                            }
                             Keys.onPressed: event => {
                                 if ((event.key === Qt.Key_Return || event.key === Qt.Key_Enter)
                                     && (event.modifiers & Qt.ControlModifier)) {

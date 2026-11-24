@@ -30,6 +30,9 @@ use studio_preview::NativeHost;
 /// does not fit beside the panels; the canvas scrolls.
 const WIDTH: f64 = 1440.0;
 const HEIGHT: f64 = 900.0;
+/// Wheel notches a scroll to a node takes before it says the node never
+/// came into the window.
+const SCROLL_NOTCHES: usize = 512;
 
 #[derive(World)]
 #[world(init = Self::new)]
@@ -899,6 +902,7 @@ impl Window {
     }
 
     /// Scrolls what holds the node `key` until the node is in the window,
+    /// or its top is for one taller than the window,
     /// as a person does with a control past the window's edge: a wheel
     /// notch at a time over the part of its nearest holder the window
     /// shows. A node already in the window is left where it is.
@@ -928,10 +932,33 @@ impl Window {
         let Some((mut at, mut over)) = place(self) else {
             return Ok(());
         };
-        while at.y0 < window.y0 || at.y1 > window.y1 {
+        // A node taller than the window is never in it whole: its top is
+        // brought in, where a person starts on it.
+        let tall = |r: &Rect| r.height() > window.height();
+        let shown = |r: &Rect| {
+            r.y0 >= window.y0
+                && if tall(r) {
+                    r.y0 < window.y1
+                } else {
+                    r.y1 <= window.y1
+                }
+        };
+        let mut notches = 0;
+        while !shown(&at) {
+            if notches == SCROLL_NOTCHES {
+                return Err(format!(
+                    "the node at {at:?} is not shown after {SCROLL_NOTCHES} wheel notches"
+                ));
+            }
+            notches += 1;
             // A positive notch turns the wheel away, which shows what is
             // above.
-            let notch = if at.y1 > window.y1 { -1.0 } else { 1.0 };
+            let below = if tall(&at) {
+                at.y0 >= window.y1
+            } else {
+                at.y1 > window.y1
+            };
+            let notch = if below { -1.0 } else { 1.0 };
             self.stage
                 .drive()
                 .wheel(over.center(), Wheel::Notches(0.0, notch))
@@ -948,13 +975,41 @@ impl Window {
         Ok(())
     }
 
+    fn window_rect(&self) -> ljos::item::kurbo::Rect {
+        ljos::item::kurbo::Rect::new(0.0, 0.0, WIDTH, HEIGHT)
+    }
+
+    /// The part of the node `key` the window shows, when the node is
+    /// taller than the window.
+    fn tall_shown(&self, key: ljos_a11y::NodeKey) -> Option<ljos::item::kurbo::Rect> {
+        let window = self.window_rect();
+        let mut seen = None;
+        self.stage.scene.accessibility_tree().walk(|k, _, d| {
+            if k == key {
+                let b = d.bounds;
+                seen = Some(ljos::item::kurbo::Rect::new(b.x0, b.y0, b.x1, b.y1));
+            }
+        });
+        seen.filter(|r| r.height() > window.height())
+            .map(|r| r.intersect(window))
+            .filter(|r| r.area() > 0.0)
+    }
+
     fn click_node(&mut self, node: &AccessibleNode) -> StepResult {
         let key = node.key.ok_or("the node has no key")?;
         self.scroll_to(key)?;
+        let not_clicked = |why| format!("{:?} {:?} is not clicked: {why:?}", node.role, node.name);
+        let aimed = self.stage.drive().aim_at_node(key);
+        // Ljós aims at a node's middle, which for one taller than the
+        // window is never in it: a person clicks the part it shows.
+        let aimed = match (aimed, self.tall_shown(key)) {
+            (Err(ljos_drive::Refusal::Outside { .. }), Some(seen)) => {
+                ljos_drive::aim_at_point(seen.center(), self.window_rect())
+            }
+            (aimed, _) => aimed,
+        };
+        let at = aimed.map_err(not_clicked)?;
         let mut driver = self.stage.drive();
-        let at = driver
-            .aim_at_node(key)
-            .map_err(|why| format!("{:?} {:?} is not clicked: {why:?}", node.role, node.name))?;
         driver
             .click(at, MouseButtons::LEFT, 1)
             .map_err(drive_error)?;
