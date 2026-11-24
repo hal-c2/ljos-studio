@@ -1,7 +1,7 @@
 //! Calls `export` on a project as an agent does and prints the answer, for
 //! tasks that need a bundle without an agent (`mise run export:web:check`).
 //!
-//! `cargo run -p studio_mcp --example export -- DIR ENTRY [native|web] [--build]`
+//! `cargo run -p studio_mcp --example export -- DIR ENTRY [native | web [--build]]`
 //!
 //! `--build` builds the site as Studio's window does, with the ljos-web and
 //! `qmlc` that `LJOS_WEB` and `QMLC` name, or that Studio finds.
@@ -10,16 +10,24 @@ use ljos_mcp_core::{CallCtx, Cap, CapSet, McpSurface};
 use serde_json::json;
 use studio_mcp::{Studio, StudioServer};
 
-const USAGE: &str = "usage: export DIR ENTRY [native|web] [--build]";
+const USAGE: &str = "usage: export DIR ENTRY [native]\n       export DIR ENTRY web [--build]";
 
-/// The target and whether to build it, from what follows DIR and ENTRY.
+/// The target and whether to build it, from what follows DIR and ENTRY:
+/// anything else is refused, so a word misspelt is not a native export.
 fn parse(rest: &[String]) -> Result<(String, bool), String> {
-    let build = rest.iter().any(|a| a == "--build");
-    let target = rest
-        .iter()
-        .find(|a| !a.starts_with("--"))
-        .cloned()
-        .unwrap_or_else(|| "native".to_owned());
+    let mut target = None;
+    let mut build = false;
+    for arg in rest {
+        match arg.as_str() {
+            "--build" if !build => build = true,
+            "native" | "web" if target.is_none() => target = Some(arg.clone()),
+            _ => return Err(format!("`{arg}` is not an argument here")),
+        }
+    }
+    let target = target.unwrap_or_else(|| "native".to_owned());
+    if build && target != "web" {
+        return Err("only a web export is built: give `web`".to_owned());
+    }
     Ok((target, build))
 }
 
@@ -63,8 +71,14 @@ mod tests {
         assert_eq!(parse(&args(&[])), Ok(("native".to_owned(), false)));
         assert_eq!(parse(&args(&["native"])), Ok(("native".to_owned(), false)));
         assert_eq!(parse(&args(&["web"])), Ok(("web".to_owned(), false)));
-        assert_eq!(parse(&args(&["web", "--build"])), Ok(("web".to_owned(), true)));
-        assert_eq!(parse(&args(&["--build", "web"])), Ok(("web".to_owned(), true)));
+        assert_eq!(
+            parse(&args(&["web", "--build"])),
+            Ok(("web".to_owned(), true))
+        );
+        assert_eq!(
+            parse(&args(&["--build", "web"])),
+            Ok(("web".to_owned(), true))
+        );
     }
 
     // A flag misspelt or a word too many is not silently a native export.
