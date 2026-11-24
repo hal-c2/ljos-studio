@@ -45,6 +45,9 @@ Popup {
     // A build: running, and what the last one answered, or why it failed.
     property bool building: false
     property var built: null
+    // What the last build was asked: its site stays the one to copy while
+    // the export checked is the one it built.
+    property var builtAsked: null
     property string buildRefusal: ""
     // Whether the last check found what a build needs.
     property bool buildReady: false
@@ -99,8 +102,12 @@ Popup {
     function run(dry) {
         if (entry === "")
             return
-        // What a build made is of the export before this one.
-        built = null
+        // A real export replaces the bundle the site was built from; a check
+        // of another export is not of that site.
+        if (!dry || builtAsked === null || !current(builtAsked)) {
+            built = null
+            builtAsked = null
+        }
         buildRefusal = ""
         waiting += 1
         workspace.dispatch("export", args(dry, false))
@@ -114,6 +121,7 @@ Popup {
         a.open = true
         building = true
         built = null
+        builtAsked = null
         buildRefusal = ""
         workspace.aside("export", a)
     }
@@ -185,6 +193,7 @@ Popup {
         iconEdited = false
         imageEdited = false
         built = null
+        builtAsked = null
         buildRefusal = ""
         buildReady = false
         chosen = defaultEntry()
@@ -326,6 +335,7 @@ Popup {
             if (asked.build === true && asked.dry_run !== true) {
                 panel.building = false
                 panel.built = answer.build
+                panel.builtAsked = asked
                 if (panel.current(asked)) {
                     panel.refusal = ""
                     panel.answer = answer
@@ -356,7 +366,10 @@ Popup {
                 return
             }
             panel.waiting -= 1
-            panel.answer = null
+            // A bundle written before the refusal (its page was not saved)
+            // is still what the export did.
+            const written = (error.details || {}).export
+            panel.answer = written && panel.current(asked) ? written : null
             panel.buildReady = false
             panel.refusal = error.message
         }
