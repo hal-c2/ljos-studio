@@ -1500,6 +1500,34 @@ objects a rebased undo brings back get new handles; a text edit's `None`
 touches are cautious. `node_select` sets the session's one selection, so
 an agent holding objects also moves the window's selection.
 
+#### As built: a folder of files
+
+Studio opens a folder anywhere, not only a project below the workspace, and
+edits the files in it that are not documents. `project_open` `folder` and
+`files` are the calls (MCP.md, Files); the window's Files tab makes them.
+
+- The Files tab, third so the first two keep their keys, lists the folder as
+  a tree, folders first. A document opens in the designer; any other text
+  file opens in the file editor, which takes the canvas's place while it is
+  open. `New`, `Rename` and `Delete` work on the chosen file; `Delete` asks.
+- An edit of a file that is not a document is held until `Ctrl+S` (or
+  `Ctrl+Shift+S` for every file). A dot marks a file with edits held; it
+  turns the danger colour when another program saved the file under them,
+  and the editor offers "Take theirs" or "Keep mine". One with no edits held
+  follows the disk through the project watcher, which nothing polls.
+- Closing a file with edits held, opening another folder and closing the
+  window each ask first: save, don't save or cancel.
+- The folder dialog and the close hook are the native window's
+  (`shell/Window.qml`): the web shell shares `Builtin/` but has no system
+  dialog, so `Open…` shows only where the window can choose folders.
+- The folders opened are kept newest first; the Files tab offers them, and
+  `studio --last` opens the newest.
+
+DECISION: a TypeScript file opens in the file editor, not the designer,
+which draws documents.
+DECISION: the file editor replaces the canvas rather than splitting it, so a
+phone-wide window keeps one thing readable.
+
 ## 8. Risks
 
 - **Addressing across edits.** Child-index paths shift. Studio gives an
