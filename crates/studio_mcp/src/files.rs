@@ -465,6 +465,10 @@ pub(crate) fn act(
             }
         }
         FilesAction::Remove => {
+            // A file goes with its held edits only when the caller says so.
+            if !a.force && studio.files.get(&path).is_some_and(Held::dirty) {
+                return Err(unsaved_error(vec![path]));
+            }
             store.remove(&path).map_err(store_error)?;
             studio.files.remove(&path);
             gone(&path)

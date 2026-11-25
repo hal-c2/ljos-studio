@@ -87,6 +87,9 @@ pub struct Studio {
     files: files::Open,
     /// The folders opened last.
     recent: recent::Recent,
+    /// The folders the person chose in Studio's window, which an agent may
+    /// then open too: a grant to write files is not one to pick where.
+    chosen: Chosen,
     /// The paths the Files tab listed last, and what the held files said
     /// then, while the project watch says nothing moved: a view built on
     /// every keystroke walks no tree and reads no file back. `None` once it
@@ -206,6 +209,7 @@ impl Studio {
             project_watch: None,
             files: files::Open::new(),
             recent: recent::Recent::default(),
+            chosen: Chosen::default(),
             listed: Listed::default(),
         };
         studio.follow();
@@ -420,6 +424,15 @@ impl Studio {
         if real.parent().is_none() {
             return Err(not_folder("is the filesystem's root"));
         }
+        if !self.may_open(&real) {
+            return Err(SurfaceError::new(
+                ErrorCode::PathDenied,
+                format!(
+                    "`{folder}` was not chosen in Studio's window: a folder opens once the person has opened it there"
+                ),
+            )
+            .with_details(serde_json::json!({ "project": self.project, "kind": "not_chosen" })));
+        }
         let was = std::mem::replace(&mut self.workspace, real.clone());
         if let Err(e) = self.switch_in_dir(Path::new("."), ".", folder) {
             self.workspace = was;
@@ -427,6 +440,21 @@ impl Studio {
         }
         self.recent.remember(&real);
         Ok(())
+    }
+
+    /// Whether `real` (canonical) is the workspace, a folder opened before
+    /// or one the person chose: what a call may open.
+    #[cfg(feature = "native")]
+    fn may_open(&self, real: &Path) -> bool {
+        let same = |f: &PathBuf| f.canonicalize().is_ok_and(|f| f == real);
+        same(&self.workspace)
+            || self.recent.folders.iter().any(same)
+            || self
+                .chosen
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .iter()
+                .any(same)
     }
 
     #[cfg(not(feature = "native"))]
@@ -626,7 +654,12 @@ const SHOWN_WITHOUT_WRITING: &[&str] = &[
 pub struct StudioServer {
     studio: Arc<Mutex<Studio>>,
     tools: Arc<ToolRegistry>,
+    chosen: Chosen,
 }
+
+/// The folders the person chose, kept apart from the session's lock so the
+/// window can say so while a call runs.
+type Chosen = Arc<Mutex<Vec<PathBuf>>>;
 
 impl std::fmt::Debug for StudioServer {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -641,12 +674,25 @@ const TOLD_PROBLEMS: usize = 8;
 
 impl StudioServer {
     pub fn new(studio: Studio) -> Self {
+        let chosen = studio.chosen.clone();
         let studio = Arc::new(Mutex::new(studio));
         let tools = tools::registry(&studio);
         Self {
             studio,
             tools: Arc::new(tools),
+            chosen,
         }
+    }
+
+    /// The person chose `folder` in Studio's window (its folder dialog), so
+    /// `project_open`'s `folder` may open it. No tool call can say this: a
+    /// client granted `fs` writes files in the folder open, and picks no
+    /// other.
+    pub fn choose_folder(&self, folder: &str) {
+        self.chosen
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .push(PathBuf::from(folder));
     }
 
     /// The session, shared with whatever else shows it (Studio's canvas).

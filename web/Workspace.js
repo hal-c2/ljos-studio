@@ -98,6 +98,8 @@ export const Workspace = defineType("Workspace", QtObject, {
     dispatch(tool, args) {
       this.$queue.enqueue({ tool, args: args ?? {} });
     },
+    // The web holds one project and opens no folder, chosen or not.
+    chooseFolder(_folder) {},
     // Whether `text` is a literal as QML reads one, as the native block says.
     literal(text) {
       return served?.isLiteral(text) ?? false;
