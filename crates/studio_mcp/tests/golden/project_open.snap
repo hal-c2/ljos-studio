@@ -9,7 +9,7 @@ expression: value
     "open_world": false,
     "read_only": false
   },
-  "description": "Open a project directory below the workspace, or describe the open one. Opening starts a new session: handles and history end. `asset` manages its pictures and fonts.",
+  "description": "Open a project below the workspace, or any `folder`, or describe the open one. Opening starts a new session: handles and history end. `asset`: its pictures and fonts; `files`: its other files.",
   "inputSchema": {
     "properties": {
       "asset": {
@@ -26,8 +26,32 @@ expression: value
         "type": "string"
       },
       "file": {
-        "description": "`import`: a file below the workspace.",
+        "description": "`import`: a file below the workspace; `files`: the project's.",
         "type": "string"
+      },
+      "files": {
+        "description": "`list` (inspect), the rest `fs`; `edit` holds `text` until `save`.",
+        "enum": [
+          "list",
+          "read",
+          "edit",
+          "save",
+          "save_all",
+          "revert",
+          "close",
+          "new",
+          "rename",
+          "remove"
+        ],
+        "type": "string"
+      },
+      "folder": {
+        "description": "Absolute; opened as the workspace (`fs`).",
+        "type": "string"
+      },
+      "force": {
+        "description": "Drops unsaved edits; saves over a change on disk.",
+        "type": "boolean"
       },
       "name": {
         "description": "`import`: the name to give it. `remove`: the asset's name.",
@@ -35,6 +59,14 @@ expression: value
       },
       "path": {
         "description": "Relative or absolute (`.` is the workspace). Left out: the open project.",
+        "type": "string"
+      },
+      "text": {
+        "description": "`files`: what it holds.",
+        "type": "string"
+      },
+      "to": {
+        "description": "`rename`: the new path.",
         "type": "string"
       }
     },
@@ -49,10 +81,16 @@ expression: value
       "documents": {
         "type": "array"
       },
+      "file": {},
+      "files": {},
+      "more": {},
       "project": {
         "type": "string"
       },
-      "removed": {}
+      "recent": {},
+      "removed": {},
+      "saved": {},
+      "unsaved": {}
     },
     "required": [
       "project",

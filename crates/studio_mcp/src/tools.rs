@@ -3,6 +3,7 @@
 use std::sync::{Arc, Mutex};
 
 use crate::assets::{self, AssetAction, AssetInfo};
+use crate::files;
 use crate::schema::Answers;
 use ljos_mcp_core::{
     CallCtx, Cap, ErrorCode, SurfaceError, ToolAnnotations, ToolDef, ToolRegistry, denied,
@@ -29,10 +30,20 @@ const TREE_PAGE: usize = 200;
 struct ProjectOpenArgs {
     /// Relative or absolute (`.` is the workspace). Left out: the open project.
     path: Option<String>,
+    /// Absolute; opened as the workspace (`fs`).
+    folder: Option<String>,
     /// On the project's `assets/`: `list` it, `import` a picture or font (`fs`), `remove` one no document uses (`fs`).
     asset: Option<AssetAction>,
-    /// `import`: a file below the workspace.
+    /// `list` (inspect), the rest `fs`; `edit` holds `text` until `save`.
+    files: Option<files::FilesAction>,
+    /// `import`: a file below the workspace; `files`: the project's.
     file: Option<String>,
+    /// `files`: what it holds.
+    text: Option<String>,
+    /// `rename`: the new path.
+    to: Option<String>,
+    /// Drops unsaved edits; saves over a change on disk.
+    force: Option<bool>,
     /// `import`: the file's bytes in base64 (a client with no file here); needs `name`.
     data: Option<String>,
     /// `import`: the name to give it. `remove`: the asset's name.
@@ -44,6 +55,24 @@ struct ProjectInfo {
     project: String,
     /// QML documents, relative to the project.
     documents: Vec<String>,
+    /// What `files` `list` found.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    files: Option<Vec<String>>,
+    /// The listing stopped short.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    more: bool,
+    /// The file a `files` action read or wrote.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    file: Option<files::FileInfo>,
+    /// What `save_all` wrote.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    saved: Option<Vec<String>>,
+    /// Files with edits not saved.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    unsaved: Vec<String>,
+    /// Folders opened last, newest first.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    recent: Vec<String>,
     /// What `list` found.
     #[serde(skip_serializing_if = "Option::is_none")]
     assets: Option<Vec<AssetInfo>>,
@@ -905,6 +934,12 @@ fn info(studio: &Studio) -> ProjectInfo {
     ProjectInfo {
         project: studio.project().to_owned(),
         documents: crate::harness::documents(&studio.session),
+        files: None,
+        more: false,
+        file: None,
+        saved: None,
+        unsaved: files::unsaved(&studio.files),
+        recent: studio.recent(),
         assets: None,
         asset: None,
         removed: None,
@@ -916,27 +951,62 @@ fn project_open(
     ctx: &CallCtx,
     a: ProjectOpenArgs,
 ) -> Result<ProjectInfo, SurfaceError> {
+    if a.asset.is_some() && a.files.is_some() {
+        return Err(SurfaceError::invalid_argument(
+            "`asset` and `files` are one call each".to_owned(),
+        ));
+    }
     let action = match a.asset {
         Some(action) => Some(action),
-        None if a.file.is_some() || a.data.is_some() || a.name.is_some() => {
+        None if a.files.is_none() && (a.file.is_some() || a.data.is_some() || a.name.is_some()) => {
             return Err(SurfaceError::invalid_argument(
-                "`file`, `data` and `name` go with `asset`".to_owned(),
+                "`file`, `data` and `name` go with `asset` or `files`".to_owned(),
             ));
         }
         None => None,
     };
+    if a.files.is_none() && (a.text.is_some() || a.to.is_some()) {
+        return Err(SurfaceError::invalid_argument(
+            "`text` and `to` go with `files`".to_owned(),
+        ));
+    }
     // Listing only reads; the registry checked `inspect`, the rest is
     // checked here, refused the way the registry does.
-    if matches!(action, Some(AssetAction::Import | AssetAction::Remove))
-        && !ctx.caps.contains(Cap::Fs)
-    {
+    let writes = matches!(action, Some(AssetAction::Import | AssetAction::Remove))
+        || a.files.is_some_and(files::FilesAction::needs_fs)
+        || a.folder.is_some();
+    if writes && !ctx.caps.contains(Cap::Fs) {
         return Err(denied("project_open", Cap::Fs, ctx));
+    }
+    let force = a.force.unwrap_or(false);
+    if a.path.is_some() || a.folder.is_some() {
+        files::may_leave(&studio.files, force)?;
+    }
+    if let Some(folder) = a.folder {
+        studio.open_folder(&folder)?;
     }
     if let Some(path) = a.path {
         studio.switch(&path)?;
     }
+    let answer = match a.files {
+        Some(action) => files::act(
+            studio,
+            action,
+            &files::Asked {
+                file: a.file.as_deref(),
+                text: a.text.as_deref(),
+                to: a.to.as_deref(),
+                force,
+            },
+        )?,
+        None => files::Answer::default(),
+    };
     let mut out = ProjectInfo {
         documents: Vec::new(),
+        files: answer.files,
+        more: answer.more,
+        file: answer.file,
+        saved: answer.saved,
         ..info(studio)
     };
     match action {
@@ -1898,11 +1968,12 @@ fn edits(studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
         .with(
             ToolDef::new::<ProjectOpenArgs>(
                 "project_open",
-                "Open a project directory below the workspace, or describe the open one. Opening starts a new session: handles and history end. `asset` manages its pictures and fonts.",
+                "Open a project below the workspace, or any `folder`, or describe the open one. Opening starts a new session: handles and history end. `asset`: its pictures and fonts; `files`: its other files.",
             )
             .answers::<ProjectInfo>()
             .requires(Cap::Inspect)
-            // An asset's import or removal writes; a reader is told by `fs`.
+            // An asset's import or removal, and a file's save, write; a reader
+            // is told by `fs`.
             .annotated(DESTRUCTIVE),
             typed({
                 let studio = s();

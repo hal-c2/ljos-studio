@@ -12,6 +12,7 @@ mod component;
 #[cfg(feature = "http")]
 pub mod endpoint;
 pub mod export;
+mod files;
 mod harness;
 mod layout_tools;
 mod loads;
@@ -20,6 +21,7 @@ pub mod preview;
 mod preview_tools;
 #[cfg(feature = "native")]
 mod project_watch;
+mod recent;
 mod review;
 pub mod schema;
 pub mod signals;
@@ -80,6 +82,11 @@ pub struct Studio {
     /// Hears of the files other programs change in the open project.
     #[cfg(feature = "native")]
     project_watch: Option<project_watch::ProjectWatch>,
+    /// The files that are not documents being edited, which are written
+    /// only when saved (`files.rs`).
+    files: files::Open,
+    /// The folders opened last.
+    recent: recent::Recent,
 }
 
 /// Told that what a window shows may have changed. Called with the
@@ -180,6 +187,8 @@ impl Studio {
             rehandled: Vec::new(),
             #[cfg(feature = "native")]
             project_watch: None,
+            files: files::Open::new(),
+            recent: recent::Recent::default(),
         };
         studio.follow();
         studio
@@ -306,6 +315,72 @@ impl Studio {
         &self.workspace
     }
 
+    /// Keeps the folders opened in `file`, and the workspace as the first.
+    pub fn with_recent(mut self, file: impl Into<PathBuf>) -> Self {
+        let mut recent = recent::Recent::load(file.into());
+        if !self.workspace.as_os_str().is_empty() {
+            recent.remember(&self.workspace);
+        }
+        self.recent = recent;
+        self
+    }
+
+    /// The folder opened last before this start, if Studio keeps them.
+    pub fn last_folder(file: &Path) -> Option<PathBuf> {
+        recent::Recent::load(file.to_owned())
+            .folders
+            .into_iter()
+            .find(|f| f.is_dir())
+    }
+
+    /// The folders opened last, newest first.
+    pub(crate) fn recent(&self) -> Vec<String> {
+        self.recent.listed()
+    }
+
+    /// A window shows which files are held with edits.
+    pub(crate) fn files_changed(&self) {
+        self.watchers.tell();
+    }
+
+    /// Opens `folder`, anywhere, as the workspace and its project. The
+    /// filesystem's root is refused: a walk of it would never end.
+    #[cfg(feature = "native")]
+    pub fn open_folder(&mut self, folder: &str) -> Result<(), SurfaceError> {
+        let path = Path::new(folder);
+        let not_folder = |why: &str| {
+            SurfaceError::new(ErrorCode::PathDenied, format!("`{folder}` {why}"))
+                .with_details(serde_json::json!({ "project": self.project }))
+        };
+        if !path.is_absolute() {
+            return Err(not_folder("is not an absolute path"));
+        }
+        let real = path
+            .canonicalize()
+            .map_err(|_| not_folder("does not exist"))?;
+        if !real.is_dir() {
+            return Err(not_folder("is not a folder"));
+        }
+        if real.parent().is_none() {
+            return Err(not_folder("is the filesystem's root"));
+        }
+        let was = std::mem::replace(&mut self.workspace, real.clone());
+        if let Err(e) = self.switch_in_dir(Path::new("."), ".", folder) {
+            self.workspace = was;
+            return Err(e);
+        }
+        self.recent.remember(&real);
+        Ok(())
+    }
+
+    #[cfg(not(feature = "native"))]
+    pub fn open_folder(&mut self, _: &str) -> Result<(), SurfaceError> {
+        Err(SurfaceError::new(
+            ErrorCode::NotActionable,
+            "this server holds one project and cannot open another",
+        ))
+    }
+
     pub fn project(&self) -> &str {
         &self.project
     }
@@ -402,6 +477,7 @@ impl Studio {
         }
         self.locked.clear();
         self.rehandled.clear();
+        self.files.clear();
         self.follow();
         self.watch_project(root);
         Ok(())

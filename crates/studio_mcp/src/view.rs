@@ -224,9 +224,30 @@ pub struct AssetTile {
     pub file: String,
 }
 
+/// A file of the project, as the files panel lists it.
+#[derive(Clone, Debug, Default, PartialEq, Serialize)]
+pub struct FileRow {
+    pub path: String,
+    /// Open in an editor (`files` `read` or `edit`).
+    pub open: bool,
+    /// Edits are held that are not saved.
+    pub dirty: bool,
+    /// The disk changed under the edits held.
+    pub outside: bool,
+    /// One more each time an open file without edits took a change from the
+    /// disk: an editor showing it reads it again.
+    pub stamp: u64,
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Serialize)]
 pub struct View {
     pub documents: Vec<String>,
+    /// Every file of the project, documents too, sorted by path.
+    pub files: Vec<FileRow>,
+    /// Where the project is, as a person reads it.
+    pub folder: String,
+    /// The folders opened last, newest first.
+    pub recent: Vec<String>,
     /// The pictures in `assets/`, for the Insert tab.
     pub assets: Vec<AssetTile>,
     /// The project's directory has nothing in it a walk would list.
@@ -295,6 +316,30 @@ pub struct Held {
 }
 
 impl Studio {
+    fn file_rows(&mut self) -> Vec<FileRow> {
+        let store = self.session.store();
+        for (path, held) in &mut self.files {
+            crate::files::look(store, path, held);
+        }
+        let (paths, _) = crate::files::list(store);
+        paths
+            .into_iter()
+            .map(|path| match self.files.get(&path) {
+                Some(held) => FileRow {
+                    open: true,
+                    dirty: held.dirty(),
+                    outside: held.outside,
+                    stamp: held.stamp,
+                    path,
+                },
+                None => FileRow {
+                    path,
+                    ..FileRow::default()
+                },
+            })
+            .collect()
+    }
+
     fn asset_tiles(&self) -> Vec<AssetTile> {
         let dir = self.dir();
         crate::assets::names(self.session.store())
@@ -318,6 +363,9 @@ impl Studio {
     pub fn view(&mut self, doc: &str) -> View {
         let documents = crate::harness::documents(&self.session);
         let mut view = View {
+            files: self.file_rows(),
+            folder: self.session.store().describe(),
+            recent: self.recent(),
             blank: documents.is_empty() && self.session.blank(),
             documents,
             assets: self.asset_tiles(),

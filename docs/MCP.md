@@ -30,7 +30,7 @@ documents: export), `run` (start previews). They are granted at launch with
 
 | # | Tool | Does | Needs |
 |---|---|---|---|
-| 1 | `project_open` | Open a project directory below the workspace, or describe the open one: documents, blocks, targets; `asset` lists, imports or removes its pictures and fonts | inspect; fs to import or remove |
+| 1 | `project_open` | Open a project directory below the workspace, or `folder` anywhere, or describe the open one: documents, blocks, targets, `recent` folders, `unsaved` files; `asset` lists, imports or removes its pictures and fonts; `files` lists, reads, edits, saves, makes, renames and removes its other files | inspect; fs for `folder`, files beyond `list`, and to import or remove |
 | 2 | `document_tree` | A document's objects in order: handle, path, type, `id`, bindings; paginated | inspect |
 | 3 | `document_text` | A document's text or a byte range of it, with its generation and whether it parses | inspect |
 | 4 | `document_new` | Create a QML document, or one keeping a project JSON file's records (`data`): a `JsonListModel` of the file, or a `ListModel` copy, or a `shell` of a block; undo removes it | mutate |
@@ -1050,6 +1050,51 @@ own because the list stays at 25 tools.
   as they are.
 - On the web a file that is not text is held in browser storage as a data
   URL's text; `list`, `import` and `remove` work the same.
+
+## Files
+
+`project_open` with `files` works on every file of the project a walk keeps,
+documents and the rest: a README, a TypeScript module, a style sheet. The
+Files tab of the window makes the same calls. An action and not a tool of its
+own for the same reason as `asset`: the list stays at 25 tools.
+
+| `files` | Takes | Answers | Needs |
+|---|---|---|---|
+| `list` | | `files`, sorted paths; `more` when it stopped at 5000 | inspect |
+| `read` | `file` | `file`: `path`, `text`, `dirty`, `outside` | fs |
+| `edit` | `file`, `text` | `file`, held, not written; `unsaved` | fs |
+| `save` | `file`; `force` over a change made outside | `file` | fs |
+| `save_all` | `force` | `saved`, the paths written | fs |
+| `revert` | `file` | `file`, the text on disk | fs |
+| `close` | `file`; `force` to drop edits held | | fs |
+| `new` | `file`, `text` (empty by default) | `file` | fs |
+| `rename` | `file`, `to` | `file`, at `to` | fs |
+| `remove` | `file` | | fs |
+
+- A document (`.qml`) is saved as it is edited, with its history, so `edit`,
+  `save`, `revert` and `new` refuse it `invalid_argument`, kind `document`,
+  and send the caller to the document tools. `rename` and `remove` take it,
+  and the documents list follows.
+- An edit is held until `save`: that is the one moment the file changes on
+  disk. A file another program saved under edits held answers `outside`, and
+  `save` is refused `stale_ref`, kind `changed_outside`, until `force`. One
+  with no edits held just takes the new text.
+- `path` and `folder` are refused `invalid_argument`, kind
+  `unsaved`, with the `files` held with edits, until `force`, which drops them.
+- A path a walk leaves out (`.git/`, `node_modules/`, `.studio/`) is refused
+  `path_denied`; so is one that leads outside the project through a link.
+  Text only (kind `not_text`), 8 MiB at most (kind `too_large`).
+- `folder` opens a folder anywhere on the machine as the workspace, not only
+  below it, which is why it needs `fs`. It is an absolute path; one that is
+  not a folder, or is the filesystem's root, is refused `path_denied`.
+  Opening a folder writes nothing into it. The folders opened are kept newest
+  first in `ljos-studio/recent.json` in the configuration directory and
+  answered as `recent`; `studio --last` opens the newest one still there.
+- DECISION: QML documents keep writing through with undo and have no dirty
+  marker; every other file is held until saved, as a code editor does, since
+  it has no history of its own in Studio.
+- DECISION: a TypeScript or JavaScript file opens in the file editor. The
+  designer draws documents; a script has no canvas of its own.
 
 ## Prompts
 
