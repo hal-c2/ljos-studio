@@ -61,6 +61,10 @@ struct Args {
     /// Serve no tools to agents while the window is open.
     #[arg(long, conflicts_with = "mcp")]
     no_agents: bool,
+    /// Open the folder opened last, when no DIR is named and it is still
+    /// there.
+    #[arg(long, conflicts_with = "dir")]
+    last: bool,
     /// The workspace: the project opened first, and the directory
     /// `project_open` may open others below.
     dir: Option<PathBuf>,
@@ -69,7 +73,13 @@ struct Args {
 fn main() -> anyhow::Result<()> {
     let args = Args::parse();
     let caps = granted(&args)?;
-    let dir = match args.dir {
+    // The folders opened, newest first, for the Files tab and `--last`.
+    let recent = config_dir().map(|c| c.join("recent.json"));
+    let last = args
+        .last
+        .then(|| recent.as_deref().and_then(Studio::last_folder))
+        .flatten();
+    let dir = match args.dir.or(last) {
         Some(dir) => dir,
         None => std::env::current_dir().context("the current directory")?,
     };
@@ -79,11 +89,13 @@ fn main() -> anyhow::Result<()> {
     let state_dir = state_dir()?;
     let state = state_dir.path().to_owned();
     let previews = state.clone();
-    let studio = Studio::open(&dir)
-        .with_context(|| format!("opening {}", dir.display()))?
-        .with_previews(Arc::new(move |project| {
-            Box::new(NativeHost::new(project, &ljos, &previews))
-        }));
+    let mut studio = Studio::open(&dir).with_context(|| format!("opening {}", dir.display()))?;
+    if let Some(file) = recent {
+        studio = studio.with_recent(file);
+    }
+    let studio = studio.with_previews(Arc::new(move |project| {
+        Box::new(NativeHost::new(project, &ljos, &previews))
+    }));
     stop_on_signal(studio.preview_closer(), state.clone());
     // The window's end ends the preview, whoever still holds the session: a
     // process leaving runs no destructor another thread's Arc keeps alive.
