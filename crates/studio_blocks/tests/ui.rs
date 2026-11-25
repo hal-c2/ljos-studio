@@ -76,6 +76,10 @@ struct UiWorld {
     check_on_its_way: Option<Json>,
     /// Where fields were when a scenario noted them, by panel and name.
     noted: std::collections::HashMap<String, ljos::item::kurbo::Rect>,
+    /// Folders beside the project, made for a scenario to open, by name.
+    beside: std::collections::HashMap<String, tempfile::TempDir>,
+    /// The system's dialogs, which the person answers in a step.
+    dialogs: ljos_platform::FakeDialogs,
 }
 
 /// A preview that answers everything but `placed`, whose default refuses.
@@ -375,6 +379,8 @@ impl UiWorld {
             held: None,
             check_on_its_way: None,
             noted: std::collections::HashMap::new(),
+            beside: std::collections::HashMap::new(),
+            dialogs: ljos_platform::FakeDialogs::default(),
         }
     }
 
@@ -487,6 +493,7 @@ impl UiWorld {
             }
         });
         studio_blocks::register(&engine);
+        Platform::of(&engine).set_dialogs(Rc::new(self.dialogs.clone()));
         let mut stage = Stage::new(&engine, WIDTH, HEIGHT);
         studio_blocks::serve(&engine, Arc::clone(&server));
         let (root, watch) = make(&engine)?;
@@ -835,6 +842,7 @@ impl Window {
             "Inspector" => "Design tab",
             "Tokens" => "Tokens tab",
             "Flow" => "Flow tab",
+            "Files" => "Files tab",
             _ => return Ok(()),
         };
         let tree = self.tree();
@@ -4992,6 +5000,253 @@ fn perf_export(project: &str) {
         ms(at(0.95)),
         samples.len()
     );
+}
+
+// ------------------------------------------------------------------ files
+
+#[given(regex = r#"^the folder "([^"]+)" beside the project holds the file "([^"]+)":$"#)]
+fn folder_beside(w: &mut UiWorld, folder: String, name: String, step: &Step) -> StepResult {
+    let dir = match w.beside.entry(folder) {
+        std::collections::hash_map::Entry::Occupied(e) => e.into_mut(),
+        std::collections::hash_map::Entry::Vacant(e) => {
+            e.insert(tempfile::tempdir().map_err(|e| e.to_string())?)
+        }
+    };
+    let path = dir.path().join(&name);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    std::fs::write(path, file_text(step)?).map_err(|e| e.to_string())
+}
+
+#[given(regex = r#"^the person has opened "([^"]+)" in the files panel$"#)]
+#[when(regex = r#"^the person opens "([^"]+)" in the files panel$"#)]
+fn opens_file(w: &mut UiWorld, path: String) -> StepResult {
+    let window = w.window()?;
+    let row = window.node("Files", None, &path)?;
+    window.click_row("Files", &row)
+}
+
+#[then(regex = r#"^the files panel lists "([^"]*)"$"#)]
+fn files_list(w: &mut UiWorld, want: String) -> StepResult {
+    let window = w.window()?;
+    window.open_panel("Files")?;
+    let tree = window.tree();
+    let list = find(&tree, &|n| n.name == "Files" && n.role == "list")
+        .ok_or("no list of files in the window")?;
+    // The rows, wherever the list nests them: the first named node down
+    // each branch, but for the scroll bar.
+    fn rows<'n>(node: &'n AccessibleNode, out: &mut Vec<&'n str>) {
+        for c in &node.children {
+            if c.role == "scrollbar" {
+                continue;
+            }
+            if c.key.is_some() && !c.name.is_empty() {
+                out.push(&c.name);
+            } else {
+                rows(c, out);
+            }
+        }
+    }
+    let mut got = Vec::new();
+    rows(list, &mut got);
+    let want: Vec<&str> = want.split(", ").filter(|s| !s.is_empty()).collect();
+    (got == want)
+        .then_some(())
+        .ok_or_else(|| format!("the files panel lists {got:?}"))
+}
+
+/// The node of the file editor with this object name.
+fn editor_part(window: &Window, part: &str) -> Result<AccessibleNode, String> {
+    find(&window.tree(), &|n| n.object_name == part)
+        .cloned()
+        .ok_or_else(|| format!("the file editor shows no {part}"))
+}
+
+#[given(regex = r#"^the person has typed "(.*)" in the file editor$"#)]
+#[when(regex = r#"^the person types "(.*)" in the file editor$"#)]
+fn types_in_editor(w: &mut UiWorld, text: String) -> StepResult {
+    let text = unescape(&text);
+    let window = w.window()?;
+    let area = editor_part(window, "fileText")?;
+    window.click_shown(&area)?;
+    let item = window
+        .stage
+        .scene
+        .accessible_item(area.key.ok_or("the file editor has no key")?)
+        .ok_or("the file editor is not an item")?;
+    // What is there goes, as a person's select-all and typing replaces it.
+    let engine = window.engine().clone();
+    engine
+        .invoke_by_name(item, "selectAll", &[])
+        .map_err(|e| e.to_string())?;
+    window.stage.drive().commit(&text).map_err(drive_error)?;
+    window.rest()
+}
+
+#[when(regex = r#"^the person enters "([^"]+)" as the new file's path$"#)]
+fn enters_file_path(w: &mut UiWorld, path: String) -> StepResult {
+    let window = w.window()?;
+    window.open_panel("Files")?;
+    let field = window.node("Files", Some("textinput"), "File's path")?;
+    window.click_shown(&field)?;
+    window.stage.drive().commit(&path).map_err(drive_error)?;
+    window.rest()
+}
+
+/// Lets the window run until the file editor says `want`: a change another
+/// program made comes from the watcher's thread on the real clock.
+#[then(regex = r#"^the file editor says "([^"]+)" within (\d+) seconds$"#)]
+fn editor_says_within(w: &mut UiWorld, want: String, seconds: u64) -> StepResult {
+    let window = w.window()?;
+    let mut got = String::new();
+    for _ in 0..seconds * 20 {
+        got = editor_part(window, "fileState")?.name;
+        if got == want {
+            return Ok(());
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        window.stage.drive().advance(50).map_err(drive_error)?;
+        window.rest()?;
+    }
+    Err(format!(
+        "after {seconds} seconds the file editor says {got:?}"
+    ))
+}
+
+#[then(regex = r#"^the file editor says "([^"]+)"$"#)]
+fn editor_says(w: &mut UiWorld, want: String) -> StepResult {
+    let window = w.window()?;
+    let state = editor_part(window, "fileState")?;
+    (state.name == want)
+        .then_some(())
+        .ok_or_else(|| format!("the file editor says {:?}", state.name))
+}
+
+/// Lets the window run until the file editor holds `want`: what another
+/// program saves comes from the watcher's thread on the real clock.
+#[then(regex = r#"^the file editor holds "(.*)" within (\d+) seconds$"#)]
+fn editor_holds(w: &mut UiWorld, want: String, seconds: u64) -> StepResult {
+    let want = unescape(&want);
+    let window = w.window()?;
+    let mut got = String::new();
+    for _ in 0..seconds * 20 {
+        got = editor_part(window, "fileText")?.value;
+        if got == want {
+            return Ok(());
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        window.stage.drive().advance(50).map_err(drive_error)?;
+        window.rest()?;
+    }
+    Err(format!(
+        "after {seconds} seconds the file editor holds {got:?}"
+    ))
+}
+
+#[then(regex = r#"^the file editor holds "(.*)"$"#)]
+fn editor_holds_now(w: &mut UiWorld, want: String) -> StepResult {
+    let want = unescape(&want);
+    let got = editor_part(w.window()?, "fileText")?.value;
+    (got == want)
+        .then_some(())
+        .ok_or_else(|| format!("the file editor holds {got:?}"))
+}
+
+#[then(regex = r#"^the file editor shows (a|no) file$"#)]
+fn editor_shown(w: &mut UiWorld, shown: String) -> StepResult {
+    let shows = editor_part(w.window()?, "fileText").is_ok();
+    (shows == (shown == "a")).then_some(()).ok_or_else(|| {
+        format!(
+            "the file editor shows {}",
+            if shows { "a file" } else { "none" }
+        )
+    })
+}
+
+#[then(regex = r#"^the window asks "(.+)"$"#)]
+fn window_asks(w: &mut UiWorld, question: String) -> StepResult {
+    let tree = w.window()?.tree();
+    find(&tree, &|n| n.name == question && n.role == "dialog")
+        .map(drop)
+        .ok_or_else(|| {
+            format!(
+                "the window asks nothing of {question:?}; it holds {}",
+                names(&tree)
+            )
+        })
+}
+
+#[then("the window asks nothing")]
+fn window_asks_nothing(w: &mut UiWorld) -> StepResult {
+    let tree = w.window()?.tree();
+    find(&tree, &|n| n.role == "dialog")
+        .map_or(Ok(()), |n| Err(format!("the window asks {:?}", n.name)))
+}
+
+#[when(regex = r#"^the person picks the folder "([^"]+)" in the folder dialog$"#)]
+fn picks_folder(w: &mut UiWorld, folder: String) -> StepResult {
+    let path = w
+        .beside
+        .get(&folder)
+        .ok_or_else(|| format!("no folder {folder:?} beside the project"))?
+        .path()
+        .to_owned();
+    let shown = w.dialogs.shown();
+    if !w.dialogs.choose(vec![path]) {
+        return Err(format!("the system shows no dialog, only {shown:?}"));
+    }
+    w.window()?.rest()
+}
+
+#[then(regex = r#"^the window shows the folder "([^"]+)"$"#)]
+fn shows_folder(w: &mut UiWorld, folder: String) -> StepResult {
+    let want = w
+        .beside
+        .get(&folder)
+        .ok_or_else(|| format!("no folder {folder:?} beside the project"))?
+        .path()
+        .canonicalize()
+        .map_err(|e| e.to_string())?;
+    let got = w.window()?.read("folder").to_js_string().to_string();
+    (std::path::Path::new(&got) == want)
+        .then_some(())
+        .ok_or_else(|| format!("the window shows the folder {got:?}"))
+}
+
+#[then(regex = r#"^the folder "([^"]+)" holds the file "([^"]+)" saying "(.*)"$"#)]
+fn beside_says(w: &mut UiWorld, folder: String, name: String, want: String) -> StepResult {
+    let want = unescape(&want);
+    let dir = w
+        .beside
+        .get(&folder)
+        .ok_or_else(|| format!("no folder {folder:?} beside the project"))?;
+    let got = std::fs::read_to_string(dir.path().join(&name)).map_err(|e| e.to_string())?;
+    got.contains(&want)
+        .then_some(())
+        .ok_or_else(|| format!("`{name}` does not say {want:?}:\n{got}"))
+}
+
+#[when("the person closes the window")]
+fn closes_window(w: &mut UiWorld) -> StepResult {
+    let window = w.window()?;
+    let engine = window.engine().clone();
+    engine
+        .invoke_by_name(window.root, "close", &[])
+        .map_err(|e| e.to_string())?;
+    window.rest()
+}
+
+#[then(regex = r#"^the window is (open|closed)$"#)]
+fn window_is(w: &mut UiWorld, state: String) -> StepResult {
+    let window = w.window()?;
+    let visible = window
+        .engine()
+        .read_by_name(window.root, "visible")
+        .to_boolean();
+    (visible == (state == "open"))
+        .then_some(())
+        .ok_or_else(|| format!("the window is {}", if visible { "open" } else { "closed" }))
 }
 
 /// Told each scenario as it starts. One that outlasts its patience ends the

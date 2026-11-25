@@ -14,6 +14,10 @@ pub const WINDOW: (&str, &str) = ("Window.qml", include_str!("../../../shell/Win
 /// Studio's own shell, by its path from `Builtin/`.
 pub const BUILTIN: &[(&str, &str)] = &[
     (
+        "AskPanel.qml",
+        include_str!("../../../shell/Builtin/AskPanel.qml"),
+    ),
+    (
         "BlockActions.qml",
         include_str!("../../../shell/Builtin/BlockActions.qml"),
     ),
@@ -48,6 +52,14 @@ pub const BUILTIN: &[(&str, &str)] = &[
     (
         "Field.qml",
         include_str!("../../../shell/Builtin/Field.qml"),
+    ),
+    (
+        "FileEditor.qml",
+        include_str!("../../../shell/Builtin/FileEditor.qml"),
+    ),
+    (
+        "FilesPanel.qml",
+        include_str!("../../../shell/Builtin/FilesPanel.qml"),
     ),
     (
         "FloatBar.qml",

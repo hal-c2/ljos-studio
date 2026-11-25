@@ -75,5 +75,7 @@ var paths = {
     tabs: "M2 6 H14 V13 H2 Z M2 6 V3 H7 V6",
     window: "M2 3 H14 V13 H2 Z M2 6 H14",
     pointer: "M8 2 V5 M4 4 L6 6 M2 9 H5 M7 7 L13 9.5 L10.5 10.5 L9.5 13 Z",
-    document: "M4 2 H10 L12.5 4.5 V14 H4 Z M10 2 V4.5 H12.5"
+    document: "M4 2 H10 L12.5 4.5 V14 H4 Z M10 2 V4.5 H12.5",
+    folder: "M2 4 H6.5 L8 5.5 H14 V13 H2 Z",
+    folderOpen: "M2 4 H6.5 L8 5.5 H13 V7 M2 13 L4 7 H14.5 L12.5 13 Z M2 4 V13"
 }

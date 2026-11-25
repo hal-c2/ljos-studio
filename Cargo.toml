@@ -46,6 +46,8 @@ ljos_quick = { git = "https://github.com/hal-c2/ljos-ui", rev = "ef64e611d30caaa
 # The role words the driver names nodes by, for tests that find a node by
 # role among several.
 ljos_a11y = { git = "https://github.com/hal-c2/ljos-ui", rev = "ef64e611d30caaa089a411be41f9b6c96c0d0473" }
+# The system's dialogs as a test answers them, for the UI scenarios.
+ljos_platform = { git = "https://github.com/hal-c2/ljos-ui", rev = "ef64e611d30caaa089a411be41f9b6c96c0d0473" }
 
 # Pins match ljos-ui's, so the two lock files agree.
 anyhow = "1.0"

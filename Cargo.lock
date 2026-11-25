@@ -5576,6 +5576,7 @@ dependencies = [
  "ljos_dev",
  "ljos_drive",
  "ljos_mcp_core",
+ "ljos_platform",
  "ljos_quick",
  "ljos_runtime",
  "png",

@@ -24,6 +24,7 @@ tokio.workspace = true
 ljos = { workspace = true, features = ["dev-qml", "testing"] }
 ljos_drive.workspace = true
 ljos_a11y.workspace = true
+ljos_platform.workspace = true
 ljos_dev.workspace = true
 ljos_quick.workspace = true
 ljos_runtime.workspace = true

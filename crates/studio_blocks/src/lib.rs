@@ -144,6 +144,18 @@ pub struct Workspace {
     /// The pictures in the project's `assets/`, for the Insert tab.
     #[qml(readonly, notify)]
     pub assets: Json,
+    /// Every file of the project, documents too: `path`, and whether it is
+    /// `open` in an editor, `dirty` with edits not saved, changed on disk
+    /// under them (`outside`), and its `stamp`, one more each time it took
+    /// the disk's text.
+    #[qml(readonly, notify)]
+    pub files: Json,
+    /// Where the project is, as a person reads it.
+    #[qml(readonly, notify)]
+    pub folder: String,
+    /// The folders opened last, newest first.
+    #[qml(readonly, notify)]
+    pub recent: Json,
     /// The preview's picture may be out of date after a click: the shell
     /// calls `lookAgain` every so often until this is false.
     #[qml(readonly, notify)]
@@ -291,6 +303,9 @@ impl Default for Workspace {
             documents: none(),
             tools: none(),
             assets: none(),
+            files: none(),
+            folder: String::new(),
+            recent: none(),
             settling: false,
             playing: false,
             looks: 0,
@@ -1483,6 +1498,15 @@ fn publish(engine: &Engine, ws: ObjectId, view: View, seen: u64) {
         Workspace::ASSETS,
         "ASSETS",
         to_json(&view.assets),
+        &queue,
+    );
+    give(&cx, Workspace::FILES, "FILES", to_json(&view.files), &queue);
+    let _ = cx.set(Workspace::FOLDER, view.folder);
+    give(
+        &cx,
+        Workspace::RECENT,
+        "RECENT",
+        to_json(&view.recent),
         &queue,
     );
     let _ = cx.set(Workspace::GENERATION, view.generation as f64);
