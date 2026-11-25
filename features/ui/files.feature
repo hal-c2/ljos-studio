@@ -93,6 +93,18 @@ Feature: A person edits the project's files in Studio's window
     Then the file "README.md" says "mine"
     And the file editor says "Saved"
 
+  Scenario: Edits typed back to the text read take what another program saved
+    Given Studio's window shows the project
+    And the person has opened "README.md" in the files panel
+    And the person has typed "mine" in the file editor
+    When the file "README.md" is written outside Studio:
+      """text
+      theirs
+      """
+    Then the file editor says "Changed on disk" within 5 seconds
+    When the person types "# Hello\n" in the file editor
+    Then the file editor holds "theirs\n" within 5 seconds
+
   Scenario: Closing a file with edits held asks first
     Given Studio's window shows the project
     And the person has opened "README.md" in the files panel
@@ -172,6 +184,19 @@ Feature: A person edits the project's files in Studio's window
     And the person closes the window
     Then the window asks "Save the changes to README.md?"
     And the window is open
+
+  Scenario: A file named as a property every object has is saved like any other
+    Given the file "constructor":
+      """text
+      plain
+      """
+    And Studio's window shows the project
+    And the person has opened "constructor" in the files panel
+    And the person has typed "changed" in the file editor
+    When the person presses "Ctrl+S"
+    Then the file "constructor" says "changed"
+    When the person closes the window
+    Then the window is closed
 
   Scenario: Edits held of a file another program deleted still stop the window closing
     Given Studio's window shows the project

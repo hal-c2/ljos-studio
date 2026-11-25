@@ -32,17 +32,22 @@ Panel {
     // Edits sent and not yet answered, by file: until they are, the text
     // here is ahead of the held one and must not be set from an answer, and
     // the file has edits not saved even once another one is shown.
-    property var unanswered: ({})
-    readonly property int pending: unanswered[path] || 0
+    // Kept without a prototype and read only as its own keys, so a file
+    // named `constructor` or `toString` counts from 0 like any other.
+    property var unanswered: Object.create(null)
+    readonly property int pending: waiting(unanswered, path)
     property bool syncing: false
     property real stamp: -1
 
     signal closeAsked()
 
     // `by` more edits of `file` on their way, or answered when negative.
+    function waiting(counts, file) {
+        return Object.prototype.hasOwnProperty.call(counts, file) ? counts[file] : 0
+    }
     function sent(file, by) {
-        const next = Object.assign({}, unanswered)
-        next[file] = (next[file] || 0) + by
+        const next = Object.assign(Object.create(null), unanswered)
+        next[file] = waiting(next, file) + by
         if (next[file] <= 0)
             delete next[file]
         unanswered = next
