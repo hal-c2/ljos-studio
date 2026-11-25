@@ -31,6 +31,14 @@ Feature: A person edits the project's files in Studio's window
     Given Studio's window shows the project
     Then the files panel lists "src, src/logic.ts, Main.qml, README.md"
 
+  Scenario: A folder of any name is a folder in the Files tab
+    Given the file "constructor/note.txt":
+      """text
+      a note
+      """
+    And Studio's window shows the project
+    Then the files panel lists "constructor, constructor/note.txt, src, src/logic.ts, Main.qml, README.md"
+
   Scenario: A file is edited and saved when the person says
     Given Studio's window shows the project
     When the person opens "README.md" in the files panel
@@ -142,3 +150,14 @@ Feature: A person edits the project's files in Studio's window
     And the person clicks the button "Don't save"
     Then the window is closed
     And the file "README.md" says "# Hello"
+
+  Scenario: Edits held of a file another program deleted still stop the window closing
+    Given Studio's window shows the project
+    And the person has opened "README.md" in the files panel
+    And the person has typed "unsaved" in the file editor
+    When the file "README.md" is deleted outside Studio
+    Then the file editor says "Changed on disk" within 5 seconds
+    And the files panel lists "src, src/logic.ts, Main.qml, README.md"
+    When the person closes the window
+    Then the window asks "Save the changes to README.md?"
+    And the window is open

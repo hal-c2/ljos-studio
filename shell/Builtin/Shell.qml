@@ -29,9 +29,17 @@ Item {
     // Everything held is saved or dropped, so the window may close.
     signal closeAgreed()
 
-    readonly property var unsaved: workspace.files.filter(f => f.dirty).map(f => f.path)
+    // The files with edits not saved: the editor's, too, while an edit typed
+    // there has not been answered yet and so is in no row.
+    readonly property var unsaved: {
+        const dirty = workspace.files.filter(f => f.dirty).map(f => f.path)
+        if (fileEditor.pending > 0 && editing !== "" && dirty.indexOf(editing) < 0)
+            dirty.push(editing)
+        return dirty
+    }
     // What runs once the edits held are saved: the person's way on after
-    // "Save all", null for none.
+    // "Save all", null for none, with the request it waits for, so the
+    // answer to an earlier save asked for something else runs nothing.
     property var afterSave: null
 
     // Asks before `go(force)` drops edits held: `force` is whether it may.
@@ -43,7 +51,7 @@ Item {
         const n = unsaved.length
         asker.ask = (which) => {
             if (which === 1) {
-                afterSave = () => go(false)
+                afterSave = {files: "save_all", file: undefined, then: () => go(false)}
                 workspace.dispatch("project_open", {files: "save_all"})
             } else if (which === 2) {
                 go(true)
@@ -75,7 +83,7 @@ Item {
         }
         asker.ask = (which) => {
             if (which === 1) {
-                afterSave = () => close(false)
+                afterSave = {files: "save", file: path, then: () => close(false)}
                 workspace.dispatch("project_open", {files: "save", file: path})
             } else if (which === 2) {
                 close(true)
@@ -125,14 +133,16 @@ Item {
                 shell.entered(workspace.documents.filter(d => d !== asked.file))
                 return
             }
-            if ((asked.files === "save_all" || asked.files === "save") && shell.afterSave !== null) {
-                const then = shell.afterSave
+            const waiting = shell.afterSave
+            if (waiting !== null && asked.files === waiting.files && asked.file === waiting.file) {
                 shell.afterSave = null
-                then()
+                waiting.then()
             }
         }
         function onRefused(tool, error, asked) {
-            if (tool === "project_open" && (asked.files === "save_all" || asked.files === "save"))
+            const waiting = shell.afterSave
+            if (tool === "project_open" && waiting !== null
+                    && asked.files === waiting.files && asked.file === waiting.file)
                 shell.afterSave = null
         }
         // A document shown is the designer's: the file editor steps aside.
@@ -436,6 +446,7 @@ Item {
                     border.color: Colors.surfacePressed
                 }
                 FileEditor {
+                    id: fileEditor
                     visible: shell.editing !== ""
                     workspace: workspace
                     path: shell.editing
