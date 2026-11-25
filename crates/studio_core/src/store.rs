@@ -65,6 +65,13 @@ pub trait Store: Send + Sync {
         bytes.truncate(most);
         Ok((size, bytes))
     }
+    /// Moves the file at `from` to `to`, which does not exist. A store
+    /// without a rename of its own copies and then removes.
+    fn rename(&self, from: &str, to: &str) -> Result<(), StoreError> {
+        let bytes = self.read_bytes(from)?;
+        self.write_bytes(to, &bytes)?;
+        self.remove(from)
+    }
 }
 
 /// Told of a file about to be written with its text, or removed (`None`).
@@ -112,6 +119,18 @@ impl Store for Announcing {
     }
     fn peek(&self, path: &str, most: usize) -> Result<(u64, Vec<u8>), StoreError> {
         self.inner.peek(path, most)
+    }
+    fn rename(&self, from: &str, to: &str) -> Result<(), StoreError> {
+        // Heard as the old document gone and the new one written, which is
+        // what the disk will tell of.
+        if document_path(from) {
+            (self.writing)(from, None);
+        }
+        if document_path(to) {
+            let text = self.inner.read(from)?;
+            (self.writing)(to, Some(&text));
+        }
+        self.inner.rename(from, to)
     }
 }
 
@@ -355,6 +374,21 @@ impl Store for FsStore {
 
     fn exists(&self, path: &str) -> bool {
         self.confine(path).is_ok_and(|p| p.is_file())
+    }
+
+    fn rename(&self, from: &str, to: &str) -> Result<(), StoreError> {
+        let (old, new) = (self.confine(from)?, self.confine(to)?);
+        let io = |e: std::io::Error| match e.kind() {
+            std::io::ErrorKind::NotFound => StoreError::Missing(from.to_owned()),
+            _ => StoreError::Io {
+                path: from.to_owned(),
+                message: e.to_string(),
+            },
+        };
+        if let Some(parent) = new.parent() {
+            std::fs::create_dir_all(parent).map_err(io)?;
+        }
+        std::fs::rename(old, new).map_err(io)
     }
 
     fn describe(&self) -> String {

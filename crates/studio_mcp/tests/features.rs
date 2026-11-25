@@ -73,6 +73,9 @@ struct StudioWorld {
     overlap: Option<(bool, Result<bool, String>)>,
     /// The hold of a build the scenario says is running.
     building: Option<studio_mcp::export::BeingBuilt>,
+    /// Folders beside the workspace, by name: another place a person keeps
+    /// a project.
+    beside: HashMap<String, tempfile::TempDir>,
 }
 
 /// Told, once an input is in, a way to see whether what it moved still moves.
@@ -266,6 +269,7 @@ impl StudioWorld {
             input_heard: Arc::default(),
             overlap: None,
             building: None,
+            beside: HashMap::new(),
         }
     }
 
@@ -724,6 +728,49 @@ fn opens_by_absolute_path(w: &mut StudioWorld, name: String) -> StepResult {
     let path = w.dir.path().join(&name);
     let path = path.to_str().ok_or("the path is not text")?.to_owned();
     w.call("project_open", serde_json::json!({ "path": path }))
+}
+
+#[given(regex = r#"^the folder "([^"]+)" beside the workspace holds the file "([^"]+)":$"#)]
+fn folder_beside(w: &mut StudioWorld, folder: String, name: String, step: &Step) -> StepResult {
+    let text = file_text(step)?;
+    if !w.beside.contains_key(&folder) {
+        let made = tempfile::tempdir().map_err(|e| e.to_string())?;
+        w.beside.insert(folder.clone(), made);
+    }
+    let path = w.beside[&folder].path().join(name);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
+    std::fs::write(path, text).map_err(|e| e.to_string())
+}
+
+fn beside_path(w: &StudioWorld, folder: &str) -> Result<String, String> {
+    let dir = w
+        .beside
+        .get(folder)
+        .ok_or_else(|| format!("no folder {folder:?} beside the workspace"))?;
+    dir.path()
+        .to_str()
+        .map(str::to_owned)
+        .ok_or_else(|| "the path is not text".to_owned())
+}
+
+#[when(regex = r#"^the agent opens the folder "([^"]+)" beside the workspace$"#)]
+fn opens_folder_beside(w: &mut StudioWorld, folder: String) -> StepResult {
+    let path = beside_path(w, &folder)?;
+    w.call("project_open", serde_json::json!({ "folder": path }))
+}
+
+#[then(regex = r#"^the answer's "(/[^"]*)" names the folder "([^"]+)" beside the workspace$"#)]
+fn names_folder_beside(w: &mut StudioWorld, pointer: String, folder: String) -> StepResult {
+    let want = std::fs::canonicalize(beside_path(w, &folder)?).map_err(|e| e.to_string())?;
+    let got = at(w.answer()?, &pointer)?
+        .as_str()
+        .ok_or_else(|| format!("`{pointer}` is not text"))?;
+    let got = std::fs::canonicalize(got).map_err(|e| format!("{got}: {e}"))?;
+    (got == want)
+        .then_some(())
+        .ok_or_else(|| format!("{} is not {}", got.display(), want.display()))
 }
 
 #[given(regex = r#"^the agent has called the tool "([^"]+)" with:$"#)]
