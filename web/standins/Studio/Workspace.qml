@@ -65,4 +65,7 @@ QtObject {
 
     function lookAgain() {
     }
+
+    function chooseFolder(folder: string) {
+    }
 }

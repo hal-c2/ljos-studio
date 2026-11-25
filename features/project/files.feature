@@ -220,6 +220,24 @@ Feature: An agent edits the project's other files
       """
     Then the file "styles/main.css" does not exist
 
+  Scenario: A file with edits held is removed only when the caller says so
+    Given the agent has called the tool "project_open" with:
+      """json
+      {"files": "edit", "file": "README.md", "text": "unsaved\n"}
+      """
+    When the agent calls the tool "project_open" with:
+      """json
+      {"files": "remove", "file": "README.md"}
+      """
+    Then the agent is refused with "invalid_argument"
+    And the refusal's "/details/kind" is "unsaved"
+    And the file "README.md" contains "# Hello"
+    When the agent calls the tool "project_open" with:
+      """json
+      {"files": "remove", "file": "README.md", "force": true}
+      """
+    Then the file "README.md" does not exist
+
   Scenario: A file that exists is not made again, nor renamed over
     When the agent calls the tool "project_open" with:
       """json
@@ -389,10 +407,53 @@ Feature: An agent edits the project's other files
       import QtQuick
       Item {}
       """
+    And the person has chosen the folder "elsewhere" beside the workspace in Studio's window
     When the agent opens the folder "elsewhere" beside the workspace
     Then the answer's "/documents" lists "Page.qml"
     And the answer's "/project" is "."
     And the answer's "/recent/0" names the folder "elsewhere" beside the workspace
+
+  @disk
+  Scenario: A folder opens in a call of its own
+    Given the folder "elsewhere" beside the workspace holds the file "Page.qml":
+      """qml
+      import QtQuick
+      Item {}
+      """
+    And the person has chosen the folder "elsewhere" beside the workspace in Studio's window
+    When the agent opens the folder "elsewhere" beside the workspace and lists its files
+    Then the agent is refused with "invalid_argument"
+    And the file "README.md" contains "# Hello"
+
+  @disk
+  Scenario: Only who may open folders is told the folders opened before
+    Given the folder "elsewhere" beside the workspace holds the file "Page.qml":
+      """qml
+      import QtQuick
+      Item {}
+      """
+    And the person has chosen the folder "elsewhere" beside the workspace in Studio's window
+    And the agent opens the folder "elsewhere" beside the workspace
+    And the studio tools are connected with the capabilities "inspect"
+    When the agent calls the tool "project_open" with:
+      """json
+      {}
+      """
+    Then the answer's "/recent" is absent
+    And the answer's "/documents" lists "Page.qml"
+
+  # A grant to write files is one to write them in the folder open: which
+  # folder that is, the person says in Studio's window.
+  @disk
+  Scenario: An agent opens no folder the person did not choose
+    Given the folder "elsewhere" beside the workspace holds the file "Page.qml":
+      """qml
+      import QtQuick
+      Item {}
+      """
+    When the agent opens the folder "elsewhere" beside the workspace
+    Then the agent is refused with "path_denied"
+    And the refusal's "/details/kind" is "not_chosen"
 
   # A folder opened becomes the workspace, wherever it is: inside the old
   # one too, it moves what `path` and every later `folder` start from.

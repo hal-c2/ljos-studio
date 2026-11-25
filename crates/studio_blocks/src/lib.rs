@@ -407,6 +407,16 @@ impl Workspace {
         Ok(())
     }
 
+    /// The person chose `folder` in the window's folder dialog, so a call
+    /// may open it: no tool call can say so itself.
+    #[qml(invokable, name = "chooseFolder")]
+    fn choose_folder(cx: &Cx, folder: String) -> Result<(), EngineError> {
+        if let Some(server) = cx.engine.extension::<Context>().server.borrow().as_ref() {
+            server.choose_folder(&folder);
+        }
+        Ok(())
+    }
+
     /// Fetches the preview's picture again while `settling`.
     #[qml(invokable, name = "lookAgain")]
     fn look_again(cx: &Cx) -> Result<(), EngineError> {

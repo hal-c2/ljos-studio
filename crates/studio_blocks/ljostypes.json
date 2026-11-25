@@ -565,6 +565,16 @@
               "returnType": "void"
             },
             {
+              "name": "chooseFolder",
+              "parameters": [
+                {
+                  "name": "folder",
+                  "type": "string"
+                }
+              ],
+              "returnType": "void"
+            },
+            {
               "name": "lookAgain",
               "parameters": [],
               "returnType": "void"

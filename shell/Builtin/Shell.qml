@@ -66,6 +66,12 @@ Item {
                            : unsaved.join(", ") + ": their changes are lost if you don't save them.",
                    "Save all", "Don't save")
     }
+    // A folder the person picked in the system's folder dialog: the window
+    // says so first, as only it can, so the call may open it.
+    function chooseFolder(folder) {
+        workspace.chooseFolder(folder)
+        openFolder(folder)
+    }
     function openFolder(folder) {
         leave(force => workspace.dispatch("project_open", force ? {folder: folder, force: true} : {folder: folder}))
     }
@@ -99,7 +105,8 @@ Item {
             if (which === 1) {
                 if (editing === path)
                     editing = ""
-                workspace.dispatch("project_open", {files: "remove", file: path})
+                // The person said to delete it, edits held and all.
+                workspace.dispatch("project_open", {files: "remove", file: path, force: true})
             }
         }
         asker.show("Delete " + path + "?", "It is removed from the folder on disk.", "Delete", "", true)

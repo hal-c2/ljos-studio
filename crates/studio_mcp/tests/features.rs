@@ -760,10 +760,31 @@ fn beside_path(w: &StudioWorld, folder: &str) -> Result<String, String> {
         .ok_or_else(|| "the path is not text".to_owned())
 }
 
+#[given(
+    regex = r#"^the person has chosen the folder "([^"]+)" beside the workspace in Studio's window$"#
+)]
+fn person_chose_folder(w: &mut StudioWorld, folder: String) -> StepResult {
+    let path = beside_path(w, &folder)?;
+    w.server()?.choose_folder(&path);
+    Ok(())
+}
+
+#[given(regex = r#"^the agent opens the folder "([^"]+)" beside the workspace$"#)]
 #[when(regex = r#"^the agent opens the folder "([^"]+)" beside the workspace$"#)]
 fn opens_folder_beside(w: &mut StudioWorld, folder: String) -> StepResult {
     let path = beside_path(w, &folder)?;
     w.call("project_open", serde_json::json!({ "folder": path }))
+}
+
+#[when(
+    regex = r#"^the agent opens the folder "([^"]+)" beside the workspace and lists its files$"#
+)]
+fn opens_folder_and_lists(w: &mut StudioWorld, folder: String) -> StepResult {
+    let path = beside_path(w, &folder)?;
+    w.call(
+        "project_open",
+        serde_json::json!({ "folder": path, "files": "list" }),
+    )
 }
 
 #[then(regex = r#"^the answer's "(/[^"]*)" names the folder "([^"]+)" beside the workspace$"#)]

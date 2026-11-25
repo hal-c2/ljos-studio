@@ -965,6 +965,14 @@ fn project_open(
         }
         None => None,
     };
+    // Opening a folder replaces the session, ends its previews and is
+    // remembered: one call of its own, so nothing after it can fail it
+    // halfway.
+    if a.folder.is_some() && (a.path.is_some() || a.files.is_some() || action.is_some()) {
+        return Err(SurfaceError::invalid_argument(
+            "`folder` is a call of its own: no `path`, `files` or `asset` with it".to_owned(),
+        ));
+    }
     if a.files.is_none() && (a.text.is_some() || a.to.is_some()) {
         return Err(SurfaceError::invalid_argument(
             "`text` and `to` go with `files`".to_owned(),
@@ -1009,6 +1017,11 @@ fn project_open(
         saved: answer.saved,
         ..info(studio)
     };
+    // Where else on the machine the person works is not the project's: only
+    // a caller that may open those folders is told them.
+    if !ctx.caps.contains(Cap::Fs) {
+        out.recent.clear();
+    }
     match action {
         Some(AssetAction::List) => out.assets = Some(assets::list(studio.session.store())),
         Some(AssetAction::Import) => {

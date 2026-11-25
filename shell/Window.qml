@@ -62,7 +62,7 @@ ApplicationWindow {
     FolderDialog {
         id: folders
         title: "Open folder"
-        onAccepted: window.shell.openFolder(window.pathOf(selectedFolder))
+        onAccepted: window.shell.chooseFolder(window.pathOf(selectedFolder))
     }
 
     ColumnLayout {
