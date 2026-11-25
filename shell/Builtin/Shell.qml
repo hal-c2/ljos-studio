@@ -72,12 +72,11 @@ Item {
     }
     function closeFile() {
         const path = editing
-        const row = workspace.files.find(f => f.path === path)
         const close = force => {
             workspace.dispatch("project_open", {files: "close", file: path, force: force})
             editing = ""
         }
-        if (row === undefined || !row.dirty) {
+        if (unsaved.indexOf(path) < 0) {
             close(false)
             return
         }
