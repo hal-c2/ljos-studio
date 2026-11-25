@@ -5225,6 +5225,31 @@ fn picks_folder(w: &mut UiWorld, folder: String) -> StepResult {
     w.window()?.rest()
 }
 
+/// The grant to open a folder is the person's pick, not `fs`: an agent
+/// holding `fs` is refused a folder the person backed out of.
+#[then(regex = r#"^an agent with fs that opens the folder "([^"]+)" is refused "([^"]+)"$"#)]
+fn agent_folder_refused(w: &mut UiWorld, folder: String, kind: String) -> StepResult {
+    let path = w
+        .beside
+        .get(&folder)
+        .ok_or_else(|| format!("no folder {folder:?} beside the project"))?
+        .path()
+        .to_string_lossy()
+        .into_owned();
+    let window = w.window()?;
+    let ctx = CallCtx::new(CapSet::of([Cap::Inspect, Cap::Mutate, Cap::Fs]));
+    let args = serde_json::json!({"folder": path, "force": true});
+    match window.server.call("project_open", &ctx, args) {
+        Ok(_) => Err(format!("the agent opened {folder:?}")),
+        Err(e) => {
+            let got = e.to_value();
+            (got["error"]["details"]["kind"] == kind)
+                .then_some(())
+                .ok_or_else(|| format!("the agent was refused {got}"))
+        }
+    }
+}
+
 #[then(regex = r#"^the window shows the folder "([^"]+)"$"#)]
 fn shows_folder(w: &mut UiWorld, folder: String) -> StepResult {
     let want = w

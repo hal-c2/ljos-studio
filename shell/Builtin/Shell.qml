@@ -23,7 +23,7 @@ Item {
     // The file the editor shows in place of the canvas, empty for none.
     property string editing: ""
     // Whether the window can ask the system for a folder: it sets this
-    // when it does, and answers `folderAsked` with `openFolder`.
+    // when it does, and answers `folderAsked` with `chooseFolder`.
     property bool choosesFolders: false
     signal folderAsked()
     // Everything held is saved or dropped, so the window may close.
@@ -66,14 +66,20 @@ Item {
                            : unsaved.join(", ") + ": their changes are lost if you don't save them.",
                    "Save all", "Don't save")
     }
-    // A folder the person picked in the system's folder dialog: the window
-    // says so first, as only it can, so the call may open it.
+    // A folder the person picked in the system's folder dialog. It is
+    // their choice, as only the window can say, once they go on past the
+    // edits held: one they backed out of is not theirs for an agent to open.
     function chooseFolder(folder) {
-        workspace.chooseFolder(folder)
-        openFolder(folder)
+        leave(force => {
+            workspace.chooseFolder(folder)
+            enterFolder(folder, force)
+        })
     }
     function openFolder(folder) {
-        leave(force => workspace.dispatch("project_open", force ? {folder: folder, force: true} : {folder: folder}))
+        leave(force => enterFolder(folder, force))
+    }
+    function enterFolder(folder, force) {
+        workspace.dispatch("project_open", force ? {folder: folder, force: true} : {folder: folder})
     }
     // What the window asks before it closes.
     function askClose() {

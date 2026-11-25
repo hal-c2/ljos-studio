@@ -9,7 +9,7 @@ expression: value
     "open_world": false,
     "read_only": false
   },
-  "description": "Open a project below the workspace, or any `folder`, or describe the open one. Opening starts a new session: handles and history end. `asset`: its pictures and fonts; `files`: its other files.",
+  "description": "Open a project below the workspace, or a `folder` the person chose (the workspace, a `recent` one, or one picked in the window), or describe the open one. Opening starts a new session: handles and history end. `asset`: its pictures and fonts; `files`: its other files.",
   "inputSchema": {
     "properties": {
       "asset": {

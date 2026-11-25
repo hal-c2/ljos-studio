@@ -161,6 +161,22 @@ Feature: A person edits the project's files in Studio's window
     Then the file "README.md" says "kept"
     And the window shows the folder "elsewhere"
 
+  Scenario: A folder picked and then backed out of is not the person's choice
+    Given the folder "elsewhere" beside the project holds the file "Page.qml":
+      """qml
+      import QtQuick
+      Item {}
+      """
+    And Studio's window shows the project
+    And the person has opened "README.md" in the files panel
+    And the person has typed "kept" in the file editor
+    When the person clicks the button "Open folder"
+    And the person picks the folder "elsewhere" in the folder dialog
+    Then the window asks "Save the changes to README.md?"
+    When the person clicks the button "Cancel"
+    Then an agent with fs that opens the folder "elsewhere" is refused "not_chosen"
+    And the file editor shows a file
+
   Scenario: The window does not close over edits held until the person says
     Given Studio's window shows the project
     And the person has opened "README.md" in the files panel

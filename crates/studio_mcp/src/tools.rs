@@ -1981,7 +1981,7 @@ fn edits(studio: &Arc<Mutex<Studio>>) -> ToolRegistry {
         .with(
             ToolDef::new::<ProjectOpenArgs>(
                 "project_open",
-                "Open a project below the workspace, or any `folder`, or describe the open one. Opening starts a new session: handles and history end. `asset`: its pictures and fonts; `files`: its other files.",
+                "Open a project below the workspace, or a `folder` the person chose (the workspace, a `recent` one, or one picked in the window), or describe the open one. Opening starts a new session: handles and history end. `asset`: its pictures and fonts; `files`: its other files.",
             )
             .answers::<ProjectInfo>()
             .requires(Cap::Inspect)

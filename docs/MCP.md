@@ -30,7 +30,7 @@ documents: export), `run` (start previews). They are granted at launch with
 
 | # | Tool | Does | Needs |
 |---|---|---|---|
-| 1 | `project_open` | Open a project directory below the workspace, or `folder` anywhere, or describe the open one: documents, blocks, targets, `recent` folders, `unsaved` files; `asset` lists, imports or removes its pictures and fonts; `files` lists, reads, edits, saves, makes, renames and removes its other files | inspect; fs for `folder`, files beyond `list`, and to import or remove |
+| 1 | `project_open` | Open a project directory below the workspace, or a `folder` the person chose, or describe the open one: documents, blocks, targets, `recent` folders, `unsaved` files; `asset` lists, imports or removes its pictures and fonts; `files` lists, reads, edits, saves, makes, renames and removes its other files | inspect; fs for `folder`, files beyond `list`, and to import or remove |
 | 2 | `document_tree` | A document's objects in order: handle, path, type, `id`, bindings; paginated | inspect |
 | 3 | `document_text` | A document's text or a byte range of it, with its generation and whether it parses | inspect |
 | 4 | `document_new` | Create a QML document, or one keeping a project JSON file's records (`data`): a `JsonListModel` of the file, or a `ListModel` copy, or a `shell` of a block; undo removes it | mutate |
@@ -1084,12 +1084,19 @@ own for the same reason as `asset`: the list stays at 25 tools.
 - A path a walk leaves out (`.git/`, `node_modules/`, `.studio/`) is refused
   `path_denied`; so is one that leads outside the project through a link.
   Text only (kind `not_text`), 8 MiB at most (kind `too_large`).
-- `folder` opens a folder anywhere on the machine as the workspace, not only
-  below it, which is why it needs `fs`. It is an absolute path; one that is
-  not a folder, or is the filesystem's root, is refused `path_denied`.
+- `folder` opens a folder outside the workspace, not only below it, and
+  needs `fs`. `fs` alone does not choose the folder: it must be the
+  workspace, one opened before (in `recent`), or one the person picked in
+  the window's folder dialog. Any other is refused `path_denied`, kind
+  `not_chosen`. It is an absolute path; one that is not a folder, or is the
+  filesystem's root, is refused `path_denied`. `folder` is a call of its
+  own: with `path`, `files` or `asset` it is refused `invalid_argument`.
   Opening a folder writes nothing into it. The folders opened are kept newest
   first in `ljos-studio/recent.json` in the configuration directory and
-  answered as `recent`; `studio --last` opens the newest one still there.
+  answered as `recent` to callers with `fs`; it is left out for others.
+  `studio --last` opens the newest one still there.
+- `remove` of a file with edits held is refused `invalid_argument`, kind
+  `unsaved`, until `force`.
 - DECISION: QML documents keep writing through with undo and have no dirty
   marker; every other file is held until saved, as a code editor does, since
   it has no history of its own in Studio.
