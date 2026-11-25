@@ -74,7 +74,8 @@ const over = await page
   );
 check("the preview is laid over the shell's Canvas panel", over === true, over);
 
-await labelled("Main.qml").click();
+// The Files tab lists Main.qml too: the document is the Documents list's row.
+await labelled("Documents").locator('[aria-label="Main.qml"]').click();
 await shows("Rectangle card");
 await labelled("Rectangle card").click();
 const width = labelled("width").locator("input");

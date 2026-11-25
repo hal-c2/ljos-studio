@@ -43,6 +43,42 @@
               "notify": "assetsChanged"
             },
             {
+              "name": "files",
+              "type": "var",
+              "kind": "value",
+              "list": false,
+              "readonly": true,
+              "final": true,
+              "required": false,
+              "constant": false,
+              "group": false,
+              "notify": "filesChanged"
+            },
+            {
+              "name": "folder",
+              "type": "string",
+              "kind": "value",
+              "list": false,
+              "readonly": true,
+              "final": true,
+              "required": false,
+              "constant": false,
+              "group": false,
+              "notify": "folderChanged"
+            },
+            {
+              "name": "recent",
+              "type": "var",
+              "kind": "value",
+              "list": false,
+              "readonly": true,
+              "final": true,
+              "required": false,
+              "constant": false,
+              "group": false,
+              "notify": "recentChanged"
+            },
+            {
               "name": "settling",
               "type": "bool",
               "kind": "value",
