@@ -35,6 +35,9 @@ QtObject {
     readonly property bool blank
     readonly property var chosen
     readonly property var assets
+    readonly property var files
+    readonly property string folder
+    readonly property var recent
     readonly property var offers
     property bool playing
     readonly property var toolkit
