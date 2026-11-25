@@ -87,7 +87,16 @@ pub struct Studio {
     files: files::Open,
     /// The folders opened last.
     recent: recent::Recent,
+    /// The paths the Files tab listed last, and what the held files said
+    /// then, while the project watch says nothing moved: a view built on
+    /// every keystroke walks no tree and reads no file back. `None` once it
+    /// may have.
+    listed: Listed,
 }
+
+/// See [`Studio::listed`]: shared with the watch's thread and the store's
+/// writes, which drop it.
+pub(crate) type Listed = Arc<Mutex<Option<Vec<String>>>>;
 
 /// Told that what a window shows may have changed. Called with the
 /// session locked, on whatever thread changed it: a watcher only notes it
@@ -189,6 +198,7 @@ impl Studio {
             project_watch: None,
             files: files::Open::new(),
             recent: recent::Recent::default(),
+            listed: Listed::default(),
         };
         studio.follow();
         studio
@@ -343,6 +353,36 @@ impl Studio {
         self.watchers.tell();
     }
 
+    /// The Files tab lists the disk again at the next view.
+    pub(crate) fn relist(&self) {
+        relist(&self.listed);
+    }
+
+    /// The rows the Files tab listed last, if nothing may have moved since:
+    /// only a project watch can say so.
+    pub(crate) fn still_listed(&self) -> Option<Vec<String>> {
+        #[cfg(feature = "native")]
+        if self.project_watch.is_some() {
+            return self
+                .listed
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .clone();
+        }
+        None
+    }
+
+    pub(crate) fn listed_now(&self, paths: &[String]) {
+        #[cfg(feature = "native")]
+        if self.project_watch.is_some() {
+            *self
+                .listed
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(paths.to_vec());
+        }
+        let _ = paths;
+    }
+
     /// Opens `folder`, anywhere, as the workspace and its project. The
     /// filesystem's root is refused: a walk of it would never end.
     #[cfg(feature = "native")]
@@ -488,22 +528,47 @@ impl Studio {
     #[cfg(feature = "native")]
     fn watch_project(&mut self, root: PathBuf) {
         let (previews, watchers, timer) = self.written();
+        self.relist();
+        let listed = self.listed.clone();
         let watch = project_watch::ProjectWatch::start(
             root,
-            Box::new(move |news| match news {
-                project_watch::News::Document => told_of_write(&previews, &watchers, &timer),
-                // What changes the list of files is no reason to spend a
-                // reload: a log the app writes in its project would spend them
-                // all, and the edit it is there for would wait.
-                project_watch::News::Other => watchers.tell(),
+            Box::new(move |news| {
+                relist(&listed);
+                match news {
+                    project_watch::News::Document => told_of_write(&previews, &watchers, &timer),
+                    // What changes the list of files is no reason to spend a
+                    // reload: a log the app writes in its project would spend
+                    // them all, and the edit it is there for would wait.
+                    project_watch::News::Other => watchers.tell(),
+                }
             }),
         );
         if let Some(watch) = &watch {
             let own = watch.own_writes();
-            self.session.on_writing(own);
+            let listed = self.listed.clone();
+            // The session's own writes of a document say nothing to the
+            // watch, so one that adds or takes a path drops the list here.
+            self.session.on_writing(move |path, text| {
+                own(path, text);
+                let mut listed = listed
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                let known = listed
+                    .as_ref()
+                    .is_some_and(|paths| paths.binary_search_by(|p| p.as_str().cmp(path)).is_ok());
+                if text.is_none() || !known {
+                    *listed = None;
+                }
+            });
         }
         self.project_watch = watch;
     }
+}
+
+fn relist(listed: &Listed) {
+    *listed
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
 }
 
 /// `start` and all that pairs of old and new names link it to.

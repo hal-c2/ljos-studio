@@ -317,11 +317,17 @@ pub struct Held {
 
 impl Studio {
     fn file_rows(&mut self) -> Vec<FileRow> {
-        let store = self.session.store();
-        for (path, held) in &mut self.files {
-            crate::files::look(store, path, held);
-        }
-        let (mut paths, _) = crate::files::list(store);
+        let mut paths = if let Some(paths) = self.still_listed() {
+            paths
+        } else {
+            let store = self.session.store();
+            for (path, held) in &mut self.files {
+                crate::files::look(store, path, held);
+            }
+            let (paths, _) = crate::files::list(store);
+            self.listed_now(&paths);
+            paths
+        };
         // A file with edits held stays listed when its file went from disk,
         // so the window still asks about it before they are lost; its row
         // says the disk moved under it.

@@ -273,6 +273,12 @@ pub(crate) fn act(
     a: &Asked<'_>,
 ) -> Result<Answer, SurfaceError> {
     let mut out = Answer::default();
+    if !matches!(
+        action,
+        FilesAction::Edit | FilesAction::Read | FilesAction::List
+    ) {
+        studio.relist();
+    }
     let name = match action {
         FilesAction::List => {
             let (files, more) = list(studio.session.store());
@@ -282,12 +288,41 @@ pub(crate) fn act(
         }
         FilesAction::SaveAll => {
             let store = studio.session.store();
-            let mut saved = Vec::new();
+            // Every file is compared with the disk before any is written: a
+            // refusal leaves all of them as they were, and names them all.
+            let mut changed = Vec::new();
             for (path, held) in &mut studio.files {
                 if held.dirty() {
-                    save(store, path, held, a.force)?;
-                    saved.push(path.clone());
+                    look(store, path, held);
+                    if held.outside {
+                        changed.push(path.clone());
+                    }
                 }
+            }
+            if !changed.is_empty() && !a.force {
+                studio.files_changed();
+                return Err(SurfaceError::new(
+                    ErrorCode::StaleRef,
+                    format!(
+                        "{} changed on disk since read: read them again, or pass `force` to write over them; nothing was saved",
+                        changed.iter().map(|p| format!("`{p}`")).collect::<Vec<_>>().join(", ")
+                    ),
+                )
+                .with_details(json!({ "kind": "changed_outside", "files": changed, "saved": [] })));
+            }
+            let mut saved = Vec::new();
+            for (path, held) in &mut studio.files {
+                if !held.dirty() {
+                    continue;
+                }
+                if let Err(error) = save(store, path, held, true) {
+                    // A write the disk refused stops the rest; who asked
+                    // hears which were saved before it.
+                    let details = json!({ "file": path, "saved": saved });
+                    studio.files_changed();
+                    return Err(error.with_details(details));
+                }
+                saved.push(path.clone());
             }
             out.saved = Some(saved);
             studio.files_changed();
