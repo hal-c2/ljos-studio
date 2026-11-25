@@ -49,7 +49,8 @@ await page.waitForFunction(() => window.mounted, null, { timeout: 10000 });
 
 check("the documents panel lists the project's documents", await shows("Main.qml"));
 
-await labelled("Main.qml").click();
+// The Files tab lists Main.qml too: the document is the Documents list's row.
+await labelled("Documents").locator('[aria-label="Main.qml"]').click();
 check("opening a document lists its objects as layers", (await shows("Item root")) && (await shows("Rectangle card")));
 
 await labelled("Rectangle card").click();
