@@ -555,6 +555,11 @@ fn deleted(w: &mut StudioWorld, name: String) -> StepResult {
     std::fs::remove_file(w.dir.path().join(&name)).map_err(|e| e.to_string())
 }
 
+#[when(regex = r#"^a directory is made at "([^"]+)" outside Studio$"#)]
+fn directory_outside(w: &mut StudioWorld, name: String) -> StepResult {
+    std::fs::create_dir_all(w.dir.path().join(name)).map_err(|e| e.to_string())
+}
+
 #[given(regex = r#"^the link "([^"]+)" leads to "([^"]+)"$"#)]
 fn link_inside(w: &mut StudioWorld, name: String, to: String) -> StepResult {
     std::os::unix::fs::symlink(w.dir.path().join(to), w.dir.path().join(name))
