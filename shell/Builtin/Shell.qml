@@ -29,12 +29,15 @@ Item {
     // Everything held is saved or dropped, so the window may close.
     signal closeAgreed()
 
-    // The files with edits not saved: the editor's, too, while an edit typed
-    // there has not been answered yet and so is in no row.
+    // The files with edits not saved: those with an edit typed in the
+    // editor that has not been answered yet, too, which are in no row, even
+    // once the editor shows another file.
     readonly property var unsaved: {
         const dirty = workspace.files.filter(f => f.dirty).map(f => f.path)
-        if (fileEditor.pending > 0 && editing !== "" && dirty.indexOf(editing) < 0)
-            dirty.push(editing)
+        for (const path of Object.keys(fileEditor.unanswered)) {
+            if (dirty.indexOf(path) < 0)
+                dirty.push(path)
+        }
         return dirty
     }
     // What runs once the edits held are saved: the person's way on after
@@ -446,6 +449,7 @@ Item {
                 }
                 FileEditor {
                     id: fileEditor
+                    objectName: "fileEditor"
                     visible: shell.editing !== ""
                     workspace: workspace
                     path: shell.editing

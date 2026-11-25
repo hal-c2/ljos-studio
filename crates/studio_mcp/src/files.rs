@@ -315,7 +315,7 @@ pub(crate) fn act(
                 if !held.dirty() {
                     continue;
                 }
-                if let Err(error) = save(store, path, held, true) {
+                if let Err(error) = save(store, path, held, a.force) {
                     // A write the disk refused stops the rest; who asked
                     // hears which were saved before it.
                     let details = json!({ "file": path, "saved": saved });
@@ -386,8 +386,15 @@ pub(crate) fn act(
                 );
             }
             let held = studio.files.get_mut(&path).expect("just held");
+            // Edits taken back by typing leave a file that follows the disk
+            // again, which only a look at it says: the next view takes one.
+            let clean_again = held.dirty() && text == held.base;
             held.text = (text != held.base).then(|| text.to_owned());
-            info(&path, held)
+            let shown = info(&path, held);
+            if clean_again {
+                studio.relist();
+            }
+            shown
         }
         FilesAction::Save => {
             let held = studio.files.get_mut(&path).ok_or_else(|| not_open(&path))?;

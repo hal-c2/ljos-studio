@@ -67,6 +67,19 @@ Feature: A person edits the project's files in Studio's window
       """
     Then the file editor holds "# Saved elsewhere\n" within 5 seconds
 
+  Scenario: A dotfile with no edits held follows another program's save too
+    Given the file ".env":
+      """text
+      A=1
+      """
+    And Studio's window shows the project
+    And the person has opened ".env" in the files panel
+    When the file ".env" is written outside Studio:
+      """text
+      A=2
+      """
+    Then the file editor holds "A=2\n" within 5 seconds
+
   Scenario: Edits held over another program's save are kept when the person says
     Given Studio's window shows the project
     And the person has opened "README.md" in the files panel
@@ -150,6 +163,15 @@ Feature: A person edits the project's files in Studio's window
     And the person clicks the button "Don't save"
     Then the window is closed
     And the file "README.md" says "# Hello"
+
+  Scenario: An edit not answered yet stops the window closing once another file is shown
+    Given Studio's window shows the project
+    And the person has opened "README.md" in the files panel
+    And an edit of "README.md" typed in the file editor is not answered yet
+    When the person opens "Main.qml" in the files panel
+    And the person closes the window
+    Then the window asks "Save the changes to README.md?"
+    And the window is open
 
   Scenario: Edits held of a file another program deleted still stop the window closing
     Given Studio's window shows the project
