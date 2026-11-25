@@ -29,7 +29,8 @@ Panel {
     readonly property real rowHeight: 26
     // The row chosen last: what Rename and Delete act on.
     property string chosen: ""
-    // Folders folded away, by path.
+    // Folders folded away, by "/" and their path: a folder named
+    // `constructor` or `__proto__` is no key an object already has.
     property var folded: ({})
     // What a gesture asked for and has no answer yet.
     property string making: ""
@@ -46,15 +47,16 @@ Panel {
         return path.endsWith(".qml")
     }
 
-    // Folders first, each sorted, as a file manager lists them.
+    // Folders first, each sorted, as a file manager lists them. A folder's
+    // folders have no inherited keys, so any name is a folder's.
     function tree(files, folded) {
-        const root = {dirs: {}, files: []}
+        const root = {dirs: Object.create(null), files: []}
         for (const f of files) {
             const parts = f.path.split("/")
             let node = root
             for (let i = 0; i < parts.length - 1; ++i) {
                 if (node.dirs[parts[i]] === undefined)
-                    node.dirs[parts[i]] = {dirs: {}, files: []}
+                    node.dirs[parts[i]] = {dirs: Object.create(null), files: []}
                 node = node.dirs[parts[i]]
             }
             node.files.push({name: parts[parts.length - 1], file: f})
@@ -63,7 +65,7 @@ Panel {
         const walk = (node, prefix, depth) => {
             for (const name of Object.keys(node.dirs).sort()) {
                 const path = prefix + name
-                const open = folded[path] !== true
+                const open = folded["/" + path] !== true
                 rows.push({path: path, name: name, depth: depth, folder: true, open: open,
                            dirty: false, outside: false})
                 if (open)
@@ -80,7 +82,7 @@ Panel {
     function choose(row) {
         if (row.folder) {
             const next = Object.assign({}, folded)
-            next[row.path] = !folded[row.path]
+            next["/" + row.path] = folded["/" + row.path] !== true
             folded = next
             return
         }

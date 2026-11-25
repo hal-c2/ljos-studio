@@ -4177,6 +4177,11 @@ fn written_outside(w: &mut UiWorld, name: String, step: &Step) -> StepResult {
     the_file(w, name, step)
 }
 
+#[when(regex = r#"^the file "([^"]+)" is deleted outside Studio$"#)]
+fn deleted_outside(w: &mut UiWorld, name: String) -> StepResult {
+    std::fs::remove_file(w.dir.path().join(name)).map_err(|e| e.to_string())
+}
+
 /// Lets the window run until `shown` holds for its documents panel. The
 /// report comes from another thread on the real clock.
 fn documents_until(w: &mut UiWorld, seconds: u64, name: &str, shown: bool) -> StepResult {
@@ -5080,7 +5085,14 @@ fn types_in_editor(w: &mut UiWorld, text: String) -> StepResult {
     engine
         .invoke_by_name(item, "selectAll", &[])
         .map_err(|e| e.to_string())?;
-    window.stage.drive().commit(&text).map_err(drive_error)?;
+    let mut driver = window.stage.drive();
+    // Deleted first: committing nothing over a selection keeps it.
+    driver
+        .chord(&Chord::parse("Delete")?, 0)
+        .map_err(drive_error)?;
+    if !text.is_empty() {
+        driver.commit(&text).map_err(drive_error)?;
+    }
     window.rest()
 }
 

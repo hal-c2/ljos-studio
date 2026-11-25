@@ -50,9 +50,13 @@ ApplicationWindow {
         }
     }
 
-    // A file URL as the path it names: `file:///C:/x` is `C:/x`.
+    // A file URL as the path it names: `file:///C:/x` is `C:/x`, and a
+    // network folder's `file://server/share/x` is `//server/share/x`.
     function pathOf(url) {
-        const path = decodeURIComponent(url.toString().replace(/^file:\/\//, ""))
+        const text = url.toString()
+        if (/^file:\/\/[^/]/.test(text))
+            return decodeURIComponent("//" + text.slice("file://".length))
+        const path = decodeURIComponent(text.replace(/^file:\/\//, ""))
         return /^\/[A-Za-z]:/.test(path) ? path.slice(1) : path
     }
     FolderDialog {
