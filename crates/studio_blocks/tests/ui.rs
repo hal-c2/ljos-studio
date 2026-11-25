@@ -5068,6 +5068,20 @@ fn editor_part(window: &Window, part: &str) -> Result<AccessibleNode, String> {
         .ok_or_else(|| format!("the file editor shows no {part}"))
 }
 
+/// An answer that comes at once cannot show what is asked while it is on
+/// its way, so the editor is put where a slow answer leaves it.
+#[given(regex = r#"^an edit of "([^"]+)" typed in the file editor is not answered yet$"#)]
+fn edit_unanswered(w: &mut UiWorld, file: String) -> StepResult {
+    let window = w.window()?;
+    let engine = window.engine().clone();
+    let editor = ljos_drive::find_below(window.engine(), window.root, "fileEditor")
+        .ok_or("the window has no file editor")?;
+    engine
+        .invoke_by_name(editor, "sent", &[Value::from(file.as_str()), Value::Int(1)])
+        .map_err(|e| e.to_string())?;
+    window.rest()
+}
+
 #[given(regex = r#"^the person has typed "(.*)" in the file editor$"#)]
 #[when(regex = r#"^the person types "(.*)" in the file editor$"#)]
 fn types_in_editor(w: &mut UiWorld, text: String) -> StepResult {

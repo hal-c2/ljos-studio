@@ -96,7 +96,15 @@ pub struct Studio {
 
 /// See [`Studio::listed`]: shared with the watch's thread and the store's
 /// writes, which drop it.
-pub(crate) type Listed = Arc<Mutex<Option<Vec<String>>>>;
+pub(crate) type Listed = Arc<Mutex<Listing>>;
+
+/// The paths listed last, and how many times a listing was dropped: one
+/// read before a drop is not kept after it.
+#[derive(Debug, Default)]
+pub(crate) struct Listing {
+    dropped: u64,
+    paths: Option<Vec<String>>,
+}
 
 /// Told that what a window shows may have changed. Called with the
 /// session locked, on whatever thread changed it: a watcher only notes it
@@ -358,29 +366,37 @@ impl Studio {
         relist(&self.listed);
     }
 
-    /// The rows the Files tab listed last, if nothing may have moved since:
-    /// only a project watch can say so.
-    pub(crate) fn still_listed(&self) -> Option<Vec<String>> {
+    /// The rows the Files tab listed last, if nothing may have moved since
+    /// (only a project watch can say so), or else the drop a listing read
+    /// now follows, for [`Studio::listed_now`].
+    pub(crate) fn still_listed(&self) -> Result<Vec<String>, u64> {
+        let listing = self
+            .listed
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         #[cfg(feature = "native")]
-        if self.project_watch.is_some() {
-            return self
-                .listed
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .clone();
+        if self.project_watch.is_some()
+            && let Some(paths) = &listing.paths
+        {
+            return Ok(paths.clone());
         }
-        None
+        Err(listing.dropped)
     }
 
-    pub(crate) fn listed_now(&self, paths: &[String]) {
+    /// Keeps `paths`, read after drop `after`, unless the list was dropped
+    /// again while they were read.
+    pub(crate) fn listed_now(&self, after: u64, paths: &[String]) {
         #[cfg(feature = "native")]
         if self.project_watch.is_some() {
-            *self
+            let mut listing = self
                 .listed
                 .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(paths.to_vec());
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if listing.dropped == after {
+                listing.paths = Some(paths.to_vec());
+            }
         }
-        let _ = paths;
+        let _ = (after, paths);
     }
 
     /// Opens `folder`, anywhere, as the workspace and its project. The
@@ -554,10 +570,12 @@ impl Studio {
                     .lock()
                     .unwrap_or_else(std::sync::PoisonError::into_inner);
                 let known = listed
+                    .paths
                     .as_ref()
                     .is_some_and(|paths| paths.binary_search_by(|p| p.as_str().cmp(path)).is_ok());
                 if text.is_none() || !known {
-                    *listed = None;
+                    listed.dropped += 1;
+                    listed.paths = None;
                 }
             });
         }
@@ -566,9 +584,11 @@ impl Studio {
 }
 
 fn relist(listed: &Listed) {
-    *listed
+    let mut listed = listed
         .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    listed.dropped += 1;
+    listed.paths = None;
 }
 
 /// `start` and all that pairs of old and new names link it to.

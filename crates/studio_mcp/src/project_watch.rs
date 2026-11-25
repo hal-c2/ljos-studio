@@ -180,14 +180,17 @@ fn news_of(
         return None;
     }
     let name = rel.rsplit('/').next().unwrap_or_default();
+    // What the Files tab leaves out: a walk's skipped folders, Studio's own
+    // temporary files and stand-ins (`.Main.qml`).
     if !listed(&rel)
-        || name.starts_with('.')
-        || name.ends_with('~')
         || name.ends_with(".studio-tmp")
+        || (name.starts_with('.') && name.ends_with(".qml"))
     {
         return None;
     }
-    if !document_path(&rel) {
+    // A dotfile or a backup is listed, so it is news, but never of a
+    // document: an editor's are not what a preview shows.
+    if name.starts_with('.') || name.ends_with('~') || !document_path(&rel) {
         // Not worth reading to tell. A directory gone may have taken
         // documents with it; what is gone says no more than its name.
         let gone = !name.contains('.') && path.symlink_metadata().is_err();
@@ -282,7 +285,7 @@ mod tests {
         std::fs::create_dir_all(dir.path().join("target")).unwrap();
         let (_watch, told) = watched(dir.path());
         std::fs::write(dir.path().join("target/Out.qml"), "Item {}\n").unwrap();
-        std::fs::write(dir.path().join(".Main.qml.swp"), "x").unwrap();
+        std::fs::write(dir.path().join(".Main.qml"), "x").unwrap();
         std::fs::write(dir.path().join("Main.qml.studio-tmp"), "x").unwrap();
         saved(dir.path(), "Theirs.qml", "Item {}\n");
         waits_for("the later file", || told.load(Ordering::SeqCst) > 0);
@@ -314,6 +317,30 @@ mod tests {
         saved(dir.path(), "A.qml", "Item {}\n");
         waits_for("the document", || documents.load(Ordering::SeqCst) > 0);
         assert_eq!(documents.load(Ordering::SeqCst), 1, "tellings of one save");
+    }
+
+    #[test]
+    fn a_dotfile_or_a_backup_the_files_tab_lists_is_news_of_no_document() {
+        let dir = tempfile::tempdir().unwrap();
+        let documents = Arc::new(AtomicU64::new(0));
+        let others = Arc::new(AtomicU64::new(0));
+        let (d, o) = (documents.clone(), others.clone());
+        let _watch = ProjectWatch::start(
+            dir.path().canonicalize().unwrap(),
+            Box::new(move |news| {
+                let count = if news == News::Document { &d } else { &o };
+                count.fetch_add(1, Ordering::SeqCst);
+            }),
+        )
+        .expect("a watch");
+        saved(dir.path(), ".env", "A=1\n");
+        waits_for("the dotfile", || others.load(Ordering::SeqCst) > 0);
+        let after_dotfile = others.load(Ordering::SeqCst);
+        saved(dir.path(), "Main.qml~", "Item {}\n");
+        waits_for("the backup", || {
+            others.load(Ordering::SeqCst) > after_dotfile
+        });
+        assert_eq!(documents.load(Ordering::SeqCst), 0);
     }
 
     #[test]

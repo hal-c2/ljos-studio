@@ -29,13 +29,24 @@ Panel {
     readonly property bool dirty: row !== null && row.dirty
     readonly property bool outside: row !== null && row.outside
     property string refusal: ""
-    // Edits sent and not yet answered: until they are, the text here is
-    // ahead of the held one and must not be set from an answer.
-    property int pending: 0
+    // Edits sent and not yet answered, by file: until they are, the text
+    // here is ahead of the held one and must not be set from an answer, and
+    // the file has edits not saved even once another one is shown.
+    property var unanswered: ({})
+    readonly property int pending: unanswered[path] || 0
     property bool syncing: false
     property real stamp: -1
 
     signal closeAsked()
+
+    // `by` more edits of `file` on their way, or answered when negative.
+    function sent(file, by) {
+        const next = Object.assign({}, unanswered)
+        next[file] = (next[file] || 0) + by
+        if (next[file] <= 0)
+            delete next[file]
+        unanswered = next
+    }
 
     function take(text) {
         if (pending > 0 || area.text === text)
@@ -60,7 +71,6 @@ Panel {
 
     onPathChanged: {
         refusal = ""
-        pending = 0
         stamp = row === null ? -1 : row.stamp
         syncing = true
         area.text = ""
@@ -79,18 +89,22 @@ Panel {
     Connections {
         target: editor.workspace
         function onAnswered(tool, answer, asked) {
-            if (tool !== "project_open" || asked.file !== editor.path || answer.file === undefined)
+            if (tool !== "project_open")
                 return
             if (asked.files === "edit")
-                --editor.pending
+                editor.sent(asked.file, -1)
+            if (asked.file !== editor.path || answer.file === undefined)
+                return
             if (answer.file.text !== undefined)
                 editor.take(answer.file.text)
         }
         function onRefused(tool, error, asked) {
-            if (tool !== "project_open" || asked.file !== editor.path)
+            if (tool !== "project_open")
                 return
             if (asked.files === "edit")
-                --editor.pending
+                editor.sent(asked.file, -1)
+            if (asked.file !== editor.path)
+                return
             editor.refusal = error.message
         }
     }
@@ -231,7 +245,7 @@ Panel {
                 onTextChanged: {
                     if (editor.syncing || editor.path === "")
                         return
-                    ++editor.pending
+                    editor.sent(editor.path, 1)
                     editor.workspace.dispatch("project_open", {files: "edit", file: editor.path, text: text})
                 }
             }
