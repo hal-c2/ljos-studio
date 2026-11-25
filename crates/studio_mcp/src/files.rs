@@ -104,8 +104,10 @@ fn needs_file(file: Option<&str>, action: &str) -> Result<String, SurfaceError> 
 }
 
 /// `path` as a file of the project a person edits: a plain path, outside the
-/// directories a walk leaves out, judged where it really is.
-fn checked(store: &dyn Store, path: &str) -> Result<String, SurfaceError> {
+/// directories a walk leaves out, judged where it really is. With it, whether
+/// it is a document, also judged where it really is: a link named `notes.txt`
+/// to `Main.qml` is edited as the document it is.
+fn checked(store: &dyn Store, path: &str) -> Result<(String, bool), SurfaceError> {
     let denied = || {
         SurfaceError::new(
             ErrorCode::PathDenied,
@@ -119,7 +121,7 @@ fn checked(store: &dyn Store, path: &str) -> Result<String, SurfaceError> {
     if !listed(&real) {
         return Err(denied());
     }
-    Ok(path.to_owned())
+    Ok((path.to_owned(), document_path(path) || document_path(&real)))
 }
 
 /// Whether a listing has `path`: not a file Studio stands in with, nor one it
@@ -248,9 +250,10 @@ fn save(store: &dyn Store, path: &str, held: &mut Held, force: bool) -> Result<(
         )
         .with_details(json!({ "kind": "changed_outside", "file": path })));
     }
-    if let Some(text) = held.text.take() {
-        write(store, path, &text)?;
-        held.base = text;
+    // Taken only once it is on disk: a write that fails keeps the edits.
+    if let Some(text) = &held.text {
+        write(store, path, text)?;
+        held.base = held.text.take().expect("just written");
     }
     held.outside = false;
     Ok(())
@@ -300,11 +303,11 @@ pub(crate) fn act(
         FilesAction::Remove => "remove",
     };
     let store = studio.session.store();
-    let path = checked(store, &needs_file(a.file, name)?)?;
-    let is_document = document_path(&path);
+    let (path, is_document) = checked(store, &needs_file(a.file, name)?)?;
     out.file = Some(match action {
         FilesAction::Read if is_document => {
-            let (text, _) = studio.session.text(&path).map_err(crate::error)?;
+            let real = store.resolved(&path).map_err(store_error)?;
+            let (text, _) = studio.session.text(&real).map_err(crate::error)?;
             FileInfo {
                 path: path.clone(),
                 text: Some(text.to_owned()),
@@ -358,8 +361,10 @@ pub(crate) fn act(
         }
         FilesAction::Revert => {
             let held = studio.files.get_mut(&path).ok_or_else(|| not_open(&path))?;
+            // Read first: a file that is gone or no longer text keeps its edits.
+            let base = read_disk(store, &path)?;
             held.text = None;
-            held.base = read_disk(store, &path)?;
+            held.base = base;
             held.stamp += 1;
             held.outside = false;
             info(&path, held)
@@ -375,6 +380,7 @@ pub(crate) fn act(
             if store.exists(&path) {
                 return Err(exists(&path));
             }
+            held_dirty(&studio.files, &path)?;
             let text = a.text.unwrap_or_default();
             write(store, &path, text)?;
             studio.files.insert(
@@ -387,7 +393,7 @@ pub(crate) fn act(
             info(&path, &studio.files[&path])
         }
         FilesAction::Rename => {
-            let to = checked(
+            let (to, to_document) = checked(
                 store,
                 a.to.ok_or_else(|| {
                     SurfaceError::invalid_argument("`rename` needs `to`".to_owned())
@@ -396,11 +402,19 @@ pub(crate) fn act(
             if store.exists(&to) {
                 return Err(exists(&to));
             }
+            held_dirty(&studio.files, &to)?;
+            // A document is edited by the document tools, so edits held
+            // under another name are saved or let go before it becomes one.
+            if to_document && studio.files.get(&path).is_some_and(Held::dirty) {
+                return Err(unsaved_error(vec![path]));
+            }
             if !store.exists(&path) {
                 return Err(store_error(StoreError::Missing(path)));
             }
             store.rename(&path, &to).map_err(store_error)?;
-            if let Some(held) = studio.files.remove(&path) {
+            if let Some(held) = studio.files.remove(&path)
+                && !to_document
+            {
                 studio.files.insert(to.clone(), held);
             }
             match studio.files.get(&to) {
@@ -417,6 +431,15 @@ pub(crate) fn act(
     });
     studio.files_changed();
     Ok(out)
+}
+
+/// Refused while `path` holds edits, though its file may be gone from disk:
+/// a new file or a rename there would put them out of reach.
+fn held_dirty(open: &Open, path: &str) -> Result<(), SurfaceError> {
+    match open.get(path) {
+        Some(held) if held.dirty() => Err(unsaved_error(vec![path.to_owned()])),
+        _ => Ok(()),
+    }
 }
 
 fn exists(path: &str) -> SurfaceError {

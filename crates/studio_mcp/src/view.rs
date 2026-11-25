@@ -321,7 +321,16 @@ impl Studio {
         for (path, held) in &mut self.files {
             crate::files::look(store, path, held);
         }
-        let (paths, _) = crate::files::list(store);
+        let (mut paths, _) = crate::files::list(store);
+        // A file with edits held stays listed when its file went from disk,
+        // so the window still asks about it before they are lost; its row
+        // says the disk moved under it.
+        for (path, held) in &self.files {
+            if held.dirty() && paths.binary_search(path).is_err() {
+                let at = paths.partition_point(|p| p < path);
+                paths.insert(at, path.clone());
+            }
+        }
         paths
             .into_iter()
             .map(|path| match self.files.get(&path) {

@@ -200,6 +200,83 @@ Feature: An agent edits the project's other files
     Then the agent is refused with "invalid_argument"
     And the refusal's "/details/kind" is "document"
 
+  Scenario: A save that fails keeps the edits
+    Given the agent has called the tool "project_open" with:
+      """json
+      {"files": "edit", "file": "README.md", "text": "mine\n"}
+      """
+    When the file "README.md" is deleted outside Studio
+    And a directory is made at "README.md" outside Studio
+    And the agent calls the tool "project_open" with:
+      """json
+      {"files": "save", "file": "README.md", "force": true}
+      """
+    Then the agent is refused with "internal"
+    When the agent calls the tool "project_open" with:
+      """json
+      {"files": "list"}
+      """
+    Then the answer's "/unsaved" lists "README.md"
+
+  Scenario: Taking back edits of a file that went keeps them
+    Given the agent has called the tool "project_open" with:
+      """json
+      {"files": "edit", "file": "README.md", "text": "mine\n"}
+      """
+    When the file "README.md" is deleted outside Studio
+    And the agent calls the tool "project_open" with:
+      """json
+      {"files": "revert", "file": "README.md"}
+      """
+    Then the agent is refused with "not_found"
+    When the agent calls the tool "project_open" with:
+      """json
+      {"files": "list"}
+      """
+    Then the answer's "/unsaved" lists "README.md"
+
+  Scenario: Edits held where a file went are not put out of reach
+    Given the agent has called the tool "project_open" with:
+      """json
+      {"files": "edit", "file": "README.md", "text": "mine\n"}
+      """
+    When the file "README.md" is deleted outside Studio
+    And the agent calls the tool "project_open" with:
+      """json
+      {"files": "new", "file": "README.md", "text": "fresh\n"}
+      """
+    Then the agent is refused with "invalid_argument"
+    And the refusal's "/details/kind" is "unsaved"
+    When the agent calls the tool "project_open" with:
+      """json
+      {"files": "rename", "file": "src/logic.ts", "to": "README.md"}
+      """
+    Then the agent is refused with "invalid_argument"
+    And the refusal's "/details/kind" is "unsaved"
+    And the file "src/logic.ts" exists
+
+  Scenario: Edits held are saved or let go before their file becomes a document
+    Given the agent has called the tool "project_open" with:
+      """json
+      {"files": "edit", "file": "README.md", "text": "Item {}\n"}
+      """
+    When the agent calls the tool "project_open" with:
+      """json
+      {"files": "rename", "file": "README.md", "to": "Readme.qml"}
+      """
+    Then the agent is refused with "invalid_argument"
+    And the refusal's "/details/kind" is "unsaved"
+    And the file "README.md" exists
+
+  Scenario: A link to a document is edited as the document
+    Given the link "notes.txt" leads to "Main.qml"
+    When the agent calls the tool "project_open" with:
+      """json
+      {"files": "edit", "file": "notes.txt", "text": "Item {}\n"}
+      """
+    Then the agent is refused with "invalid_argument"
+    And the refusal's "/details/kind" is "document"
+
   Scenario Outline: A file a walk leaves out is not reached
     When the agent calls the tool "project_open" with:
       """json
